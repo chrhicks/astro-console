@@ -22,6 +22,7 @@ export interface DesktopStatus {
   authenticated: boolean;
   host?: string;
   deviceState: Record<string, unknown> | null;
+  viewState: Record<string, unknown> | null;
   lastUpdatedAt?: string;
   lastError?: string;
 }
@@ -30,12 +31,29 @@ export interface ConnectRequest {
   host: string;
 }
 
+export type DesktopViewMode = "star" | "moon" | "sun" | "planet" | "scenery";
+
+export type DesktopCommandAction =
+  | "open-arm"
+  | "park"
+  | "start-view"
+  | "stop-view"
+  | "start-stack"
+  | "stop-stack"
+  | "autofocus";
+
+export interface DesktopCommandRequest {
+  action: DesktopCommandAction;
+  mode?: DesktopViewMode;
+}
+
 export interface SeestarDesktopApi {
   discover(): Promise<DesktopDiscoveredDevice[]>;
   connect(input: ConnectRequest): Promise<DesktopStatus>;
   disconnect(): Promise<DesktopStatus>;
   getStatus(): Promise<DesktopStatus>;
   refreshState(): Promise<DesktopStatus>;
+  runCommand(input: DesktopCommandRequest): Promise<DesktopStatus>;
   getLogs(): Promise<DesktopLogEntry[]>;
   onLog(listener: (entry: DesktopLogEntry) => void): () => void;
   onStatus(listener: (status: DesktopStatus) => void): () => void;

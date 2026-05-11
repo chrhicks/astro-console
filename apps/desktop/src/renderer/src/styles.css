@@ -18,7 +18,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -47,6 +48,15 @@ button.primary {
 }
 
 input {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid #2a3d60;
+  background: #0f1a2a;
+  color: #edf4ff;
+  padding: 0.78rem 0.9rem;
+}
+
+select {
   width: 100%;
   border-radius: 12px;
   border: 1px solid #2a3d60;
@@ -144,6 +154,8 @@ pre {
 
 .state {
   grid-area: state;
+  display: grid;
+  gap: 1rem;
 }
 
 .logs {
@@ -192,6 +204,12 @@ pre {
   color: #ffc9c9;
 }
 
+.message.warning {
+  background: rgba(232, 174, 74, 0.1);
+  border: 1px solid rgba(232, 174, 74, 0.28);
+  color: #ffd899;
+}
+
 .connection-summary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -227,6 +245,90 @@ pre {
 .device-card span {
   color: #9fb0cc;
   font-size: 0.93rem;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.status-card {
+  border-radius: 16px;
+  border: 1px solid #1d314d;
+  background: #0b1422;
+  padding: 1rem;
+}
+
+.status-card h3 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.status-card-body {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+}
+
+.status-field strong {
+  display: block;
+  margin-top: 0.22rem;
+}
+
+.state-controls {
+  border-radius: 18px;
+  border: 1px solid #1d314d;
+  background: rgba(8, 17, 29, 0.72);
+  padding: 1rem;
+}
+
+.panel-subheading h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.inline-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) auto auto;
+  gap: 0.75rem;
+  align-items: end;
+  margin-top: 1rem;
+}
+
+.compact-field {
+  margin-top: 0;
+}
+
+.state-action-row {
+  margin-top: 0.9rem;
+}
+
+.top-action-row {
+  margin-top: 1rem;
+}
+
+.raw-state {
+  border-radius: 16px;
+  border: 1px solid #1d314d;
+  background: rgba(8, 17, 29, 0.72);
+  padding: 0.3rem;
+}
+
+.raw-state summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0.9rem;
+  color: #cfe1ff;
+  font-weight: 600;
+}
+
+.raw-state summary::-webkit-details-marker {
+  display: none;
+}
+
+.raw-state pre {
+  margin: 0 0.6rem 0.6rem;
 }
 
 .log-list {
@@ -280,6 +382,14 @@ pre {
       "state state"
       "logs logs";
   }
+
+  .inline-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .inline-controls .field {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 760px) {
@@ -301,6 +411,11 @@ pre {
   }
 
   .connection-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .status-grid,
+  .inline-controls {
     grid-template-columns: 1fr;
   }
 }

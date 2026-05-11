@@ -7,6 +7,7 @@ import {
   type Logger,
 } from "../../../../sdk/dist/index.js";
 import type {
+  DesktopCommandRequest,
   ConnectRequest,
   DesktopDiscoveredDevice,
   DesktopLogEntry,
@@ -22,6 +23,7 @@ export class SeestarDesktopService {
     connected: false,
     authenticated: false,
     deviceState: null,
+    viewState: null,
   };
   private subscribers = new Set<WebContents>();
   private logger: Logger = {
@@ -85,6 +87,7 @@ export class SeestarDesktopService {
         authenticated: true,
         host,
         deviceState: null,
+        viewState: null,
         lastUpdatedAt: new Date().toISOString(),
       };
       return this.refreshState();
@@ -94,6 +97,7 @@ export class SeestarDesktopService {
         authenticated: false,
         host,
         deviceState: null,
+        viewState: null,
         lastError: toErrorMessage(error),
         lastUpdatedAt: new Date().toISOString(),
       };
@@ -104,12 +108,13 @@ export class SeestarDesktopService {
 
   async disconnect(): Promise<DesktopStatus> {
     this.disconnectDevice();
-    this.status = {
-      connected: false,
-      authenticated: false,
-      deviceState: null,
-      lastUpdatedAt: new Date().toISOString(),
-    };
+      this.status = {
+        connected: false,
+        authenticated: false,
+        deviceState: null,
+        viewState: null,
+        lastUpdatedAt: new Date().toISOString(),
+      };
     this.emitStatus();
     return this.getStatus();
   }
@@ -121,6 +126,7 @@ export class SeestarDesktopService {
         connected: false,
         authenticated: false,
         deviceState: null,
+        viewState: null,
         lastUpdatedAt: new Date().toISOString(),
       };
       this.emitStatus();
@@ -128,12 +134,16 @@ export class SeestarDesktopService {
     }
 
     try {
-      const deviceState = await this.device.getDeviceState();
+      const [deviceState, viewState] = await Promise.all([
+        this.device.getDeviceState(),
+        this.device.getViewState(),
+      ]);
       this.status = {
         ...this.status,
         connected: this.device.isConnected(),
         authenticated: true,
         deviceState: (deviceState ?? null) as Record<string, unknown> | null,
+        viewState: (viewState ?? null) as Record<string, unknown> | null,
         lastError: undefined,
         lastUpdatedAt: new Date().toISOString(),
       };
@@ -146,6 +156,7 @@ export class SeestarDesktopService {
         connected: false,
         authenticated: false,
         deviceState: null,
+        viewState: null,
         lastError: toErrorMessage(error),
         lastUpdatedAt: new Date().toISOString(),
       };
@@ -162,10 +173,61 @@ export class SeestarDesktopService {
     return [...this.logs];
   }
 
+  async runCommand(input: DesktopCommandRequest): Promise<DesktopStatus> {
+    const device = this.requireConnectedDevice();
+
+    switch (input.action) {
+      case "open-arm":
+        await this.expectAccepted(device.moveToHorizon(), "Device rejected move-to-horizon request");
+        break;
+      case "park":
+        await this.expectAccepted(device.park(), "Device rejected park request");
+        break;
+      case "start-view": {
+        const mode = input.mode;
+        if (!mode) {
+          throw new Error("View mode is required to start a view");
+        }
+        await this.expectAccepted(device.startView(mode), `Device rejected ${mode} view request`);
+        break;
+      }
+      case "stop-view":
+        await this.expectAccepted(device.stopView(), "Device rejected stop-view request");
+        break;
+      case "start-stack":
+        await this.expectAccepted(device.startStack(true), "Device rejected start-stack request");
+        break;
+      case "stop-stack":
+        await this.expectAccepted(device.stopStack(), "Device rejected stop-stack request");
+        break;
+      case "autofocus":
+        await this.expectAccepted(device.startAutoFocus(), "Device rejected autofocus request");
+        break;
+      default:
+        throw new Error(`Unsupported device command: ${String(input.action)}`);
+    }
+
+    return this.refreshState();
+  }
+
   private disconnectDevice(): void {
     if (!this.device) return;
     this.device.disconnect();
     this.device = null;
+  }
+
+  private requireConnectedDevice(): SeestarDevice {
+    if (!this.device || !this.device.isConnected()) {
+      throw new Error("Connect to a Seestar device before sending commands");
+    }
+    return this.device;
+  }
+
+  private async expectAccepted(work: Promise<boolean>, message: string): Promise<void> {
+    const ok = await work;
+    if (!ok) {
+      throw new Error(message);
+    }
   }
 
   private resolvePemPath(): string {

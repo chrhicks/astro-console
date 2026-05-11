@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import path from "node:path";
 import { SeestarDesktopService } from "./seestar-service";
-import type { ConnectRequest } from "../shared/api";
+import type { ConnectRequest, DesktopCommandRequest } from "../shared/api";
 
 const service = new SeestarDesktopService();
 const rendererDevUrl = process.env.VITE_DEV_SERVER_URL;
@@ -37,6 +37,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle("seestar:disconnect", () => service.disconnect());
   ipcMain.handle("seestar:get-status", () => service.getStatus());
   ipcMain.handle("seestar:refresh-state", () => service.refreshState());
+  ipcMain.handle("seestar:run-command", (_event, input: DesktopCommandRequest) => service.runCommand(input));
   ipcMain.handle("seestar:get-logs", () => service.getLogs());
 }
 
