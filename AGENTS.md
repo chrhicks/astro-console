@@ -77,3 +77,11 @@ During a session use these sub-commands regularly to keep track of your work and
 
 - `continuum task`
 - `continuum memory`
+
+## Output
+
+When it makes sense for large output or explaining things for the user, user **HTML**. Use tmux to run an http server against the output directory. Make links work over the Tailscale network host: `chicks-arch`
+
+Output dir: `./.www`
+Tmux session id: `seestar-www`
+URL base: `http://chicks-arch[:port]`
