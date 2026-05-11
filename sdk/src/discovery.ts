@@ -1,4 +1,5 @@
 import * as dgram from "node:dgram";
+import { networkInterfaces } from "node:os";
 import type { Logger } from "./logging.js";
 import { emitLog } from "./logging.js";
 
@@ -23,6 +24,7 @@ export async function discoverSeestars(
   const discoveryPort = options.port ?? 4720;
   const timeoutMs = options.timeoutMs ?? 3000;
   const broadcastAddress = options.broadcastAddress ?? "255.255.255.255";
+  const targetAddresses = resolveDiscoveryTargets(broadcastAddress);
   const payload = Buffer.from(
     JSON.stringify({ id: 1, method: "scan_iscope", params: "" }) + "\r\n"
   );
@@ -38,13 +40,14 @@ export async function discoverSeestars(
       component: "discovery",
       phase: "connect",
       sessionId: options.sessionId,
-      summary: "Started UDP scan for Seestar devices",
-      data: {
-        port: discoveryPort,
-        timeoutMs,
-        broadcastAddress,
-      },
-    });
+        summary: "Started UDP scan for Seestar devices",
+        data: {
+          port: discoveryPort,
+          timeoutMs,
+          broadcastAddress,
+          targetAddresses,
+        },
+      });
 
     const finish = () => {
       if (settled) return;
@@ -118,12 +121,29 @@ export async function discoverSeestars(
 
     socket.bind(() => {
       socket.setBroadcast(true);
-      socket.send(payload, discoveryPort, broadcastAddress, (err) => {
-        if (err) {
-          clearTimeout(timer);
-          fail(err);
-        }
-      });
+      let pendingSends = targetAddresses.length;
+      for (const targetAddress of targetAddresses) {
+        socket.send(payload, discoveryPort, targetAddress, (err) => {
+          if (settled) return;
+          if (err) {
+            clearTimeout(timer);
+            fail(err);
+            return;
+          }
+          pendingSends -= 1;
+          if (pendingSends === 0) {
+            emitLog(options.logger, {
+              level: "debug",
+              event: "discovery.scan.broadcast.sent",
+              component: "discovery",
+              phase: "connect",
+              sessionId: options.sessionId,
+              summary: `Sent UDP discovery payload to ${targetAddresses.length} broadcast target(s)`,
+              data: { targetAddresses },
+            });
+          }
+        });
+      }
     });
   });
 }
@@ -137,4 +157,40 @@ export async function discoverSeestarHost(
     throw new Error("No Seestar devices discovered on the local network");
   }
   return first.host;
+}
+
+function resolveDiscoveryTargets(globalBroadcastAddress: string): string[] {
+  const targets = new Set<string>([globalBroadcastAddress]);
+
+  for (const interfaceEntries of Object.values(networkInterfaces())) {
+    if (!interfaceEntries) continue;
+    for (const entry of interfaceEntries) {
+      if (entry.family !== "IPv4" || entry.internal) continue;
+      const broadcast = calculateBroadcastAddress(entry.address, entry.netmask);
+      if (broadcast) targets.add(broadcast);
+    }
+  }
+
+  return [...targets];
+}
+
+function calculateBroadcastAddress(address: string, netmask: string): string | null {
+  const addressOctets = parseIpv4Octets(address);
+  const netmaskOctets = parseIpv4Octets(netmask);
+  if (!addressOctets || !netmaskOctets) return null;
+
+  const broadcastOctets = addressOctets.map((octet, index) => {
+    const maskOctet = netmaskOctets[index] ?? 0;
+    return (octet & maskOctet) | (~maskOctet & 255);
+  });
+
+  return broadcastOctets.join(".");
+}
+
+function parseIpv4Octets(value: string): number[] | null {
+  const octets = value.split(".").map((part) => Number(part));
+  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+    return null;
+  }
+  return octets;
 }
