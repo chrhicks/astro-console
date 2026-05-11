@@ -1,0 +1,29 @@
+.continuum/
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.DS_Store
+.idea/
+.vscode/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.www/
+venv/
+seestar_3.1.2_fw_7.32_interop.pem
+
+# SDK generated/build artifacts
+sdk/node_modules/
+sdk/dist/
+sdk/downloads/
+sdk/output_sdk_test/
+sdk/prototype_output/
+sdk/solar_output/
+sdk/logs/
+
+# SDK Python cache
+sdk/**/__pycache__/
+sdk/**/*.pyc
