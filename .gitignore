@@ -27,3 +27,7 @@ sdk/logs/
 # SDK Python cache
 sdk/**/__pycache__/
 sdk/**/*.pyc
+
+
+dist/
+node_modules/
