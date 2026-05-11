@@ -17,7 +17,9 @@ import {
 } from "./logging.js";
 import { listShareDirectory } from "./smb.js";
 import type {
+  ActionWaitOptions,
   AlbumsResult,
+  DevelopmentSmokeTestOptions,
   EquCoord,
   DeviceState,
   ViewStateResult,
@@ -25,6 +27,7 @@ import type {
   ShareEntry,
   StartViewOptions,
   PreflightSummary,
+  SeestarPushEvent,
   StartupSequenceOptions,
   StartupSequenceReport,
   StartupStepReport,
@@ -170,6 +173,301 @@ export class SeestarDevice {
       data: { warningCount: summary.warnings.length },
     });
     return summary;
+  }
+
+  async developmentSmokeTest(
+    options: DevelopmentSmokeTestOptions = {}
+  ): Promise<StartupSequenceReport> {
+    const dryRun = options.dryRun ?? false;
+    const mode = options.mode ?? "scenery";
+    const openArm = options.openArm ?? "if_needed";
+    const parkAtEnd = options.parkAtEnd ?? true;
+    const steps: StartupStepReport[] = [];
+    const warnings: string[] = [];
+    let preflight: PreflightSummary | undefined;
+    const sequenceId = `dev_smoke_${String(++this.startupSequenceCount).padStart(2, "0")}`;
+
+    const report = (ok: boolean): StartupSequenceReport => ({
+      ok,
+      dryRun,
+      resolvedHost: this.host ?? "",
+      preflight,
+      steps,
+      warnings,
+    });
+
+    const stepStarted = (step: string, summary: string) => {
+      this.log({
+        level: "info",
+        event: "smoke.step.started",
+        component: "smoke",
+        phase: "startup",
+        sequenceId,
+        step,
+        summary,
+      });
+    };
+
+    const stepCompleted = (step: string, summary: string, changed?: boolean, data?: unknown) => {
+      this.log({
+        level: "info",
+        event: "smoke.step.completed",
+        component: "smoke",
+        phase: "startup",
+        sequenceId,
+        step,
+        changed,
+        ok: true,
+        summary,
+        data,
+      });
+    };
+
+    const stepSkipped = (step: string, summary: string, data?: unknown) => {
+      this.log({
+        level: "info",
+        event: "smoke.step.skipped",
+        component: "smoke",
+        phase: "startup",
+        sequenceId,
+        step,
+        ok: true,
+        summary,
+        data,
+      });
+    };
+
+    const fail = (name: string, summary: string, error?: unknown): StartupSequenceReport => {
+      const detail = errorMessage(error);
+      steps.push({ name, ok: false, summary, error: detail });
+      this.log({
+        level: "error",
+        event: "smoke.step.failed",
+        component: "smoke",
+        phase: "startup",
+        sequenceId,
+        step: name,
+        ok: false,
+        summary,
+        error: detail,
+      });
+      this.log({
+        level: "error",
+        event: "smoke.sequence.failed",
+        component: "smoke",
+        phase: "startup",
+        sequenceId,
+        ok: false,
+        summary: `Development smoke test failed at ${name}`,
+        error: detail,
+      });
+      return report(false);
+    };
+
+    this.log({
+      level: "info",
+      event: "smoke.sequence.started",
+      component: "smoke",
+      phase: "startup",
+      sequenceId,
+      summary: "Starting development smoke test",
+      data: { dryRun, mode, openArm, parkAtEnd },
+    });
+
+    try {
+      stepStarted("connect", "Connecting and authenticating with device");
+      await this.connect();
+      const authenticated = await this.authenticate();
+      if (!authenticated) {
+        return fail("connect", "Authentication failed");
+      }
+      steps.push({
+        name: "connect",
+        ok: true,
+        changed: true,
+        summary: `Connected and authenticated at ${this.resolvedHost()}`,
+      });
+      stepCompleted("connect", `Connected and authenticated at ${this.resolvedHost()}`, true);
+    } catch (error) {
+      return fail("connect", "Failed to connect and authenticate", error);
+    }
+
+    try {
+      stepStarted("preflight", "Collecting device status and warnings");
+      preflight = await this.collectPreflightSummary();
+      warnings.push(...preflight.warnings);
+      steps.push({
+        name: "preflight",
+        ok: true,
+        summary: summarizePreflight(preflight),
+        data: preflight,
+      });
+      stepCompleted("preflight", summarizePreflight(preflight), false, {
+        warningCount: preflight.warnings.length,
+      });
+    } catch (error) {
+      return fail("preflight", "Failed to collect device status", error);
+    }
+
+    if (preflight && isViewActive(preflight)) {
+      return fail(
+        "preflight",
+        `Device is already busy in ${preflight.viewMode ?? "unknown"}/${preflight.viewStage ?? "unknown"}`
+      );
+    }
+
+    if (openArm === "never" && preflight?.mountClosed) {
+      return fail("open_arm", "Mount is closed and openArm is set to never");
+    }
+
+    const shouldOpenArm =
+      openArm === "always" || (openArm === "if_needed" && preflight?.mountClosed === true);
+
+    if (shouldOpenArm) {
+      if (dryRun) {
+        steps.push({
+          name: "open_arm",
+          ok: true,
+          skipped: true,
+          summary: "Would move the arm to the horizon position",
+        });
+        stepSkipped("open_arm", "Would move the arm to the horizon position");
+      } else {
+        try {
+          stepStarted("open_arm", "Moving the arm to the horizon position");
+          const ok = await this.moveToHorizon({
+            waitForCompletion: true,
+            timeoutMs: 45000,
+            pollIntervalMs: 500,
+          });
+          if (!ok) return fail("open_arm", "Device rejected move-to-horizon request");
+          steps.push({
+            name: "open_arm",
+            ok: true,
+            changed: true,
+            summary: "Moved the arm to the horizon position",
+          });
+          stepCompleted("open_arm", "Moved the arm to the horizon position", true);
+        } catch (error) {
+          return fail("open_arm", "Failed to move the arm to horizon", error);
+        }
+      }
+    } else {
+      steps.push({
+        name: "open_arm",
+        ok: true,
+        skipped: true,
+        summary: "Arm already ready for development smoke test",
+      });
+      stepSkipped("open_arm", "Arm already ready for development smoke test");
+    }
+
+    if (dryRun) {
+      steps.push({
+        name: "start_view",
+        ok: true,
+        skipped: true,
+        summary: describeStartView(mode, undefined, false),
+      });
+      stepSkipped("start_view", describeStartView(mode, undefined, false));
+    } else {
+      try {
+        stepStarted("start_view", describeStartView(mode, undefined, false));
+        const ok = await this.startViewDetailed(
+          { mode },
+          { waitForCompletion: true, timeoutMs: 30000, pollIntervalMs: 500 }
+        );
+        if (!ok) return fail("start_view", "Device rejected start-view request");
+        steps.push({
+          name: "start_view",
+          ok: true,
+          changed: true,
+          summary: describeStartView(mode, undefined, false),
+        });
+        stepCompleted("start_view", describeStartView(mode, undefined, false), true);
+      } catch (error) {
+        return fail("start_view", "Failed to start development view", error);
+      }
+    }
+
+    if (dryRun) {
+      steps.push({
+        name: "stop_view",
+        ok: true,
+        skipped: true,
+        summary: "Would stop development view",
+      });
+      stepSkipped("stop_view", "Would stop development view");
+    } else {
+      try {
+        stepStarted("stop_view", "Stopping development view");
+        const ok = await this.stopView(undefined, {
+          waitForCompletion: true,
+          timeoutMs: 30000,
+          pollIntervalMs: 500,
+        });
+        if (!ok) return fail("stop_view", "Device rejected stop-view request");
+        steps.push({
+          name: "stop_view",
+          ok: true,
+          changed: true,
+          summary: "Stopped development view",
+        });
+        stepCompleted("stop_view", "Stopped development view", true);
+      } catch (error) {
+        return fail("stop_view", "Failed to stop development view", error);
+      }
+    }
+
+    if (!parkAtEnd) {
+      steps.push({
+        name: "park",
+        ok: true,
+        skipped: true,
+        summary: "Left mount open after development smoke test",
+      });
+      stepSkipped("park", "Left mount open after development smoke test");
+    } else if (dryRun) {
+      steps.push({
+        name: "park",
+        ok: true,
+        skipped: true,
+        summary: "Would park mount after development smoke test",
+      });
+      stepSkipped("park", "Would park mount after development smoke test");
+    } else {
+      try {
+        stepStarted("park", "Parking mount after development smoke test");
+        const ok = await this.parkWithRetries({
+          waitForCompletion: true,
+          timeoutMs: 45000,
+          pollIntervalMs: 500,
+        });
+        if (!ok) return fail("park", "Device rejected park request");
+        steps.push({
+          name: "park",
+          ok: true,
+          changed: true,
+          summary: "Parked mount after development smoke test",
+        });
+        stepCompleted("park", "Parked mount after development smoke test", true);
+      } catch (error) {
+        return fail("park", "Failed to park after development smoke test", error);
+      }
+    }
+
+    this.log({
+      level: "info",
+      event: "smoke.sequence.completed",
+      component: "smoke",
+      phase: "startup",
+      sequenceId,
+      ok: true,
+      summary: "Development smoke test completed",
+      data: { warningCount: warnings.length, dryRun, mode, parkAtEnd },
+    });
+
+    return report(true);
   }
 
   async startupSequence(
@@ -427,7 +725,9 @@ export class SeestarDevice {
             "filter_wheel",
             `Setting filter wheel to position ${observation.filterWheelPosition}`
           );
-          const ok = await this.setWheelPosition(observation.filterWheelPosition);
+          const ok = await this.setWheelPosition(observation.filterWheelPosition, {
+            waitForCompletion: true,
+          });
           if (!ok) return fail("filter_wheel", "Device rejected filter wheel change");
           steps.push({
             name: "filter_wheel",
@@ -465,7 +765,7 @@ export class SeestarDevice {
       } else {
         try {
           stepStarted("open_arm", "Moving the arm to the horizon position");
-          const ok = await this.moveToHorizon();
+          const ok = await this.moveToHorizon({ waitForCompletion: true });
           if (!ok) return fail("open_arm", "Device rejected move-to-horizon request");
           steps.push({
             name: "open_arm",
@@ -502,12 +802,15 @@ export class SeestarDevice {
     } else {
       try {
         stepStarted("start_view", describeStartView(mode, targetName, observation.lpFilter ?? false));
-        const ok = await this.startViewDetailed({
-          mode,
-          targetName,
-          targetRaDec,
-          lpFilter: observation.lpFilter,
-        });
+        const ok = await this.startViewDetailed(
+          {
+            mode,
+            targetName,
+            targetRaDec,
+            lpFilter: observation.lpFilter,
+          },
+          { waitForCompletion: true }
+        );
         if (!ok) return fail("start_view", "Device rejected start-view request");
         steps.push({
           name: "start_view",
@@ -532,16 +835,16 @@ export class SeestarDevice {
         stepSkipped("autofocus", "Would start autofocus after the view is active");
       } else {
         try {
-          stepStarted("autofocus", "Starting autofocus after the view became active");
-          const ok = await this.startAutoFocus();
+          stepStarted("autofocus", "Running autofocus after the view became active");
+          const ok = await this.startAutoFocus({ waitForCompletion: true });
           if (!ok) return fail("autofocus", "Device rejected autofocus request");
           steps.push({
             name: "autofocus",
             ok: true,
             changed: true,
-            summary: "Started autofocus after the view became active",
+            summary: "Completed autofocus after the view became active",
           });
-          stepCompleted("autofocus", "Started autofocus after the view became active", true);
+          stepCompleted("autofocus", "Completed autofocus after the view became active", true);
         } catch (error) {
           return fail("autofocus", "Failed to start autofocus", error);
         }
@@ -560,7 +863,9 @@ export class SeestarDevice {
       } else {
         try {
           stepStarted("start_stack", `Starting stacking (restart=${observation.restart ?? true})`);
-          const ok = await this.startStack(observation.restart ?? true);
+          const ok = await this.startStack(observation.restart ?? true, {
+            waitForCompletion: true,
+          });
           if (!ok) return fail("start_stack", "Device rejected start-stack request");
           steps.push({
             name: "start_stack",
@@ -622,15 +927,22 @@ export class SeestarDevice {
 
   // --- Control commands ---
 
-  async goto(ra: number, dec: number): Promise<boolean> {
+  async goto(ra: number, dec: number, wait: ActionWaitOptions = {}): Promise<boolean> {
     const resp = await this.client.sendSync("scope_goto", [ra, dec]);
-    return resp.code === 0;
+    const ok = resp.code === 0;
+    if (ok && wait.waitForCompletion) {
+      await this.waitForGotoCompletion(ra, dec, wait);
+    }
+    return ok;
   }
 
-  async moveToHorizon(): Promise<boolean> {
+  async moveToHorizon(wait: ActionWaitOptions = {}): Promise<boolean> {
     const resp = await this.client.sendSync("scope_move_to_horizon", "");
     const ok = resp.code === 0;
     if (ok) {
+      if (wait.waitForCompletion) {
+        await this.waitForMountClosed(false, "ScopeMoveToHorizon", "move arm to horizon", wait);
+      }
       this.log({
         level: "info",
         event: "observation.arm.opened",
@@ -644,10 +956,13 @@ export class SeestarDevice {
     return ok;
   }
 
-  async park(): Promise<boolean> {
+  async park(wait: ActionWaitOptions = {}): Promise<boolean> {
     const resp = await this.client.sendSync("scope_park", "");
     const ok = resp.code === 0;
     if (ok) {
+      if (wait.waitForCompletion) {
+        await this.waitForMountClosed(true, "ScopeHome", "park arm", wait);
+      }
       this.log({
         level: "info",
         event: "observation.arm.parked",
@@ -666,14 +981,21 @@ export class SeestarDevice {
     return resp.code === 0;
   }
 
-  async startView(mode: string, targetName?: string): Promise<boolean> {
+  async startView(
+    mode: string,
+    targetName?: string,
+    wait: ActionWaitOptions = {}
+  ): Promise<boolean> {
     return this.startViewDetailed({
       mode: mode as StartViewOptions["mode"],
       targetName,
-    });
+    }, wait);
   }
 
-  async startViewDetailed(options: StartViewOptions): Promise<boolean> {
+  async startViewDetailed(
+    options: StartViewOptions,
+    wait: ActionWaitOptions = {}
+  ): Promise<boolean> {
     const params: Record<string, unknown> = { mode: options.mode };
     if (options.targetName) params.target_name = options.targetName;
     if (options.targetRaDec) params.target_ra_dec = options.targetRaDec;
@@ -681,6 +1003,9 @@ export class SeestarDevice {
     const resp = await this.client.sendSync("iscope_start_view", params);
     const ok = resp.code === 0;
     if (ok) {
+      if (wait.waitForCompletion) {
+        await this.waitForViewStarted(options, wait);
+      }
       this.log({
         level: "info",
         event: "observation.view.started",
@@ -700,16 +1025,23 @@ export class SeestarDevice {
     return ok;
   }
 
-  async stopView(stage?: string): Promise<boolean> {
+  async stopView(stage?: string, wait: ActionWaitOptions = {}): Promise<boolean> {
     const params = stage ? { stage } : "";
     const resp = await this.client.sendSync("iscope_stop_view", params);
-    return resp.code === 0;
+    const ok = resp.code === 0;
+    if (ok && wait.waitForCompletion) {
+      await this.waitForViewStopped(wait);
+    }
+    return ok;
   }
 
-  async startStack(restart = true): Promise<boolean> {
+  async startStack(restart = true, wait: ActionWaitOptions = {}): Promise<boolean> {
     const resp = await this.client.sendSync("iscope_start_stack", { restart });
     const ok = resp.code === 0;
     if (ok) {
+      if (wait.waitForCompletion) {
+        await this.waitForStackStarted(wait);
+      }
       this.log({
         level: "info",
         event: "observation.stack.started",
@@ -724,20 +1056,32 @@ export class SeestarDevice {
     return ok;
   }
 
-  async stopStack(): Promise<boolean> {
+  async stopStack(wait: ActionWaitOptions = {}): Promise<boolean> {
     const resp = await this.client.sendSync("iscope_stop_view", { stage: "Stack" });
-    return resp.code === 0;
+    const ok = resp.code === 0;
+    if (ok && wait.waitForCompletion) {
+      await this.waitForStackStopped(wait);
+    }
+    return ok;
   }
 
-  async setWheelPosition(position: number): Promise<boolean> {
+  async setWheelPosition(position: number, wait: ActionWaitOptions = {}): Promise<boolean> {
     const resp = await this.client.sendSync("set_wheel_position", position);
-    return resp.code === 0;
+    const ok = resp.code === 0;
+    if (ok && wait.waitForCompletion) {
+      await this.waitForWheelPosition(position, wait);
+    }
+    return ok;
   }
 
-  async startAutoFocus(): Promise<boolean> {
+  async startAutoFocus(wait: ActionWaitOptions = {}): Promise<boolean> {
     const resp = await this.client.sendSync("start_auto_focuse", "");
     const ok = resp.code === 0;
     if (ok) {
+      if (wait.waitForCompletion) {
+        await this.waitForAutofocusCompletion(wait);
+      }
+      const summary = wait.waitForCompletion ? "Completed autofocus" : "Started autofocus";
       this.log({
         level: "info",
         event: "observation.autofocus.started",
@@ -745,7 +1089,7 @@ export class SeestarDevice {
         phase: "observe",
         changed: true,
         ok: true,
-        summary: "Started autofocus",
+        summary,
       });
     }
     return ok;
@@ -826,6 +1170,560 @@ export class SeestarDevice {
       throw new Error("Seestar client is not configured; call connect() first");
     }
     return this.client;
+  }
+
+  private async waitForMountClosed(
+    closed: boolean,
+    eventName: string,
+    action: string,
+    wait: ActionWaitOptions
+  ): Promise<void> {
+    await this.waitForStateConvergence({
+      action,
+      wait,
+      eventNames: [eventName],
+      readState: async () => this.getDeviceState(["mount"]),
+      isComplete: (state) => readMountClosed(state) === closed && readMountMoveType(state) === "none",
+      getFailure: (_state, event) => failureFromPushEvent(event, [eventName]),
+      summarizeState: (state) => ({
+        mountClosed: readMountClosed(state),
+        mountMoveType: readMountMoveType(state),
+      }),
+    });
+  }
+
+  private async parkWithRetries(wait: ActionWaitOptions, attempts = 3, delayMs = 2000): Promise<boolean> {
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        const ok = await this.park(wait);
+        if (ok) return true;
+      } catch {
+        const state = await this.getDeviceState(["mount"]);
+        if (readMountClosed(state) === true) {
+          return true;
+        }
+      }
+
+      if (attempt < attempts) {
+        await delay(delayMs);
+      }
+    }
+
+    const state = await this.getDeviceState(["mount"]);
+    return readMountClosed(state) === true;
+  }
+
+  private async waitForViewStarted(
+    options: StartViewOptions,
+    wait: ActionWaitOptions
+  ): Promise<void> {
+    await this.waitForStateConvergence({
+      action: `start ${options.mode} view`,
+      wait,
+      eventNames: ["View", "ContinuousExposure", "Initialise"],
+      readState: async () => this.getViewState(),
+      isComplete: (state) => isRequestedViewActive(state, options.mode),
+      getFailure: (state, event) => {
+        const eventFailure = failureFromPushEvent(event, ["View"]);
+        if (eventFailure) return eventFailure;
+        if (readViewStateName(state) === "cancel") return "view cancelled before becoming active";
+        return undefined;
+      },
+      summarizeState: summarizeViewState,
+    });
+  }
+
+  private async waitForViewStopped(wait: ActionWaitOptions): Promise<void> {
+    await this.waitForStateConvergence({
+      action: "stop view",
+      wait,
+      eventNames: ["View"],
+      readState: async () => this.getViewState(),
+      isComplete: (state) => isViewStopped(state),
+      summarizeState: summarizeViewState,
+    });
+  }
+
+  private async waitForStackStarted(wait: ActionWaitOptions): Promise<void> {
+    await this.waitForStateConvergence({
+      action: "start stack",
+      wait,
+      eventNames: ["Stack", "View"],
+      readState: async () => this.getViewState(),
+      isComplete: (state) => isStackActive(state),
+      getFailure: (_state, event) => failureFromPushEvent(event, ["Stack"]),
+      summarizeState: summarizeViewState,
+    });
+  }
+
+  private async waitForStackStopped(wait: ActionWaitOptions): Promise<void> {
+    await this.waitForStateConvergence({
+      action: "stop stack",
+      wait,
+      eventNames: ["Stack", "View"],
+      readState: async () => this.getViewState(),
+      isComplete: (state) => !isStackActive(state),
+      summarizeState: summarizeViewState,
+    });
+  }
+
+  private async waitForWheelPosition(position: number, wait: ActionWaitOptions): Promise<void> {
+    await this.waitForPushCompletion({
+      action: `set filter wheel to ${position}`,
+      wait,
+      predicate: (event) => {
+        if (event.Event !== "WheelMove") return false;
+        const state = normalizeEventState(event);
+        return state === "complete" || state === "fail";
+      },
+      getFailure: (event) => {
+        if (normalizeEventState(event) === "fail") {
+          return event.error ?? `filter wheel reported ${event.state ?? "failure"}`;
+        }
+        const eventPosition = asNumber(event.position);
+        if (typeof eventPosition === "number" && eventPosition !== position) {
+          return `filter wheel stopped at ${eventPosition} instead of ${position}`;
+        }
+        return failureFromPushEvent(event, ["WheelMove"]);
+      },
+    });
+  }
+
+  private async waitForGotoCompletion(
+    ra: number,
+    dec: number,
+    wait: ActionWaitOptions
+  ): Promise<void> {
+    await this.waitForPushCompletion({
+      action: `goto ${ra}, ${dec}`,
+      wait,
+      predicate: (event) => {
+        if (event.Event !== "AutoGoto" && event.Event !== "ScopeGoto") return false;
+        const state = normalizeEventState(event);
+        return state === "complete" || state === "fail";
+      },
+      getFailure: (event) => failureFromPushEvent(event, ["AutoGoto", "ScopeGoto"]),
+    });
+  }
+
+  private async waitForAutofocusCompletion(wait: ActionWaitOptions): Promise<void> {
+    const timeoutMs = wait.timeoutMs ?? this.config.timeoutMs ?? 10000;
+    const pollIntervalMs = wait.pollIntervalMs ?? 500;
+    const quietPeriodMs = Math.max(1500, pollIntervalMs * 3);
+
+    this.log({
+      level: "debug",
+      event: "observation.wait.started",
+      component: "observation",
+      phase: "observe",
+      summary: "Waiting for complete autofocus",
+      data: {
+        action: "complete autofocus",
+        timeoutMs,
+        pollIntervalMs,
+        quietPeriodMs,
+        mode: "event+poll",
+        eventNames: ["AutoFocus", "FocuserMove"],
+      },
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let currentCheck: Promise<void> | undefined;
+      let rerunCheck = false;
+      let sawAutofocusStart = false;
+      let sawBusyAutofocus = false;
+      let lastActivityAt = Date.now();
+      let lastEvent: SeestarPushEvent | undefined;
+      let lastFocuserState: string | undefined;
+
+      const cleanup = () => {
+        clearInterval(intervalHandle);
+        clearTimeout(timeoutHandle);
+        wait.signal?.removeEventListener("abort", onAbort);
+        unsubscribe();
+      };
+
+      const finish = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        callback();
+      };
+
+      const fail = (message: string) => {
+        this.log({
+          level: message.includes("Timed out") ? "warn" : "error",
+          event: "observation.wait.failed",
+          component: "observation",
+          phase: "observe",
+          ok: false,
+          summary: "Failed while waiting for complete autofocus",
+          error: message,
+          data: {
+            action: "complete autofocus",
+            mode: "event+poll",
+            eventName: lastEvent?.Event,
+            state: lastEvent?.state,
+            focuserState: lastFocuserState,
+          },
+        });
+        finish(() => reject(new Error(message)));
+      };
+
+      const succeed = () => {
+        this.log({
+          level: "debug",
+          event: "observation.wait.completed",
+          component: "observation",
+          phase: "observe",
+          ok: true,
+          summary: "Finished waiting for complete autofocus",
+          data: {
+            action: "complete autofocus",
+            mode: "event+poll",
+            eventName: lastEvent?.Event,
+            state: lastEvent?.state,
+            focuserState: lastFocuserState,
+            quietPeriodMs,
+          },
+        });
+        finish(resolve);
+      };
+
+      const evaluate = () => {
+        if (settled) return;
+        if (currentCheck) {
+          rerunCheck = true;
+          return;
+        }
+
+        currentCheck = (async () => {
+          do {
+            rerunCheck = false;
+            const state = await this.getDeviceState(["focuser"]);
+            lastFocuserState = readFocuserState(state);
+            if (isBusyState(lastFocuserState)) {
+              sawBusyAutofocus = true;
+              continue;
+            }
+            if (!sawAutofocusStart || !sawBusyAutofocus) {
+              continue;
+            }
+            if (Date.now() - lastActivityAt < quietPeriodMs) {
+              continue;
+            }
+            succeed();
+            return;
+          } while (rerunCheck && !settled);
+        })()
+          .catch((error) => {
+            fail(errorMessage(error) ?? "Autofocus wait failed");
+          })
+          .finally(() => {
+            currentCheck = undefined;
+          });
+      };
+
+      const onAbort = () => {
+        fail("Waiting for complete autofocus aborted");
+      };
+
+      const unsubscribe = this.client.subscribeToPushEvents((event) => {
+        if (event.Event !== "AutoFocus" && !isAutofocusFocuserEvent(event)) return;
+        lastEvent = event;
+        lastActivityAt = Date.now();
+
+        const eventState = normalizeEventState(event);
+        if (event.Event === "AutoFocus" || isAutofocusFocuserEvent(event)) {
+          sawAutofocusStart = true;
+        }
+        if (eventState === "start" || eventState === "working") {
+          sawBusyAutofocus = true;
+        }
+
+        this.log({
+          level: "debug",
+          event: "observation.wait.event",
+          component: "observation",
+          phase: "observe",
+          summary: `Received ${event.Event} while waiting for complete autofocus`,
+          data: {
+            action: "complete autofocus",
+            eventName: event.Event,
+            state: event.state,
+            code: event.code,
+            error: event.error,
+          },
+        });
+
+        if (event.Event === "AutoFocus" && (eventState === "fail" || eventState === "cancel")) {
+          fail(event.error ?? `autofocus ${eventState}`);
+          return;
+        }
+        if (isAutofocusFocuserEvent(event) && eventState === "fail") {
+          fail(event.error ?? "focuser move failed during autofocus");
+          return;
+        }
+
+        evaluate();
+      });
+
+      const intervalHandle = setInterval(() => {
+        evaluate();
+      }, pollIntervalMs);
+
+      const timeoutHandle = setTimeout(() => {
+        fail("Timed out waiting for complete autofocus");
+      }, timeoutMs);
+
+      if (wait.signal?.aborted) {
+        onAbort();
+        return;
+      }
+
+      wait.signal?.addEventListener("abort", onAbort, { once: true });
+      evaluate();
+    });
+  }
+
+  private async waitForPushCompletion(config: {
+    action: string;
+    wait: ActionWaitOptions;
+    predicate: (event: SeestarPushEvent) => boolean;
+    getFailure?: (event: SeestarPushEvent) => string | undefined;
+  }): Promise<SeestarPushEvent> {
+    const timeoutMs = config.wait.timeoutMs ?? this.config.timeoutMs ?? 10000;
+
+    this.log({
+      level: "debug",
+      event: "observation.wait.started",
+      component: "observation",
+      phase: "observe",
+      summary: `Waiting for ${config.action}`,
+      data: { action: config.action, timeoutMs, mode: "event" },
+    });
+
+    try {
+      const event = await this.client.waitForPushEvent(config.predicate, {
+        timeoutMs,
+        signal: config.wait.signal,
+      });
+      const failure = config.getFailure?.(event);
+      if (failure) {
+        throw new Error(failure);
+      }
+      this.log({
+        level: "debug",
+        event: "observation.wait.completed",
+        component: "observation",
+        phase: "observe",
+        ok: true,
+        summary: `Finished waiting for ${config.action}`,
+        data: {
+          action: config.action,
+          mode: "event",
+          eventName: event.Event,
+          state: event.state,
+          code: event.code,
+        },
+      });
+      return event;
+    } catch (error) {
+      this.log({
+        level: errorMessage(error)?.includes("Timeout") ? "warn" : "error",
+        event: "observation.wait.failed",
+        component: "observation",
+        phase: "observe",
+        ok: false,
+        summary: `Failed while waiting for ${config.action}`,
+        error: errorMessage(error),
+        data: { action: config.action, mode: "event" },
+      });
+      throw error;
+    }
+  }
+
+  private async waitForStateConvergence<TState>(config: {
+    action: string;
+    wait: ActionWaitOptions;
+    eventNames: string[];
+    readState: () => Promise<TState>;
+    isComplete: (state: TState, event?: SeestarPushEvent) => boolean;
+    getFailure?: (state: TState, event?: SeestarPushEvent) => string | undefined;
+    summarizeState?: (state: TState) => unknown;
+  }): Promise<TState> {
+    const timeoutMs = config.wait.timeoutMs ?? this.config.timeoutMs ?? 10000;
+    const pollIntervalMs = config.wait.pollIntervalMs ?? 500;
+
+    this.log({
+      level: "debug",
+      event: "observation.wait.started",
+      component: "observation",
+      phase: "observe",
+      summary: `Waiting for ${config.action}`,
+      data: {
+        action: config.action,
+        timeoutMs,
+        pollIntervalMs,
+        mode: "event+poll",
+        eventNames: config.eventNames,
+      },
+    });
+
+    return new Promise<TState>((resolve, reject) => {
+      let settled = false;
+      let currentCheck: Promise<void> | undefined;
+      let rerunCheck = false;
+      let lastState: TState | undefined;
+      let lastEvent: SeestarPushEvent | undefined;
+
+      const cleanup = () => {
+        clearInterval(intervalHandle);
+        clearTimeout(timeoutHandle);
+        config.wait.signal?.removeEventListener("abort", onAbort);
+        unsubscribe();
+      };
+
+      const finish = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        callback();
+      };
+
+      const evaluateState = (source: "initial" | "poll" | "event", event?: SeestarPushEvent) => {
+        if (settled) return;
+        if (currentCheck) {
+          rerunCheck = true;
+          return;
+        }
+
+        currentCheck = (async () => {
+          do {
+            rerunCheck = false;
+            const state = await config.readState();
+            lastState = state;
+            const failure = config.getFailure?.(state, event ?? lastEvent);
+            if (failure) {
+              this.log({
+                level: "error",
+                event: "observation.wait.failed",
+                component: "observation",
+                phase: "observe",
+                ok: false,
+                summary: `Failed while waiting for ${config.action}`,
+                error: failure,
+                data: {
+                  action: config.action,
+                  mode: "event+poll",
+                  source,
+                  state: config.summarizeState?.(state),
+                  eventName: (event ?? lastEvent)?.Event,
+                },
+              });
+              finish(() => reject(new Error(failure)));
+              return;
+            }
+            if (config.isComplete(state, event ?? lastEvent)) {
+              this.log({
+                level: "debug",
+                event: "observation.wait.completed",
+                component: "observation",
+                phase: "observe",
+                ok: true,
+                summary: `Finished waiting for ${config.action}`,
+                data: {
+                  action: config.action,
+                  mode: "event+poll",
+                  source,
+                  state: config.summarizeState?.(state),
+                  eventName: (event ?? lastEvent)?.Event,
+                },
+              });
+              finish(() => resolve(state));
+              return;
+            }
+          } while (rerunCheck && !settled);
+        })()
+          .catch((error) => {
+            this.log({
+              level: "error",
+              event: "observation.wait.failed",
+              component: "observation",
+              phase: "observe",
+              ok: false,
+              summary: `Failed while waiting for ${config.action}`,
+              error: errorMessage(error),
+              data: {
+                action: config.action,
+                mode: "event+poll",
+                source,
+                state: lastState ? config.summarizeState?.(lastState) : undefined,
+                eventName: (event ?? lastEvent)?.Event,
+              },
+            });
+            finish(() => reject(error));
+          })
+          .finally(() => {
+            currentCheck = undefined;
+          });
+      };
+
+      const onAbort = () => {
+        finish(() => reject(new Error(`Waiting for ${config.action} aborted`)));
+      };
+
+      const unsubscribe = this.client.subscribeToPushEvents((event) => {
+        if (!config.eventNames.includes(event.Event)) return;
+        lastEvent = event;
+        this.log({
+          level: "debug",
+          event: "observation.wait.event",
+          component: "observation",
+          phase: "observe",
+          summary: `Received ${event.Event} while waiting for ${config.action}`,
+          data: {
+            action: config.action,
+            eventName: event.Event,
+            state: event.state,
+            code: event.code,
+            error: event.error,
+          },
+        });
+        evaluateState("event", event);
+      });
+
+      const intervalHandle = setInterval(() => {
+        evaluateState("poll");
+      }, pollIntervalMs);
+
+      const timeoutHandle = setTimeout(() => {
+        this.log({
+          level: "warn",
+          event: "observation.wait.timeout",
+          component: "observation",
+          phase: "observe",
+          ok: false,
+          summary: `Timed out while waiting for ${config.action}`,
+          data: {
+            action: config.action,
+            timeoutMs,
+            state: lastState ? config.summarizeState?.(lastState) : undefined,
+            eventName: lastEvent?.Event,
+          },
+        });
+        finish(() => reject(new Error(`Timed out waiting for ${config.action}`)));
+      }, timeoutMs);
+
+      if (config.wait.signal?.aborted) {
+        onAbort();
+        return;
+      }
+
+      config.wait.signal?.addEventListener("abort", onAbort, { once: true });
+      evaluateState("initial");
+    });
   }
 
   private configureClient(host: string): void {
@@ -1050,6 +1948,80 @@ function isViewActive(summary: PreflightSummary): boolean {
   return summary.viewState !== "cancel";
 }
 
+function isRequestedViewActive(viewState: ViewStateResult | null, mode: string): boolean {
+  const view = asRecord(viewState?.View);
+  return asString(view?.mode) === mode && readViewStateName(viewState) !== "cancel";
+}
+
+function isViewStopped(viewState: ViewStateResult | null): boolean {
+  const view = asRecord(viewState?.View);
+  const mode = asString(view?.mode);
+  return !mode || mode === "none" || readViewStateName(viewState) === "cancel";
+}
+
+function isStackActive(viewState: ViewStateResult | null): boolean {
+  const view = asRecord(viewState?.View);
+  return asString(view?.stage) === "Stack" && readViewStateName(viewState) !== "cancel";
+}
+
+function summarizeViewState(viewState: ViewStateResult | null): unknown {
+  const view = asRecord(viewState?.View);
+  return {
+    mode: asString(view?.mode),
+    stage: asString(view?.stage),
+    state: asString(view?.state),
+    targetName: asString(view?.target_name),
+  };
+}
+
+function readViewStateName(viewState: ViewStateResult | null): string | undefined {
+  const view = asRecord(viewState?.View);
+  return asString(view?.state);
+}
+
+function readMountClosed(deviceState: DeviceState | null): boolean | undefined {
+  const mount = asRecord(asRecord(deviceState)?.mount);
+  return asBoolean(mount?.close);
+}
+
+function readMountMoveType(deviceState: DeviceState | null): string | undefined {
+  const mount = asRecord(asRecord(deviceState)?.mount);
+  return asString(mount?.move_type);
+}
+
+function readFocuserState(deviceState: DeviceState | null): string | undefined {
+  const focuser = asRecord(asRecord(deviceState)?.focuser);
+  return asString(focuser?.state);
+}
+
+function normalizeEventState(event?: SeestarPushEvent): string | undefined {
+  return typeof event?.state === "string" ? event.state.toLowerCase() : undefined;
+}
+
+function isBusyState(state?: string): boolean {
+  return state === "working" || state === "moving" || state === "start";
+}
+
+function isAutofocusFocuserEvent(event?: SeestarPushEvent): boolean {
+  if (!event || event.Event !== "FocuserMove") return false;
+  return Array.isArray(event.route) && event.route.includes("AutoFocus");
+}
+
+function failureFromPushEvent(
+  event: SeestarPushEvent | undefined,
+  relevantEvents: string[]
+): string | undefined {
+  if (!event || !relevantEvents.includes(event.Event)) return undefined;
+  const state = normalizeEventState(event);
+  if (state === "fail" || state === "cancel") {
+    return event.error ?? `${event.Event} reported ${state}`;
+  }
+  if (typeof event.code === "number" && event.code !== 0) {
+    return event.error ?? `${event.Event} reported code ${event.code}`;
+  }
+  return undefined;
+}
+
 function readDeviceTime(value: unknown): PreflightSummary["deviceTime"] {
   const record = asRecord(value);
   const year = asNumber(record?.year);
@@ -1133,6 +2105,10 @@ function resolvedTimeZone(): string {
 
 function buildSessionId(): string {
   return `ses_${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}_${randomUUID().slice(0, 8)}`;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function warningCode(warning: string): string {

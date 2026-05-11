@@ -70,11 +70,34 @@ export interface ViewStateResult {
   View?: Record<string, unknown>;
 }
 
-export type StackEvent = {
+export interface SeestarPushEvent {
+  Event: string;
+  Timestamp?: string;
+  timestamp?: string;
+  state?: string;
+  error?: string;
+  code?: number;
+  route?: string[];
+  [key: string]: unknown;
+}
+
+export type PushEventListener = (event: SeestarPushEvent) => void;
+
+export interface WaitOptions {
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  signal?: AbortSignal;
+}
+
+export interface ActionWaitOptions extends WaitOptions {
+  waitForCompletion?: boolean;
+}
+
+export interface StackEvent extends SeestarPushEvent {
   Event: "Stack";
-  stacked_frame: number;
-  dropped_frame: number;
-};
+  stacked_frame?: number;
+  dropped_frame?: number;
+}
 
 export interface ClientConfig {
   host?: string;
@@ -128,6 +151,13 @@ export interface StartupSequenceOptions {
   openArm?: "if_needed" | "always" | "never";
   autofocus?: "off" | "after_view";
   observation?: StartupObservationOptions;
+}
+
+export interface DevelopmentSmokeTestOptions {
+  dryRun?: boolean;
+  mode?: Extract<SeestarViewMode, "scenery" | "moon" | "sun" | "planet">;
+  openArm?: "if_needed" | "always" | "never";
+  parkAtEnd?: boolean;
 }
 
 export interface StartupStepReport {

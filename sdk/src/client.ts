@@ -1,5 +1,11 @@
 import * as net from "node:net";
-import type { JsonRpcRequest, JsonRpcResponse } from "./types.js";
+import type {
+  JsonRpcRequest,
+  JsonRpcResponse,
+  PushEventListener,
+  SeestarPushEvent,
+  WaitOptions,
+} from "./types.js";
 import type { Logger } from "./logging.js";
 import { createNoopLogger, emitLog } from "./logging.js";
 
@@ -22,6 +28,7 @@ export class SeestarClient {
   private inflightRequests = new Map<number, { method: string; startedAt: number }>();
   private receiveBuffer = "";
   private connected = false;
+  private pushListeners = new Set<PushEventListener>();
   private logger: Logger;
   private sessionId?: string;
   private traceProtocol: boolean;
@@ -197,6 +204,97 @@ export class SeestarClient {
     this.deviceSn = deviceSn;
   }
 
+  subscribeToPushEvents(listener: PushEventListener): () => void {
+    this.pushListeners.add(listener);
+    return () => {
+      this.pushListeners.delete(listener);
+    };
+  }
+
+  async waitForPushEvent(
+    predicate: (event: SeestarPushEvent) => boolean,
+    options: WaitOptions = {}
+  ): Promise<SeestarPushEvent> {
+    const timeoutMs = options.timeoutMs ?? this.timeoutMs;
+    const signal = options.signal;
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+      const cleanup = () => {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        signal?.removeEventListener("abort", onAbort);
+        unsubscribe();
+      };
+
+      const finish = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        callback();
+      };
+
+      const onAbort = () => {
+        finish(() => reject(new Error("Push-event wait aborted")));
+      };
+
+      const unsubscribe = this.subscribeToPushEvents((event) => {
+        if (!predicate(event)) return;
+        emitLog(this.logger, {
+          level: "debug",
+          event: "rpc.push.wait.matched",
+          component: "rpc",
+          sessionId: this.sessionId,
+          host: this.host,
+          deviceModel: this.deviceModel,
+          deviceSn: this.deviceSn,
+          summary: "Matched pushed device event",
+          data: {
+            eventName: event.Event,
+            state: event.state,
+            code: event.code,
+            error: event.error,
+          },
+        });
+        finish(() => resolve(event));
+      });
+
+      emitLog(this.logger, {
+        level: "debug",
+        event: "rpc.push.wait.started",
+        component: "rpc",
+        sessionId: this.sessionId,
+        host: this.host,
+        deviceModel: this.deviceModel,
+        deviceSn: this.deviceSn,
+        summary: "Waiting for pushed device event",
+        data: { timeoutMs },
+      });
+
+      if (signal?.aborted) {
+        finish(() => reject(new Error("Push-event wait aborted")));
+        return;
+      }
+
+      signal?.addEventListener("abort", onAbort, { once: true });
+      timeoutHandle = setTimeout(() => {
+        emitLog(this.logger, {
+          level: "warn",
+          event: "rpc.push.wait.timeout",
+          component: "rpc",
+          sessionId: this.sessionId,
+          host: this.host,
+          deviceModel: this.deviceModel,
+          deviceSn: this.deviceSn,
+          durationMs: timeoutMs,
+          summary: "Timed out waiting for pushed device event",
+        });
+        finish(() => reject(new Error(`Timeout waiting for pushed event after ${timeoutMs}ms`)));
+      }, timeoutMs);
+    });
+  }
+
   private onData(data: Buffer): void {
     this.receiveBuffer += data.toString("utf-8");
     let idx: number;
@@ -207,6 +305,7 @@ export class SeestarClient {
       try {
         const parsed = JSON.parse(line) as Record<string, unknown>;
         if (typeof parsed.Event === "string") {
+          const pushEvent = parsed as SeestarPushEvent;
           emitLog(this.logger, {
             level: "debug",
             event: "rpc.push.received",
@@ -217,10 +316,31 @@ export class SeestarClient {
             deviceSn: this.deviceSn,
             summary: "Received unsolicited device event",
             data: {
-              eventName: parsed.Event,
-              preview: this.traceProtocol ? previewValue(parsed, undefined) : undefined,
+              eventName: pushEvent.Event,
+              state: pushEvent.state,
+              code: pushEvent.code,
+              error: pushEvent.error,
+              preview: this.traceProtocol ? previewValue(pushEvent, undefined) : undefined,
             },
           });
+          for (const listener of this.pushListeners) {
+            try {
+              listener(pushEvent);
+            } catch (error) {
+              emitLog(this.logger, {
+                level: "warn",
+                event: "rpc.push.listener_failed",
+                component: "rpc",
+                sessionId: this.sessionId,
+                host: this.host,
+                deviceModel: this.deviceModel,
+                deviceSn: this.deviceSn,
+                summary: "Push-event listener threw an error",
+                error: error instanceof Error ? error.message : undefined,
+                data: { eventName: pushEvent.Event },
+              });
+            }
+          }
           continue;
         }
 
