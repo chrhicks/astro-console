@@ -4,6 +4,7 @@ import type {
   DesktopCommandAction,
   DesktopDiscoveredDevice,
   DesktopLogEntry,
+  DesktopPreviewFrame,
   DesktopStatus,
   DesktopViewMode,
 } from "../../shared/api";
@@ -13,6 +14,10 @@ const EMPTY_STATUS: DesktopStatus = {
   authenticated: false,
   deviceState: null,
   viewState: null,
+  preview: {
+    active: false,
+    mode: "rtsp-mjpeg",
+  },
 };
 
 const VIEW_MODES: DesktopViewMode[] = ["scenery", "star", "moon", "sun", "planet"];
@@ -21,6 +26,7 @@ export function App() {
   const [devices, setDevices] = useState<DesktopDiscoveredDevice[]>([]);
   const [status, setStatus] = useState<DesktopStatus>(EMPTY_STATUS);
   const [logs, setLogs] = useState<DesktopLogEntry[]>([]);
+  const [previewFrame, setPreviewFrame] = useState<DesktopPreviewFrame | null>(null);
   const [host, setHost] = useState("192.168.4.29");
   const [viewMode, setViewMode] = useState<DesktopViewMode>("scenery");
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -42,12 +48,21 @@ export function App() {
     const offStatus = window.seestar.onStatus((nextStatus) => {
       setStatus(nextStatus);
     });
+    const offPreviewFrame = window.seestar.onPreviewFrame((nextFrame) => {
+      setPreviewFrame(nextFrame);
+    });
 
     return () => {
       offLog();
       offStatus();
+      offPreviewFrame();
     };
   }, []);
+
+  useEffect(() => {
+    if (status.preview.active) return;
+    setPreviewFrame(null);
+  }, [status.preview.active]);
 
   useEffect(() => {
     if (!status.connected) return;
@@ -89,9 +104,11 @@ export function App() {
   }, [summary.batteryPercent, summary.batteryTempC, summary.deviceTempC, summary.mountClosed]);
 
   const rawStatusJson = useMemo(
-    () => JSON.stringify({ deviceState: status.deviceState, viewState: status.viewState }, null, 2) ?? "null",
-    [status.deviceState, status.viewState]
+    () => JSON.stringify({ deviceState: status.deviceState, viewState: status.viewState, preview: status.preview }, null, 2) ?? "null",
+    [status.deviceState, status.preview, status.viewState]
   );
+
+  const previewUpdatedAt = previewFrame?.ts ?? status.preview.lastFrameAt;
 
   async function runAction(action: string, work: () => Promise<void>) {
     setBusyAction(action);
@@ -344,6 +361,76 @@ export function App() {
               >
                 {busyAction === "stop-stack" ? "Stopping stack..." : "Stop stack"}
               </button>
+            </div>
+          </section>
+
+          <section className="preview-panel">
+            <div className="panel-heading panel-subheading">
+              <h3>Live preview</h3>
+              <p>Scenery mode RTSP is decoded in the Electron main process and pushed here as JPEG frames.</p>
+            </div>
+
+            <div className="actions state-action-row">
+              <button
+                className="primary"
+                onClick={() =>
+                  void runAction("start-preview", async () => {
+                    const nextStatus = await window.seestar.startPreview();
+                    setStatus(nextStatus);
+                  })
+                }
+                disabled={
+                  Boolean(busyAction) ||
+                  !status.connected ||
+                  status.preview.active ||
+                  summary.viewMode !== "scenery"
+                }
+              >
+                {busyAction === "start-preview" ? "Starting preview..." : "Start preview"}
+              </button>
+              <button
+                onClick={() =>
+                  void runAction("stop-preview", async () => {
+                    const nextStatus = await window.seestar.stopPreview();
+                    setStatus(nextStatus);
+                  })
+                }
+                disabled={Boolean(busyAction) || !status.preview.active}
+              >
+                {busyAction === "stop-preview" ? "Stopping preview..." : "Stop preview"}
+              </button>
+            </div>
+
+            {summary.viewMode !== "scenery" ? (
+              <p className="message warning">Start Scenery view first. The Seestar only exposes this RTSP feed while that mode is active.</p>
+            ) : null}
+            {status.preview.lastError ? <p className="message error">{status.preview.lastError}</p> : null}
+
+            <div className="preview-meta">
+              <div>
+                <span className="meta-label">Transport</span>
+                <strong>{status.preview.mode}</strong>
+              </div>
+              <div>
+                <span className="meta-label">Source</span>
+                <strong>{status.preview.rtspUrl ?? "Not active"}</strong>
+              </div>
+              <div>
+                <span className="meta-label">Last frame</span>
+                <strong>{previewUpdatedAt ? new Date(previewUpdatedAt).toLocaleTimeString() : "None yet"}</strong>
+              </div>
+            </div>
+
+            <div className="preview-shell">
+              {previewFrame ? (
+                <img className="preview-frame" src={previewFrame.dataUrl} alt="Live Seestar preview" />
+              ) : (
+                <div className="preview-placeholder">
+                  {status.preview.active
+                    ? "Waiting for the first frame from ffmpeg..."
+                    : "No live preview yet. Start Scenery mode, then start preview."}
+                </div>
+              )}
             </div>
           </section>
 

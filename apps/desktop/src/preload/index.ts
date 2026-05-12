@@ -4,6 +4,7 @@ import type {
   ConnectRequest,
   DesktopDiscoveredDevice,
   DesktopLogEntry,
+  DesktopPreviewFrame,
   DesktopStatus,
   SeestarDesktopApi,
 } from "../shared/api";
@@ -14,11 +15,14 @@ const api: SeestarDesktopApi = {
   disconnect: () => ipcRenderer.invoke("seestar:disconnect") as Promise<DesktopStatus>,
   getStatus: () => ipcRenderer.invoke("seestar:get-status") as Promise<DesktopStatus>,
   refreshState: () => ipcRenderer.invoke("seestar:refresh-state") as Promise<DesktopStatus>,
+  startPreview: () => ipcRenderer.invoke("seestar:start-preview") as Promise<DesktopStatus>,
+  stopPreview: () => ipcRenderer.invoke("seestar:stop-preview") as Promise<DesktopStatus>,
   runCommand: (input: DesktopCommandRequest) =>
     ipcRenderer.invoke("seestar:run-command", input) as Promise<DesktopStatus>,
   getLogs: () => ipcRenderer.invoke("seestar:get-logs") as Promise<DesktopLogEntry[]>,
   onLog: (listener) => subscribe("seestar:log", listener),
   onStatus: (listener) => subscribe("seestar:status", listener),
+  onPreviewFrame: (listener) => subscribe("seestar:preview-frame", listener),
 };
 
 contextBridge.exposeInMainWorld("seestar", api);

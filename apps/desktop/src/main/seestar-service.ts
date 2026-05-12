@@ -1,5 +1,7 @@
 import { app, WebContents } from "electron";
 import path from "node:path";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
+import type { Readable } from "node:stream";
 import {
   SeestarDevice,
   discoverSeestars,
@@ -11,10 +13,18 @@ import type {
   ConnectRequest,
   DesktopDiscoveredDevice,
   DesktopLogEntry,
+  DesktopPreviewFrame,
+  DesktopPreviewState,
   DesktopStatus,
 } from "../shared/api";
 
 const LOG_LIMIT = 250;
+const PREVIEW_MODE = "rtsp-mjpeg" as const;
+const PREVIEW_FRAME_RATE = 5;
+const PREVIEW_JPEG_QUALITY = 3;
+const MAX_PREVIEW_BUFFER_BYTES = 2 * 1024 * 1024;
+const JPEG_SOI = Buffer.from([0xff, 0xd8]);
+const JPEG_EOI = Buffer.from([0xff, 0xd9]);
 
 export class SeestarDesktopService {
   private device: SeestarDevice | null = null;
@@ -24,8 +34,13 @@ export class SeestarDesktopService {
     authenticated: false,
     deviceState: null,
     viewState: null,
+    preview: createDefaultPreviewState(),
   };
   private subscribers = new Set<WebContents>();
+  private previewProcess: ChildProcessByStdio<null, Readable, Readable> | null = null;
+  private previewBuffer = Buffer.alloc(0);
+  private previewStopRequested = false;
+  private previewLastStderr: string | undefined;
   private logger: Logger = {
     log: (event) => {
       this.applyLogSideEffects(event);
@@ -89,6 +104,7 @@ export class SeestarDesktopService {
         host,
         deviceState: null,
         viewState: null,
+        preview: createDefaultPreviewState(),
         lastUpdatedAt: new Date().toISOString(),
       };
       return this.refreshState();
@@ -99,6 +115,7 @@ export class SeestarDesktopService {
         host,
         deviceState: null,
         viewState: null,
+        preview: createDefaultPreviewState(),
         lastError: toErrorMessage(error),
         lastUpdatedAt: new Date().toISOString(),
       };
@@ -109,25 +126,28 @@ export class SeestarDesktopService {
 
   async disconnect(): Promise<DesktopStatus> {
     this.disconnectDevice();
-      this.status = {
-        connected: false,
-        authenticated: false,
-        deviceState: null,
-        viewState: null,
-        lastUpdatedAt: new Date().toISOString(),
-      };
+    this.status = {
+      connected: false,
+      authenticated: false,
+      deviceState: null,
+      viewState: null,
+      preview: createDefaultPreviewState(),
+      lastUpdatedAt: new Date().toISOString(),
+    };
     this.emitStatus();
     return this.getStatus();
   }
 
   async refreshState(): Promise<DesktopStatus> {
     if (!this.device || !this.device.isConnected()) {
+      this.stopPreviewProcess();
       this.status = {
         ...this.status,
         connected: false,
         authenticated: false,
         deviceState: null,
         viewState: null,
+        preview: createDefaultPreviewState(),
         lastUpdatedAt: new Date().toISOString(),
       };
       this.emitStatus();
@@ -158,6 +178,7 @@ export class SeestarDesktopService {
         authenticated: false,
         deviceState: null,
         viewState: null,
+        preview: createDefaultPreviewState(),
         lastError: toErrorMessage(error),
         lastUpdatedAt: new Date().toISOString(),
       };
@@ -166,16 +187,119 @@ export class SeestarDesktopService {
     }
   }
 
+  async startPreview(): Promise<DesktopStatus> {
+    if (!this.device || !this.device.isConnected()) {
+      throw new Error("Connect to a Seestar device before starting live preview");
+    }
+
+    const host = this.status.host?.trim();
+    if (!host) {
+      throw new Error("No Seestar host is available for RTSP preview");
+    }
+
+    const viewMode = this.readViewMode();
+    if (viewMode !== "scenery") {
+      throw new Error("Start Scenery view before starting live preview");
+    }
+
+    this.stopPreviewProcess();
+
+    const rtspUrl = buildRtspUrl(host);
+    const ffmpegArgs = [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-nostdin",
+      "-rtsp_transport",
+      "tcp",
+      "-fflags",
+      "nobuffer",
+      "-flags",
+      "low_delay",
+      "-i",
+      rtspUrl,
+      "-an",
+      "-vf",
+      `fps=${PREVIEW_FRAME_RATE}`,
+      "-q:v",
+      String(PREVIEW_JPEG_QUALITY),
+      "-f",
+      "image2pipe",
+      "-vcodec",
+      "mjpeg",
+      "pipe:1",
+    ];
+
+    const previewProcess = spawn("ffmpeg", ffmpegArgs, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    this.previewProcess = previewProcess;
+    this.previewBuffer = Buffer.alloc(0);
+    this.previewStopRequested = false;
+    this.previewLastStderr = undefined;
+    this.status = {
+      ...this.status,
+      preview: {
+        active: true,
+        mode: PREVIEW_MODE,
+        rtspUrl,
+      },
+      lastUpdatedAt: new Date().toISOString(),
+    };
+    this.emitStatus();
+
+    previewProcess.stdout.on("data", (chunk: Buffer) => {
+      if (this.previewProcess !== previewProcess) return;
+      this.consumePreviewChunk(chunk);
+    });
+    previewProcess.stderr.setEncoding("utf8");
+    previewProcess.stderr.on("data", (chunk: string) => {
+      if (this.previewProcess !== previewProcess) return;
+      this.consumePreviewStderr(chunk);
+    });
+    previewProcess.once("error", (error) => {
+      if (this.previewProcess !== previewProcess) return;
+      this.handlePreviewFailure(toErrorMessage(error));
+    });
+    previewProcess.once("exit", (code, signal) => {
+      if (this.previewProcess !== previewProcess) return;
+      if (this.previewStopRequested) return;
+      this.handlePreviewFailure(describePreviewExit(code, signal, this.previewLastStderr));
+    });
+
+    return this.getStatus();
+  }
+
+  async stopPreview(): Promise<DesktopStatus> {
+    this.stopPreviewProcess();
+    this.status = {
+      ...this.status,
+      preview: createDefaultPreviewState(),
+      lastUpdatedAt: new Date().toISOString(),
+    };
+    this.emitStatus();
+    return this.getStatus();
+  }
+
   getStatus(): DesktopStatus {
-    return { ...this.status };
+    return {
+      ...this.status,
+      preview: { ...this.status.preview },
+    };
   }
 
   getLogs(): DesktopLogEntry[] {
     return [...this.logs];
   }
 
+  dispose(): void {
+    this.disconnectDevice();
+  }
+
   async runCommand(input: DesktopCommandRequest): Promise<DesktopStatus> {
     const device = this.requireConnectedDevice();
+    let stopPreview = false;
 
     switch (input.action) {
       case "open-arm":
@@ -183,6 +307,7 @@ export class SeestarDesktopService {
         break;
       case "park":
         await this.expectAccepted(device.park(), "Device rejected park request");
+        stopPreview = true;
         break;
       case "start-view": {
         const mode = input.mode;
@@ -190,10 +315,12 @@ export class SeestarDesktopService {
           throw new Error("View mode is required to start a view");
         }
         await this.expectAccepted(device.startView(mode), `Device rejected ${mode} view request`);
+        stopPreview = mode !== "scenery";
         break;
       }
       case "stop-view":
         await this.expectAccepted(device.stopView(), "Device rejected stop-view request");
+        stopPreview = true;
         break;
       case "start-stack":
         await this.expectAccepted(device.startStack(true), "Device rejected start-stack request");
@@ -208,10 +335,19 @@ export class SeestarDesktopService {
         throw new Error(`Unsupported device command: ${String(input.action)}`);
     }
 
+    if (stopPreview) {
+      this.stopPreviewProcess();
+      this.status = {
+        ...this.status,
+        preview: createDefaultPreviewState(),
+      };
+    }
+
     return this.refreshState();
   }
 
   private disconnectDevice(): void {
+    this.stopPreviewProcess();
     if (!this.device) return;
     this.device.disconnect();
     this.device = null;
@@ -232,7 +368,7 @@ export class SeestarDesktopService {
   }
 
   private resolvePemPath(): string {
-    return path.resolve(app.getAppPath(), "../..", "seestar_3.1.2_fw_7.32_interop.pem");
+    return path.resolve(app.getAppPath(), "seestar_3.1.2_fw_7.32_interop.pem");
   }
 
   private emitStatus(): void {
@@ -249,6 +385,7 @@ export class SeestarDesktopService {
       return;
     }
 
+    this.stopPreviewProcess();
     this.device = null;
     this.status = {
       ...this.status,
@@ -256,11 +393,135 @@ export class SeestarDesktopService {
       authenticated: false,
       deviceState: null,
       viewState: null,
+      preview: createDefaultPreviewState(),
       lastError: event.event === "connection.tcp.error" ? event.error ?? event.summary : undefined,
       lastUpdatedAt: new Date().toISOString(),
     };
     this.emitStatus();
   }
+
+  private readViewMode(): string | undefined {
+    const viewState = asRecord(this.status.viewState);
+    const view = asRecord(viewState?.View);
+    return asString(view?.mode);
+  }
+
+  private stopPreviewProcess(): void {
+    if (!this.previewProcess) return;
+
+    const previewProcess = this.previewProcess;
+    this.previewProcess = null;
+    this.previewStopRequested = true;
+    this.previewBuffer = Buffer.alloc(0);
+    this.previewLastStderr = undefined;
+    previewProcess.removeAllListeners();
+    previewProcess.stdout.removeAllListeners();
+    previewProcess.stderr.removeAllListeners();
+    previewProcess.kill("SIGTERM");
+  }
+
+  private consumePreviewStderr(chunk: string): void {
+    const lines = chunk
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length > 0) {
+      this.previewLastStderr = lines[lines.length - 1];
+    }
+  }
+
+  private consumePreviewChunk(chunk: Buffer): void {
+    this.previewBuffer = Buffer.concat([this.previewBuffer, chunk]);
+
+    if (this.previewBuffer.length > MAX_PREVIEW_BUFFER_BYTES) {
+      const start = this.previewBuffer.lastIndexOf(JPEG_SOI);
+      this.previewBuffer = start >= 0 ? this.previewBuffer.subarray(start) : Buffer.alloc(0);
+    }
+
+    while (true) {
+      const start = this.previewBuffer.indexOf(JPEG_SOI);
+      if (start === -1) {
+        this.previewBuffer = Buffer.alloc(0);
+        return;
+      }
+
+      if (start > 0) {
+        this.previewBuffer = this.previewBuffer.subarray(start);
+      }
+
+      const end = this.previewBuffer.indexOf(JPEG_EOI, JPEG_SOI.length);
+      if (end === -1) {
+        return;
+      }
+
+      const frame = this.previewBuffer.subarray(0, end + JPEG_EOI.length);
+      this.previewBuffer = this.previewBuffer.subarray(end + JPEG_EOI.length);
+      this.emitPreviewFrame(frame);
+    }
+  }
+
+  private emitPreviewFrame(frame: Buffer): void {
+    const ts = new Date().toISOString();
+    this.status = {
+      ...this.status,
+      preview: {
+        ...this.status.preview,
+        active: true,
+        mode: PREVIEW_MODE,
+        lastFrameAt: ts,
+        lastError: undefined,
+      },
+    };
+
+    const payload: DesktopPreviewFrame = {
+      ts,
+      dataUrl: `data:image/jpeg;base64,${frame.toString("base64")}`,
+    };
+
+    for (const subscriber of this.subscribers) {
+      if (!subscriber.isDestroyed()) {
+        subscriber.send("seestar:preview-frame", payload);
+      }
+    }
+  }
+
+  private handlePreviewFailure(message: string): void {
+    this.previewProcess = null;
+    this.previewStopRequested = false;
+    this.previewBuffer = Buffer.alloc(0);
+    this.previewLastStderr = undefined;
+    this.status = {
+      ...this.status,
+      preview: {
+        ...createDefaultPreviewState(),
+        lastError: message,
+      },
+      lastUpdatedAt: new Date().toISOString(),
+    };
+    this.emitStatus();
+  }
+}
+
+function createDefaultPreviewState(): DesktopPreviewState {
+  return {
+    active: false,
+    mode: PREVIEW_MODE,
+  };
+}
+
+function buildRtspUrl(host: string): string {
+  return `rtsp://${host}:4554/stream`;
+}
+
+function describePreviewExit(
+  code: number | null,
+  signal: NodeJS.Signals | null,
+  stderr: string | undefined
+): string {
+  if (stderr) return stderr;
+  if (signal) return `RTSP preview stopped (${signal})`;
+  if (typeof code === "number") return `RTSP preview exited with code ${code}`;
+  return "RTSP preview ended unexpectedly";
 }
 
 function toDesktopLogEntry(event: LogEvent): DesktopLogEntry {

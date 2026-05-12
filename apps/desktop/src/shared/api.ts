@@ -18,12 +18,26 @@ export interface DesktopLogEntry {
   data?: unknown;
 }
 
+export interface DesktopPreviewState {
+  active: boolean;
+  mode: "rtsp-mjpeg";
+  rtspUrl?: string;
+  lastFrameAt?: string;
+  lastError?: string;
+}
+
+export interface DesktopPreviewFrame {
+  ts: string;
+  dataUrl: string;
+}
+
 export interface DesktopStatus {
   connected: boolean;
   authenticated: boolean;
   host?: string;
   deviceState: Record<string, unknown> | null;
   viewState: Record<string, unknown> | null;
+  preview: DesktopPreviewState;
   lastUpdatedAt?: string;
   lastError?: string;
 }
@@ -54,8 +68,11 @@ export interface SeestarDesktopApi {
   disconnect(): Promise<DesktopStatus>;
   getStatus(): Promise<DesktopStatus>;
   refreshState(): Promise<DesktopStatus>;
+  startPreview(): Promise<DesktopStatus>;
+  stopPreview(): Promise<DesktopStatus>;
   runCommand(input: DesktopCommandRequest): Promise<DesktopStatus>;
   getLogs(): Promise<DesktopLogEntry[]>;
   onLog(listener: (entry: DesktopLogEntry) => void): () => void;
   onStatus(listener: (status: DesktopStatus) => void): () => void;
+  onPreviewFrame(listener: (frame: DesktopPreviewFrame) => void): () => void;
 }

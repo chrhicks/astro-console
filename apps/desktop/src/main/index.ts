@@ -37,6 +37,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle("seestar:disconnect", () => service.disconnect());
   ipcMain.handle("seestar:get-status", () => service.getStatus());
   ipcMain.handle("seestar:refresh-state", () => service.refreshState());
+  ipcMain.handle("seestar:start-preview", () => service.startPreview());
+  ipcMain.handle("seestar:stop-preview", () => service.stopPreview());
   ipcMain.handle("seestar:run-command", (_event, input: DesktopCommandRequest) => service.runCommand(input));
   ipcMain.handle("seestar:get-logs", () => service.getLogs());
 }
@@ -50,6 +52,10 @@ app.whenReady().then(() => {
       createMainWindow();
     }
   });
+});
+
+app.on("before-quit", () => {
+  service.dispose();
 });
 
 app.on("window-all-closed", () => {
