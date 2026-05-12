@@ -1,4 +1,5 @@
 .continuum/
+.agents/
 .env
 .env.local
 .env.development.local
