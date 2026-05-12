@@ -372,7 +372,8 @@ export function App() {
                     <span>{entry.event}</span>
                   </div>
                   <strong>{entry.summary ?? "Log event"}</strong>
-                  {entry.error ? <p>{entry.error}</p> : null}
+                  {entry.details ? <p className="log-detail">{entry.details}</p> : null}
+                  {entry.error ? <p className="log-error">{entry.error}</p> : null}
                 </article>
               ))}
           </div>

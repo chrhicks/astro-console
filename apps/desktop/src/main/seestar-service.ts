@@ -28,6 +28,7 @@ export class SeestarDesktopService {
   private subscribers = new Set<WebContents>();
   private logger: Logger = {
     log: (event) => {
+      this.applyLogSideEffects(event);
       const entry = toDesktopLogEntry(event);
       this.logs = [...this.logs.slice(-(LOG_LIMIT - 1)), entry];
       for (const subscriber of this.subscribers) {
@@ -242,6 +243,24 @@ export class SeestarDesktopService {
       }
     }
   }
+
+  private applyLogSideEffects(event: LogEvent): void {
+    if (event.event !== "connection.tcp.closed" && event.event !== "connection.tcp.error") {
+      return;
+    }
+
+    this.device = null;
+    this.status = {
+      ...this.status,
+      connected: false,
+      authenticated: false,
+      deviceState: null,
+      viewState: null,
+      lastError: event.event === "connection.tcp.error" ? event.error ?? event.summary : undefined,
+      lastUpdatedAt: new Date().toISOString(),
+    };
+    this.emitStatus();
+  }
 }
 
 function toDesktopLogEntry(event: LogEvent): DesktopLogEntry {
@@ -250,11 +269,109 @@ function toDesktopLogEntry(event: LogEvent): DesktopLogEntry {
     level: event.level,
     event: event.event,
     component: event.component,
-    summary: event.summary,
+    summary: formatLogSummary(event),
+    details: formatLogDetails(event),
     error: event.error,
     host: event.host,
     data: event.data,
   };
+}
+
+function formatLogSummary(event: LogEvent): string | undefined {
+  const data = asRecord(event.data);
+  const pushEventName = asString(data?.eventName);
+
+  switch (event.event) {
+    case "rpc.request.sent":
+      return describeRpcSummary("Sent", event.method, event.rpcId, "request");
+    case "rpc.response.received":
+      return describeRpcSummary("Received", event.method, event.rpcId, "response");
+    case "rpc.request.timeout":
+      return describeRpcTimeout(event.method, event.rpcId);
+    case "rpc.request.disconnected":
+      return describeRpcDisconnect(event.method, event.rpcId);
+    case "rpc.push.received":
+      return pushEventName ? `Received ${pushEventName} device event` : event.summary;
+    case "rpc.push.wait.started":
+      return pushEventName ? `Waiting for ${pushEventName} device event` : event.summary;
+    case "rpc.push.wait.matched":
+      return pushEventName ? `Matched ${pushEventName} device event` : event.summary;
+    case "rpc.push.wait.timeout":
+      return pushEventName ? `Timed out waiting for ${pushEventName} device event` : event.summary;
+    case "auth.challenge.received": {
+      const challengeLength = asNumber(data?.challengeLength);
+      return challengeLength === undefined
+        ? event.summary
+        : `Received authentication challenge (${challengeLength} chars)`;
+    }
+    default:
+      return event.summary;
+  }
+}
+
+function formatLogDetails(event: LogEvent): string | undefined {
+  const data = asRecord(event.data);
+  const details: string[] = [];
+  const code = asNumber(data?.code);
+
+  if (event.method) {
+    details.push(`method ${event.method}`);
+  }
+  if (typeof event.rpcId === "number") {
+    details.push(`rpc #${event.rpcId}`);
+  }
+  if (code !== undefined) {
+    details.push(`code ${code}`);
+  }
+  if (typeof event.durationMs === "number") {
+    details.push(`${event.durationMs} ms`);
+  }
+
+  const pushEventName = asString(data?.eventName);
+  if (pushEventName) {
+    details.push(`event ${pushEventName}`);
+  }
+
+  const pushState = asString(data?.state);
+  if (pushState) {
+    details.push(`state ${pushState}`);
+  }
+
+  const pushError = asString(data?.error);
+  if (pushError) {
+    details.push(`error ${pushError}`);
+  }
+
+  const challengeLength = asNumber(data?.challengeLength);
+  if (challengeLength !== undefined && event.event !== "auth.challenge.received") {
+    details.push(`challenge ${challengeLength} chars`);
+  }
+
+  return details.length > 0 ? details.join(" • ") : undefined;
+}
+
+function describeRpcSummary(
+  verb: "Sent" | "Received",
+  method: string | undefined,
+  rpcId: number | undefined,
+  noun: "request" | "response"
+): string {
+  const name = method ? `${method} ${noun}` : `RPC ${noun}`;
+  return typeof rpcId === "number" ? `${verb} ${name} (#${rpcId})` : `${verb} ${name}`;
+}
+
+function describeRpcTimeout(method: string | undefined, rpcId: number | undefined): string {
+  const name = method ? `${method} RPC response` : "RPC response";
+  return typeof rpcId === "number"
+    ? `Timed out waiting for ${name} (#${rpcId})`
+    : `Timed out waiting for ${name}`;
+}
+
+function describeRpcDisconnect(method: string | undefined, rpcId: number | undefined): string {
+  const name = method ? `${method} RPC response` : "RPC response";
+  return typeof rpcId === "number"
+    ? `Connection closed while waiting for ${name} (#${rpcId})`
+    : `Connection closed while waiting for ${name}`;
 }
 
 function toErrorMessage(error: unknown): string {
@@ -262,6 +379,14 @@ function toErrorMessage(error: unknown): string {
   return String(error);
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
+}
+
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }

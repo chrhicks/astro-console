@@ -51,6 +51,21 @@ export class SeestarClient {
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       const startedAt = Date.now();
+      const onSocketError = (err: Error) => {
+        this.connected = false;
+        emitLog(this.logger, {
+          level: "error",
+          event: "connection.tcp.error",
+          component: "connection",
+          sessionId: this.sessionId,
+          host: this.host,
+          deviceModel: this.deviceModel,
+          deviceSn: this.deviceSn,
+          summary: "TCP connection to device failed after connect",
+          error: err.message,
+          data: { port: this.port },
+        });
+      };
       const onError = (err: Error) => {
         cleanup();
         emitLog(this.logger, {
@@ -72,6 +87,7 @@ export class SeestarClient {
       const onConnect = () => {
         cleanup();
         this.connected = true;
+        this.socket?.on("error", onSocketError);
         emitLog(this.logger, {
           level: "info",
           event: "connection.tcp.connect.succeeded",
@@ -111,7 +127,10 @@ export class SeestarClient {
       this.socket.once("error", onError);
       this.socket.on("data", (data) => this.onData(data));
       this.socket.on("close", () => {
+        this.socket = null;
         this.connected = false;
+        this.receiveBuffer = "";
+        this.inflightRequests.clear();
         emitLog(this.logger, {
           level: "info",
           event: "connection.tcp.closed",
@@ -179,6 +198,23 @@ export class SeestarClient {
         const resp = this.responseQueue.get(id)!;
         this.responseQueue.delete(id);
         return resp;
+      }
+      if (!this.connected || !this.socket || this.socket.destroyed) {
+        this.inflightRequests.delete(id);
+        emitLog(this.logger, {
+          level: "error",
+          event: "rpc.request.disconnected",
+          component: "rpc",
+          sessionId: this.sessionId,
+          host: this.host,
+          deviceModel: this.deviceModel,
+          deviceSn: this.deviceSn,
+          rpcId: id,
+          method,
+          durationMs: Date.now() - start,
+          summary: "Connection closed while waiting for RPC response",
+        });
+        throw new Error(`Connection closed while waiting for response to ${method} (id=${id})`);
       }
       await sleep(50);
     }

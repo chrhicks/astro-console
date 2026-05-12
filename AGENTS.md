@@ -70,22 +70,8 @@ We use the `continuum` to keep track of our tasks and to serve as our tool for s
 
 At the beginning of a session run these commands:
 
-- `continuum --help`
+- `continuum guide` -- explains usage and workflows and links to command specific guides
 - `continuum init`
-
-During a session use these sub-commands regularly to keep track of your work and thoughts:
-
-- `continuum task`
-- `continuum memory`
-
-Important `continuum` usage details:
-
-- `continuum memory append` only accepts `user`, `agent`, or `tool`
-- use `continuum memory append user "..."` for user context you want saved
-- use `continuum memory append agent "..."` for agent notes you want saved
-- use `continuum memory append tool <name> "summary..."` for tool activity
-- `discovery` and `decision` are not valid `memory append` kinds
-- `discovery` and `decision` are valid only for task notes, for example: `continuum task note add <task_id> --kind discovery --content "..."`
 
 ## Output
 

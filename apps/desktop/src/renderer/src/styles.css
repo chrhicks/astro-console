@@ -351,8 +351,17 @@ pre {
   margin-top: 0.28rem;
 }
 
-.log-entry p {
+.log-detail,
+.log-error {
   margin: 0.35rem 0 0;
+  word-break: break-word;
+}
+
+.log-detail {
+  color: #8ba4c8;
+}
+
+.log-error {
   color: #ffb9b9;
 }
 

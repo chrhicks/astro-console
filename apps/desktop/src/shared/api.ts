@@ -12,6 +12,7 @@ export interface DesktopLogEntry {
   event: string;
   component: string;
   summary?: string;
+  details?: string;
   error?: string;
   host?: string;
   data?: unknown;
