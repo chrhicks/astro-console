@@ -67,6 +67,8 @@ export function App() {
   const [tonightSort, setTonightSort] = useState<TonightSortKey>("score");
   const [queueSearch, setQueueSearch] = useState("");
   const [queueError, setQueueError] = useState<string | null>(null);
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("observe");
+  const [planningPane, setPlanningPane] = useState<PlanningPane>("tonight");
 
   useEffect(() => {
     void Promise.all([window.seestar.getStatus(), window.seestar.getLogs(), window.seestar.getPlanningSnapshot()])
@@ -200,6 +202,10 @@ export function App() {
   const queueDiagnostics = useMemo(
     () => buildQueueDiagnostics(queueItems, catalogById, siteById),
     [catalogById, queueItems, siteById]
+  );
+  const queueWarningCount = useMemo(
+    () => [...queueDiagnostics.values()].reduce((total, entry) => total + entry.warnings.length, 0),
+    [queueDiagnostics]
   );
 
   async function runAction(action: string, work: () => Promise<void>) {
@@ -337,64 +343,162 @@ export function App() {
     <div className={`app-shell ${isConnected ? "connected" : "disconnected"}`}>
       <header className="topbar">
         <div className="topbar-copy">
-          <p className="eyebrow">Seestar Desktop</p>
-          <h1>Preview-first control deck</h1>
+          <p className="eyebrow">Seestar Console</p>
+          <h1>Observing instrument console</h1>
           <p className="topbar-summary">
             {isConnected
               ? hasActiveDeviceView
-                ? `Connected to ${status.host ?? host}. The device already reports ${formatView(summary)}; attach local preview or stop the active view before changing modes.`
-                : `Connected to ${status.host ?? host}. Live preview, commands, and logs now share one working surface.`
-              : "Discover a Seestar, connect, and keep the live view centered once the scope is online."}
+                ? `Connected to ${status.host ?? host}. The scope is already in ${formatView(summary)}. Use Observe for live control, Planning for targets, and Diagnostics for low-level inspection.`
+                : `Connected to ${status.host ?? host}. Operate the scope, plan the night, and keep diagnostics off the operator path.`
+              : "Run the session from one place: Observe for live control, Planning for targets and queue drafts, Diagnostics for logs and raw state."}
           </p>
         </div>
         <div className="topbar-actions">
-            <div className="status-meta">
-              <div className={`status-pill ${statusTone}`}>{isConnected ? "Connected" : "Disconnected"}</div>
-              <p className="status-caption">
-                {status.reconnect.active
-                  ? formatReconnectCaption(status)
-                  : status.lastUpdatedAt
-                    ? `Updated ${new Date(status.lastUpdatedAt).toLocaleTimeString()}`
-                    : "No telemetry yet"}
-              </p>
-            </div>
-          <button
-            onClick={() =>
-              void runAction("refresh", async () => {
-                const nextStatus = await window.seestar.refreshState();
-                setStatus(nextStatus);
-              })
-            }
-            disabled={Boolean(busyAction) || !status.connected}
-          >
-            Refresh state
-          </button>
-          <button
-            onClick={() =>
-              void runAction("disconnect", async () => {
-                const nextStatus = await window.seestar.disconnect();
-                setStatus(nextStatus);
-              })
-            }
-            disabled={Boolean(busyAction) || !status.connected}
-          >
-            Disconnect
-          </button>
+          <div className="status-meta">
+            <div className={`status-pill ${statusTone}`}>{isConnected ? "Connected" : "Disconnected"}</div>
+            <p className="status-caption">
+              {status.reconnect.active
+                ? formatReconnectCaption(status)
+                : status.lastUpdatedAt
+                  ? `Updated ${new Date(status.lastUpdatedAt).toLocaleTimeString()}`
+                  : "No telemetry yet"}
+            </p>
+          </div>
         </div>
       </header>
 
       {error ? <p className="message error global-message">{error}</p> : null}
       {status.lastError ? <p className="message error global-message">{status.lastError}</p> : null}
 
-      <main className="workspace">
-        <aside className="side-rail">
+      <section className="panel session-strip">
+        <div className="session-strip-main">
+          <div className="session-strip-copy">
+            <p className="eyebrow">Session bus</p>
+            <h2>{isConnected ? `Scope online at ${status.host ?? host}` : "Scope offline"}</h2>
+            <p>
+              {activeSite
+                ? `Active site: ${activeSite.name}. Planner is ${status.planner.ready ? "ready" : "flagging issues"}.`
+                : "No active site selected yet. Planning and queue work will stay limited until one is selected."}
+            </p>
+          </div>
+
+          <div className="session-strip-controls">
+            <label className="field compact-field session-host-field">
+              <span>Host</span>
+              <input value={host} onChange={(event) => setHost(event.target.value)} placeholder="Leave blank to discover" />
+            </label>
+
+            <div className="actions session-actions">
+              <button
+                type="button"
+                onClick={() =>
+                  void runAction("discover", async () => {
+                    const discovered = await window.seestar.discover();
+                    setDevices(discovered);
+                    if (discovered[0]?.host) setHost(discovered[0].host);
+                  })
+                }
+                disabled={Boolean(busyAction)}
+              >
+                {busyAction === "discover" ? "Scanning..." : "Discover"}
+              </button>
+              <button
+                className="primary"
+                type="button"
+                onClick={() =>
+                  void runAction("connect", async () => {
+                    const nextStatus = await window.seestar.connect({ host });
+                    setStatus(nextStatus);
+                  })
+                }
+                disabled={Boolean(busyAction)}
+              >
+                {busyAction === "connect" ? "Connecting..." : isConnected ? "Reconnect" : "Connect"}
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  void runAction("refresh", async () => {
+                    const nextStatus = await window.seestar.refreshState();
+                    setStatus(nextStatus);
+                  })
+                }
+                disabled={Boolean(busyAction) || !status.connected}
+              >
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  void runAction("disconnect", async () => {
+                    const nextStatus = await window.seestar.disconnect();
+                    setStatus(nextStatus);
+                  })
+                }
+                disabled={Boolean(busyAction) || !status.connected}
+              >
+                Disconnect
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="session-strip-metrics">
+          <QuickStat label="Host" value={status.host ?? "None"} />
+          <QuickStat label="Site" value={activeSite?.name ?? "No active site"} />
+          <QuickStat label="Planner" value={status.planner.ready ? "Ready" : "Attention"} />
+          <QuickStat label="Discovery" value={formatDiscoveryMode(status)} />
+          <QuickStat label="View" value={formatView(summary)} />
+          <QuickStat label="Preview" value={status.preview.active ? "Live" : "Idle"} />
+          <QuickStat label="Queue" value={`${queueItems.length} item${queueItems.length === 1 ? "" : "s"}`} />
+          <QuickStat label="Warnings" value={String(queueWarningCount)} />
+        </div>
+
+        {status.reconnect.active ? <p className="message info">{formatReconnectMessage(status)}</p> : null}
+        {!status.planner.ready && status.planner.issues.length > 0 ? (
+          <div className="planner-issues compact-issues">
+            {status.planner.issues.map((issue) => (
+              <p key={issue} className="message warning planner-issue">
+                {issue}
+              </p>
+            ))}
+          </div>
+        ) : null}
+      </section>
+
+      <nav className="mode-tabs" aria-label="Workspace modes">
+        <button
+          type="button"
+          className={workspaceMode === "observe" ? "mode-tab active" : "mode-tab"}
+          onClick={() => setWorkspaceMode("observe")}
+        >
+          Observe
+        </button>
+        <button
+          type="button"
+          className={workspaceMode === "planning" ? "mode-tab active" : "mode-tab"}
+          onClick={() => setWorkspaceMode("planning")}
+        >
+          Planning
+        </button>
+        <button
+          type="button"
+          className={workspaceMode === "diagnostics" ? "mode-tab active" : "mode-tab"}
+          onClick={() => setWorkspaceMode("diagnostics")}
+        >
+          Diagnostics
+        </button>
+      </nav>
+
+      <main className={`workspace workspace-${workspaceMode}`}>
+        {workspaceMode === "diagnostics" ? <aside className="side-rail diagnostics-rail">
           <section className="panel controls connect-panel">
             <div className="panel-heading">
-              <h2>{isConnected ? "Connected device" : "Connect"}</h2>
+              <h2>Connection lab</h2>
               <p>
                 {isConnected
-                  ? "Keep the active host handy, and reopen discovery only when you need another device."
-                  : "Use discovery for LAN devices or enter a host directly."}
+                  ? "Inspect connection state, discovery fallback, and planner sync from one diagnostics surface."
+                  : "Run explicit discovery and direct-host tests without leaving diagnostics."}
               </p>
             </div>
 
@@ -442,18 +546,6 @@ export function App() {
               <QuickStat label="Firmware" value={summary.firmwareVersion ?? "Unknown"} />
             </div>
 
-            {status.reconnect.active ? <p className="message info">{formatReconnectMessage(status)}</p> : null}
-
-            {!status.planner.ready && status.planner.issues.length > 0 ? (
-              <div className="planner-issues">
-                {status.planner.issues.map((issue) => (
-                  <p key={issue} className="message warning planner-issue">
-                    {issue}
-                  </p>
-                ))}
-              </div>
-            ) : null}
-
             {status.recording.sessionDir ? (
               <p className="message recorder-message">
                 Recording session bundle to <code>{status.recording.sessionDir}</code>
@@ -496,11 +588,42 @@ export function App() {
               )}
             </details>
           ) : null}
+        </aside> : null}
 
-          <section className="panel site-panel">
+        <section className="main-stage">
+          {workspaceMode === "planning" ? (
+            <>
+              <div className="submode-tabs" role="tablist" aria-label="Planning modes">
+                <button
+                  type="button"
+                  className={planningPane === "tonight" ? "mode-tab active" : "mode-tab"}
+                  onClick={() => setPlanningPane("tonight")}
+                >
+                  Tonight
+                </button>
+                <button
+                  type="button"
+                  className={planningPane === "queue" ? "mode-tab active" : "mode-tab"}
+                  onClick={() => setPlanningPane("queue")}
+                >
+                  Queue
+                </button>
+                <button
+                  type="button"
+                  className={planningPane === "sites" ? "mode-tab active" : "mode-tab"}
+                  onClick={() => setPlanningPane("sites")}
+                >
+                  Sites
+                </button>
+              </div>
+            </>
+          ) : null}
+
+          {workspaceMode === "planning" && planningPane === "sites" ? (
+            <section className="panel site-panel">
             <div className="panel-heading">
-              <h2>Site profiles</h2>
-              <p>Persist reusable observing locations and pick one active site for the current planning session.</p>
+              <h2>Site library</h2>
+              <p>Manage observing locations, masks, and the session’s active site without mixing them into diagnostics.</p>
             </div>
 
             {planning ? (
@@ -720,20 +843,26 @@ export function App() {
                   </div>
                 </section>
 
-                <p className="message recorder-message">
-                  Planning data is stored at <code>{planning.storage.filePath}</code>
-                </p>
+                <details className="storage-note">
+                  <summary>Planning storage path</summary>
+                  <p className="message recorder-message">
+                    Planning data is stored at <code>{planning.storage.filePath}</code>
+                  </p>
+                </details>
               </>
             ) : (
               <p className="message info">Loading site profiles...</p>
             )}
           </section>
+          ) : null}
 
+          {workspaceMode === "observe" ? (
+          <>
           {alerts.length > 0 ? (
-            <section className="panel alerts-panel">
+            <section className="panel alerts-panel compact-panel">
               <div className="panel-heading">
-                <h2>Attention</h2>
-                <p>Operational warnings that should stay visible while you work.</p>
+                <h2>Operator alerts</h2>
+                <p>Issues that should stay visible while you are slewing, previewing, or acquiring.</p>
               </div>
               {alerts.map((message) => (
                 <p key={message} className="message warning inline-message">
@@ -742,15 +871,13 @@ export function App() {
               ))}
             </section>
           ) : null}
-        </aside>
 
-        <section className="main-stage">
-          <section className="panel live-workspace">
+          <section className="panel live-workspace instrument-panel">
             <div className="preview-stage">
               <div className="live-heading">
                 <div className="panel-heading">
-                  <h2>Live workspace</h2>
-                  <p>Preview is the primary surface once the device is connected.</p>
+                  <h2>Observe</h2>
+                  <p>Keep the acquisition path tight: preview, mode control, and scope actions in one instrument surface.</p>
                 </div>
 
                 <div className="metric-grid hero-metrics">
@@ -935,12 +1062,14 @@ export function App() {
               </section>
             </section>
           </section>
+          </>
+          ) : null}
 
-          <section className="panel tonight-browser">
+          {workspaceMode === "planning" && planningPane === "tonight" ? <section className="panel tonight-browser instrument-panel">
             <div className="tonight-header">
               <div className="panel-heading">
                 <h2>Tonight browser</h2>
-                <p>Read-only planning output for the active site using the shared visibility and backyard-mask engine.</p>
+                <p>Ranked observing candidates for the active site, optimized for reading rather than diagnostics.</p>
               </div>
 
               <div className="tonight-meta">
@@ -1007,9 +1136,9 @@ export function App() {
                 </div>
               </>
             )}
-          </section>
+          </section> : null}
 
-          <section className="panel queue-editor">
+          {workspaceMode === "planning" && planningPane === "queue" ? <section className="panel queue-editor instrument-panel">
             <div className="tonight-header">
               <div className="panel-heading">
                 <h2>Queue editor</h2>
@@ -1073,13 +1202,17 @@ export function App() {
                 ))}
               </div>
             )}
-          </section>
+          </section> : null}
 
-          <div className="lower-grid">
+          {(workspaceMode === "observe" || workspaceMode === "diagnostics") ? <div className="lower-grid">
             <section className="panel state-overview">
               <div className="panel-heading">
-                <h2>Device overview</h2>
-                <p>Readable status plus a compact snapshot of device and environment telemetry.</p>
+                <h2>{workspaceMode === "observe" ? "Telemetry" : "Device overview"}</h2>
+                <p>
+                  {workspaceMode === "observe"
+                    ? "Compact telemetry for the current observing session."
+                    : "Readable status plus a compact snapshot of device and environment telemetry."}
+                </p>
               </div>
 
               <div className="status-grid">
@@ -1131,7 +1264,7 @@ export function App() {
               </div>
             </section>
 
-            <section className="panel logs">
+            {workspaceMode === "diagnostics" ? <section className="panel logs">
               <div className="panel-heading">
                 <h2>SDK logs</h2>
                 <p>Live logs streamed from the Electron main process.</p>
@@ -1155,13 +1288,13 @@ export function App() {
                     </article>
                   ))}
               </div>
-            </section>
-          </div>
+            </section> : null}
+          </div> : null}
 
-          <details className="panel raw-state">
+          {workspaceMode === "diagnostics" ? <details className="panel raw-state">
             <summary>Raw status JSON</summary>
             <pre>{rawStatusJson}</pre>
-          </details>
+          </details> : null}
         </section>
       </main>
     </div>
