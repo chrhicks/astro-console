@@ -2,11 +2,14 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  createQueueItem,
   createEmptyPlanningState,
   PLANNING_SCHEMA_VERSION,
   type PersistedPlanningState,
   type PlanningSnapshot,
   type PlanningStorageInfo,
+  type QueueItem,
+  type QueueItemDraft,
   type SiteProfile,
   type SiteProfileDraft,
   validatePersistedPlanningState,
@@ -193,6 +196,19 @@ export class PlanningStore {
     });
   }
 
+  async replaceQueue(input: { items: QueueItem[] }): Promise<PlanningSnapshot> {
+    return this.updateState((state) => ({
+      ...state,
+      queue: input.items.map((item) => cloneQueueItem(item)),
+    }));
+  }
+
+  async createQueueFromDrafts(input: { items: QueueItemDraft[] }): Promise<PlanningSnapshot> {
+    return this.replaceQueue({
+      items: input.items.map((item) => createQueueItem(randomUUID(), item)),
+    });
+  }
+
   getStorageInfo(): PlanningStorageInfo {
     const rootDir = path.join(this.options.getUserDataDir(), PLANNING_DIRNAME);
     return {
@@ -305,6 +321,10 @@ function cloneSiteDraft(site: SiteProfileDraft): SiteProfileDraft {
     ...site,
     blockedAzimuthRanges: site.blockedAzimuthRanges.map((range) => ({ ...range })),
   };
+}
+
+function cloneQueueItem(item: QueueItem): QueueItem {
+  return { ...item };
 }
 
 function hasSelectableSite(state: PersistedPlanningState): boolean {

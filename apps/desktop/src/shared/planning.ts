@@ -38,10 +38,14 @@ export interface RankedTarget {
   siteId: string;
   score: number;
   evaluatedAt: string;
+  skyVisibleMinutes: number;
   visibleMinutes: number;
+  altitudeNowDeg?: number;
   bestAltitudeDeg?: number;
   windowStartAt?: string;
   windowEndAt?: string;
+  moonSeparationDeg?: number;
+  recommendation: "good_now" | "later_tonight" | "not_tonight";
   backyardVisible: boolean;
   positiveReasons: string[];
   rejectionReasons: string[];
@@ -49,11 +53,38 @@ export interface RankedTarget {
 
 export interface QueueItem {
   id: string;
+  siteId: string;
   targetId: string;
+  targetName: string;
+  targetRaHours: number;
+  targetDecDeg: number;
+  requestedFilter?: CatalogTarget["recommendedFilter"];
   desiredDurationMin: number;
+  notBeforeLocal?: string;
   stopWhenBelowAltitudeDeg?: number;
   stopWhenBackyardHidden: boolean;
   stopAtDawn: boolean;
+  autofocusBeforeStart: boolean;
+  restartStack: boolean;
+  status: QueueItemStatus;
+}
+
+export type QueueItemStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "skipped";
+
+export interface QueueItemDraft {
+  siteId: string;
+  targetId: string;
+  targetName: string;
+  targetRaHours: number;
+  targetDecDeg: number;
+  requestedFilter?: CatalogTarget["recommendedFilter"];
+  desiredDurationMin: number;
+  notBeforeLocal?: string;
+  stopWhenBelowAltitudeDeg?: number;
+  stopWhenBackyardHidden: boolean;
+  stopAtDawn: boolean;
+  autofocusBeforeStart?: boolean;
+  restartStack?: boolean;
 }
 
 export interface PlanningStorageMetadata {
@@ -130,9 +161,7 @@ export function validatePersistedPlanningState(state: PersistedPlanningState): s
   for (const rankedTarget of state.rankedTargets) {
     errors.push(...validateRankedTarget(rankedTarget));
   }
-  for (const queueItem of state.queue) {
-    errors.push(...validateQueueItem(queueItem));
-  }
+  errors.push(...validateQueueItems(state.queue, state.catalog, state.sites));
 
   return errors;
 }
@@ -274,11 +303,20 @@ export function validateRankedTarget(target: RankedTarget): string[] {
   if (!isFiniteNumber(target.score)) {
     errors.push(`ranked target ${String(target.targetId)} score must be finite`);
   }
+  if (!isFiniteNumber(target.skyVisibleMinutes) || target.skyVisibleMinutes < 0) {
+    errors.push(`ranked target ${String(target.targetId)} skyVisibleMinutes must be 0 or greater`);
+  }
   if (!isNonEmptyString(target.evaluatedAt)) {
     errors.push(`ranked target ${String(target.targetId)} evaluatedAt is required`);
   }
   if (!isFiniteNumber(target.visibleMinutes) || target.visibleMinutes < 0) {
     errors.push(`ranked target ${String(target.targetId)} visibleMinutes must be 0 or greater`);
+  }
+  if (
+    target.altitudeNowDeg !== undefined &&
+    (!isFiniteNumber(target.altitudeNowDeg) || target.altitudeNowDeg < -90 || target.altitudeNowDeg > 90)
+  ) {
+    errors.push(`ranked target ${String(target.targetId)} altitudeNowDeg must be between -90 and 90 when provided`);
   }
   if (target.bestAltitudeDeg !== undefined && (!isFiniteNumber(target.bestAltitudeDeg) || target.bestAltitudeDeg < 0 || target.bestAltitudeDeg > 90)) {
     errors.push(`ranked target ${String(target.targetId)} bestAltitudeDeg must be between 0 and 90 when provided`);
@@ -288,6 +326,19 @@ export function validateRankedTarget(target: RankedTarget): string[] {
   }
   if (target.windowEndAt !== undefined && !isNonEmptyString(target.windowEndAt)) {
     errors.push(`ranked target ${String(target.targetId)} windowEndAt must be non-empty when provided`);
+  }
+  if (
+    target.moonSeparationDeg !== undefined &&
+    (!isFiniteNumber(target.moonSeparationDeg) || target.moonSeparationDeg < 0 || target.moonSeparationDeg > 180)
+  ) {
+    errors.push(`ranked target ${String(target.targetId)} moonSeparationDeg must be between 0 and 180 when provided`);
+  }
+  if (
+    target.recommendation !== "good_now" &&
+    target.recommendation !== "later_tonight" &&
+    target.recommendation !== "not_tonight"
+  ) {
+    errors.push(`ranked target ${String(target.targetId)} recommendation must be good_now, later_tonight, or not_tonight`);
   }
   if (!Array.isArray(target.positiveReasons) || target.positiveReasons.some((reason) => !isNonEmptyString(reason))) {
     errors.push(`ranked target ${String(target.targetId)} positiveReasons must be an array of non-empty strings`);
@@ -305,11 +356,36 @@ export function validateQueueItem(item: QueueItem): string[] {
   if (!isNonEmptyString(item.id)) {
     errors.push("queue item id is required");
   }
+  if (!isNonEmptyString(item.siteId)) {
+    errors.push(`queue item ${String(item.id)} siteId is required`);
+  }
   if (!isNonEmptyString(item.targetId)) {
     errors.push(`queue item ${String(item.id)} targetId is required`);
   }
+  if (!isNonEmptyString(item.targetName)) {
+    errors.push(`queue item ${String(item.id)} targetName is required`);
+  }
+  if (!isFiniteNumber(item.targetRaHours) || item.targetRaHours < 0 || item.targetRaHours >= 24) {
+    errors.push(`queue item ${String(item.id)} targetRaHours must be between 0 and 24`);
+  }
+  if (!isFiniteNumber(item.targetDecDeg) || item.targetDecDeg < -90 || item.targetDecDeg > 90) {
+    errors.push(`queue item ${String(item.id)} targetDecDeg must be between -90 and 90`);
+  }
+  if (
+    item.requestedFilter !== undefined &&
+    item.requestedFilter !== "clear" &&
+    item.requestedFilter !== "ir" &&
+    item.requestedFilter !== "lp"
+  ) {
+    errors.push(`queue item ${String(item.id)} requestedFilter must be clear, ir, or lp when provided`);
+  }
   if (!isFiniteNumber(item.desiredDurationMin) || item.desiredDurationMin <= 0) {
     errors.push(`queue item ${String(item.id)} desiredDurationMin must be greater than 0`);
+  }
+  if (item.notBeforeLocal !== undefined && !isNonEmptyString(item.notBeforeLocal)) {
+    errors.push(`queue item ${String(item.id)} notBeforeLocal must be non-empty when provided`);
+  } else if (item.notBeforeLocal !== undefined && !isValidLocalClock(item.notBeforeLocal)) {
+    errors.push(`queue item ${String(item.id)} notBeforeLocal must use HH:MM local time`);
   }
   if (
     item.stopWhenBelowAltitudeDeg !== undefined &&
@@ -317,8 +393,69 @@ export function validateQueueItem(item: QueueItem): string[] {
   ) {
     errors.push(`queue item ${String(item.id)} stopWhenBelowAltitudeDeg must be between 0 and 90 when provided`);
   }
+  if (
+    item.status !== "pending" &&
+    item.status !== "running" &&
+    item.status !== "completed" &&
+    item.status !== "failed" &&
+    item.status !== "cancelled" &&
+    item.status !== "skipped"
+  ) {
+    errors.push(`queue item ${String(item.id)} status must be pending, running, completed, failed, cancelled, or skipped`);
+  }
 
   return errors;
+}
+
+export function validateQueueItems(
+  items: QueueItem[],
+  catalog: CatalogTarget[],
+  sites: SiteProfile[]
+): string[] {
+  const errors: string[] = [];
+  const itemIds = new Set<string>();
+  const validSiteIds = new Set(sites.filter((site) => !site.archivedAt).map((site) => site.id));
+  const catalogById = new Map(catalog.map((target) => [target.id, target]));
+
+  for (const item of items) {
+    if (itemIds.has(item.id)) {
+      errors.push(`duplicate queue item id ${item.id}`);
+    }
+    itemIds.add(item.id);
+    errors.push(...validateQueueItem(item));
+
+    if (!validSiteIds.has(item.siteId)) {
+      errors.push(`queue item ${String(item.id)} siteId ${item.siteId} does not match an active site`);
+    }
+
+    const catalogTarget = catalogById.get(item.targetId);
+    if (!catalogTarget) {
+      errors.push(`queue item ${String(item.id)} targetId ${item.targetId} does not match the catalog`);
+      continue;
+    }
+
+    if (catalogTarget.primaryName !== item.targetName) {
+      errors.push(`queue item ${String(item.id)} targetName must match catalog target ${item.targetId}`);
+    }
+    if (catalogTarget.raHours !== item.targetRaHours) {
+      errors.push(`queue item ${String(item.id)} targetRaHours must match catalog target ${item.targetId}`);
+    }
+    if (catalogTarget.decDeg !== item.targetDecDeg) {
+      errors.push(`queue item ${String(item.id)} targetDecDeg must match catalog target ${item.targetId}`);
+    }
+  }
+
+  return errors;
+}
+
+export function createQueueItem(id: string, draft: QueueItemDraft): QueueItem {
+  return {
+    id,
+    ...draft,
+    autofocusBeforeStart: draft.autofocusBeforeStart ?? true,
+    restartStack: draft.restartStack ?? true,
+    status: "pending",
+  };
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -347,4 +484,8 @@ function isValidTimeZone(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isValidLocalClock(value: string): boolean {
+  return /^([01]?\d|2[0-3]):[0-5]\d$/u.test(value.trim());
 }

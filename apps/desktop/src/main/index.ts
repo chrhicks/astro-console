@@ -5,9 +5,11 @@ import type {
   AddManualCatalogTargetRequest,
   ArchiveSiteProfileRequest,
   ConnectRequest,
+  CreateQueueFromDraftsRequest,
   CreateSiteProfileRequest,
   DesktopCommandRequest,
   DuplicateSiteProfileRequest,
+  ReplaceQueueRequest,
   SearchCatalogTargetsRequest,
   SetActiveSiteRequest,
   UpdateSiteProfileRequest,
@@ -55,6 +57,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle("seestar:set-active-site", (_event, input: SetActiveSiteRequest) => service.setActiveSite(input));
   ipcMain.handle("seestar:search-catalog-targets", (_event, input: SearchCatalogTargetsRequest) => service.searchCatalogTargets(input));
   ipcMain.handle("seestar:add-manual-catalog-target", (_event, input: AddManualCatalogTargetRequest) => service.addManualCatalogTarget(input));
+  ipcMain.handle("seestar:replace-queue", (_event, input: ReplaceQueueRequest) => service.replaceQueue(input));
+  ipcMain.handle("seestar:create-queue-from-drafts", (_event, input: CreateQueueFromDraftsRequest) => service.createQueueFromDrafts(input));
   ipcMain.handle("seestar:refresh-state", () => service.refreshState());
   ipcMain.handle("seestar:start-preview", () => service.startPreview());
   ipcMain.handle("seestar:stop-preview", () => service.stopPreview());

@@ -554,6 +554,165 @@ pre {
   margin-top: 0;
 }
 
+.tonight-browser {
+  display: grid;
+  gap: 1rem;
+}
+
+.tonight-header {
+  display: grid;
+  gap: 1rem;
+}
+
+.tonight-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.tonight-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+  gap: 0.85rem;
+}
+
+.tonight-buckets {
+  display: grid;
+  gap: 1rem;
+}
+
+.tonight-bucket {
+  display: grid;
+  gap: 0.85rem;
+  border-top: 1px solid rgba(143, 184, 255, 0.12);
+  padding-top: 1rem;
+}
+
+.tonight-target-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.tonight-target-card {
+  display: grid;
+  gap: 0.9rem;
+  border-radius: 18px;
+  border: 1px solid #1d314d;
+  background: #0b1422;
+  padding: 1rem;
+}
+
+.tonight-target-card.recommendation-good_now {
+  border-color: rgba(70, 204, 145, 0.35);
+}
+
+.tonight-target-card.recommendation-later_tonight {
+  border-color: rgba(91, 156, 255, 0.35);
+}
+
+.tonight-target-card.recommendation-not_tonight {
+  border-color: rgba(232, 174, 74, 0.35);
+}
+
+.tonight-target-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.tonight-target-header p,
+.tonight-reason-group p {
+  margin: 0.35rem 0 0;
+  color: #9fb0cc;
+}
+
+.tonight-target-score {
+  display: grid;
+  justify-items: end;
+  gap: 0.5rem;
+}
+
+.tonight-target-metrics {
+  margin-top: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.tonight-target-actions {
+  margin-top: 0;
+}
+
+.tonight-reason-group {
+  display: grid;
+  gap: 0.45rem;
+  border-radius: 14px;
+  padding: 0.9rem;
+}
+
+.tonight-reason-group.positive {
+  background: rgba(70, 204, 145, 0.08);
+  border: 1px solid rgba(70, 204, 145, 0.18);
+}
+
+.tonight-reason-group.negative {
+  background: rgba(232, 174, 74, 0.08);
+  border: 1px solid rgba(232, 174, 74, 0.18);
+}
+
+.queue-editor {
+  display: grid;
+  gap: 1rem;
+}
+
+.queue-search-results,
+.queue-item-list,
+.queue-warning-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.queue-search-result,
+.queue-item-card {
+  display: grid;
+  gap: 0.85rem;
+  border-radius: 18px;
+  border: 1px solid #1d314d;
+  background: #0b1422;
+  padding: 1rem;
+  text-align: left;
+}
+
+.queue-search-result span,
+.queue-item-header p {
+  color: #9fb0cc;
+}
+
+.queue-item-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.queue-item-header p {
+  margin: 0.35rem 0 0;
+}
+
+.queue-item-actions {
+  margin-top: 0;
+}
+
+.queue-item-grid,
+.queue-toggle-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.queue-warning {
+  margin: 0;
+}
+
 .control-section {
   display: grid;
   gap: 0.85rem;
@@ -721,6 +880,13 @@ pre {
   .hero-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .tonight-meta,
+  .tonight-target-metrics,
+  .queue-item-grid,
+  .queue-toggle-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 760px) {
@@ -751,6 +917,18 @@ pre {
   .status-grid,
   .site-grid {
     grid-template-columns: 1fr;
+  }
+
+  .tonight-toolbar,
+  .tonight-meta,
+  .tonight-target-metrics,
+  .queue-item-grid,
+  .queue-toggle-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .queue-item-header {
+    flex-direction: column;
   }
 
   .actions button {

@@ -17,6 +17,7 @@
     "start": "npm run build && electron dist/main/index.js"
   },
   "dependencies": {
+    "astronomy-engine": "^2.1.19",
     "electron": "^35.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

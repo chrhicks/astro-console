@@ -8,8 +8,9 @@ import type {
   DesktopStatus,
   DesktopViewMode,
 } from "../../shared/api";
-import type { PlanningSnapshot, SiteProfile, SiteProfileDraft } from "../../shared/planning";
-import { validateSiteProfileDraft } from "../../shared/planning";
+import type { CatalogTarget, PlanningSnapshot, QueueItem, RankedTarget, SiteProfile, SiteProfileDraft } from "../../shared/planning";
+import { createQueueItem, validateSiteProfileDraft } from "../../shared/planning";
+import { rankTargetsForTonight } from "../../shared/visibility-engine";
 
 const EMPTY_STATUS: DesktopStatus = {
   connected: false,
@@ -62,6 +63,10 @@ export function App() {
   const [siteError, setSiteError] = useState<string | null>(null);
   const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
   const [siteForm, setSiteForm] = useState<SiteFormState>(() => createDefaultSiteFormState());
+  const [tonightFilter, setTonightFilter] = useState("");
+  const [tonightSort, setTonightSort] = useState<TonightSortKey>("score");
+  const [queueSearch, setQueueSearch] = useState("");
+  const [queueError, setQueueError] = useState<string | null>(null);
 
   useEffect(() => {
     void Promise.all([window.seestar.getStatus(), window.seestar.getLogs(), window.seestar.getPlanningSnapshot()])
@@ -159,6 +164,7 @@ export function App() {
   const activeSiteId = planning?.state.activeSiteId;
   const selectableSites = useMemo(() => siteProfiles.filter((site) => !site.archivedAt), [siteProfiles]);
   const archivedSites = useMemo(() => siteProfiles.filter((site) => Boolean(site.archivedAt)), [siteProfiles]);
+  const siteById = useMemo(() => new Map(siteProfiles.map((site) => [site.id, site])), [siteProfiles]);
   const activeSite = useMemo(
     () => selectableSites.find((site) => site.id === activeSiteId) ?? null,
     [activeSiteId, selectableSites]
@@ -166,6 +172,35 @@ export function App() {
   const hasActiveDeviceView = Boolean(summary.viewMode && summary.viewMode !== "none" && summary.viewState !== "cancel");
   const selectedViewAlreadyActive = isConnected && hasActiveDeviceView && summary.viewMode === viewMode;
   const canAttachSceneryPreview = summary.viewMode === "scenery" && !status.preview.active;
+  const catalogById = useMemo(() => new Map((planning?.state.catalog ?? []).map((target) => [target.id, target])), [planning?.state.catalog]);
+  const tonightTargets = useMemo(() => {
+    if (!activeSite || !planning) return [];
+    return rankTargetsForTonight({
+      site: activeSite,
+      targets: planning.state.catalog,
+    });
+  }, [activeSite, planning]);
+  const filteredTonightTargets = useMemo(() => {
+    const needle = tonightFilter.trim().toLowerCase();
+    const filtered = needle.length === 0
+      ? tonightTargets
+      : tonightTargets.filter((entry) => matchesTonightFilter(entry, catalogById.get(entry.targetId), needle));
+    return [...filtered].sort((left, right) => compareTonightTargets(left, right, tonightSort));
+  }, [catalogById, tonightFilter, tonightSort, tonightTargets]);
+  const tonightBuckets = useMemo(() => groupTonightTargets(filteredTonightTargets), [filteredTonightTargets]);
+  const queueItems = planning?.state.queue ?? [];
+  const queueItemCounts = useMemo(() => buildQueueItemCounts(queueItems), [queueItems]);
+  const queueSearchResults = useMemo(() => {
+    const needle = queueSearch.trim().toLowerCase();
+    if (!needle) return [];
+    return (planning?.state.catalog ?? [])
+      .filter((target) => matchesCatalogSearch(target, needle))
+      .slice(0, 6);
+  }, [planning?.state.catalog, queueSearch]);
+  const queueDiagnostics = useMemo(
+    () => buildQueueDiagnostics(queueItems, catalogById, siteById),
+    [catalogById, queueItems, siteById]
+  );
 
   async function runAction(action: string, work: () => Promise<void>) {
     setBusyAction(action);
@@ -235,6 +270,67 @@ export function App() {
       ...current,
       [key]: value,
     }));
+  }
+
+  async function persistQueue(nextItems: QueueItem[]) {
+    setQueueError(null);
+    try {
+      const nextPlanning = await window.seestar.replaceQueue({ items: nextItems });
+      setPlanning(nextPlanning);
+    } catch (queueUpdateError) {
+      setQueueError(toErrorMessage(queueUpdateError));
+    }
+  }
+
+  async function addTargetToQueue(target: CatalogTarget) {
+    if (!activeSite) {
+      setQueueError("Select an active site before adding targets to the queue");
+      return;
+    }
+
+    if ((queueItemCounts.get(buildQueueTargetKey(activeSite.id, target.id)) ?? 0) > 0) {
+      setQueueError(`${target.primaryName} is already in the queue for ${activeSite.name}`);
+      return;
+    }
+
+    const nextItem = createQueueItem(window.crypto.randomUUID(), {
+      siteId: activeSite.id,
+      targetId: target.id,
+      targetName: target.primaryName,
+      targetRaHours: target.raHours,
+      targetDecDeg: target.decDeg,
+      requestedFilter: target.recommendedFilter,
+      desiredDurationMin: 45,
+      stopWhenBelowAltitudeDeg: activeSite.minAltitudeDeg,
+      stopWhenBackyardHidden: activeSite.blockedAzimuthRanges.length > 0,
+      stopAtDawn: true,
+      autofocusBeforeStart: true,
+      restartStack: true,
+    });
+
+    await persistQueue([...queueItems, nextItem]);
+    setQueueSearch("");
+  }
+
+  async function updateQueueItem(itemId: string, patch: Partial<QueueItem>) {
+    await persistQueue(queueItems.map((item) => (item.id === itemId ? { ...item, ...patch } : item)));
+  }
+
+  async function removeQueueItem(itemId: string) {
+    await persistQueue(queueItems.filter((item) => item.id !== itemId));
+  }
+
+  async function moveQueueItem(itemId: string, direction: -1 | 1) {
+    const currentIndex = queueItems.findIndex((item) => item.id === itemId);
+    if (currentIndex === -1) return;
+
+    const nextIndex = currentIndex + direction;
+    if (nextIndex < 0 || nextIndex >= queueItems.length) return;
+
+    const reordered = [...queueItems];
+    const [item] = reordered.splice(currentIndex, 1);
+    reordered.splice(nextIndex, 0, item);
+    await persistQueue(reordered);
   }
 
   return (
@@ -840,6 +936,145 @@ export function App() {
             </section>
           </section>
 
+          <section className="panel tonight-browser">
+            <div className="tonight-header">
+              <div className="panel-heading">
+                <h2>Tonight browser</h2>
+                <p>Read-only planning output for the active site using the shared visibility and backyard-mask engine.</p>
+              </div>
+
+              <div className="tonight-meta">
+                <QuickStat label="Active site" value={activeSite?.name ?? "None selected"} />
+                <QuickStat label="Catalog" value={String(planning?.state.catalog.length ?? 0)} />
+                <QuickStat label="Good now" value={String(tonightBuckets.goodNow.length)} />
+                <QuickStat label="Later" value={String(tonightBuckets.laterTonight.length)} />
+              </div>
+            </div>
+
+            {!activeSite ? (
+              <p className="message info">Select an active site to generate Tonight results.</p>
+            ) : (
+              <>
+                <div className="tonight-toolbar">
+                  <label className="field compact-field">
+                    <span>Filter</span>
+                    <input
+                      value={tonightFilter}
+                      onChange={(event) => setTonightFilter(event.target.value)}
+                      placeholder="M42, galaxy, nebula, North America..."
+                    />
+                  </label>
+
+                  <label className="field compact-field">
+                    <span>Sort</span>
+                    <select value={tonightSort} onChange={(event) => setTonightSort(event.target.value as TonightSortKey)}>
+                      <option value="score">Score</option>
+                      <option value="altitude">Altitude now</option>
+                      <option value="visibility">Usable minutes</option>
+                      <option value="moon">Moon separation</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div className="tonight-buckets">
+                  <TonightBucket
+                    title="Good Now"
+                    caption="Targets that are currently usable from the active site."
+                    targets={tonightBuckets.goodNow}
+                    catalogById={catalogById}
+                    activeSite={activeSite}
+                    queueItemCounts={queueItemCounts}
+                    onAddToQueue={addTargetToQueue}
+                  />
+                  <TonightBucket
+                    title="Later Tonight"
+                    caption="Targets that clear the site constraints later in the night window."
+                    targets={tonightBuckets.laterTonight}
+                    catalogById={catalogById}
+                    activeSite={activeSite}
+                    queueItemCounts={queueItemCounts}
+                    onAddToQueue={addTargetToQueue}
+                  />
+                  <TonightBucket
+                    title="Blocked / Not Tonight"
+                    caption="Targets that never become usable or are fully blocked by the current site mask."
+                    targets={tonightBuckets.notTonight}
+                    catalogById={catalogById}
+                    activeSite={activeSite}
+                    queueItemCounts={queueItemCounts}
+                    onAddToQueue={addTargetToQueue}
+                  />
+                </div>
+              </>
+            )}
+          </section>
+
+          <section className="panel queue-editor">
+            <div className="tonight-header">
+              <div className="panel-heading">
+                <h2>Queue editor</h2>
+                <p>Build a local observing draft from Tonight results or direct catalog search. Nothing executes yet.</p>
+              </div>
+
+              <div className="tonight-meta">
+                <QuickStat label="Queue items" value={String(queueItems.length)} />
+                <QuickStat label="Active site" value={activeSite?.name ?? "None selected"} />
+                <QuickStat
+                  label="Warnings"
+                  value={String([...queueDiagnostics.values()].reduce((total, entry) => total + entry.warnings.length, 0))}
+                />
+                <QuickStat label="Saved" value={planning ? "Local" : "Waiting"} />
+              </div>
+            </div>
+
+            <div className="queue-toolbar">
+              <label className="field compact-field">
+                <span>Add from catalog</span>
+                <input
+                  value={queueSearch}
+                  onChange={(event) => setQueueSearch(event.target.value)}
+                  placeholder="Search catalog or manual targets"
+                />
+              </label>
+            </div>
+
+            {queueSearchResults.length > 0 ? (
+              <div className="queue-search-results">
+                {queueSearchResults.map((target) => (
+                  <QueueSearchResultCard
+                    key={target.id}
+                    target={target}
+                    activeSite={activeSite}
+                    queuedCount={activeSite ? queueItemCounts.get(buildQueueTargetKey(activeSite.id, target.id)) ?? 0 : 0}
+                    onAddToQueue={addTargetToQueue}
+                  />
+                ))}
+              </div>
+            ) : null}
+
+            {queueError ? <p className="message error">{queueError}</p> : null}
+
+            {queueItems.length === 0 ? (
+              <p className="message info">Add targets from Tonight or use the catalog search above to start a queue draft.</p>
+            ) : (
+              <div className="queue-item-list">
+                {queueItems.map((item, index) => (
+                  <QueueItemCard
+                    key={item.id}
+                    item={item}
+                    index={index}
+                    total={queueItems.length}
+                    site={siteById.get(item.siteId)}
+                    warnings={queueDiagnostics.get(item.id)?.warnings ?? []}
+                    onMove={moveQueueItem}
+                    onRemove={removeQueueItem}
+                    onUpdate={updateQueueItem}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+
           <div className="lower-grid">
             <section className="panel state-overview">
               <div className="panel-heading">
@@ -1228,6 +1463,455 @@ function QuickStat(props: { label: string; value: string }) {
   );
 }
 
+function TonightBucket(props: {
+  title: string;
+  caption: string;
+  targets: RankedTarget[];
+  catalogById: Map<string, CatalogTarget>;
+  activeSite: SiteProfile | null;
+  queueItemCounts: Map<string, number>;
+  onAddToQueue(target: CatalogTarget): Promise<void> | void;
+}) {
+  return (
+    <section className="tonight-bucket">
+      <div className="panel-heading panel-subheading">
+        <h3>{props.title}</h3>
+        <p>{props.caption}</p>
+      </div>
+      {props.targets.length === 0 ? (
+        <p className="empty">No targets in this bucket.</p>
+      ) : (
+        <div className="tonight-target-list">
+          {props.targets.map((entry) => (
+            <TonightTargetCard
+              key={entry.targetId}
+              target={props.catalogById.get(entry.targetId)}
+              ranking={entry}
+              activeSite={props.activeSite}
+              queuedCount={
+                props.activeSite
+                  ? props.queueItemCounts.get(buildQueueTargetKey(props.activeSite.id, entry.targetId)) ?? 0
+                  : 0
+              }
+              onAddToQueue={props.onAddToQueue}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TonightTargetCard(props: {
+  target: CatalogTarget | undefined;
+  ranking: RankedTarget;
+  activeSite: SiteProfile | null;
+  queuedCount: number;
+  onAddToQueue(target: CatalogTarget): Promise<void> | void;
+}) {
+  const addLabel = props.queuedCount > 0 ? `In queue (${props.queuedCount})` : "Add to queue";
+  const canAdd = Boolean(props.target) && Boolean(props.activeSite) && props.queuedCount === 0;
+
+  return (
+    <article className={`tonight-target-card recommendation-${props.ranking.recommendation}`}>
+      <div className="tonight-target-header">
+        <div>
+          <strong>{props.target?.primaryName ?? props.ranking.targetId}</strong>
+          <p>
+            {props.target?.objectType ?? "target"}
+            {props.target?.constellation ? ` • ${props.target.constellation}` : ""}
+          </p>
+        </div>
+        <div className="tonight-target-score">
+          <span className="drawer-state">{formatTonightRecommendation(props.ranking.recommendation)}</span>
+          <strong>{props.ranking.score.toFixed(1)}</strong>
+        </div>
+      </div>
+
+      <div className="metric-grid tonight-target-metrics">
+        <QuickStat label="Altitude now" value={formatTonightNumber(props.ranking.altitudeNowDeg, "deg")} />
+        <QuickStat label="Peak altitude" value={formatTonightNumber(props.ranking.bestAltitudeDeg, "deg")} />
+        <QuickStat label="Usable" value={formatTonightMinutes(props.ranking.visibleMinutes)} />
+        <QuickStat label="Sky-visible" value={formatTonightMinutes(props.ranking.skyVisibleMinutes)} />
+        <QuickStat label="Moon" value={formatTonightNumber(props.ranking.moonSeparationDeg, "deg")} />
+        <QuickStat label="Window" value={formatTonightWindow(props.ranking)} />
+      </div>
+
+      {props.target ? (
+        <div className="actions tonight-target-actions">
+          <button className="primary" type="button" onClick={() => void props.onAddToQueue(props.target)} disabled={!canAdd}>
+            {addLabel}
+          </button>
+        </div>
+      ) : null}
+
+      {props.ranking.positiveReasons.length > 0 ? (
+        <div className="tonight-reason-group positive">
+          <span className="meta-label">Why it works</span>
+          {props.ranking.positiveReasons.map((reason) => (
+            <p key={reason}>{reason}</p>
+          ))}
+        </div>
+      ) : null}
+
+      {props.ranking.rejectionReasons.length > 0 ? (
+        <div className="tonight-reason-group negative">
+          <span className="meta-label">Watch-outs</span>
+          {props.ranking.rejectionReasons.map((reason) => (
+            <p key={reason}>{reason}</p>
+          ))}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function QueueSearchResultCard(props: {
+  target: CatalogTarget;
+  activeSite: SiteProfile | null;
+  queuedCount: number;
+  onAddToQueue(target: CatalogTarget): Promise<void> | void;
+}) {
+  const canAdd = Boolean(props.activeSite) && props.queuedCount === 0;
+
+  return (
+    <button
+      className="queue-search-result"
+      type="button"
+      onClick={() => void props.onAddToQueue(props.target)}
+      disabled={!canAdd}
+    >
+      <strong>{props.target.primaryName}</strong>
+      <span>
+        {props.target.objectType}
+        {props.target.constellation ? ` • ${props.target.constellation}` : ""}
+      </span>
+      <span>
+        {!props.activeSite
+          ? "Select a site first"
+          : props.queuedCount > 0
+            ? `Already in queue (${props.queuedCount})`
+            : `Add for ${props.activeSite.name}`}
+      </span>
+    </button>
+  );
+}
+
+function QueueItemCard(props: {
+  item: QueueItem;
+  index: number;
+  total: number;
+  site: SiteProfile | undefined;
+  warnings: string[];
+  onMove(itemId: string, direction: -1 | 1): Promise<void> | void;
+  onRemove(itemId: string): Promise<void> | void;
+  onUpdate(itemId: string, patch: Partial<QueueItem>): Promise<void> | void;
+}) {
+  const [durationInput, setDurationInput] = useState(String(props.item.desiredDurationMin));
+  const [altitudeInput, setAltitudeInput] = useState(
+    typeof props.item.stopWhenBelowAltitudeDeg === "number" ? String(props.item.stopWhenBelowAltitudeDeg) : ""
+  );
+  const [notBeforeInput, setNotBeforeInput] = useState(props.item.notBeforeLocal ?? "");
+
+  useEffect(() => {
+    setDurationInput(String(props.item.desiredDurationMin));
+    setAltitudeInput(
+      typeof props.item.stopWhenBelowAltitudeDeg === "number" ? String(props.item.stopWhenBelowAltitudeDeg) : ""
+    );
+    setNotBeforeInput(props.item.notBeforeLocal ?? "");
+  }, [props.item]);
+
+  return (
+    <article className="queue-item-card">
+      <div className="queue-item-header">
+        <div>
+          <strong>{props.item.targetName}</strong>
+          <p>
+            {props.site?.name ?? "Unknown site"} • RA {props.item.targetRaHours.toFixed(4)} • Dec {props.item.targetDecDeg.toFixed(4)}
+          </p>
+        </div>
+        <div className="actions queue-item-actions">
+          <button onClick={() => void props.onMove(props.item.id, -1)} disabled={props.index === 0} type="button">
+            Up
+          </button>
+          <button onClick={() => void props.onMove(props.item.id, 1)} disabled={props.index === props.total - 1} type="button">
+            Down
+          </button>
+          <button onClick={() => void props.onRemove(props.item.id)} type="button">
+            Remove
+          </button>
+        </div>
+      </div>
+
+      <div className="queue-item-grid">
+        <label className="field compact-field">
+          <span>Duration min</span>
+          <input
+            value={durationInput}
+            onChange={(event) => setDurationInput(event.target.value)}
+            onBlur={() => {
+              const parsed = Number(durationInput);
+              if (Number.isFinite(parsed) && parsed > 0) {
+                void props.onUpdate(props.item.id, { desiredDurationMin: parsed });
+              } else {
+                setDurationInput(String(props.item.desiredDurationMin));
+              }
+            }}
+          />
+        </label>
+
+        <label className="field compact-field">
+          <span>Not before</span>
+          <input
+            value={notBeforeInput}
+            onChange={(event) => setNotBeforeInput(event.target.value)}
+            onBlur={() => {
+              const trimmed = notBeforeInput.trim();
+              if (trimmed.length === 0) {
+                void props.onUpdate(props.item.id, { notBeforeLocal: undefined });
+                return;
+              }
+              if (/^([01]?\d|2[0-3]):[0-5]\d$/u.test(trimmed)) {
+                void props.onUpdate(props.item.id, { notBeforeLocal: trimmed });
+              } else {
+                setNotBeforeInput(props.item.notBeforeLocal ?? "");
+              }
+            }}
+            placeholder="22:30"
+          />
+        </label>
+
+        <label className="field compact-field">
+          <span>Stop below alt</span>
+          <input
+            value={altitudeInput}
+            onChange={(event) => setAltitudeInput(event.target.value)}
+            onBlur={() => {
+              const trimmed = altitudeInput.trim();
+              if (trimmed.length === 0) {
+                void props.onUpdate(props.item.id, { stopWhenBelowAltitudeDeg: undefined });
+                return;
+              }
+              const parsed = Number(trimmed);
+              if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 90) {
+                void props.onUpdate(props.item.id, { stopWhenBelowAltitudeDeg: parsed });
+              } else {
+                setAltitudeInput(
+                  typeof props.item.stopWhenBelowAltitudeDeg === "number"
+                    ? String(props.item.stopWhenBelowAltitudeDeg)
+                    : ""
+                );
+              }
+            }}
+            placeholder="28"
+          />
+        </label>
+
+        <label className="field compact-field">
+          <span>Filter</span>
+          <select
+            value={props.item.requestedFilter ?? ""}
+            onChange={(event) =>
+              void props.onUpdate(props.item.id, {
+                requestedFilter: event.target.value ? (event.target.value as QueueItem["requestedFilter"]) : undefined,
+              })
+            }
+          >
+            <option value="">Auto</option>
+            <option value="clear">Clear</option>
+            <option value="ir">IR</option>
+            <option value="lp">LP</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="queue-toggle-grid">
+        <label className="site-checkbox">
+          <input
+            type="checkbox"
+            checked={props.item.stopWhenBackyardHidden}
+            onChange={(event) => void props.onUpdate(props.item.id, { stopWhenBackyardHidden: event.target.checked })}
+          />
+          <span>Stop when backyard hidden</span>
+        </label>
+        <label className="site-checkbox">
+          <input
+            type="checkbox"
+            checked={props.item.stopAtDawn}
+            onChange={(event) => void props.onUpdate(props.item.id, { stopAtDawn: event.target.checked })}
+          />
+          <span>Stop at dawn</span>
+        </label>
+        <label className="site-checkbox">
+          <input
+            type="checkbox"
+            checked={props.item.autofocusBeforeStart}
+            onChange={(event) => void props.onUpdate(props.item.id, { autofocusBeforeStart: event.target.checked })}
+          />
+          <span>Autofocus before start</span>
+        </label>
+        <label className="site-checkbox">
+          <input
+            type="checkbox"
+            checked={props.item.restartStack}
+            onChange={(event) => void props.onUpdate(props.item.id, { restartStack: event.target.checked })}
+          />
+          <span>Restart stack</span>
+        </label>
+      </div>
+
+      {props.warnings.length > 0 ? (
+        <div className="queue-warning-list">
+          {props.warnings.map((warning) => (
+            <p key={warning} className="message warning queue-warning">
+              {warning}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function buildQueueDiagnostics(
+  items: QueueItem[],
+  catalogById: Map<string, CatalogTarget>,
+  siteById: Map<string, SiteProfile>
+): Map<string, { warnings: string[] }> {
+  const diagnostics = new Map<string, { warnings: string[] }>();
+
+  for (const item of items) {
+    const warnings: string[] = [];
+    const site = siteById.get(item.siteId);
+    const target = catalogById.get(item.targetId);
+
+    if (!site) {
+      warnings.push("The selected site is no longer available");
+    }
+    if (!target) {
+      warnings.push("The catalog target is missing from the current planning state");
+    }
+    if (item.notBeforeLocal && !/^([01]?\d|2[0-3]):[0-5]\d$/u.test(item.notBeforeLocal)) {
+      warnings.push("Not-before time should use HH:MM local format");
+    }
+
+    if (site && target) {
+      const ranking = rankTargetsForTonight({ site, targets: [target] })[0];
+      if (ranking.visibleMinutes < item.desiredDurationMin) {
+        warnings.push(
+          `Usable window is about ${ranking.visibleMinutes} minutes, shorter than the requested ${item.desiredDurationMin} minutes`
+        );
+      }
+      if (!ranking.backyardVisible && item.stopWhenBackyardHidden) {
+        warnings.push("Current site mask blocks this target tonight");
+      }
+      if (
+        typeof item.stopWhenBelowAltitudeDeg === "number" &&
+        item.stopWhenBelowAltitudeDeg < site.minAltitudeDeg
+      ) {
+        warnings.push(
+          `Stop altitude ${item.stopWhenBelowAltitudeDeg} deg is below the site's planning floor ${site.minAltitudeDeg} deg`
+        );
+      }
+    }
+
+    diagnostics.set(item.id, { warnings });
+  }
+
+  return diagnostics;
+}
+
+function matchesCatalogSearch(target: CatalogTarget, needle: string): boolean {
+  return [target.id, target.primaryName, ...target.aliases, target.objectType, target.constellation, ...(target.tags ?? [])]
+    .filter((value): value is string => Boolean(value))
+    .join(" ")
+    .toLowerCase()
+    .includes(needle);
+}
+
+function buildQueueItemCounts(items: QueueItem[]): Map<string, number> {
+  const counts = new Map<string, number>();
+
+  for (const item of items) {
+    const key = buildQueueTargetKey(item.siteId, item.targetId);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  return counts;
+}
+
+function buildQueueTargetKey(siteId: string, targetId: string): string {
+  return `${siteId}::${targetId}`;
+}
+
+function matchesTonightFilter(ranking: RankedTarget, target: CatalogTarget | undefined, needle: string): boolean {
+  const haystack = [
+    ranking.targetId,
+    target?.primaryName,
+    ...(target?.aliases ?? []),
+    target?.objectType,
+    target?.constellation,
+    ...(target?.tags ?? []),
+    ...ranking.positiveReasons,
+    ...ranking.rejectionReasons,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" ")
+    .toLowerCase();
+
+  return haystack.includes(needle);
+}
+
+function compareTonightTargets(left: RankedTarget, right: RankedTarget, sortKey: TonightSortKey): number {
+  switch (sortKey) {
+    case "altitude":
+      return (right.altitudeNowDeg ?? -90) - (left.altitudeNowDeg ?? -90) || right.score - left.score;
+    case "visibility":
+      return right.visibleMinutes - left.visibleMinutes || right.score - left.score;
+    case "moon":
+      return (right.moonSeparationDeg ?? 0) - (left.moonSeparationDeg ?? 0) || right.score - left.score;
+    default:
+      return right.score - left.score || right.visibleMinutes - left.visibleMinutes;
+  }
+}
+
+function groupTonightTargets(targets: RankedTarget[]): TonightBuckets {
+  return {
+    goodNow: targets.filter((target) => target.recommendation === "good_now"),
+    laterTonight: targets.filter((target) => target.recommendation === "later_tonight"),
+    notTonight: targets.filter((target) => target.recommendation === "not_tonight"),
+  };
+}
+
+function formatTonightRecommendation(value: RankedTarget["recommendation"]): string {
+  switch (value) {
+    case "good_now":
+      return "Good now";
+    case "later_tonight":
+      return "Later";
+    default:
+      return "Blocked";
+  }
+}
+
+function formatTonightMinutes(value: number): string {
+  return value > 0 ? `${value} min` : "0 min";
+}
+
+function formatTonightNumber(value: number | undefined, unit: string): string {
+  return typeof value === "number" ? `${value.toFixed(1)} ${unit}` : "Unknown";
+}
+
+function formatTonightWindow(ranking: RankedTarget): string {
+  if (!ranking.windowStartAt || !ranking.windowEndAt) {
+    return ranking.visibleMinutes > 0 ? "Check reasons" : "None";
+  }
+
+  return `${new Date(ranking.windowStartAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} - ${new Date(
+    ranking.windowEndAt
+  ).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+}
+
 interface DeviceSummary {
   productModel?: string;
   serialNumber?: string;
@@ -1253,6 +1937,14 @@ interface DeviceSummary {
   exposureHeaterEnabled?: boolean;
   dewHeaterEnabled?: boolean;
 }
+
+interface TonightBuckets {
+  goodNow: RankedTarget[];
+  laterTonight: RankedTarget[];
+  notTonight: RankedTarget[];
+}
+
+type TonightSortKey = "score" | "altitude" | "visibility" | "moon";
 
 interface SiteFormState {
   name: string;

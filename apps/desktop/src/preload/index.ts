@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   AddManualCatalogTargetRequest,
   ArchiveSiteProfileRequest,
+  CreateQueueFromDraftsRequest,
   DesktopCommandRequest,
   ConnectRequest,
   CreateSiteProfileRequest,
@@ -10,6 +11,7 @@ import type {
   DesktopLogEntry,
   DesktopPreviewFrame,
   DesktopStatus,
+  ReplaceQueueRequest,
   SearchCatalogTargetsRequest,
   SetActiveSiteRequest,
   SeestarDesktopApi,
@@ -38,6 +40,10 @@ const api: SeestarDesktopApi = {
     ipcRenderer.invoke("seestar:search-catalog-targets", input) as Promise<CatalogSearchResult[]>,
   addManualCatalogTarget: (input: AddManualCatalogTargetRequest) =>
     ipcRenderer.invoke("seestar:add-manual-catalog-target", input) as Promise<PlanningSnapshot>,
+  replaceQueue: (input: ReplaceQueueRequest) =>
+    ipcRenderer.invoke("seestar:replace-queue", input) as Promise<PlanningSnapshot>,
+  createQueueFromDrafts: (input: CreateQueueFromDraftsRequest) =>
+    ipcRenderer.invoke("seestar:create-queue-from-drafts", input) as Promise<PlanningSnapshot>,
   refreshState: () => ipcRenderer.invoke("seestar:refresh-state") as Promise<DesktopStatus>,
   startPreview: () => ipcRenderer.invoke("seestar:start-preview") as Promise<DesktopStatus>,
   stopPreview: () => ipcRenderer.invoke("seestar:stop-preview") as Promise<DesktopStatus>,

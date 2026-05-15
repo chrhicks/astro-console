@@ -1,4 +1,4 @@
-import type { PlanningSnapshot, SiteProfileDraft } from "./planning";
+import type { PlanningSnapshot, QueueItem, QueueItemDraft, SiteProfileDraft } from "./planning";
 import type { CatalogSearchResult, ManualCatalogTargetInput } from "./starter-catalog";
 
 export interface DesktopDiscoveredDevice {
@@ -157,6 +157,14 @@ export interface AddManualCatalogTargetRequest {
   target: ManualCatalogTargetInput;
 }
 
+export interface ReplaceQueueRequest {
+  items: QueueItem[];
+}
+
+export interface CreateQueueFromDraftsRequest {
+  items: QueueItemDraft[];
+}
+
 export type DesktopViewMode = "star" | "moon" | "sun" | "planet" | "scenery";
 
 export type DesktopCommandAction =
@@ -186,6 +194,8 @@ export interface SeestarDesktopApi {
   setActiveSite(input: SetActiveSiteRequest): Promise<PlanningSnapshot>;
   searchCatalogTargets(input: SearchCatalogTargetsRequest): Promise<CatalogSearchResult[]>;
   addManualCatalogTarget(input: AddManualCatalogTargetRequest): Promise<PlanningSnapshot>;
+  replaceQueue(input: ReplaceQueueRequest): Promise<PlanningSnapshot>;
+  createQueueFromDrafts(input: CreateQueueFromDraftsRequest): Promise<PlanningSnapshot>;
   refreshState(): Promise<DesktopStatus>;
   startPreview(): Promise<DesktopStatus>;
   stopPreview(): Promise<DesktopStatus>;

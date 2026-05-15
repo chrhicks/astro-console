@@ -12,6 +12,7 @@ import {
 import type {
   AddManualCatalogTargetRequest,
   ArchiveSiteProfileRequest,
+  CreateQueueFromDraftsRequest,
   DesktopDeviceTime,
   DesktopCommandRequest,
   ConnectRequest,
@@ -24,6 +25,7 @@ import type {
   DesktopPreviewFrame,
   DesktopPreviewState,
   DesktopReconnectState,
+  ReplaceQueueRequest,
   SearchCatalogTargetsRequest,
   DesktopStatus,
   SetActiveSiteRequest,
@@ -374,6 +376,14 @@ export class SeestarDesktopService {
 
   async addManualCatalogTarget(input: AddManualCatalogTargetRequest): Promise<PlanningSnapshot> {
     return this.planningStore.addManualCatalogTarget(input);
+  }
+
+  async replaceQueue(input: ReplaceQueueRequest): Promise<PlanningSnapshot> {
+    return this.planningStore.replaceQueue(input);
+  }
+
+  async createQueueFromDrafts(input: CreateQueueFromDraftsRequest): Promise<PlanningSnapshot> {
+    return this.planningStore.createQueueFromDrafts(input);
   }
 
   getLogs(): DesktopLogEntry[] {
