@@ -151,6 +151,12 @@ pre {
   color: #ffb6b6;
 }
 
+.status-pill.reconnecting {
+  background: rgba(91, 156, 255, 0.12);
+  border-color: rgba(91, 156, 255, 0.45);
+  color: #d5e4ff;
+}
+
 .status-pill.idle {
   background: rgba(143, 184, 255, 0.12);
   color: #d5e4ff;
@@ -233,6 +239,12 @@ pre {
   color: #ffc9c9;
 }
 
+.message.info {
+  background: rgba(91, 156, 255, 0.1);
+  border: 1px solid rgba(91, 156, 255, 0.28);
+  color: #d5e4ff;
+}
+
 .message.warning {
   background: rgba(232, 174, 74, 0.1);
   border: 1px solid rgba(232, 174, 74, 0.28);
@@ -245,6 +257,17 @@ pre {
 
 .inline-message {
   margin-top: 0;
+}
+
+.recorder-message {
+  overflow-wrap: anywhere;
+  background: rgba(143, 184, 255, 0.08);
+  border: 1px solid rgba(143, 184, 255, 0.24);
+  color: #d5e4ff;
+}
+
+.recorder-message code {
+  font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
 
 .connection-summary,

@@ -31,6 +31,21 @@ export interface DesktopPreviewFrame {
   dataUrl: string;
 }
 
+export interface DesktopRecordingState {
+  active: boolean;
+  sessionId?: string;
+  sessionDir?: string;
+  startedAt?: string;
+}
+
+export interface DesktopReconnectState {
+  active: boolean;
+  attempt: number;
+  host?: string;
+  nextRetryAt?: string;
+  lastError?: string;
+}
+
 export interface DesktopStatus {
   connected: boolean;
   authenticated: boolean;
@@ -38,6 +53,8 @@ export interface DesktopStatus {
   deviceState: Record<string, unknown> | null;
   viewState: Record<string, unknown> | null;
   preview: DesktopPreviewState;
+  recording: DesktopRecordingState;
+  reconnect: DesktopReconnectState;
   lastUpdatedAt?: string;
   lastError?: string;
 }

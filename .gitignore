@@ -15,6 +15,7 @@ opencode.json
 .mypy_cache/
 .coverage
 .www/
+recordings/
 venv/
 seestar_3.1.2_fw_7.32_interop.pem
 

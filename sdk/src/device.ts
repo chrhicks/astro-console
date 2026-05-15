@@ -1029,8 +1029,25 @@ export class SeestarDevice {
     const params = stage ? { stage } : "";
     const resp = await this.client.sendSync("iscope_stop_view", params);
     const ok = resp.code === 0;
-    if (ok && wait.waitForCompletion) {
-      await this.waitForViewStopped(wait);
+    if (ok) {
+      if (wait.waitForCompletion) {
+        await this.waitForViewStopped(wait);
+      }
+      this.log({
+        level: "info",
+        event: "observation.view.stopped",
+        component: "observation",
+        phase: "observe",
+        changed: true,
+        ok: true,
+        summary: wait.waitForCompletion
+          ? stage ? `Stopped ${stage} view stage` : "Stopped active view"
+          : stage ? `Requested stop of ${stage} view stage` : "Requested stop of active view",
+        data: {
+          stage,
+          waitForCompletion: wait.waitForCompletion ?? false,
+        },
+      });
     }
     return ok;
   }
@@ -1059,8 +1076,22 @@ export class SeestarDevice {
   async stopStack(wait: ActionWaitOptions = {}): Promise<boolean> {
     const resp = await this.client.sendSync("iscope_stop_view", { stage: "Stack" });
     const ok = resp.code === 0;
-    if (ok && wait.waitForCompletion) {
-      await this.waitForStackStopped(wait);
+    if (ok) {
+      if (wait.waitForCompletion) {
+        await this.waitForStackStopped(wait);
+      }
+      this.log({
+        level: "info",
+        event: "observation.stack.stopped",
+        component: "observation",
+        phase: "observe",
+        changed: true,
+        ok: true,
+        summary: wait.waitForCompletion ? "Stopped stacking" : "Requested stop of stacking",
+        data: {
+          waitForCompletion: wait.waitForCompletion ?? false,
+        },
+      });
     }
     return ok;
   }
@@ -1075,13 +1106,10 @@ export class SeestarDevice {
   }
 
   async startAutoFocus(wait: ActionWaitOptions = {}): Promise<boolean> {
+    const startedAt = Date.now();
     const resp = await this.client.sendSync("start_auto_focuse", "");
     const ok = resp.code === 0;
     if (ok) {
-      if (wait.waitForCompletion) {
-        await this.waitForAutofocusCompletion(wait);
-      }
-      const summary = wait.waitForCompletion ? "Completed autofocus" : "Started autofocus";
       this.log({
         level: "info",
         event: "observation.autofocus.started",
@@ -1089,8 +1117,23 @@ export class SeestarDevice {
         phase: "observe",
         changed: true,
         ok: true,
-        summary,
+        summary: "Started autofocus",
       });
+      if (wait.waitForCompletion) {
+        await this.waitForAutofocusCompletion(wait);
+        this.log({
+          level: "info",
+          event: "observation.autofocus.completed",
+          component: "observation",
+          phase: "observe",
+          changed: true,
+          ok: true,
+          summary: "Completed autofocus",
+          data: {
+            durationMs: Date.now() - startedAt,
+          },
+        });
+      }
     }
     return ok;
   }

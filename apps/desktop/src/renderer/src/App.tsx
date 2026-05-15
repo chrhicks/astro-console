@@ -18,6 +18,9 @@ const EMPTY_STATUS: DesktopStatus = {
     active: false,
     mode: "rtsp-mjpeg",
   },
+  recording: {
+    active: false,
+  },
 };
 
 const VIEW_MODES: DesktopViewMode[] = ["scenery", "star", "moon", "sun", "planet"];
@@ -111,6 +114,9 @@ export function App() {
   const previewUpdatedAt = previewFrame?.ts ?? status.preview.lastFrameAt;
   const isConnected = status.connected && status.authenticated;
   const showDiscoveryPanel = !isConnected || devices.length > 0;
+  const hasActiveDeviceView = Boolean(summary.viewMode && summary.viewMode !== "none" && summary.viewState !== "cancel");
+  const selectedViewAlreadyActive = isConnected && hasActiveDeviceView && summary.viewMode === viewMode;
+  const canAttachSceneryPreview = summary.viewMode === "scenery" && !status.preview.active;
 
   async function runAction(action: string, work: () => Promise<void>) {
     setBusyAction(action);
@@ -139,7 +145,9 @@ export function App() {
           <h1>Preview-first control deck</h1>
           <p className="topbar-summary">
             {isConnected
-              ? `Connected to ${status.host ?? host}. Live preview, commands, and logs now share one working surface.`
+              ? hasActiveDeviceView
+                ? `Connected to ${status.host ?? host}. The device already reports ${formatView(summary)}; attach local preview or stop the active view before changing modes.`
+                : `Connected to ${status.host ?? host}. Live preview, commands, and logs now share one working surface.`
               : "Discover a Seestar, connect, and keep the live view centered once the scope is online."}
           </p>
         </div>
@@ -226,8 +234,15 @@ export function App() {
               <QuickStat label="Current host" value={status.host ?? "None"} />
               <QuickStat label="View" value={formatView(summary)} />
               <QuickStat label="Preview" value={status.preview.active ? "Live" : "Idle"} />
+              <QuickStat label="Recorder" value={status.recording.active ? "Active" : "Idle"} />
               <QuickStat label="Firmware" value={summary.firmwareVersion ?? "Unknown"} />
             </div>
+
+            {status.recording.sessionDir ? (
+              <p className="message recorder-message">
+                Recording session bundle to <code>{status.recording.sessionDir}</code>
+              </p>
+            ) : null}
           </section>
 
           {showDiscoveryPanel ? (
@@ -326,7 +341,9 @@ export function App() {
                   <div className="preview-placeholder">
                     {status.preview.active
                       ? "Waiting for the first frame from ffmpeg..."
-                      : "No live preview yet. Connect, start Scenery mode, then start preview."}
+                      : canAttachSceneryPreview
+                        ? "The device is already in Scenery mode. Start preview to attach the local viewer."
+                        : "No live preview yet. Connect, start Scenery mode, then start preview."}
                   </div>
                 )}
               </div>
@@ -341,6 +358,7 @@ export function App() {
               <div className="metric-grid compact-metrics">
                 <QuickStat label="Mount" value={formatBoolean(summary.mountClosed, "Parked", "Ready")} />
                 <QuickStat label="Tracking" value={formatBoolean(summary.tracking, "On", "Off")} />
+                <QuickStat label="Focus" value={formatFocusState(summary.focusState)} />
                 <QuickStat label="EQ mode" value={formatBoolean(summary.equMode, "On", "Off")} />
                 <QuickStat label="Temp" value={formatTemperature(summary.deviceTempC, summary.tempUnit)} />
               </div>
@@ -362,15 +380,23 @@ export function App() {
                   </select>
                 </label>
 
+                {selectedViewAlreadyActive ? (
+                  <p className="message info inline-message">
+                    {viewMode === "scenery" && !status.preview.active
+                      ? "The device is already in Scenery mode. Start preview to attach locally without restarting the view."
+                      : `The device already reports ${toTitleCase(viewMode)} mode as active.`}
+                  </p>
+                ) : null}
+
                 <div className="actions state-action-row">
                   <button
                     className="primary"
                     onClick={() =>
                       void runDeviceCommand("start-view", { action: "start-view", mode: viewMode })
                     }
-                    disabled={Boolean(busyAction) || !status.connected}
+                    disabled={Boolean(busyAction) || !status.connected || selectedViewAlreadyActive}
                   >
-                    {busyAction === "start-view" ? "Starting..." : "Start view"}
+                    {busyAction === "start-view" ? "Starting..." : selectedViewAlreadyActive ? "View active" : "Start view"}
                   </button>
 
                   <button
@@ -395,7 +421,11 @@ export function App() {
                       summary.viewMode !== "scenery"
                     }
                   >
-                    {busyAction === "start-preview" ? "Starting preview..." : "Start preview"}
+                    {busyAction === "start-preview"
+                      ? "Starting preview..."
+                      : canAttachSceneryPreview
+                        ? "Attach preview"
+                        : "Start preview"}
                   </button>
 
                   <button
@@ -492,6 +522,7 @@ export function App() {
                 <StatusCard title="Mount and view">
                   <StatusField label="Mount" value={formatBoolean(summary.mountClosed, "Parked", "Ready")} />
                   <StatusField label="Tracking" value={formatBoolean(summary.tracking, "On", "Off")} />
+                  <StatusField label="Focus" value={formatFocusState(summary.focusState)} />
                   <StatusField label="EQ mode" value={formatBoolean(summary.equMode, "On", "Off")} />
                   <StatusField label="View" value={formatView(summary)} />
                 </StatusCard>
@@ -552,6 +583,7 @@ function summarizeStatus(status: DesktopStatus): DeviceSummary {
   const device = asRecord(deviceState?.device);
   const piStatus = asRecord(deviceState?.pi_status);
   const mount = asRecord(deviceState?.mount);
+  const focuser = asRecord(deviceState?.focuser);
   const station = asRecord(deviceState?.station);
   const setting = asRecord(deviceState?.setting);
   const viewState = asRecord(status.viewState);
@@ -568,6 +600,7 @@ function summarizeStatus(status: DesktopStatus): DeviceSummary {
     batteryTempC: asNumber(piStatus?.battery_temp),
     mountClosed: asBoolean(mount?.close),
     tracking: asBoolean(mount?.tracking),
+    focusState: asString(focuser?.state),
     equMode: asBoolean(mount?.equ_mode),
     viewMode: asString(view?.mode),
     viewStage: asString(view?.stage),
@@ -609,7 +642,35 @@ function formatHeaters(exposure: boolean | undefined, dew: boolean | undefined):
   return parts.length > 0 ? parts.join(" / ") : "Unknown";
 }
 
+function formatFocusState(value: string | undefined): string {
+  if (!value) return "Idle";
+  if (value === "working" || value === "moving" || value === "start") return "Running";
+  if (value === "complete" || value === "idle" || value === "none") return "Idle";
+  return toTitleCase(value);
+}
+
+function formatReconnectCaption(status: DesktopStatus): string {
+  const host = status.reconnect.host ?? status.host ?? "device";
+  const attempt = status.reconnect.attempt;
+  if (status.reconnect.nextRetryAt) {
+    return `Attempt ${attempt} to ${host} at ${new Date(status.reconnect.nextRetryAt).toLocaleTimeString()}`;
+  }
+  return `Attempt ${attempt} to ${host} in progress`;
+}
+
+function formatReconnectMessage(status: DesktopStatus): string {
+  const host = status.reconnect.host ?? status.host ?? "the device";
+  if (status.reconnect.nextRetryAt) {
+    return `Unexpected disconnect. Retrying ${host} at ${new Date(status.reconnect.nextRetryAt).toLocaleTimeString()} (attempt ${status.reconnect.attempt}).`;
+  }
+  return `Unexpected disconnect. Reconnecting to ${host} now (attempt ${status.reconnect.attempt}).`;
+}
+
 function formatView(summary: DeviceSummary): string {
+  if (!summary.viewMode || summary.viewMode === "none" || summary.viewState === "cancel") {
+    return "Idle";
+  }
+
   const parts = [summary.viewMode, summary.viewStage, summary.viewState].filter(
     (part): part is string => Boolean(part)
   );
@@ -691,6 +752,7 @@ interface DeviceSummary {
   batteryTempC?: number;
   mountClosed?: boolean;
   tracking?: boolean;
+  focusState?: string;
   equMode?: boolean;
   viewMode?: string;
   viewStage?: string;
