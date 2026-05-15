@@ -1,7 +1,17 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import path from "node:path";
 import { SeestarDesktopService } from "./seestar-service";
-import type { ConnectRequest, DesktopCommandRequest } from "../shared/api";
+import type {
+  AddManualCatalogTargetRequest,
+  ArchiveSiteProfileRequest,
+  ConnectRequest,
+  CreateSiteProfileRequest,
+  DesktopCommandRequest,
+  DuplicateSiteProfileRequest,
+  SearchCatalogTargetsRequest,
+  SetActiveSiteRequest,
+  UpdateSiteProfileRequest,
+} from "../shared/api";
 
 const service = new SeestarDesktopService();
 const rendererDevUrl = process.env.VITE_DEV_SERVER_URL;
@@ -37,6 +47,14 @@ function registerIpcHandlers(): void {
   ipcMain.handle("seestar:connect", (_event, input: ConnectRequest) => service.connect(input));
   ipcMain.handle("seestar:disconnect", () => service.disconnect());
   ipcMain.handle("seestar:get-status", () => service.getStatus());
+  ipcMain.handle("seestar:get-planning-snapshot", () => service.getPlanningSnapshot());
+  ipcMain.handle("seestar:create-site-profile", (_event, input: CreateSiteProfileRequest) => service.createSiteProfile(input));
+  ipcMain.handle("seestar:update-site-profile", (_event, input: UpdateSiteProfileRequest) => service.updateSiteProfile(input));
+  ipcMain.handle("seestar:duplicate-site-profile", (_event, input: DuplicateSiteProfileRequest) => service.duplicateSiteProfile(input));
+  ipcMain.handle("seestar:archive-site-profile", (_event, input: ArchiveSiteProfileRequest) => service.archiveSiteProfile(input));
+  ipcMain.handle("seestar:set-active-site", (_event, input: SetActiveSiteRequest) => service.setActiveSite(input));
+  ipcMain.handle("seestar:search-catalog-targets", (_event, input: SearchCatalogTargetsRequest) => service.searchCatalogTargets(input));
+  ipcMain.handle("seestar:add-manual-catalog-target", (_event, input: AddManualCatalogTargetRequest) => service.addManualCatalogTarget(input));
   ipcMain.handle("seestar:refresh-state", () => service.refreshState());
   ipcMain.handle("seestar:start-preview", () => service.startPreview());
   ipcMain.handle("seestar:stop-preview", () => service.stopPreview());

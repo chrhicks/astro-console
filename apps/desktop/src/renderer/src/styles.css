@@ -26,7 +26,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -55,13 +56,19 @@ button.primary {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   border-radius: 12px;
   border: 1px solid #2a3d60;
   background: #0f1a2a;
   color: #edf4ff;
   padding: 0.78rem 0.9rem;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 5.8rem;
 }
 
 pre {
@@ -368,6 +375,103 @@ pre {
   margin: 0;
 }
 
+.site-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.site-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.site-card {
+  display: grid;
+  gap: 0.9rem;
+  border-radius: 18px;
+  border: 1px solid #1d314d;
+  background: #0b1422;
+  padding: 1rem;
+}
+
+.site-card.active {
+  border-color: rgba(91, 156, 255, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(91, 156, 255, 0.18);
+}
+
+.site-card.archived {
+  opacity: 0.78;
+}
+
+.site-card-copy {
+  display: grid;
+  gap: 0.32rem;
+}
+
+.site-card-copy p {
+  margin: 0;
+  color: #9fb0cc;
+}
+
+.site-card-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.site-card-actions {
+  margin-top: 0;
+}
+
+.archived-sites {
+  border-top: 1px solid rgba(143, 184, 255, 0.12);
+  padding-top: 1rem;
+}
+
+.archived-sites summary {
+  cursor: pointer;
+  color: #cfe1ff;
+  font-weight: 600;
+}
+
+.archived-site-list {
+  margin-top: 0.85rem;
+}
+
+.site-editor {
+  display: grid;
+  gap: 0.85rem;
+  border-top: 1px solid rgba(143, 184, 255, 0.12);
+  padding-top: 1rem;
+}
+
+.site-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.compact-site-grid {
+  margin-top: 0;
+}
+
+.site-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: #d5e4ff;
+  font-size: 0.95rem;
+}
+
+.site-checkbox input {
+  width: auto;
+}
+
+.site-editor-actions {
+  margin-top: 0;
+}
+
 .live-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(320px, 0.95fr);
@@ -635,7 +739,8 @@ pre {
   .connection-summary,
   .metric-grid,
   .preview-meta,
-  .status-grid {
+  .status-grid,
+  .site-grid {
     grid-template-columns: 1fr;
   }
 

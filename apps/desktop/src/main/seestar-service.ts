@@ -10,15 +10,25 @@ import {
   type Logger,
 } from "../../../../sdk/dist/index.js";
 import type {
+  AddManualCatalogTargetRequest,
+  ArchiveSiteProfileRequest,
   DesktopCommandRequest,
   ConnectRequest,
+  CreateSiteProfileRequest,
   DesktopDiscoveredDevice,
+  DuplicateSiteProfileRequest,
   DesktopLogEntry,
   DesktopPreviewFrame,
   DesktopPreviewState,
   DesktopReconnectState,
+  SearchCatalogTargetsRequest,
   DesktopStatus,
+  SetActiveSiteRequest,
+  UpdateSiteProfileRequest,
 } from "../shared/api";
+import type { PlanningSnapshot } from "../shared/planning";
+import type { CatalogSearchResult } from "../shared/starter-catalog";
+import { PlanningStore } from "./planning-store";
 import { SeestarSessionRecorder } from "./session-recorder";
 
 const LOG_LIMIT = 250;
@@ -36,6 +46,9 @@ const AUTO_RECONNECT_MAX_ATTEMPTS = 3;
 export class SeestarDesktopService {
   private device: SeestarDevice | null = null;
   private logs: DesktopLogEntry[] = [];
+  private planningStore = new PlanningStore({
+    getUserDataDir: () => app.getPath("userData"),
+  });
   private recorder = new SeestarSessionRecorder({
     getRootDir: () => path.join(resolveWorkspaceRoot(__dirname) ?? resolveDesktopAppRoot(__dirname), "recordings"),
     getAppVersion: () => resolveDesktopAppVersion(__dirname) ?? app.getVersion(),
@@ -296,6 +309,38 @@ export class SeestarDesktopService {
       recording: { ...this.status.recording },
       reconnect: { ...this.status.reconnect },
     };
+  }
+
+  async getPlanningSnapshot(): Promise<PlanningSnapshot> {
+    return this.planningStore.getSnapshot();
+  }
+
+  async createSiteProfile(input: CreateSiteProfileRequest): Promise<PlanningSnapshot> {
+    return this.planningStore.createSiteProfile(input);
+  }
+
+  async updateSiteProfile(input: UpdateSiteProfileRequest): Promise<PlanningSnapshot> {
+    return this.planningStore.updateSiteProfile(input);
+  }
+
+  async duplicateSiteProfile(input: DuplicateSiteProfileRequest): Promise<PlanningSnapshot> {
+    return this.planningStore.duplicateSiteProfile(input);
+  }
+
+  async archiveSiteProfile(input: ArchiveSiteProfileRequest): Promise<PlanningSnapshot> {
+    return this.planningStore.archiveSiteProfile(input);
+  }
+
+  async setActiveSite(input: SetActiveSiteRequest): Promise<PlanningSnapshot> {
+    return this.planningStore.setActiveSite(input);
+  }
+
+  async searchCatalogTargets(input: SearchCatalogTargetsRequest): Promise<CatalogSearchResult[]> {
+    return this.planningStore.searchCatalog(input);
+  }
+
+  async addManualCatalogTarget(input: AddManualCatalogTargetRequest): Promise<PlanningSnapshot> {
+    return this.planningStore.addManualCatalogTarget(input);
   }
 
   getLogs(): DesktopLogEntry[] {

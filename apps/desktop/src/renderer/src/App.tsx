@@ -8,6 +8,8 @@ import type {
   DesktopStatus,
   DesktopViewMode,
 } from "../../shared/api";
+import type { PlanningSnapshot, SiteProfile, SiteProfileDraft } from "../../shared/planning";
+import { validateSiteProfileDraft } from "../../shared/planning";
 
 const EMPTY_STATUS: DesktopStatus = {
   connected: false,
@@ -21,6 +23,10 @@ const EMPTY_STATUS: DesktopStatus = {
   recording: {
     active: false,
   },
+  reconnect: {
+    active: false,
+    attempt: 0,
+  },
 };
 
 const VIEW_MODES: DesktopViewMode[] = ["scenery", "star", "moon", "sun", "planet"];
@@ -29,17 +35,22 @@ export function App() {
   const [devices, setDevices] = useState<DesktopDiscoveredDevice[]>([]);
   const [status, setStatus] = useState<DesktopStatus>(EMPTY_STATUS);
   const [logs, setLogs] = useState<DesktopLogEntry[]>([]);
+  const [planning, setPlanning] = useState<PlanningSnapshot | null>(null);
   const [previewFrame, setPreviewFrame] = useState<DesktopPreviewFrame | null>(null);
   const [host, setHost] = useState("192.168.4.29");
   const [viewMode, setViewMode] = useState<DesktopViewMode>("scenery");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [siteError, setSiteError] = useState<string | null>(null);
+  const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
+  const [siteForm, setSiteForm] = useState<SiteFormState>(() => createDefaultSiteFormState());
 
   useEffect(() => {
-    void Promise.all([window.seestar.getStatus(), window.seestar.getLogs()])
-      .then(([nextStatus, nextLogs]) => {
+    void Promise.all([window.seestar.getStatus(), window.seestar.getLogs(), window.seestar.getPlanningSnapshot()])
+      .then(([nextStatus, nextLogs, nextPlanning]) => {
         setStatus(nextStatus);
         setLogs(nextLogs);
+        setPlanning(nextPlanning);
       })
       .catch((startupError: unknown) => {
         setError(toErrorMessage(startupError));
@@ -114,6 +125,14 @@ export function App() {
   const previewUpdatedAt = previewFrame?.ts ?? status.preview.lastFrameAt;
   const isConnected = status.connected && status.authenticated;
   const showDiscoveryPanel = !isConnected || devices.length > 0;
+  const siteProfiles = planning?.state.sites ?? [];
+  const activeSiteId = planning?.state.activeSiteId;
+  const selectableSites = useMemo(() => siteProfiles.filter((site) => !site.archivedAt), [siteProfiles]);
+  const archivedSites = useMemo(() => siteProfiles.filter((site) => Boolean(site.archivedAt)), [siteProfiles]);
+  const activeSite = useMemo(
+    () => selectableSites.find((site) => site.id === activeSiteId) ?? null,
+    [activeSiteId, selectableSites]
+  );
   const hasActiveDeviceView = Boolean(summary.viewMode && summary.viewMode !== "none" && summary.viewState !== "cancel");
   const selectedViewAlreadyActive = isConnected && hasActiveDeviceView && summary.viewMode === viewMode;
   const canAttachSceneryPreview = summary.viewMode === "scenery" && !status.preview.active;
@@ -135,6 +154,57 @@ export function App() {
       const nextStatus = await window.seestar.runCommand(input);
       setStatus(nextStatus);
     });
+  }
+
+  function resetSiteEditor() {
+    setEditingSiteId(null);
+    setSiteForm(createDefaultSiteFormState());
+    setSiteError(null);
+  }
+
+  function beginSiteEdit(site: SiteProfile) {
+    setEditingSiteId(site.id);
+    setSiteForm(createSiteFormState(site, site.id === activeSiteId));
+    setSiteError(null);
+  }
+
+  async function submitSiteProfile() {
+    setSiteError(null);
+
+    let parsedSite: SiteProfileDraft;
+    try {
+      parsedSite = parseSiteForm(siteForm);
+    } catch (formError) {
+      setSiteError(toErrorMessage(formError));
+      return;
+    }
+
+    const validationErrors = validateSiteProfileDraft(parsedSite, editingSiteId ? "site" : "new site");
+    if (validationErrors.length > 0) {
+      setSiteError(validationErrors.join(". "));
+      return;
+    }
+
+    await runAction(editingSiteId ? "update-site" : "create-site", async () => {
+      const nextPlanning = editingSiteId
+        ? await window.seestar.updateSiteProfile({
+            siteId: editingSiteId,
+            site: parsedSite,
+          })
+        : await window.seestar.createSiteProfile({
+            site: parsedSite,
+            makeActive: siteForm.makeActive,
+          });
+      setPlanning(nextPlanning);
+      resetSiteEditor();
+    });
+  }
+
+  function setSiteField<K extends keyof SiteFormState>(key: K, value: SiteFormState[K]) {
+    setSiteForm((current) => ({
+      ...current,
+      [key]: value,
+    }));
   }
 
   return (
@@ -280,6 +350,238 @@ export function App() {
               )}
             </details>
           ) : null}
+
+          <section className="panel site-panel">
+            <div className="panel-heading">
+              <h2>Site profiles</h2>
+              <p>Persist reusable observing locations and pick one active site for the current planning session.</p>
+            </div>
+
+            {planning ? (
+              <>
+                <div className="connection-summary">
+                  <QuickStat label="Active site" value={activeSite?.name ?? "None selected"} />
+                  <QuickStat label="Timezone" value={activeSite?.timezone ?? "Unknown"} />
+                  <QuickStat
+                    label="Min altitude"
+                    value={typeof activeSite?.minAltitudeDeg === "number" ? `${activeSite.minAltitudeDeg} deg` : "Unknown"}
+                  />
+                  <QuickStat label="Masks" value={String(activeSite?.blockedAzimuthRanges.length ?? 0)} />
+                </div>
+
+                {selectableSites.length === 0 ? (
+                  <p className="message info">No site profiles yet. Save a backyard or dark-site profile to unlock planning work.</p>
+                ) : (
+                  <div className="site-list">
+                    {selectableSites.map((site) => {
+                      const isActiveSite = site.id === activeSiteId;
+
+                      return (
+                        <article key={site.id} className={`site-card ${isActiveSite ? "active" : ""}`}>
+                          <div className="site-card-copy">
+                            <div className="site-card-heading">
+                              <strong>{site.name}</strong>
+                              {isActiveSite ? <span className="drawer-state">Active</span> : null}
+                            </div>
+                            <p>
+                              {site.lat.toFixed(4)}, {site.lon.toFixed(4)} • {site.timezone}
+                            </p>
+                            <p>
+                              Floor {site.minAltitudeDeg} deg • {formatBlockedAzimuthSummary(site)}
+                            </p>
+                          </div>
+                          <div className="actions site-card-actions">
+                            <button
+                              className={isActiveSite ? "primary" : undefined}
+                              onClick={() =>
+                                void runAction("set-active-site", async () => {
+                                  const nextPlanning = await window.seestar.setActiveSite({ siteId: site.id });
+                                  setPlanning(nextPlanning);
+                                  setSiteForm((current) => ({ ...current, makeActive: true }));
+                                })
+                              }
+                              disabled={Boolean(busyAction) || isActiveSite}
+                            >
+                              {isActiveSite ? "Active site" : "Use tonight"}
+                            </button>
+                            <button onClick={() => beginSiteEdit(site)} disabled={Boolean(busyAction)}>
+                              Edit
+                            </button>
+                            <button
+                              onClick={() =>
+                                void runAction("duplicate-site", async () => {
+                                  const nextPlanning = await window.seestar.duplicateSiteProfile({ siteId: site.id });
+                                  setPlanning(nextPlanning);
+                                })
+                              }
+                              disabled={Boolean(busyAction)}
+                            >
+                              Duplicate
+                            </button>
+                            <button
+                              onClick={() =>
+                                void runAction("archive-site", async () => {
+                                  const nextPlanning = await window.seestar.archiveSiteProfile({ siteId: site.id });
+                                  setPlanning(nextPlanning);
+                                  if (editingSiteId === site.id) {
+                                    resetSiteEditor();
+                                  }
+                                })
+                              }
+                              disabled={Boolean(busyAction)}
+                            >
+                              Archive
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {archivedSites.length > 0 ? (
+                  <details className="archived-sites">
+                    <summary>Archived sites ({archivedSites.length})</summary>
+                    <div className="site-list archived-site-list">
+                      {archivedSites.map((site) => (
+                        <article key={site.id} className="site-card archived">
+                          <div className="site-card-copy">
+                            <div className="site-card-heading">
+                              <strong>{site.name}</strong>
+                              <span className="drawer-state">Archived</span>
+                            </div>
+                            <p>
+                              {site.lat.toFixed(4)}, {site.lon.toFixed(4)} • {site.timezone}
+                            </p>
+                          </div>
+                          <div className="actions site-card-actions">
+                            <button
+                              onClick={() =>
+                                void runAction("duplicate-archived-site", async () => {
+                                  const nextPlanning = await window.seestar.duplicateSiteProfile({ siteId: site.id });
+                                  setPlanning(nextPlanning);
+                                })
+                              }
+                              disabled={Boolean(busyAction)}
+                            >
+                              Duplicate
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
+
+                <section className="site-editor">
+                  <div className="panel-heading panel-subheading">
+                    <h3>{editingSiteId ? "Edit site" : "Add site"}</h3>
+                    <p>
+                      {editingSiteId
+                        ? "Update the saved site profile and keep the planning store well-formed."
+                        : "Create a reusable site profile for your backyard, travel setup, or dark-sky location."}
+                    </p>
+                  </div>
+
+                  <label className="field compact-field">
+                    <span>Site name</span>
+                    <input
+                      value={siteForm.name}
+                      onChange={(event) => setSiteField("name", event.target.value)}
+                      placeholder="Backyard"
+                    />
+                  </label>
+
+                  <div className="site-grid compact-site-grid">
+                    <label className="field compact-field">
+                      <span>Latitude</span>
+                      <input
+                        value={siteForm.lat}
+                        onChange={(event) => setSiteField("lat", event.target.value)}
+                        placeholder="37.7749"
+                      />
+                    </label>
+
+                    <label className="field compact-field">
+                      <span>Longitude</span>
+                      <input
+                        value={siteForm.lon}
+                        onChange={(event) => setSiteField("lon", event.target.value)}
+                        placeholder="-122.4194"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="site-grid compact-site-grid">
+                    <label className="field compact-field">
+                      <span>Timezone</span>
+                      <input
+                        value={siteForm.timezone}
+                        onChange={(event) => setSiteField("timezone", event.target.value)}
+                        placeholder="America/Los_Angeles"
+                      />
+                    </label>
+
+                    <label className="field compact-field">
+                      <span>Min altitude</span>
+                      <input
+                        value={siteForm.minAltitudeDeg}
+                        onChange={(event) => setSiteField("minAltitudeDeg", event.target.value)}
+                        placeholder="25"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="field compact-field">
+                    <span>Blocked azimuth ranges</span>
+                    <textarea
+                      value={siteForm.blockedAzimuthText}
+                      onChange={(event) => setSiteField("blockedAzimuthText", event.target.value)}
+                      placeholder={"215-260:House\n300-332:Trees"}
+                      rows={4}
+                    />
+                  </label>
+
+                  <p className="message info inline-message">
+                    One blocked azimuth range per line: <code>start-end:label</code>. The label is optional, and ranges may wrap
+                    across north if needed.
+                  </p>
+
+                  <label className="site-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={siteForm.makeActive}
+                      onChange={(event) => setSiteField("makeActive", event.target.checked)}
+                    />
+                    <span>Use this site for the current planning session after saving</span>
+                  </label>
+
+                  {siteError ? <p className="message error">{siteError}</p> : null}
+
+                  <div className="actions site-editor-actions">
+                    <button className="primary" onClick={() => void submitSiteProfile()} disabled={Boolean(busyAction)}>
+                      {busyAction === "create-site"
+                        ? "Saving site..."
+                        : busyAction === "update-site"
+                          ? "Updating site..."
+                          : editingSiteId
+                            ? "Update site"
+                            : "Save site"}
+                    </button>
+                    <button onClick={resetSiteEditor} disabled={Boolean(busyAction)}>
+                      {editingSiteId ? "Cancel edit" : "Reset"}
+                    </button>
+                  </div>
+                </section>
+
+                <p className="message recorder-message">
+                  Planning data is stored at <code>{planning.storage.filePath}</code>
+                </p>
+              </>
+            ) : (
+              <p className="message info">Loading site profiles...</p>
+            )}
+          </section>
 
           {alerts.length > 0 ? (
             <section className="panel alerts-panel">
@@ -714,6 +1016,93 @@ function readLocation(value: unknown): { lat: number; lon: number } | undefined 
   return { lat, lon };
 }
 
+function formatBlockedAzimuthSummary(site: SiteProfile): string {
+  const count = site.blockedAzimuthRanges.length;
+  if (count === 0) return "No blocked sectors";
+  if (count === 1) return "1 blocked sector";
+  return `${count} blocked sectors`;
+}
+
+function createDefaultSiteFormState(): SiteFormState {
+  return {
+    name: "",
+    lat: "",
+    lon: "",
+    timezone: resolveLocalTimeZone(),
+    minAltitudeDeg: "25",
+    blockedAzimuthText: "",
+    makeActive: true,
+  };
+}
+
+function createSiteFormState(site: SiteProfile, makeActive: boolean): SiteFormState {
+  return {
+    name: site.name,
+    lat: String(site.lat),
+    lon: String(site.lon),
+    timezone: site.timezone,
+    minAltitudeDeg: String(site.minAltitudeDeg),
+    blockedAzimuthText: site.blockedAzimuthRanges
+      .map((range) => `${range.startDeg}-${range.endDeg}${range.label ? `:${range.label}` : ""}`)
+      .join("\n"),
+    makeActive,
+  };
+}
+
+function parseSiteForm(form: SiteFormState): SiteProfileDraft {
+  const lat = Number(form.lat);
+  const lon = Number(form.lon);
+  const minAltitudeDeg = Number(form.minAltitudeDeg);
+
+  if (!Number.isFinite(lat)) {
+    throw new Error("Latitude must be a number");
+  }
+  if (!Number.isFinite(lon)) {
+    throw new Error("Longitude must be a number");
+  }
+  if (!Number.isFinite(minAltitudeDeg)) {
+    throw new Error("Minimum altitude must be a number");
+  }
+
+  return {
+    name: form.name.trim(),
+    lat,
+    lon,
+    timezone: form.timezone.trim(),
+    minAltitudeDeg,
+    blockedAzimuthRanges: parseBlockedAzimuthRanges(form.blockedAzimuthText),
+  };
+}
+
+function parseBlockedAzimuthRanges(value: string): SiteProfileDraft["blockedAzimuthRanges"] {
+  return value
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      const [rangePart, ...labelParts] = line.split(":");
+      const match = rangePart.trim().match(/^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)$/u);
+
+      if (!match) {
+        throw new Error(`Blocked azimuth line ${index + 1} must use start-end or start-end:label`);
+      }
+
+      const startDeg = Number(match[1]);
+      const endDeg = Number(match[2]);
+      const label = labelParts.join(":").trim();
+
+      return {
+        startDeg,
+        endDeg,
+        ...(label ? { label } : {}),
+      };
+    });
+}
+
+function resolveLocalTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
 function StatusCard(props: { title: string; children: ReactNode }) {
   return (
     <article className="status-card">
@@ -765,4 +1154,14 @@ interface DeviceSummary {
   tempUnit?: string;
   exposureHeaterEnabled?: boolean;
   dewHeaterEnabled?: boolean;
+}
+
+interface SiteFormState {
+  name: string;
+  lat: string;
+  lon: string;
+  timezone: string;
+  minAltitudeDeg: string;
+  blockedAzimuthText: string;
+  makeActive: boolean;
 }

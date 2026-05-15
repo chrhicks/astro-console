@@ -1,3 +1,6 @@
+import type { PlanningSnapshot, SiteProfileDraft } from "./planning";
+import type { CatalogSearchResult, ManualCatalogTargetInput } from "./starter-catalog";
+
 export interface DesktopDiscoveredDevice {
   host: string;
   port: number;
@@ -63,6 +66,38 @@ export interface ConnectRequest {
   host: string;
 }
 
+export interface CreateSiteProfileRequest {
+  site: SiteProfileDraft;
+  makeActive?: boolean;
+}
+
+export interface UpdateSiteProfileRequest {
+  siteId: string;
+  site: SiteProfileDraft;
+}
+
+export interface DuplicateSiteProfileRequest {
+  siteId: string;
+  makeActive?: boolean;
+}
+
+export interface ArchiveSiteProfileRequest {
+  siteId: string;
+}
+
+export interface SetActiveSiteRequest {
+  siteId: string;
+}
+
+export interface SearchCatalogTargetsRequest {
+  query: string;
+  limit?: number;
+}
+
+export interface AddManualCatalogTargetRequest {
+  target: ManualCatalogTargetInput;
+}
+
 export type DesktopViewMode = "star" | "moon" | "sun" | "planet" | "scenery";
 
 export type DesktopCommandAction =
@@ -84,6 +119,14 @@ export interface SeestarDesktopApi {
   connect(input: ConnectRequest): Promise<DesktopStatus>;
   disconnect(): Promise<DesktopStatus>;
   getStatus(): Promise<DesktopStatus>;
+  getPlanningSnapshot(): Promise<PlanningSnapshot>;
+  createSiteProfile(input: CreateSiteProfileRequest): Promise<PlanningSnapshot>;
+  updateSiteProfile(input: UpdateSiteProfileRequest): Promise<PlanningSnapshot>;
+  duplicateSiteProfile(input: DuplicateSiteProfileRequest): Promise<PlanningSnapshot>;
+  archiveSiteProfile(input: ArchiveSiteProfileRequest): Promise<PlanningSnapshot>;
+  setActiveSite(input: SetActiveSiteRequest): Promise<PlanningSnapshot>;
+  searchCatalogTargets(input: SearchCatalogTargetsRequest): Promise<CatalogSearchResult[]>;
+  addManualCatalogTarget(input: AddManualCatalogTargetRequest): Promise<PlanningSnapshot>;
   refreshState(): Promise<DesktopStatus>;
   startPreview(): Promise<DesktopStatus>;
   stopPreview(): Promise<DesktopStatus>;
