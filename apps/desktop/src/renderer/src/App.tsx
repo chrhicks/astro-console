@@ -27,6 +27,24 @@ const EMPTY_STATUS: DesktopStatus = {
     active: false,
     attempt: 0,
   },
+  planner: {
+    ready: false,
+    discovery: {
+      attempted: false,
+      mode: "direct",
+    },
+    clock: {
+      attempted: false,
+      synced: false,
+      staleBeforeSync: false,
+    },
+    location: {
+      attempted: false,
+      synced: false,
+      matchesActiveSite: false,
+    },
+    issues: [],
+  },
 };
 
 const VIEW_MODES: DesktopViewMode[] = ["scenery", "star", "moon", "sun", "planet"];
@@ -90,11 +108,18 @@ export function App() {
     };
   }, [status.connected]);
 
+  useEffect(() => {
+    if (status.host) {
+      setHost(status.host);
+    }
+  }, [status.host]);
+
   const statusTone = useMemo(() => {
+    if (status.reconnect.active) return "reconnecting";
     if (status.connected && status.authenticated) return "healthy";
     if (status.lastError) return "error";
     return "idle";
-  }, [status.authenticated, status.connected, status.lastError]);
+  }, [status.authenticated, status.connected, status.lastError, status.reconnect.active]);
 
   const summary = useMemo(() => summarizeStatus(status), [status]);
 
@@ -118,8 +143,13 @@ export function App() {
   }, [summary.batteryPercent, summary.batteryTempC, summary.deviceTempC, summary.mountClosed]);
 
   const rawStatusJson = useMemo(
-    () => JSON.stringify({ deviceState: status.deviceState, viewState: status.viewState, preview: status.preview }, null, 2) ?? "null",
-    [status.deviceState, status.preview, status.viewState]
+    () =>
+      JSON.stringify(
+        { deviceState: status.deviceState, viewState: status.viewState, preview: status.preview, planner: status.planner },
+        null,
+        2
+      ) ?? "null",
+    [status.deviceState, status.planner, status.preview, status.viewState]
   );
 
   const previewUpdatedAt = previewFrame?.ts ?? status.preview.lastFrameAt;
@@ -222,12 +252,16 @@ export function App() {
           </p>
         </div>
         <div className="topbar-actions">
-          <div className="status-meta">
-            <div className={`status-pill ${statusTone}`}>{isConnected ? "Connected" : "Disconnected"}</div>
-            <p className="status-caption">
-              {status.lastUpdatedAt ? `Updated ${new Date(status.lastUpdatedAt).toLocaleTimeString()}` : "No telemetry yet"}
-            </p>
-          </div>
+            <div className="status-meta">
+              <div className={`status-pill ${statusTone}`}>{isConnected ? "Connected" : "Disconnected"}</div>
+              <p className="status-caption">
+                {status.reconnect.active
+                  ? formatReconnectCaption(status)
+                  : status.lastUpdatedAt
+                    ? `Updated ${new Date(status.lastUpdatedAt).toLocaleTimeString()}`
+                    : "No telemetry yet"}
+              </p>
+            </div>
           <button
             onClick={() =>
               void runAction("refresh", async () => {
@@ -270,7 +304,7 @@ export function App() {
 
             <label className="field">
               <span>Host</span>
-              <input value={host} onChange={(event) => setHost(event.target.value)} placeholder="192.168.4.29" />
+              <input value={host} onChange={(event) => setHost(event.target.value)} placeholder="Leave blank to discover" />
             </label>
 
             <div className="actions connect-actions">
@@ -294,7 +328,7 @@ export function App() {
                     setStatus(nextStatus);
                   })
                 }
-                disabled={Boolean(busyAction) || !host.trim()}
+                disabled={Boolean(busyAction)}
               >
                 {busyAction === "connect" ? "Connecting..." : isConnected ? "Reconnect" : "Connect"}
               </button>
@@ -302,11 +336,27 @@ export function App() {
 
             <div className="connection-summary">
               <QuickStat label="Current host" value={status.host ?? "None"} />
+              <QuickStat label="Discovery" value={formatDiscoveryMode(status)} />
+              <QuickStat label="Planner" value={status.planner.ready ? "Ready" : "Attention"} />
+              <QuickStat label="Clock sync" value={formatClockSync(status)} />
+              <QuickStat label="Site sync" value={formatLocationSync(status)} />
               <QuickStat label="View" value={formatView(summary)} />
               <QuickStat label="Preview" value={status.preview.active ? "Live" : "Idle"} />
               <QuickStat label="Recorder" value={status.recording.active ? "Active" : "Idle"} />
               <QuickStat label="Firmware" value={summary.firmwareVersion ?? "Unknown"} />
             </div>
+
+            {status.reconnect.active ? <p className="message info">{formatReconnectMessage(status)}</p> : null}
+
+            {!status.planner.ready && status.planner.issues.length > 0 ? (
+              <div className="planner-issues">
+                {status.planner.issues.map((issue) => (
+                  <p key={issue} className="message warning planner-issue">
+                    {issue}
+                  </p>
+                ))}
+              </div>
+            ) : null}
 
             {status.recording.sessionDir ? (
               <p className="message recorder-message">
@@ -835,6 +885,14 @@ export function App() {
                   <StatusField label="Location" value={formatLocation(summary.location)} />
                   <StatusField label="Host" value={status.host ?? "None"} />
                 </StatusCard>
+
+                <StatusCard title="Planner sync">
+                  <StatusField label="Discovery" value={formatDiscoveryMode(status)} />
+                  <StatusField label="Active site" value={status.planner.activeSite?.name ?? "None selected"} />
+                  <StatusField label="Clock" value={formatClockSync(status)} />
+                  <StatusField label="Location" value={formatLocationSync(status)} />
+                  <StatusField label="Device time" value={formatPlannerDeviceTime(status)} />
+                </StatusCard>
               </div>
             </section>
 
@@ -966,6 +1024,46 @@ function formatReconnectMessage(status: DesktopStatus): string {
     return `Unexpected disconnect. Retrying ${host} at ${new Date(status.reconnect.nextRetryAt).toLocaleTimeString()} (attempt ${status.reconnect.attempt}).`;
   }
   return `Unexpected disconnect. Reconnecting to ${host} now (attempt ${status.reconnect.attempt}).`;
+}
+
+function formatDiscoveryMode(status: DesktopStatus): string {
+  switch (status.planner.discovery.mode) {
+    case "discovered":
+      return "Discovery";
+    case "fallback":
+      return "Fallback";
+    default:
+      return "Direct";
+  }
+}
+
+function formatClockSync(status: DesktopStatus): string {
+  if (!status.planner.clock.attempted) {
+    return status.planner.clock.deviceTime ? "Observed" : "Unknown";
+  }
+  if (status.planner.clock.synced) return "Synced";
+  if (status.planner.clock.lastError) return "Failed";
+  if (status.planner.clock.deviceTime) return "Needs attention";
+  return "Unknown";
+}
+
+function formatLocationSync(status: DesktopStatus): string {
+  if (!status.planner.activeSite) return "No active site";
+  if (status.planner.location.matchesActiveSite) return "Matched";
+  if (status.planner.location.lastError) return "Failed";
+  if (!status.planner.location.deviceLocation) return "Missing";
+  return "Mismatch";
+}
+
+function formatPlannerDeviceTime(status: DesktopStatus): string {
+  const deviceTime = status.planner.clock.deviceTime;
+  if (!deviceTime) return "Unknown";
+
+  const date = [deviceTime.year, deviceTime.mon, deviceTime.day]
+    .map((value, index) => String(value).padStart(index === 0 ? 4 : 2, "0"))
+    .join("-");
+  const time = [deviceTime.hour, deviceTime.min, deviceTime.sec].map((value) => String(value).padStart(2, "0")).join(":");
+  return `${date} ${time}${deviceTime.timeZone ? ` ${deviceTime.timeZone}` : ""}`;
 }
 
 function formatView(summary: DeviceSummary): string {

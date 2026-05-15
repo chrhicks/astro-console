@@ -375,6 +375,15 @@ pre {
   margin: 0;
 }
 
+.planner-issues {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.planner-issue {
+  margin: 0;
+}
+
 .site-panel {
   display: grid;
   gap: 1rem;

@@ -49,6 +49,64 @@ export interface DesktopReconnectState {
   lastError?: string;
 }
 
+export interface DesktopDeviceTime {
+  year: number;
+  mon: number;
+  day: number;
+  hour: number;
+  min: number;
+  sec: number;
+  timeZone?: string;
+}
+
+export interface DesktopPlannerSiteContext {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  timezone: string;
+}
+
+export interface DesktopPlannerDiscoveryState {
+  attempted: boolean;
+  mode: "direct" | "discovered" | "fallback";
+  requestedHost?: string;
+  resolvedHost?: string;
+  candidateCount?: number;
+  lastAttemptAt?: string;
+  lastError?: string;
+}
+
+export interface DesktopPlannerClockState {
+  attempted: boolean;
+  synced: boolean;
+  staleBeforeSync: boolean;
+  deviceTime?: DesktopDeviceTime;
+  hostTime?: DesktopDeviceTime;
+  lastSyncedAt?: string;
+  lastError?: string;
+}
+
+export interface DesktopPlannerLocationState {
+  attempted: boolean;
+  synced: boolean;
+  matchesActiveSite: boolean;
+  targetLocation?: { lat: number; lon: number };
+  deviceLocation?: { lat: number; lon: number };
+  lastSyncedAt?: string;
+  lastError?: string;
+}
+
+export interface DesktopPlannerHealth {
+  ready: boolean;
+  activeSite?: DesktopPlannerSiteContext;
+  discovery: DesktopPlannerDiscoveryState;
+  clock: DesktopPlannerClockState;
+  location: DesktopPlannerLocationState;
+  issues: string[];
+  lastCheckedAt?: string;
+}
+
 export interface DesktopStatus {
   connected: boolean;
   authenticated: boolean;
@@ -58,12 +116,13 @@ export interface DesktopStatus {
   preview: DesktopPreviewState;
   recording: DesktopRecordingState;
   reconnect: DesktopReconnectState;
+  planner: DesktopPlannerHealth;
   lastUpdatedAt?: string;
   lastError?: string;
 }
 
 export interface ConnectRequest {
-  host: string;
+  host?: string;
 }
 
 export interface CreateSiteProfileRequest {

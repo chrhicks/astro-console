@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { LogEvent } from "../../../../sdk/dist/index.js";
-import type { DesktopRecordingState, DesktopStatus } from "../shared/api";
+import type { DesktopPlannerHealth, DesktopRecordingState, DesktopStatus } from "../shared/api";
 
 const ARTIFACT_FILES = {
   session: "session.json",
@@ -77,6 +77,12 @@ interface RecordedStatusSummary {
     stage?: string;
     state?: string;
     targetName?: string;
+  };
+  planner?: {
+    ready: boolean;
+    activeSiteName?: string;
+    discoveryMode: string;
+    issues: string[];
   };
 }
 
@@ -415,6 +421,7 @@ function cloneStatus(status: DesktopStatus): DesktopStatus {
     preview: cloneJsonValue(status.preview),
     recording: cloneJsonValue(status.recording),
     reconnect: cloneJsonValue(status.reconnect),
+    planner: cloneJsonValue(status.planner),
   };
 }
 
@@ -440,6 +447,7 @@ function summarizeStatus(status: DesktopStatus): RecordedStatusSummary {
       state: asString(view?.state),
       targetName: asString(view?.target_name),
     },
+    planner: summarizePlanner(status.planner),
   };
 }
 
@@ -455,6 +463,7 @@ function describeStatus(status: DesktopStatus): string {
     `preview=${summary.preview.active ? "active" : "idle"}`,
     view.length > 0 ? `view=${view.join("/")}` : undefined,
     summary.view?.targetName ? `target=${summary.view.targetName}` : undefined,
+    summary.planner ? `planner=${summary.planner.ready ? "ready" : "attention"}` : undefined,
     summary.lastError ? `error=${summary.lastError}` : undefined,
     summary.preview.lastError ? `previewError=${summary.preview.lastError}` : undefined,
   ].filter((part): part is string => Boolean(part));
@@ -501,4 +510,14 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function summarizePlanner(planner: DesktopPlannerHealth | undefined): RecordedStatusSummary["planner"] | undefined {
+  if (!planner) return undefined;
+  return {
+    ready: planner.ready,
+    activeSiteName: planner.activeSite?.name,
+    discoveryMode: planner.discovery.mode,
+    issues: [...planner.issues],
+  };
 }

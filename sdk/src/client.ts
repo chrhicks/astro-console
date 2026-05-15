@@ -84,9 +84,13 @@ export class SeestarClient {
         });
         reject(err);
       };
+      const onTimeout = () => {
+        this.socket?.destroy(new Error(`connect ETIMEDOUT ${this.host}:${this.port}`));
+      };
       const onConnect = () => {
         cleanup();
         this.connected = true;
+        this.socket?.setTimeout(0);
         this.socket?.on("error", onSocketError);
         emitLog(this.logger, {
           level: "info",
@@ -106,6 +110,7 @@ export class SeestarClient {
       const cleanup = () => {
         this.socket?.off("error", onError);
         this.socket?.off("connect", onConnect);
+        this.socket?.off("timeout", onTimeout);
       };
 
       emitLog(this.logger, {
@@ -125,6 +130,7 @@ export class SeestarClient {
       this.socket.setTimeout(this.timeoutMs);
       this.socket.once("connect", onConnect);
       this.socket.once("error", onError);
+      this.socket.once("timeout", onTimeout);
       this.socket.on("data", (data) => this.onData(data));
       this.socket.on("close", () => {
         this.socket = null;

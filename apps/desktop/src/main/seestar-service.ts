@@ -12,12 +12,15 @@ import {
 import type {
   AddManualCatalogTargetRequest,
   ArchiveSiteProfileRequest,
+  DesktopDeviceTime,
   DesktopCommandRequest,
   ConnectRequest,
   CreateSiteProfileRequest,
   DesktopDiscoveredDevice,
   DuplicateSiteProfileRequest,
   DesktopLogEntry,
+  DesktopPlannerDiscoveryState,
+  DesktopPlannerHealth,
   DesktopPreviewFrame,
   DesktopPreviewState,
   DesktopReconnectState,
@@ -26,7 +29,7 @@ import type {
   SetActiveSiteRequest,
   UpdateSiteProfileRequest,
 } from "../shared/api";
-import type { PlanningSnapshot } from "../shared/planning";
+import type { PlanningSnapshot, SiteProfile } from "../shared/planning";
 import type { CatalogSearchResult } from "../shared/starter-catalog";
 import { PlanningStore } from "./planning-store";
 import { SeestarSessionRecorder } from "./session-recorder";
@@ -42,6 +45,8 @@ const DEFAULT_ACTION_WAIT = { waitForCompletion: true, timeoutMs: 120000, pollIn
 const AUTOFOCUS_ACTION_WAIT = { waitForCompletion: true, timeoutMs: 180000, pollIntervalMs: 500 } as const;
 const AUTO_RECONNECT_DELAY_MS = 3000;
 const AUTO_RECONNECT_MAX_ATTEMPTS = 3;
+const DISCOVERY_RETRY_ATTEMPTS = 3;
+const DISCOVERY_RETRY_DELAY_MS = 1000;
 
 export class SeestarDesktopService {
   private device: SeestarDevice | null = null;
@@ -61,6 +66,7 @@ export class SeestarDesktopService {
     preview: createDefaultPreviewState(),
     recording: createDefaultRecordingState(),
     reconnect: createDefaultReconnectState(),
+    planner: createDefaultPlannerHealth(),
   };
   private subscribers = new Set<WebContents>();
   private previewProcess: ChildProcessByStdio<null, Readable, Readable> | null = null;
@@ -107,15 +113,18 @@ export class SeestarDesktopService {
   }
 
   async connect(input: ConnectRequest): Promise<DesktopStatus> {
-    const host = input.host.trim();
-    if (!host) {
-      throw new Error("Host is required to connect to a Seestar device");
-    }
+    const host = input.host?.trim();
 
     this.manualDisconnectRequested = false;
     this.clearReconnectState();
 
-    return this.connectToHost(host, "connect", "connect", true);
+    return this.connectWithPlannerSync({
+      requestedHost: host,
+      trigger: "connect",
+      action: "connect",
+      startNewSession: true,
+      allowDiscoveryFallback: true,
+    });
   }
 
   async disconnect(): Promise<DesktopStatus> {
@@ -133,6 +142,7 @@ export class SeestarDesktopService {
         preview: createDefaultPreviewState(),
         recording: this.recorder.getState(),
         reconnect: createDefaultReconnectState(),
+        planner: createDefaultPlannerHealth(),
         lastUpdatedAt: new Date().toISOString(),
       };
       this.emitStatus("disconnect.completed");
@@ -144,57 +154,79 @@ export class SeestarDesktopService {
 
   async refreshState(): Promise<DesktopStatus> {
     return this.recordCommand("refresh-state", undefined, async () => {
-    if (!this.device || !this.device.isConnected()) {
-      this.stopPreviewProcess();
-      this.status = {
-        ...this.status,
-        connected: false,
-        authenticated: false,
-        deviceState: null,
-        viewState: null,
-        preview: createDefaultPreviewState(),
-        recording: this.recorder.getState(),
-        lastUpdatedAt: new Date().toISOString(),
-      };
-      this.emitStatus("refresh-state.disconnected");
-      await this.finishRecording("refresh-state.disconnected");
-      return this.getStatus();
-    }
+      if (!this.device || !this.device.isConnected()) {
+        this.stopPreviewProcess();
+        this.status = {
+          ...this.status,
+          connected: false,
+          authenticated: false,
+          deviceState: null,
+          viewState: null,
+          preview: createDefaultPreviewState(),
+          recording: this.recorder.getState(),
+          planner: createDefaultPlannerHealth(),
+          lastUpdatedAt: new Date().toISOString(),
+        };
+        this.emitStatus("refresh-state.disconnected");
+        await this.finishRecording("refresh-state.disconnected");
+        return this.getStatus();
+      }
 
-    try {
-      const [deviceState, viewState] = await Promise.all([
-        this.device.getDeviceState(),
-        this.device.getViewState(),
-      ]);
-      this.status = {
-        ...this.status,
-        connected: this.device.isConnected(),
-        authenticated: true,
-        deviceState: (deviceState ?? null) as Record<string, unknown> | null,
-        viewState: (viewState ?? null) as Record<string, unknown> | null,
-        recording: this.recorder.getState(),
-        lastError: undefined,
-        lastUpdatedAt: new Date().toISOString(),
-      };
-      this.emitStatus("refresh-state.completed");
-      return this.getStatus();
-    } catch (error) {
-      this.disconnectDevice();
-      this.status = {
-        ...this.status,
-        connected: false,
-        authenticated: false,
-        deviceState: null,
-        viewState: null,
-        preview: createDefaultPreviewState(),
-        recording: this.recorder.getState(),
-        lastError: toErrorMessage(error),
-        lastUpdatedAt: new Date().toISOString(),
-      };
-      this.emitStatus("refresh-state.failed");
-      await this.finishRecording("refresh-state.failed");
-      throw error;
-    }
+      try {
+        const telemetry = await this.collectPlannerTelemetry(this.device);
+        const activeSite = await this.getActiveSite();
+        const planner = buildPlannerHealth({
+          discovery: {
+            ...this.status.planner.discovery,
+            attempted: this.status.planner.discovery.attempted || Boolean(this.status.host),
+            resolvedHost: this.status.host,
+            lastAttemptAt: new Date().toISOString(),
+          },
+          activeSite,
+          telemetry,
+          clockAttempted: this.status.planner.clock.attempted,
+          clockSynced: this.status.planner.clock.synced,
+          clockSyncedAt: this.status.planner.clock.lastSyncedAt,
+          clockHostTime: this.status.planner.clock.hostTime,
+          clockError: this.status.planner.clock.lastError,
+          clockStaleBeforeSync: this.status.planner.clock.staleBeforeSync,
+          locationAttempted: this.status.planner.location.attempted,
+          locationSynced: this.status.planner.location.synced,
+          locationSyncedAt: this.status.planner.location.lastSyncedAt,
+          locationError: this.status.planner.location.lastError,
+        });
+
+        this.status = {
+          ...this.status,
+          connected: this.device.isConnected(),
+          authenticated: true,
+          deviceState: telemetry.deviceState,
+          viewState: telemetry.viewState,
+          recording: this.recorder.getState(),
+          planner,
+          lastError: undefined,
+          lastUpdatedAt: new Date().toISOString(),
+        };
+        this.emitStatus("refresh-state.completed");
+        return this.getStatus();
+      } catch (error) {
+        this.disconnectDevice();
+        this.status = {
+          ...this.status,
+          connected: false,
+          authenticated: false,
+          deviceState: null,
+          viewState: null,
+          preview: createDefaultPreviewState(),
+          recording: this.recorder.getState(),
+          planner: createDefaultPlannerHealth(),
+          lastError: toErrorMessage(error),
+          lastUpdatedAt: new Date().toISOString(),
+        };
+        this.emitStatus("refresh-state.failed");
+        await this.finishRecording("refresh-state.failed");
+        throw error;
+      }
     });
   }
 
@@ -308,6 +340,7 @@ export class SeestarDesktopService {
       preview: { ...this.status.preview },
       recording: { ...this.status.recording },
       reconnect: { ...this.status.reconnect },
+      planner: clonePlannerHealth(this.status.planner),
     };
   }
 
@@ -487,6 +520,7 @@ export class SeestarDesktopService {
       viewState: null,
       preview: createDefaultPreviewState(),
       recording: this.recorder.getState(),
+      planner: createDefaultPlannerHealth(),
       lastError: event.event === "connection.tcp.error" ? event.error ?? event.summary : undefined,
       lastUpdatedAt: new Date().toISOString(),
     };
@@ -666,66 +700,279 @@ export class SeestarDesktopService {
     }
   }
 
-  private async connectToHost(host: string, trigger: string, action: string, startNewSession: boolean): Promise<DesktopStatus> {
-    if (startNewSession || !this.recorder.getState().active) {
-      await this.recorder.startSession({ requestedHost: host, trigger });
+  private async connectWithPlannerSync(options: {
+    requestedHost?: string;
+    trigger: "connect" | "auto-reconnect";
+    action: string;
+    startNewSession: boolean;
+    allowDiscoveryFallback: boolean;
+  }): Promise<DesktopStatus> {
+    const requestedHost = options.requestedHost?.trim() || undefined;
+
+    if (options.startNewSession || !this.recorder.getState().active) {
+      await this.recorder.startSession({ requestedHost: requestedHost ?? "discovery", trigger: options.trigger });
     }
     this.syncRecordingState();
 
-    return this.recordCommand(action, { host }, async () => {
-      this.disconnectDevice();
-      const device = this.createDevice(host);
+    const activeSite = await this.getActiveSite();
 
-      try {
-        await device.connect();
-        const authenticated = await device.authenticate();
-        if (!authenticated) {
-          device.disconnect();
-          throw new Error("Authentication failed. Verify the PEM key and device firmware.");
-        }
+    return this.recordCommand(
+      options.action,
+      { host: requestedHost, activeSiteId: activeSite?.id },
+      async () => {
+        this.disconnectDevice();
 
-        this.device = device;
-        this.reconnectInFlight = false;
-        this.reconnectAttempt = 0;
-        this.status = {
-          connected: true,
-          authenticated: true,
-          host,
-          deviceState: null,
-          viewState: null,
-          preview: createDefaultPreviewState(),
-          recording: this.recorder.getState(),
-          reconnect: createDefaultReconnectState(),
-          lastUpdatedAt: new Date().toISOString(),
-        };
-        return this.refreshState();
-      } catch (error) {
-        this.reconnectInFlight = false;
-        this.status = {
-          connected: false,
-          authenticated: false,
-          host,
-          deviceState: null,
-          viewState: null,
-          preview: createDefaultPreviewState(),
-          recording: this.recorder.getState(),
-          reconnect: this.status.reconnect.active
-            ? {
-                ...this.status.reconnect,
-                host,
-                lastError: toErrorMessage(error),
-              }
-            : createDefaultReconnectState(),
-          lastError: toErrorMessage(error),
-          lastUpdatedAt: new Date().toISOString(),
-        };
-        this.emitStatus(trigger === "auto-reconnect" ? "reconnect.failed" : "connect.failed");
-        if (startNewSession) {
-          await this.finishRecording(trigger === "auto-reconnect" ? "reconnect.failed" : "connect.failed");
+        let discovery = createPlannerDiscoveryState({
+          requestedHost,
+          mode: requestedHost ? "direct" : "discovered",
+        });
+
+        try {
+          if (!requestedHost) {
+            const resolved = await this.resolveDiscoveredHost(undefined, "discovered");
+            discovery = resolved.discovery;
+            return await this.connectResolvedHost(resolved.host, options.trigger, activeSite, discovery);
+          }
+
+          return await this.connectResolvedHost(requestedHost, options.trigger, activeSite, discovery);
+        } catch (error) {
+          const primaryError = toErrorMessage(error);
+
+          if (requestedHost && options.allowDiscoveryFallback) {
+            try {
+              const fallback = await this.resolveDiscoveredHost(requestedHost, "fallback", primaryError);
+              return await this.connectResolvedHost(fallback.host, options.trigger, activeSite, fallback.discovery);
+            } catch (fallbackError) {
+              return await this.handleConnectFailure({
+                error: fallbackError,
+                host: requestedHost,
+                activeSite,
+                trigger: options.trigger,
+                startNewSession: options.startNewSession,
+                discovery: createPlannerDiscoveryState({
+                  requestedHost,
+                  mode: "fallback",
+                  lastError: `${primaryError}; ${toErrorMessage(fallbackError)}`,
+                }),
+              });
+            }
+          }
+
+          return await this.handleConnectFailure({
+            error,
+            host: requestedHost,
+            activeSite,
+            trigger: options.trigger,
+            startNewSession: options.startNewSession,
+            discovery,
+          });
         }
-        throw error;
       }
+    );
+  }
+
+  private async connectResolvedHost(
+    host: string,
+    trigger: "connect" | "auto-reconnect",
+    activeSite: SiteProfile | undefined,
+    discovery: DesktopPlannerDiscoveryState
+  ): Promise<DesktopStatus> {
+    const device = this.createDevice(host);
+
+    await device.connect();
+    const authenticated = await device.authenticate();
+    if (!authenticated) {
+      device.disconnect();
+      throw new Error("Authentication failed. Verify the PEM key and device firmware.");
+    }
+
+    this.device = device;
+    this.reconnectInFlight = false;
+    this.reconnectAttempt = 0;
+
+    const beforeSync = await this.collectPlannerTelemetry(device);
+    const syncAttempt = await this.syncPlannerState(device, activeSite, beforeSync);
+    const afterSync = await this.collectPlannerTelemetry(device);
+    const planner = buildPlannerHealth({
+      discovery: {
+        ...discovery,
+        resolvedHost: host,
+        lastAttemptAt: new Date().toISOString(),
+      },
+      activeSite,
+      telemetry: afterSync,
+      clockAttempted: syncAttempt.clockAttempted,
+      clockSynced: syncAttempt.clockSynced,
+      clockSyncedAt: syncAttempt.clockSyncedAt,
+      clockHostTime: syncAttempt.clockHostTime,
+      clockError: syncAttempt.clockError,
+      clockStaleBeforeSync: beforeSync.deviceTimeLooksStale,
+      locationAttempted: syncAttempt.locationAttempted,
+      locationSynced: syncAttempt.locationSynced,
+      locationSyncedAt: syncAttempt.locationSyncedAt,
+      locationError: syncAttempt.locationError,
     });
+
+    this.status = {
+      connected: true,
+      authenticated: true,
+      host,
+      deviceState: afterSync.deviceState,
+      viewState: afterSync.viewState,
+      preview: createDefaultPreviewState(),
+      recording: this.recorder.getState(),
+      reconnect: createDefaultReconnectState(),
+      planner,
+      lastUpdatedAt: new Date().toISOString(),
+    };
+    this.emitStatus(trigger === "auto-reconnect" ? "reconnect.completed" : "connect.completed");
+    return this.getStatus();
+  }
+
+  private async handleConnectFailure(input: {
+    error: unknown;
+    host: string | undefined;
+    activeSite: SiteProfile | undefined;
+    trigger: "connect" | "auto-reconnect";
+    startNewSession: boolean;
+    discovery: DesktopPlannerDiscoveryState;
+  }): Promise<DesktopStatus> {
+    this.reconnectInFlight = false;
+    this.status = {
+      connected: false,
+      authenticated: false,
+      host: input.host,
+      deviceState: null,
+      viewState: null,
+      preview: createDefaultPreviewState(),
+      recording: this.recorder.getState(),
+      reconnect: this.status.reconnect.active
+        ? {
+            ...this.status.reconnect,
+            host: input.host,
+            lastError: toErrorMessage(input.error),
+          }
+        : createDefaultReconnectState(),
+      planner: buildPlannerFailureHealth(input.activeSite, input.discovery, input.error),
+      lastError: toErrorMessage(input.error),
+      lastUpdatedAt: new Date().toISOString(),
+    };
+    this.emitStatus(input.trigger === "auto-reconnect" ? "reconnect.failed" : "connect.failed");
+    if (input.startNewSession) {
+      await this.finishRecording(input.trigger === "auto-reconnect" ? "reconnect.failed" : "connect.failed");
+    }
+    throw input.error;
+  }
+
+  private async resolveDiscoveredHost(
+    requestedHost: string | undefined,
+    mode: DesktopPlannerDiscoveryState["mode"],
+    lastError?: string
+  ): Promise<{ host: string; discovery: DesktopPlannerDiscoveryState }> {
+    let discovered: DesktopDiscoveredDevice[] = [];
+
+    for (let attempt = 1; attempt <= DISCOVERY_RETRY_ATTEMPTS; attempt += 1) {
+      discovered = await this.discover();
+      if (discovered.length > 0) {
+        break;
+      }
+      if (attempt < DISCOVERY_RETRY_ATTEMPTS) {
+        await delay(DISCOVERY_RETRY_DELAY_MS);
+      }
+    }
+
+    if (discovered.length === 0) {
+      throw new Error(
+        requestedHost
+          ? `Could not discover a Seestar after ${requestedHost} failed`
+          : "No Seestar devices were discovered on the network"
+      );
+    }
+
+    const selected = discovered.find((device) => device.host === requestedHost) ?? discovered[0];
+    return {
+      host: selected.host,
+      discovery: createPlannerDiscoveryState({
+        attempted: true,
+        mode,
+        requestedHost,
+        resolvedHost: selected.host,
+        candidateCount: discovered.length,
+        lastAttemptAt: new Date().toISOString(),
+        lastError,
+      }),
+    };
+  }
+
+  private async getActiveSite(): Promise<SiteProfile | undefined> {
+    const snapshot = await this.planningStore.getSnapshot();
+    return snapshot.state.sites.find((site) => site.id === snapshot.state.activeSiteId && !site.archivedAt);
+  }
+
+  private async collectPlannerTelemetry(device: SeestarDevice): Promise<PlannerTelemetry> {
+    const [deviceState, viewState, rawTime] = await Promise.all([
+      device.getDeviceState(),
+      device.getViewState(),
+      device.getTime(),
+    ]);
+
+    const nextDeviceState = (deviceState ?? null) as Record<string, unknown> | null;
+    return {
+      deviceState: nextDeviceState,
+      viewState: (viewState ?? null) as Record<string, unknown> | null,
+      deviceTime: readDeviceTime(rawTime),
+      deviceTimeLooksStale: isDeviceTimeStale(readDeviceTime(rawTime)),
+      deviceLocation: readDeviceLocation(nextDeviceState?.location_lon_lat),
+    };
+  }
+
+  private async syncPlannerState(
+    device: SeestarDevice,
+    activeSite: SiteProfile | undefined,
+    beforeSync: PlannerTelemetry
+  ): Promise<PlannerSyncAttempt> {
+    const now = new Date();
+    const timeZone = activeSite?.timezone ?? resolveHostTimeZone();
+    const hostTime = toDesktopDeviceTime(now, timeZone);
+    const syncAttempt: PlannerSyncAttempt = {
+      clockAttempted: true,
+      clockSynced: false,
+      clockHostTime: hostTime,
+      clockStaleBeforeSync: beforeSync.deviceTimeLooksStale,
+      locationAttempted: Boolean(activeSite),
+      locationSynced: false,
+    };
+
+    try {
+      const ok = await device.setTime(now, timeZone);
+      if (!ok) {
+        syncAttempt.clockError = "Device rejected time sync";
+      } else {
+        syncAttempt.clockSynced = true;
+        syncAttempt.clockSyncedAt = new Date().toISOString();
+      }
+    } catch (error) {
+      syncAttempt.clockError = toErrorMessage(error);
+    }
+
+    if (!activeSite) {
+      syncAttempt.locationError = "No active site selected for planner sync";
+      return syncAttempt;
+    }
+
+    try {
+      const ok = await device.setUserLocation(activeSite.lat, activeSite.lon);
+      if (!ok) {
+        syncAttempt.locationError = "Device rejected location update";
+      } else {
+        syncAttempt.locationSynced = true;
+        syncAttempt.locationSyncedAt = new Date().toISOString();
+      }
+    } catch (error) {
+      syncAttempt.locationError = toErrorMessage(error);
+    }
+
+    return syncAttempt;
   }
 
   private createDevice(host: string): SeestarDevice {
@@ -812,7 +1059,13 @@ export class SeestarDesktopService {
     this.emitStatus("reconnect.started");
 
     try {
-      await this.connectToHost(host, "auto-reconnect", "auto-reconnect", false);
+      await this.connectWithPlannerSync({
+        requestedHost: host,
+        trigger: "auto-reconnect",
+        action: "auto-reconnect",
+        startNewSession: false,
+        allowDiscoveryFallback: true,
+      });
 
       if (this.restorePreviewAfterReconnect && this.readViewMode() === "scenery" && !this.status.preview.active) {
         try {
@@ -826,9 +1079,6 @@ export class SeestarDesktopService {
           this.emitStatus("reconnect.preview-restore.failed");
         }
       }
-
-      this.clearReconnectState();
-      this.emitStatus("reconnect.completed");
     } catch (error) {
       this.reconnectInFlight = false;
       this.scheduleAutoReconnect(host, toErrorMessage(error));
@@ -852,6 +1102,27 @@ export class SeestarDesktopService {
   }
 }
 
+interface PlannerTelemetry {
+  deviceState: Record<string, unknown> | null;
+  viewState: Record<string, unknown> | null;
+  deviceTime?: DesktopDeviceTime;
+  deviceTimeLooksStale: boolean;
+  deviceLocation?: { lat: number; lon: number };
+}
+
+interface PlannerSyncAttempt {
+  clockAttempted: boolean;
+  clockSynced: boolean;
+  clockHostTime?: DesktopDeviceTime;
+  clockSyncedAt?: string;
+  clockError?: string;
+  clockStaleBeforeSync: boolean;
+  locationAttempted: boolean;
+  locationSynced: boolean;
+  locationSyncedAt?: string;
+  locationError?: string;
+}
+
 function createDefaultPreviewState(): DesktopPreviewState {
   return {
     active: false,
@@ -869,6 +1140,63 @@ function createDefaultReconnectState(): DesktopReconnectState {
   return {
     active: false,
     attempt: 0,
+  };
+}
+
+function createDefaultPlannerHealth(): DesktopPlannerHealth {
+  return {
+    ready: false,
+    discovery: createPlannerDiscoveryState({ mode: "direct" }),
+    clock: {
+      attempted: false,
+      synced: false,
+      staleBeforeSync: false,
+    },
+    location: {
+      attempted: false,
+      synced: false,
+      matchesActiveSite: false,
+    },
+    issues: [],
+  };
+}
+
+function createPlannerDiscoveryState(input: {
+  attempted?: boolean;
+  mode: DesktopPlannerDiscoveryState["mode"];
+  requestedHost?: string;
+  resolvedHost?: string;
+  candidateCount?: number;
+  lastAttemptAt?: string;
+  lastError?: string;
+}): DesktopPlannerDiscoveryState {
+  return {
+    attempted: input.attempted ?? (Boolean(input.requestedHost) || input.mode !== "direct"),
+    mode: input.mode,
+    requestedHost: input.requestedHost,
+    resolvedHost: input.resolvedHost,
+    candidateCount: input.candidateCount,
+    lastAttemptAt: input.lastAttemptAt,
+    lastError: input.lastError,
+  };
+}
+
+function clonePlannerHealth(planner: DesktopPlannerHealth): DesktopPlannerHealth {
+  return {
+    ...planner,
+    activeSite: planner.activeSite ? { ...planner.activeSite } : undefined,
+    discovery: { ...planner.discovery },
+    clock: {
+      ...planner.clock,
+      deviceTime: planner.clock.deviceTime ? { ...planner.clock.deviceTime } : undefined,
+      hostTime: planner.clock.hostTime ? { ...planner.clock.hostTime } : undefined,
+    },
+    location: {
+      ...planner.location,
+      deviceLocation: planner.location.deviceLocation ? { ...planner.location.deviceLocation } : undefined,
+      targetLocation: planner.location.targetLocation ? { ...planner.location.targetLocation } : undefined,
+    },
+    issues: [...planner.issues],
   };
 }
 
@@ -1024,6 +1352,175 @@ function isViewActive(viewState: unknown): boolean {
 function isStackActive(viewState: unknown): boolean {
   const view = asRecord(asRecord(viewState)?.View);
   return asString(view?.stage) === "Stack" && asString(view?.state) !== "cancel";
+}
+
+function buildPlannerHealth(input: {
+  discovery: DesktopPlannerDiscoveryState;
+  activeSite: SiteProfile | undefined;
+  telemetry: PlannerTelemetry;
+  clockAttempted: boolean;
+  clockSynced: boolean;
+  clockSyncedAt?: string;
+  clockHostTime?: DesktopDeviceTime;
+  clockError?: string;
+  clockStaleBeforeSync: boolean;
+  locationAttempted: boolean;
+  locationSynced: boolean;
+  locationSyncedAt?: string;
+  locationError?: string;
+}): DesktopPlannerHealth {
+  const activeSite = input.activeSite ? toPlannerSiteContext(input.activeSite) : undefined;
+  const locationMatchesActiveSite = Boolean(
+    input.activeSite && input.telemetry.deviceLocation && locationsMatch(input.telemetry.deviceLocation, input.activeSite)
+  );
+  const issues: string[] = [];
+
+  if (!input.activeSite) {
+    issues.push("No active site selected for planner sync");
+  }
+  if (!input.telemetry.deviceTime) {
+    issues.push("Device time is unavailable after connect");
+  } else if (input.telemetry.deviceTimeLooksStale) {
+    issues.push(`Device clock remains stale at ${formatDesktopDeviceTime(input.telemetry.deviceTime)}`);
+  }
+  if (input.clockError && input.telemetry.deviceTimeLooksStale) {
+    issues.push(`Clock sync failed: ${input.clockError}`);
+  }
+  if (input.activeSite && !input.telemetry.deviceLocation) {
+    issues.push("Device location is unavailable after connect");
+  }
+  if (input.activeSite && input.telemetry.deviceLocation && !locationMatchesActiveSite) {
+    issues.push(`Device location does not match active site ${input.activeSite.name}`);
+  }
+  if (input.locationError && input.activeSite && !locationMatchesActiveSite) {
+    issues.push(`Location sync failed: ${input.locationError}`);
+  }
+
+  return {
+    ready: issues.length === 0,
+    activeSite,
+    discovery: { ...input.discovery },
+    clock: {
+      attempted: input.clockAttempted,
+      synced: !input.telemetry.deviceTimeLooksStale && (input.clockSynced || !input.clockStaleBeforeSync),
+      staleBeforeSync: input.clockStaleBeforeSync,
+      deviceTime: input.telemetry.deviceTime,
+      hostTime: input.clockHostTime,
+      lastSyncedAt: input.clockSyncedAt,
+      lastError: input.clockError,
+    },
+    location: {
+      attempted: input.locationAttempted,
+      synced: Boolean(input.activeSite) && locationMatchesActiveSite && (input.locationSynced || !input.locationAttempted),
+      matchesActiveSite: locationMatchesActiveSite,
+      targetLocation: input.activeSite ? { lat: input.activeSite.lat, lon: input.activeSite.lon } : undefined,
+      deviceLocation: input.telemetry.deviceLocation,
+      lastSyncedAt: input.locationSyncedAt,
+      lastError: input.locationError,
+    },
+    issues,
+    lastCheckedAt: new Date().toISOString(),
+  };
+}
+
+function buildPlannerFailureHealth(
+  activeSite: SiteProfile | undefined,
+  discovery: DesktopPlannerDiscoveryState,
+  error: unknown
+): DesktopPlannerHealth {
+  return {
+    ...createDefaultPlannerHealth(),
+    activeSite: activeSite ? toPlannerSiteContext(activeSite) : undefined,
+    discovery: {
+      ...discovery,
+      lastError: toErrorMessage(error),
+      lastAttemptAt: new Date().toISOString(),
+    },
+    issues: [toErrorMessage(error)],
+    lastCheckedAt: new Date().toISOString(),
+  };
+}
+
+function toPlannerSiteContext(site: SiteProfile): DesktopPlannerHealth["activeSite"] {
+  return {
+    id: site.id,
+    name: site.name,
+    lat: site.lat,
+    lon: site.lon,
+    timezone: site.timezone,
+  };
+}
+
+function readDeviceTime(value: unknown): DesktopDeviceTime | undefined {
+  const record = asRecord(value);
+  const year = asNumber(record?.year);
+  const mon = asNumber(record?.mon);
+  const day = asNumber(record?.day);
+  const hour = asNumber(record?.hour);
+  const min = asNumber(record?.min);
+  const sec = asNumber(record?.sec);
+  if (
+    typeof year !== "number" ||
+    typeof mon !== "number" ||
+    typeof day !== "number" ||
+    typeof hour !== "number" ||
+    typeof min !== "number" ||
+    typeof sec !== "number"
+  ) {
+    return undefined;
+  }
+
+  return {
+    year,
+    mon,
+    day,
+    hour,
+    min,
+    sec,
+    timeZone: asString(record?.time_zone),
+  };
+}
+
+function isDeviceTimeStale(time: DesktopDeviceTime | undefined): boolean {
+  if (!time) return false;
+  return time.year < new Date().getFullYear() - 1;
+}
+
+function formatDesktopDeviceTime(time: DesktopDeviceTime): string {
+  return [String(time.year).padStart(4, "0"), String(time.mon).padStart(2, "0"), String(time.day).padStart(2, "0")].join("-") +
+    ` ${[time.hour, time.min, time.sec].map((part) => String(part).padStart(2, "0")).join(":")}${time.timeZone ? ` ${time.timeZone}` : ""}`;
+}
+
+function readDeviceLocation(value: unknown): { lat: number; lon: number } | undefined {
+  if (!Array.isArray(value) || value.length < 2) return undefined;
+  const lon = asNumber(value[0]);
+  const lat = asNumber(value[1]);
+  if (typeof lat !== "number" || typeof lon !== "number") return undefined;
+  return { lat, lon };
+}
+
+function locationsMatch(left: { lat: number; lon: number }, right: { lat: number; lon: number }): boolean {
+  return Math.abs(left.lat - right.lat) <= 0.001 && Math.abs(left.lon - right.lon) <= 0.001;
+}
+
+function toDesktopDeviceTime(date: Date, timeZone: string): DesktopDeviceTime {
+  return {
+    year: date.getFullYear(),
+    mon: date.getMonth() + 1,
+    day: date.getDate(),
+    hour: date.getHours(),
+    min: date.getMinutes(),
+    sec: date.getSeconds(),
+    timeZone,
+  };
+}
+
+function resolveHostTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function resolveWorkspaceRoot(startDir: string): string | undefined {
