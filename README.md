@@ -31,6 +31,11 @@ npm install
 npm run dev
 ```
 
+## Planning Docs
+
+- `docs/planning-operator-guide.md` - operator workflow, live verification flow, and recording guidance
+- `docs/planning-release-checklist.md` - staged planning milestone verification checklist
+
 ## Notes
 
 - The Seestar PEM key is required for authentication and is intentionally not committed.

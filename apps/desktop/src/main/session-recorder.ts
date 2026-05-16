@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { LogEvent } from "../../../../sdk/dist/index.js";
-import type { DesktopPlannerHealth, DesktopRecordingState, DesktopStatus } from "../shared/api";
+import type { DesktopPlannerHealth, DesktopQueueRunnerState, DesktopRecordingState, DesktopStatus } from "../shared/api";
 
 const ARTIFACT_FILES = {
   session: "session.json",
@@ -83,6 +83,14 @@ interface RecordedStatusSummary {
     activeSiteName?: string;
     discoveryMode: string;
     issues: string[];
+  };
+  runner?: {
+    active: boolean;
+    dryRun: boolean;
+    phase: string;
+    currentTargetName?: string;
+    summary?: string;
+    lastError?: string;
   };
 }
 
@@ -422,6 +430,7 @@ function cloneStatus(status: DesktopStatus): DesktopStatus {
     recording: cloneJsonValue(status.recording),
     reconnect: cloneJsonValue(status.reconnect),
     planner: cloneJsonValue(status.planner),
+    runner: cloneJsonValue(status.runner),
   };
 }
 
@@ -448,6 +457,7 @@ function summarizeStatus(status: DesktopStatus): RecordedStatusSummary {
       targetName: asString(view?.target_name),
     },
     planner: summarizePlanner(status.planner),
+    runner: summarizeRunner(status.runner),
   };
 }
 
@@ -464,6 +474,7 @@ function describeStatus(status: DesktopStatus): string {
     view.length > 0 ? `view=${view.join("/")}` : undefined,
     summary.view?.targetName ? `target=${summary.view.targetName}` : undefined,
     summary.planner ? `planner=${summary.planner.ready ? "ready" : "attention"}` : undefined,
+    summary.runner?.active ? `runner=${summary.runner.phase}` : undefined,
     summary.lastError ? `error=${summary.lastError}` : undefined,
     summary.preview.lastError ? `previewError=${summary.preview.lastError}` : undefined,
   ].filter((part): part is string => Boolean(part));
@@ -519,5 +530,17 @@ function summarizePlanner(planner: DesktopPlannerHealth | undefined): RecordedSt
     activeSiteName: planner.activeSite?.name,
     discoveryMode: planner.discovery.mode,
     issues: [...planner.issues],
+  };
+}
+
+function summarizeRunner(runner: DesktopQueueRunnerState | undefined): RecordedStatusSummary["runner"] | undefined {
+  if (!runner) return undefined;
+  return {
+    active: runner.active,
+    dryRun: runner.dryRun,
+    phase: runner.phase,
+    currentTargetName: runner.currentTargetName,
+    summary: runner.summary,
+    lastError: runner.lastError,
   };
 }

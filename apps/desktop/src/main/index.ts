@@ -12,6 +12,7 @@ import type {
   ReplaceQueueRequest,
   SearchCatalogTargetsRequest,
   SetActiveSiteRequest,
+  StartQueueRunRequest,
   UpdateSiteProfileRequest,
 } from "../shared/api";
 
@@ -59,6 +60,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle("seestar:add-manual-catalog-target", (_event, input: AddManualCatalogTargetRequest) => service.addManualCatalogTarget(input));
   ipcMain.handle("seestar:replace-queue", (_event, input: ReplaceQueueRequest) => service.replaceQueue(input));
   ipcMain.handle("seestar:create-queue-from-drafts", (_event, input: CreateQueueFromDraftsRequest) => service.createQueueFromDrafts(input));
+  ipcMain.handle("seestar:start-queue-run", (_event, input: StartQueueRunRequest) => service.startQueueRun(input));
+  ipcMain.handle("seestar:stop-queue-run", () => service.stopQueueRun());
   ipcMain.handle("seestar:refresh-state", () => service.refreshState());
   ipcMain.handle("seestar:start-preview", () => service.startPreview());
   ipcMain.handle("seestar:stop-preview", () => service.stopPreview());

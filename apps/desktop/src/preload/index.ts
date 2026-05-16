@@ -15,6 +15,7 @@ import type {
   SearchCatalogTargetsRequest,
   SetActiveSiteRequest,
   SeestarDesktopApi,
+  StartQueueRunRequest,
   UpdateSiteProfileRequest,
 } from "../shared/api";
 import type { PlanningSnapshot } from "../shared/planning";
@@ -44,6 +45,9 @@ const api: SeestarDesktopApi = {
     ipcRenderer.invoke("seestar:replace-queue", input) as Promise<PlanningSnapshot>,
   createQueueFromDrafts: (input: CreateQueueFromDraftsRequest) =>
     ipcRenderer.invoke("seestar:create-queue-from-drafts", input) as Promise<PlanningSnapshot>,
+  startQueueRun: (input: StartQueueRunRequest) =>
+    ipcRenderer.invoke("seestar:start-queue-run", input) as Promise<DesktopStatus>,
+  stopQueueRun: () => ipcRenderer.invoke("seestar:stop-queue-run") as Promise<DesktopStatus>,
   refreshState: () => ipcRenderer.invoke("seestar:refresh-state") as Promise<DesktopStatus>,
   startPreview: () => ipcRenderer.invoke("seestar:start-preview") as Promise<DesktopStatus>,
   stopPreview: () => ipcRenderer.invoke("seestar:stop-preview") as Promise<DesktopStatus>,

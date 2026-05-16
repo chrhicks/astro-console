@@ -24,9 +24,11 @@ import type {
   DesktopPlannerHealth,
   DesktopPreviewFrame,
   DesktopPreviewState,
+  DesktopQueueRunnerState,
   DesktopReconnectState,
   ReplaceQueueRequest,
   SearchCatalogTargetsRequest,
+  StartQueueRunRequest,
   DesktopStatus,
   SetActiveSiteRequest,
   UpdateSiteProfileRequest,
@@ -34,6 +36,7 @@ import type {
 import type { PlanningSnapshot, SiteProfile } from "../shared/planning";
 import type { CatalogSearchResult } from "../shared/starter-catalog";
 import { PlanningStore } from "./planning-store";
+import { QueueRunner, createDefaultQueueRunnerState } from "./queue-runner";
 import { SeestarSessionRecorder } from "./session-recorder";
 
 const LOG_LIMIT = 250;
@@ -69,6 +72,7 @@ export class SeestarDesktopService {
     recording: createDefaultRecordingState(),
     reconnect: createDefaultReconnectState(),
     planner: createDefaultPlannerHealth(),
+    runner: createDefaultQueueRunnerState(),
   };
   private subscribers = new Set<WebContents>();
   private previewProcess: ChildProcessByStdio<null, Readable, Readable> | null = null;
@@ -95,6 +99,15 @@ export class SeestarDesktopService {
       }
     },
   };
+  private queueRunner = new QueueRunner({
+    logger: this.logger,
+    getPlanningSnapshot: () => this.planningStore.getSnapshot(),
+    getStatus: () => this.getStatus(),
+    refreshStatus: () => this.refreshState(),
+    requireConnectedDevice: () => this.requireConnectedDevice(),
+    detachPreviewForAutomation: (reason) => this.detachPreviewForAutomation(reason),
+    onStateChange: (state, reason) => this.applyQueueRunnerState(state, reason),
+  });
 
   attachRenderer(webContents: WebContents): void {
     this.subscribers.add(webContents);
@@ -133,6 +146,7 @@ export class SeestarDesktopService {
     this.manualDisconnectRequested = true;
     this.restorePreviewAfterReconnect = false;
     this.clearReconnectState();
+    this.queueRunner.handleConnectionLost("Operator disconnected during queue execution");
 
     await this.recordCommand("disconnect", undefined, async () => {
       this.disconnectDevice();
@@ -145,6 +159,7 @@ export class SeestarDesktopService {
         recording: this.recorder.getState(),
         reconnect: createDefaultReconnectState(),
         planner: createDefaultPlannerHealth(),
+        runner: { ...this.status.runner },
         lastUpdatedAt: new Date().toISOString(),
       };
       this.emitStatus("disconnect.completed");
@@ -167,6 +182,7 @@ export class SeestarDesktopService {
           preview: createDefaultPreviewState(),
           recording: this.recorder.getState(),
           planner: createDefaultPlannerHealth(),
+          runner: { ...this.status.runner },
           lastUpdatedAt: new Date().toISOString(),
         };
         this.emitStatus("refresh-state.disconnected");
@@ -222,6 +238,7 @@ export class SeestarDesktopService {
           preview: createDefaultPreviewState(),
           recording: this.recorder.getState(),
           planner: createDefaultPlannerHealth(),
+          runner: { ...this.status.runner },
           lastError: toErrorMessage(error),
           lastUpdatedAt: new Date().toISOString(),
         };
@@ -234,6 +251,7 @@ export class SeestarDesktopService {
 
   async startPreview(): Promise<DesktopStatus> {
     return this.recordCommand("start-preview", undefined, async () => {
+      this.ensureRunnerIdle("start live preview");
       if (!this.device || !this.device.isConnected()) {
         throw new Error("Connect to a Seestar device before starting live preview");
       }
@@ -323,6 +341,7 @@ export class SeestarDesktopService {
 
   async stopPreview(): Promise<DesktopStatus> {
     return this.recordCommand("stop-preview", undefined, async () => {
+      this.ensureRunnerIdle("stop live preview");
       this.stopPreviewProcess();
       this.restorePreviewAfterReconnect = false;
       this.status = {
@@ -343,6 +362,7 @@ export class SeestarDesktopService {
       recording: { ...this.status.recording },
       reconnect: { ...this.status.reconnect },
       planner: clonePlannerHealth(this.status.planner),
+      runner: { ...this.status.runner },
     };
   }
 
@@ -367,6 +387,7 @@ export class SeestarDesktopService {
   }
 
   async setActiveSite(input: SetActiveSiteRequest): Promise<PlanningSnapshot> {
+    this.ensureRunnerIdle("change the active site");
     return this.planningStore.setActiveSite(input);
   }
 
@@ -379,11 +400,23 @@ export class SeestarDesktopService {
   }
 
   async replaceQueue(input: ReplaceQueueRequest): Promise<PlanningSnapshot> {
+    this.ensureRunnerIdle("edit the queue");
     return this.planningStore.replaceQueue(input);
   }
 
   async createQueueFromDrafts(input: CreateQueueFromDraftsRequest): Promise<PlanningSnapshot> {
+    this.ensureRunnerIdle("create a queue draft");
     return this.planningStore.createQueueFromDrafts(input);
+  }
+
+  async startQueueRun(input: StartQueueRunRequest): Promise<DesktopStatus> {
+    await this.queueRunner.start({ dryRun: input.dryRun });
+    return this.getStatus();
+  }
+
+  async stopQueueRun(): Promise<DesktopStatus> {
+    await this.queueRunner.requestStop();
+    return this.getStatus();
   }
 
   getLogs(): DesktopLogEntry[] {
@@ -397,6 +430,7 @@ export class SeestarDesktopService {
 
   async runCommand(input: DesktopCommandRequest): Promise<DesktopStatus> {
     return this.recordCommand(input.action, input, async () => {
+      this.ensureRunnerIdle(`run ${input.action}`);
       const device = this.requireConnectedDevice();
       let stopPreview = false;
 
@@ -483,6 +517,12 @@ export class SeestarDesktopService {
     this.device = null;
   }
 
+  private ensureRunnerIdle(action: string): void {
+    if (this.queueRunner.getState().active) {
+      throw new Error(`Cannot ${action} while the queue runner is active`);
+    }
+  }
+
   private requireConnectedDevice(): SeestarDevice {
     if (!this.device || !this.device.isConnected()) {
       throw new Error("Connect to a Seestar device before sending commands");
@@ -511,6 +551,30 @@ export class SeestarDesktopService {
     }
   }
 
+  private async applyQueueRunnerState(state: DesktopQueueRunnerState, reason: string): Promise<void> {
+    this.status = {
+      ...this.status,
+      runner: { ...state },
+      lastUpdatedAt: new Date().toISOString(),
+    };
+    this.emitStatus(reason);
+  }
+
+  private detachPreviewForAutomation(reason: string): void {
+    if (!this.previewProcess && !this.status.preview.active) {
+      return;
+    }
+    this.stopPreviewProcess();
+    this.restorePreviewAfterReconnect = false;
+    this.status = {
+      ...this.status,
+      preview: createDefaultPreviewState(),
+      recording: this.recorder.getState(),
+      lastUpdatedAt: new Date().toISOString(),
+    };
+    this.emitStatus(reason);
+  }
+
   private applyLogSideEffects(event: LogEvent): void {
     if (event.event !== "connection.tcp.closed" && event.event !== "connection.tcp.error") {
       return;
@@ -522,6 +586,7 @@ export class SeestarDesktopService {
 
     this.stopPreviewProcess();
     this.device = null;
+    this.queueRunner.handleConnectionLost(event.error ?? event.summary ?? "Device connection closed");
     this.status = {
       ...this.status,
       connected: false,
@@ -531,6 +596,7 @@ export class SeestarDesktopService {
       preview: createDefaultPreviewState(),
       recording: this.recorder.getState(),
       planner: createDefaultPlannerHealth(),
+      runner: { ...this.status.runner },
       lastError: event.event === "connection.tcp.error" ? event.error ?? event.summary : undefined,
       lastUpdatedAt: new Date().toISOString(),
     };
@@ -833,6 +899,7 @@ export class SeestarDesktopService {
       recording: this.recorder.getState(),
       reconnect: createDefaultReconnectState(),
       planner,
+      runner: { ...this.status.runner },
       lastUpdatedAt: new Date().toISOString(),
     };
     this.emitStatus(trigger === "auto-reconnect" ? "reconnect.completed" : "connect.completed");
@@ -864,6 +931,7 @@ export class SeestarDesktopService {
           }
         : createDefaultReconnectState(),
       planner: buildPlannerFailureHealth(input.activeSite, input.discovery, input.error),
+      runner: { ...this.status.runner },
       lastError: toErrorMessage(input.error),
       lastUpdatedAt: new Date().toISOString(),
     };

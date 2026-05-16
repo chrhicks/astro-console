@@ -107,6 +107,35 @@ export interface DesktopPlannerHealth {
   lastCheckedAt?: string;
 }
 
+export type DesktopQueueRunnerPhase =
+  | "idle"
+  | "validating"
+  | "waiting"
+  | "slewing"
+  | "focusing"
+  | "stacking"
+  | "stopping"
+  | "stopped"
+  | "completed"
+  | "failed";
+
+export interface DesktopQueueRunnerState {
+  active: boolean;
+  dryRun: boolean;
+  stopRequested: boolean;
+  phase: DesktopQueueRunnerPhase;
+  queueLength: number;
+  completedCount: number;
+  runId?: string;
+  startedAt?: string;
+  lastTransitionAt?: string;
+  currentItemId?: string;
+  currentTargetName?: string;
+  currentIndex?: number;
+  summary?: string;
+  lastError?: string;
+}
+
 export interface DesktopStatus {
   connected: boolean;
   authenticated: boolean;
@@ -117,6 +146,7 @@ export interface DesktopStatus {
   recording: DesktopRecordingState;
   reconnect: DesktopReconnectState;
   planner: DesktopPlannerHealth;
+  runner: DesktopQueueRunnerState;
   lastUpdatedAt?: string;
   lastError?: string;
 }
@@ -165,6 +195,10 @@ export interface CreateQueueFromDraftsRequest {
   items: QueueItemDraft[];
 }
 
+export interface StartQueueRunRequest {
+  dryRun?: boolean;
+}
+
 export type DesktopViewMode = "star" | "moon" | "sun" | "planet" | "scenery";
 
 export type DesktopCommandAction =
@@ -196,6 +230,8 @@ export interface SeestarDesktopApi {
   addManualCatalogTarget(input: AddManualCatalogTargetRequest): Promise<PlanningSnapshot>;
   replaceQueue(input: ReplaceQueueRequest): Promise<PlanningSnapshot>;
   createQueueFromDrafts(input: CreateQueueFromDraftsRequest): Promise<PlanningSnapshot>;
+  startQueueRun(input: StartQueueRunRequest): Promise<DesktopStatus>;
+  stopQueueRun(): Promise<DesktopStatus>;
   refreshState(): Promise<DesktopStatus>;
   startPreview(): Promise<DesktopStatus>;
   stopPreview(): Promise<DesktopStatus>;

@@ -46,6 +46,14 @@ const EMPTY_STATUS: DesktopStatus = {
     },
     issues: [],
   },
+  runner: {
+    active: false,
+    dryRun: false,
+    stopRequested: false,
+    phase: "idle",
+    queueLength: 0,
+    completedCount: 0,
+  },
 };
 
 const VIEW_MODES: DesktopViewMode[] = ["scenery", "star", "moon", "sun", "planet"];
@@ -152,11 +160,11 @@ export function App() {
   const rawStatusJson = useMemo(
     () =>
       JSON.stringify(
-        { deviceState: status.deviceState, viewState: status.viewState, preview: status.preview, planner: status.planner },
+        { deviceState: status.deviceState, viewState: status.viewState, preview: status.preview, planner: status.planner, runner: status.runner },
         null,
         2
       ) ?? "null",
-    [status.deviceState, status.planner, status.preview, status.viewState]
+    [status.deviceState, status.planner, status.preview, status.runner, status.viewState]
   );
 
   const previewUpdatedAt = previewFrame?.ts ?? status.preview.lastFrameAt;
@@ -337,6 +345,26 @@ export function App() {
     const [item] = reordered.splice(currentIndex, 1);
     reordered.splice(nextIndex, 0, item);
     await persistQueue(reordered);
+  }
+
+  async function startQueueRun(dryRun: boolean) {
+    setQueueError(null);
+    try {
+      const nextStatus = await window.seestar.startQueueRun({ dryRun });
+      setStatus(nextStatus);
+    } catch (runnerError) {
+      setQueueError(toErrorMessage(runnerError));
+    }
+  }
+
+  async function stopQueueRun() {
+    setQueueError(null);
+    try {
+      const nextStatus = await window.seestar.stopQueueRun();
+      setStatus(nextStatus);
+    } catch (runnerError) {
+      setQueueError(toErrorMessage(runnerError));
+    }
   }
 
   return (
@@ -1113,6 +1141,7 @@ export function App() {
                     catalogById={catalogById}
                     activeSite={activeSite}
                     queueItemCounts={queueItemCounts}
+                    runnerActive={status.runner.active}
                     onAddToQueue={addTargetToQueue}
                   />
                   <TonightBucket
@@ -1122,6 +1151,7 @@ export function App() {
                     catalogById={catalogById}
                     activeSite={activeSite}
                     queueItemCounts={queueItemCounts}
+                    runnerActive={status.runner.active}
                     onAddToQueue={addTargetToQueue}
                   />
                   <TonightBucket
@@ -1131,6 +1161,7 @@ export function App() {
                     catalogById={catalogById}
                     activeSite={activeSite}
                     queueItemCounts={queueItemCounts}
+                    runnerActive={status.runner.active}
                     onAddToQueue={addTargetToQueue}
                   />
                 </div>
@@ -1152,7 +1183,38 @@ export function App() {
                   label="Warnings"
                   value={String([...queueDiagnostics.values()].reduce((total, entry) => total + entry.warnings.length, 0))}
                 />
-                <QuickStat label="Saved" value={planning ? "Local" : "Waiting"} />
+                <QuickStat label="Runner" value={formatRunnerPhase(status.runner)} />
+              </div>
+            </div>
+
+            <div className="queue-runner-strip">
+              <div className="queue-runner-summary">
+                <p>
+                  {status.runner.active
+                    ? `${status.runner.dryRun ? "Dry run" : "Live run"} in ${formatRunnerPhase(status.runner)}${status.runner.currentTargetName ? ` on ${status.runner.currentTargetName}` : ""}.`
+                    : status.runner.summary ?? "Runner idle."}
+                </p>
+                {status.runner.lastError ? <p className="message error queue-runner-message">{status.runner.lastError}</p> : null}
+              </div>
+              <div className="actions queue-runner-actions">
+                <button
+                  type="button"
+                  onClick={() => void startQueueRun(true)}
+                  disabled={Boolean(busyAction) || status.runner.active || queueItems.length === 0}
+                >
+                  Dry run
+                </button>
+                <button
+                  className="primary"
+                  type="button"
+                  onClick={() => void startQueueRun(false)}
+                  disabled={Boolean(busyAction) || status.runner.active || queueItems.length === 0}
+                >
+                  Run queue
+                </button>
+                <button type="button" onClick={() => void stopQueueRun()} disabled={!status.runner.active}>
+                  {status.runner.stopRequested ? "Stopping..." : "Stop"}
+                </button>
               </div>
             </div>
 
@@ -1175,6 +1237,7 @@ export function App() {
                     target={target}
                     activeSite={activeSite}
                     queuedCount={activeSite ? queueItemCounts.get(buildQueueTargetKey(activeSite.id, target.id)) ?? 0 : 0}
+                    runnerActive={status.runner.active}
                     onAddToQueue={addTargetToQueue}
                   />
                 ))}
@@ -1195,6 +1258,7 @@ export function App() {
                     total={queueItems.length}
                     site={siteById.get(item.siteId)}
                     warnings={queueDiagnostics.get(item.id)?.warnings ?? []}
+                    disabled={status.runner.active}
                     onMove={moveQueueItem}
                     onRemove={removeQueueItem}
                     onUpdate={updateQueueItem}
@@ -1434,6 +1498,31 @@ function formatPlannerDeviceTime(status: DesktopStatus): string {
   return `${date} ${time}${deviceTime.timeZone ? ` ${deviceTime.timeZone}` : ""}`;
 }
 
+function formatRunnerPhase(runner: DesktopStatus["runner"]): string {
+  switch (runner.phase) {
+    case "validating":
+      return "Validating";
+    case "waiting":
+      return "Waiting";
+    case "slewing":
+      return "Slewing";
+    case "focusing":
+      return "Focusing";
+    case "stacking":
+      return "Stacking";
+    case "stopping":
+      return "Stopping";
+    case "completed":
+      return "Completed";
+    case "stopped":
+      return "Stopped";
+    case "failed":
+      return "Failed";
+    default:
+      return runner.active ? "Running" : "Idle";
+  }
+}
+
 function formatView(summary: DeviceSummary): string {
   if (!summary.viewMode || summary.viewMode === "none" || summary.viewState === "cancel") {
     return "Idle";
@@ -1603,6 +1692,7 @@ function TonightBucket(props: {
   catalogById: Map<string, CatalogTarget>;
   activeSite: SiteProfile | null;
   queueItemCounts: Map<string, number>;
+  runnerActive: boolean;
   onAddToQueue(target: CatalogTarget): Promise<void> | void;
 }) {
   return (
@@ -1626,6 +1716,7 @@ function TonightBucket(props: {
                   ? props.queueItemCounts.get(buildQueueTargetKey(props.activeSite.id, entry.targetId)) ?? 0
                   : 0
               }
+              runnerActive={props.runnerActive}
               onAddToQueue={props.onAddToQueue}
             />
           ))}
@@ -1640,10 +1731,11 @@ function TonightTargetCard(props: {
   ranking: RankedTarget;
   activeSite: SiteProfile | null;
   queuedCount: number;
+  runnerActive: boolean;
   onAddToQueue(target: CatalogTarget): Promise<void> | void;
 }) {
   const addLabel = props.queuedCount > 0 ? `In queue (${props.queuedCount})` : "Add to queue";
-  const canAdd = Boolean(props.target) && Boolean(props.activeSite) && props.queuedCount === 0;
+  const canAdd = Boolean(props.target) && Boolean(props.activeSite) && props.queuedCount === 0 && !props.runnerActive;
 
   return (
     <article className={`tonight-target-card recommendation-${props.ranking.recommendation}`}>
@@ -1703,9 +1795,10 @@ function QueueSearchResultCard(props: {
   target: CatalogTarget;
   activeSite: SiteProfile | null;
   queuedCount: number;
+  runnerActive: boolean;
   onAddToQueue(target: CatalogTarget): Promise<void> | void;
 }) {
-  const canAdd = Boolean(props.activeSite) && props.queuedCount === 0;
+  const canAdd = Boolean(props.activeSite) && props.queuedCount === 0 && !props.runnerActive;
 
   return (
     <button
@@ -1720,7 +1813,9 @@ function QueueSearchResultCard(props: {
         {props.target.constellation ? ` • ${props.target.constellation}` : ""}
       </span>
       <span>
-        {!props.activeSite
+        {props.runnerActive
+          ? "Runner active"
+          : !props.activeSite
           ? "Select a site first"
           : props.queuedCount > 0
             ? `Already in queue (${props.queuedCount})`
@@ -1736,6 +1831,7 @@ function QueueItemCard(props: {
   total: number;
   site: SiteProfile | undefined;
   warnings: string[];
+  disabled: boolean;
   onMove(itemId: string, direction: -1 | 1): Promise<void> | void;
   onRemove(itemId: string): Promise<void> | void;
   onUpdate(itemId: string, patch: Partial<QueueItem>): Promise<void> | void;
@@ -1764,13 +1860,13 @@ function QueueItemCard(props: {
           </p>
         </div>
         <div className="actions queue-item-actions">
-          <button onClick={() => void props.onMove(props.item.id, -1)} disabled={props.index === 0} type="button">
+          <button onClick={() => void props.onMove(props.item.id, -1)} disabled={props.disabled || props.index === 0} type="button">
             Up
           </button>
-          <button onClick={() => void props.onMove(props.item.id, 1)} disabled={props.index === props.total - 1} type="button">
+          <button onClick={() => void props.onMove(props.item.id, 1)} disabled={props.disabled || props.index === props.total - 1} type="button">
             Down
           </button>
-          <button onClick={() => void props.onRemove(props.item.id)} type="button">
+          <button onClick={() => void props.onRemove(props.item.id)} disabled={props.disabled} type="button">
             Remove
           </button>
         </div>
@@ -1781,6 +1877,7 @@ function QueueItemCard(props: {
           <span>Duration min</span>
           <input
             value={durationInput}
+            disabled={props.disabled}
             onChange={(event) => setDurationInput(event.target.value)}
             onBlur={() => {
               const parsed = Number(durationInput);
@@ -1797,6 +1894,7 @@ function QueueItemCard(props: {
           <span>Not before</span>
           <input
             value={notBeforeInput}
+            disabled={props.disabled}
             onChange={(event) => setNotBeforeInput(event.target.value)}
             onBlur={() => {
               const trimmed = notBeforeInput.trim();
@@ -1818,6 +1916,7 @@ function QueueItemCard(props: {
           <span>Stop below alt</span>
           <input
             value={altitudeInput}
+            disabled={props.disabled}
             onChange={(event) => setAltitudeInput(event.target.value)}
             onBlur={() => {
               const trimmed = altitudeInput.trim();
@@ -1844,6 +1943,7 @@ function QueueItemCard(props: {
           <span>Filter</span>
           <select
             value={props.item.requestedFilter ?? ""}
+            disabled={props.disabled}
             onChange={(event) =>
               void props.onUpdate(props.item.id, {
                 requestedFilter: event.target.value ? (event.target.value as QueueItem["requestedFilter"]) : undefined,
@@ -1863,6 +1963,7 @@ function QueueItemCard(props: {
           <input
             type="checkbox"
             checked={props.item.stopWhenBackyardHidden}
+            disabled={props.disabled}
             onChange={(event) => void props.onUpdate(props.item.id, { stopWhenBackyardHidden: event.target.checked })}
           />
           <span>Stop when backyard hidden</span>
@@ -1871,6 +1972,7 @@ function QueueItemCard(props: {
           <input
             type="checkbox"
             checked={props.item.stopAtDawn}
+            disabled={props.disabled}
             onChange={(event) => void props.onUpdate(props.item.id, { stopAtDawn: event.target.checked })}
           />
           <span>Stop at dawn</span>
@@ -1879,6 +1981,7 @@ function QueueItemCard(props: {
           <input
             type="checkbox"
             checked={props.item.autofocusBeforeStart}
+            disabled={props.disabled}
             onChange={(event) => void props.onUpdate(props.item.id, { autofocusBeforeStart: event.target.checked })}
           />
           <span>Autofocus before start</span>
@@ -1887,6 +1990,7 @@ function QueueItemCard(props: {
           <input
             type="checkbox"
             checked={props.item.restartStack}
+            disabled={props.disabled}
             onChange={(event) => void props.onUpdate(props.item.id, { restartStack: event.target.checked })}
           />
           <span>Restart stack</span>
@@ -2078,6 +2182,10 @@ interface TonightBuckets {
 }
 
 type TonightSortKey = "score" | "altitude" | "visibility" | "moon";
+
+type WorkspaceMode = "observe" | "planning" | "diagnostics";
+
+type PlanningPane = "tonight" | "queue" | "sites";
 
 interface SiteFormState {
   name: string;
