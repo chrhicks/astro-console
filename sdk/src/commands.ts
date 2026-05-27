@@ -52,7 +52,8 @@ export function parseViewState(resp: JsonRpcResponse): ViewStateResult | null {
 /**
  * Build a full HTTP URL for an album asset given the album path, thumbnail path,
  * and host. If isThumb is false, the _thn suffix is removed and replaced with
- * the given extension (default .jpg). Use extension=.mp4 for timelapse videos.
+ * the given extension (default .jpg). Use extension=.fit for FIT assets or
+ * extension=.mp4 for timelapse videos.
  */
 export function buildImageUrl(
   host: string,

@@ -10,7 +10,8 @@
     "run": "node dist/index.js",
     "solar:process": "node dist/cli/solar-process.js",
     "dev:smoke": "node dist/cli/dev-smoke.js",
-    "probe:api": "node dist/cli/api-probe.js"
+    "probe:api": "node dist/cli/api-probe.js",
+    "extract:album": "node dist/cli/extract-album.js"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
