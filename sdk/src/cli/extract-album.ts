@@ -1,7 +1,7 @@
-import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { posix as posixPath } from "node:path";
+import { resolveSeestarPemPath } from "../config.js";
 import { SeestarDevice } from "../device.js";
 
 type ExtractArgs = {
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
     throw new Error("Provide --host <ip-or-hostname> or set SEESTAR_HOST");
   }
 
-  const pemPath = args.pemPath ? resolve(args.pemPath) : resolveDefaultPemPath();
+  const pemPath = resolveSeestarPemPath({ explicitPath: args.pemPath });
   const outDir = resolve(
     args.outDir
       ?? process.env.OUT_DIR
@@ -417,22 +417,6 @@ function sanitizePathSegment(value: string): string {
   return cleaned.replace(/^-|-$/g, "") || "extract";
 }
 
-function resolveDefaultPemPath(): string {
-  const candidates = [
-    resolve("../seestar_3.1.2_fw_7.32_interop.pem"),
-    resolve("../apps/desktop/seestar_3.1.2_fw_7.32_interop.pem"),
-    resolve("./apps/desktop/seestar_3.1.2_fw_7.32_interop.pem"),
-  ];
-
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  return candidates[0]!;
-}
-
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -442,7 +426,7 @@ function printHelp(): void {
 
 Options:
   --host <host>              Device host or IP (or set SEESTAR_HOST)
-  --pem-path <path>          PEM path (default: auto-resolved)
+  --pem-path <path>          PEM path (overrides $SEESTAR_PEM_PATH/$SEESTAR_PEM)
   --out-dir <path>           Destination directory (default: ./downloads/<stack-name>-extract)
   --stack-name <name>        Stack album entry to download (default: M81)
   --sub-name <name>          Subframe album entry to pull (default: <stack-name>_sub)

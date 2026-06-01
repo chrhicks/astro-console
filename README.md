@@ -39,4 +39,5 @@ npm run dev
 ## Notes
 
 - The Seestar PEM key is required for authentication and is intentionally not committed.
+- Set `SEESTAR_PEM_PATH` (or legacy `SEESTAR_PEM`) to point SDK/CLI/desktop flows at your local PEM file.
 - This repository is intended to stay private.

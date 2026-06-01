@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { resolveSeestarPemPath } from "../config.js";
 import { SeestarDevice } from "../device.js";
 import { createConsoleLogger, type LogLevel } from "../logging.js";
 import type { DevelopmentSmokeTestOptions } from "../types.js";
@@ -46,7 +46,7 @@ function main(): void {
 
   const device = new SeestarDevice({
     host: asString(options.host) ?? DEFAULT_HOST,
-    pemPath: resolve(asString(options.pemPath) ?? "../seestar_3.1.2_fw_7.32_interop.pem"),
+    pemPath: resolveSeestarPemPath({ explicitPath: asString(options.pemPath) }),
     timeoutMs,
     logger: createConsoleLogger(logLevel),
   });
@@ -168,7 +168,7 @@ function printHelp(): void {
 
 Options:
   --host <host>              Device host or mDNS name (default: ${DEFAULT_HOST})
-  --pem-path <path>          PEM path (default: ../seestar_3.1.2_fw_7.32_interop.pem)
+  --pem-path <path>          PEM path (overrides $SEESTAR_PEM_PATH/$SEESTAR_PEM)
   --mode <mode>              scenery | moon | sun | planet (default: scenery)
   --open-arm <mode>          if_needed | always | never (default: if_needed)
   --park-at-end <bool>       true | false (default: true)

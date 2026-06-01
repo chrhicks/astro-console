@@ -1,7 +1,6 @@
-import { resolve } from "node:path";
-import { existsSync } from "node:fs";
 import { SeestarAuth } from "../auth.js";
 import { SeestarClient } from "../client.js";
+import { resolveSeestarPemPath } from "../config.js";
 import { discoverSeestars } from "../discovery.js";
 import { createConsoleLogger, type LogLevel } from "../logging.js";
 
@@ -42,7 +41,7 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  const pemPath = args.pemPath ? resolve(args.pemPath) : resolveDefaultPemPath();
+  const pemPath = resolveSeestarPemPath({ explicitPath: args.pemPath });
   const timeoutMs = args.timeoutMs ?? 10000;
   const logger = createConsoleLogger(args.logLevel);
   const discoveredDevices = !args.discover || args.host
@@ -214,26 +213,12 @@ function toErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function resolveDefaultPemPath(): string {
-  const candidates = [
-    resolve("../seestar_3.1.2_fw_7.32_interop.pem"),
-    resolve("../apps/desktop/seestar_3.1.2_fw_7.32_interop.pem"),
-    resolve("./apps/desktop/seestar_3.1.2_fw_7.32_interop.pem"),
-  ];
-
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
-  }
-
-  return candidates[0]!;
-}
-
 function printHelp(): void {
   console.log(`Usage: node dist/cli/api-probe.js [options]
 
 Options:
   --host <host>              Device host or mDNS name (skip discovery)
-  --pem-path <path>          PEM path (default: ../seestar_3.1.2_fw_7.32_interop.pem)
+  --pem-path <path>          PEM path (overrides $SEESTAR_PEM_PATH/$SEESTAR_PEM)
   --timeout-ms <n>           RPC timeout in ms (default: 10000)
   --log-level <level>        trace | debug | info | warn | error (default: info)
   --no-discover              Require --host instead of running UDP discovery

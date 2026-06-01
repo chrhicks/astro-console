@@ -1,6 +1,7 @@
 export { SeestarClient } from "./client.js";
 export { SeestarAuth } from "./auth.js";
 export { SeestarDevice } from "./device.js";
+export * from "./config.js";
 export { discoverSeestars, discoverSeestarHost } from "./discovery.js";
 export * from "./logging.js";
 export { listShareDirectory } from "./smb.js";
