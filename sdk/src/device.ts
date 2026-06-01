@@ -765,7 +765,11 @@ export class SeestarDevice {
       } else {
         try {
           stepStarted("open_arm", "Moving the arm to the horizon position");
-          const ok = await this.moveToHorizon({ waitForCompletion: true });
+          const ok = await this.moveToHorizon({
+            waitForCompletion: true,
+            timeoutMs: 45000,
+            pollIntervalMs: 500,
+          });
           if (!ok) return fail("open_arm", "Device rejected move-to-horizon request");
           steps.push({
             name: "open_arm",
@@ -809,7 +813,7 @@ export class SeestarDevice {
             targetRaDec,
             lpFilter: observation.lpFilter,
           },
-          { waitForCompletion: true }
+          { waitForCompletion: true, timeoutMs: 120000, pollIntervalMs: 500 }
         );
         if (!ok) return fail("start_view", "Device rejected start-view request");
         steps.push({
@@ -836,7 +840,11 @@ export class SeestarDevice {
       } else {
         try {
           stepStarted("autofocus", "Running autofocus after the view became active");
-          const ok = await this.startAutoFocus({ waitForCompletion: true });
+          const ok = await this.startAutoFocus({
+            waitForCompletion: true,
+            timeoutMs: 180000,
+            pollIntervalMs: 500,
+          });
           if (!ok) return fail("autofocus", "Device rejected autofocus request");
           steps.push({
             name: "autofocus",
@@ -865,6 +873,8 @@ export class SeestarDevice {
           stepStarted("start_stack", `Starting stacking (restart=${observation.restart ?? true})`);
           const ok = await this.startStack(observation.restart ?? true, {
             waitForCompletion: true,
+            timeoutMs: 120000,
+            pollIntervalMs: 500,
           });
           if (!ok) return fail("start_stack", "Device rejected start-stack request");
           steps.push({
@@ -1598,6 +1608,7 @@ export class SeestarDevice {
   }): Promise<TState> {
     const timeoutMs = config.wait.timeoutMs ?? this.config.timeoutMs ?? 10000;
     const pollIntervalMs = config.wait.pollIntervalMs ?? 500;
+    const startedAt = Date.now();
 
     this.log({
       level: "debug",
@@ -1620,12 +1631,97 @@ export class SeestarDevice {
       let rerunCheck = false;
       let lastState: TState | undefined;
       let lastEvent: SeestarPushEvent | undefined;
+      let lastProgressSignature: string | undefined;
+      let progressObservedAt = startedAt;
+      let deadlineAt = startedAt + timeoutMs;
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
       const cleanup = () => {
         clearInterval(intervalHandle);
         clearTimeout(timeoutHandle);
         config.wait.signal?.removeEventListener("abort", onAbort);
         unsubscribe();
+      };
+
+      const readEventNumber = (event: SeestarPushEvent | undefined, ...keys: string[]): number | undefined => {
+        if (!event) return undefined;
+        for (const key of keys) {
+          const value = asNumber((event as Record<string, unknown>)[key]);
+          if (typeof value === "number") return value;
+        }
+        return undefined;
+      };
+
+      const summarizeProgress = (state: TState | undefined, event?: SeestarPushEvent) => ({
+        action: config.action,
+        eventName: event?.Event,
+        eventState: normalizeEventState(event),
+        percent: readEventNumber(event, "percent"),
+        lapseMs: readEventNumber(event, "lapse_ms", "lapseMs"),
+        elapsedMs: readEventNumber(event, "elapsed_ms", "elapsedMs"),
+        state: state === undefined ? undefined : config.summarizeState?.(state),
+      });
+
+      const logProgress = (
+        source: "initial" | "poll" | "event",
+        state: TState | undefined,
+        event?: SeestarPushEvent
+      ) => {
+        if (settled) return;
+        const progress = summarizeProgress(state, event);
+        const signature = stableStringify(progress);
+        if (lastProgressSignature === undefined) {
+          lastProgressSignature = signature;
+          return;
+        }
+        if (signature === lastProgressSignature) return;
+
+        lastProgressSignature = signature;
+        progressObservedAt = Date.now();
+        deadlineAt = progressObservedAt + timeoutMs;
+        scheduleTimeout();
+
+        this.log({
+          level: "debug",
+          event: "observation.wait.progress",
+          component: "observation",
+          phase: "observe",
+          summary: `Observed progress while waiting for ${config.action}`,
+          data: {
+            action: config.action,
+            source,
+            timeoutMs,
+            remainingMs: Math.max(0, deadlineAt - Date.now()),
+            progressObservedAt: new Date(progressObservedAt).toISOString(),
+            progress,
+          },
+        });
+      };
+
+      const onTimeout = () => {
+        this.log({
+          level: "warn",
+          event: "observation.wait.timeout",
+          component: "observation",
+          phase: "observe",
+          ok: false,
+          summary: `Timed out while waiting for ${config.action}`,
+          data: {
+            action: config.action,
+            timeoutMs,
+            remainingMs: 0,
+            progressObservedAt: new Date(progressObservedAt).toISOString(),
+            state: lastState ? config.summarizeState?.(lastState) : undefined,
+            eventName: lastEvent?.Event,
+            progress: lastState ? summarizeProgress(lastState, lastEvent) : undefined,
+          },
+        });
+        finish(() => reject(new Error(`Timed out waiting for ${config.action}`)));
+      };
+
+      const scheduleTimeout = () => {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = setTimeout(onTimeout, Math.max(0, deadlineAt - Date.now()));
       };
 
       const finish = (callback: () => void) => {
@@ -1646,7 +1742,9 @@ export class SeestarDevice {
           do {
             rerunCheck = false;
             const state = await config.readState();
+            if (settled) return;
             lastState = state;
+            logProgress(source, state, event ?? lastEvent);
             const failure = config.getFailure?.(state, event ?? lastEvent);
             if (failure) {
               this.log({
@@ -1719,7 +1817,9 @@ export class SeestarDevice {
 
       const unsubscribe = this.client.subscribeToPushEvents((event) => {
         if (!config.eventNames.includes(event.Event)) return;
+        if (settled) return;
         lastEvent = event;
+        logProgress("event", lastState, event);
         this.log({
           level: "debug",
           event: "observation.wait.event",
@@ -1741,30 +1841,13 @@ export class SeestarDevice {
         evaluateState("poll");
       }, pollIntervalMs);
 
-      const timeoutHandle = setTimeout(() => {
-        this.log({
-          level: "warn",
-          event: "observation.wait.timeout",
-          component: "observation",
-          phase: "observe",
-          ok: false,
-          summary: `Timed out while waiting for ${config.action}`,
-          data: {
-            action: config.action,
-            timeoutMs,
-            state: lastState ? config.summarizeState?.(lastState) : undefined,
-            eventName: lastEvent?.Event,
-          },
-        });
-        finish(() => reject(new Error(`Timed out waiting for ${config.action}`)));
-      }, timeoutMs);
-
       if (config.wait.signal?.aborted) {
         onAbort();
         return;
       }
 
       config.wait.signal?.addEventListener("abort", onAbort, { once: true });
+      scheduleTimeout();
       evaluateState("initial");
     });
   }
@@ -2015,6 +2098,14 @@ function summarizeViewState(viewState: ViewStateResult | null): unknown {
     state: asString(view?.state),
     targetName: asString(view?.target_name),
   };
+}
+
+function stableStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function readViewStateName(viewState: ViewStateResult | null): string | undefined {
