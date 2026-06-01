@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
 import {
+  resolveSeestarPemPath,
   SeestarDevice,
   discoverSeestars,
   type LogEvent,
@@ -34,7 +35,9 @@ import type {
   UpdateSiteProfileRequest,
 } from "../shared/api";
 import type { PlanningSnapshot, SiteProfile } from "../shared/planning";
+import { evaluateSiteDiagnostics } from "../shared/site-diagnostics";
 import type { CatalogSearchResult } from "../shared/starter-catalog";
+import { PlanningContextService } from "./planning-context";
 import { PlanningStore } from "./planning-store";
 import { QueueRunner, createDefaultQueueRunnerState } from "./queue-runner";
 import { SeestarSessionRecorder } from "./session-recorder";
@@ -58,6 +61,9 @@ export class SeestarDesktopService {
   private logs: DesktopLogEntry[] = [];
   private planningStore = new PlanningStore({
     getUserDataDir: () => app.getPath("userData"),
+  });
+  private planningContext = new PlanningContextService({
+    getPlanningSnapshot: () => this.planningStore.getSnapshot(),
   });
   private recorder = new SeestarSessionRecorder({
     getRootDir: () => path.join(resolveWorkspaceRoot(__dirname) ?? resolveDesktopAppRoot(__dirname), "recordings"),
@@ -367,7 +373,7 @@ export class SeestarDesktopService {
   }
 
   async getPlanningSnapshot(): Promise<PlanningSnapshot> {
-    return this.planningStore.getSnapshot();
+    return this.planningContext.getSnapshot();
   }
 
   async createSiteProfile(input: CreateSiteProfileRequest): Promise<PlanningSnapshot> {
@@ -538,7 +544,9 @@ export class SeestarDesktopService {
   }
 
   private resolvePemPath(): string {
-    return path.resolve(app.getAppPath(), "seestar_3.1.2_fw_7.32_interop.pem");
+    return resolveSeestarPemPath({
+      fallbackCandidates: [path.resolve(app.getAppPath(), "seestar_3.1.2_fw_7.32_interop.pem")],
+    });
   }
 
   private emitStatus(reason = "status.updated"): void {
@@ -983,8 +991,7 @@ export class SeestarDesktopService {
   }
 
   private async getActiveSite(): Promise<SiteProfile | undefined> {
-    const snapshot = await this.planningStore.getSnapshot();
-    return snapshot.state.sites.find((site) => site.id === snapshot.state.activeSiteId && !site.archivedAt);
+    return this.planningContext.getActiveSite();
   }
 
   private async collectPlannerTelemetry(device: SeestarDevice): Promise<PlannerTelemetry> {
@@ -1451,7 +1458,9 @@ function buildPlannerHealth(input: {
   const locationMatchesActiveSite = Boolean(
     input.activeSite && input.telemetry.deviceLocation && locationsMatch(input.telemetry.deviceLocation, input.activeSite)
   );
-  const issues: string[] = [];
+  const issues = input.activeSite
+    ? evaluateSiteDiagnostics(input.activeSite).map((diagnostic) => `${diagnostic.summary} ${diagnostic.repairHint}`)
+    : [];
 
   if (!input.activeSite) {
     issues.push("No active site selected for planner sync");
@@ -1506,6 +1515,10 @@ function buildPlannerFailureHealth(
   discovery: DesktopPlannerDiscoveryState,
   error: unknown
 ): DesktopPlannerHealth {
+  const siteIssues = activeSite
+    ? evaluateSiteDiagnostics(activeSite).map((diagnostic) => `${diagnostic.summary} ${diagnostic.repairHint}`)
+    : [];
+
   return {
     ...createDefaultPlannerHealth(),
     activeSite: activeSite ? toPlannerSiteContext(activeSite) : undefined,
@@ -1514,7 +1527,7 @@ function buildPlannerFailureHealth(
       lastError: toErrorMessage(error),
       lastAttemptAt: new Date().toISOString(),
     },
-    issues: [toErrorMessage(error)],
+    issues: [...siteIssues, toErrorMessage(error)],
     lastCheckedAt: new Date().toISOString(),
   };
 }

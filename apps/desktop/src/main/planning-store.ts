@@ -29,7 +29,8 @@ const PLANNING_DIRNAME = "planning";
 const PLANNING_FILENAME = "planning-state.json";
 
 interface PlanningStoreOptions {
-  getUserDataDir(): string;
+  getUserDataDir?(): string;
+  getPlanningRootDir?(): string;
 }
 
 export class PlanningStore {
@@ -210,12 +211,22 @@ export class PlanningStore {
   }
 
   getStorageInfo(): PlanningStorageInfo {
-    const rootDir = path.join(this.options.getUserDataDir(), PLANNING_DIRNAME);
+    const rootDir = this.resolvePlanningRootDir();
     return {
       rootDir,
       filePath: path.join(rootDir, PLANNING_FILENAME),
       schemaVersion: PLANNING_SCHEMA_VERSION,
     };
+  }
+
+  private resolvePlanningRootDir(): string {
+    if (this.options.getPlanningRootDir) {
+      return this.options.getPlanningRootDir();
+    }
+    if (this.options.getUserDataDir) {
+      return path.join(this.options.getUserDataDir(), PLANNING_DIRNAME);
+    }
+    throw new Error("PlanningStore requires getPlanningRootDir or getUserDataDir");
   }
 
   private async loadState(filePath: string): Promise<PersistedPlanningState> {

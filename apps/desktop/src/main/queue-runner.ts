@@ -10,6 +10,7 @@ import {
   SeestarDevice,
   type Logger,
 } from "../../../../sdk/dist/index.js";
+import { resolvePlanningActiveSite } from "./planning-context";
 import { isAzimuthBlocked } from "../shared/backyard-mask";
 import type {
   DesktopQueueRunnerState,
@@ -113,9 +114,7 @@ export class QueueRunner {
   private async run(runId: string, dryRun: boolean): Promise<void> {
     try {
       const snapshot = await this.deps.getPlanningSnapshot();
-      const activeSite = snapshot.state.sites.find(
-        (site) => site.id === snapshot.state.activeSiteId && !site.archivedAt
-      );
+      const activeSite = resolvePlanningActiveSite(snapshot, { allowFirstSiteFallback: false })?.site;
       const queue = snapshot.state.queue;
       const status = dryRun ? this.deps.getStatus() : await this.deps.refreshStatus();
       const issues = validateQueueRun(snapshot, activeSite, status, dryRun);

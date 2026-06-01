@@ -9,6 +9,7 @@ import type {
   DesktopViewMode,
 } from "../../shared/api";
 import type { CatalogTarget, PlanningSnapshot, QueueItem, RankedTarget, SiteProfile, SiteProfileDraft } from "../../shared/planning";
+import { evaluateSiteDiagnostics } from "../../shared/site-diagnostics";
 import { createQueueItem, validateSiteProfileDraft } from "../../shared/planning";
 import { rankTargetsForTonight } from "../../shared/visibility-engine";
 
@@ -179,6 +180,7 @@ export function App() {
     () => selectableSites.find((site) => site.id === activeSiteId) ?? null,
     [activeSiteId, selectableSites]
   );
+  const siteDiagnostics = useMemo(() => (activeSite ? evaluateSiteDiagnostics(activeSite) : []), [activeSite]);
   const hasActiveDeviceView = Boolean(summary.viewMode && summary.viewMode !== "none" && summary.viewState !== "cancel");
   const selectedViewAlreadyActive = isConnected && hasActiveDeviceView && summary.viewMode === viewMode;
   const canAttachSceneryPreview = summary.viewMode === "scenery" && !status.preview.active;
@@ -483,6 +485,15 @@ export function App() {
         </div>
 
         {status.reconnect.active ? <p className="message info">{formatReconnectMessage(status)}</p> : null}
+        {!isConnected && siteDiagnostics.length > 0 ? (
+          <div className="planner-issues compact-issues">
+            {siteDiagnostics.map((diagnostic, index) => (
+              <p key={`${diagnostic.code}-${index}`} className="message warning planner-issue">
+                {diagnostic.summary} {diagnostic.repairHint}
+              </p>
+            ))}
+          </div>
+        ) : null}
         {!status.planner.ready && status.planner.issues.length > 0 ? (
           <div className="planner-issues compact-issues">
             {status.planner.issues.map((issue) => (
