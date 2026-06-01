@@ -11,7 +11,9 @@
     "solar:process": "node dist/cli/solar-process.js",
     "dev:smoke": "node dist/cli/dev-smoke.js",
     "probe:api": "node dist/cli/api-probe.js",
-    "extract:album": "node dist/cli/extract-album.js"
+    "extract:album": "node dist/cli/extract-album.js",
+    "watch:stack": "node dist/cli/stack-watch.js",
+    "fetch:latest-subframe": "node dist/cli/fetch-latest-subframe.js"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
