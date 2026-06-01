@@ -33,6 +33,9 @@ On successful connect the app will:
 - sync the active site location to the device
 - surface planner readiness in the status strip
 
+Before connect, the app now warns if the active site's timezone appears out of
+family with its longitude (a common stale-site signal).
+
 If planner readiness is not `Ready`, stop and inspect the listed issues before attempting automation.
 
 ### 2. Manage Sites
@@ -108,6 +111,68 @@ The first runner implementation is intentionally conservative:
 - it blocks conflicting manual actions while active
 - it records explicit runner state transitions
 - it does not depend on device-native saved plans
+
+## Operator Planning Context CLI
+
+For operator workflows that need planning ranking without launching Electron UI,
+use the planning-context CLI in `apps/desktop`.
+
+- Build and run:
+  - `npm run planning:context -- --state-file <path-to-planning-state.json>`
+- Typical target pick (JSON output):
+  - `npm run planning:context -- --state-file <path> --recommendation good_now --query m81 --json`
+- Useful overrides:
+  - `--active-site-id <id>`
+  - `--allow-first-site-fallback`
+  - `--site-lat/--site-lon/--site-timezone/--site-min-altitude-deg`
+  - repeated `--site-blocked-range start-end[:label]`
+
+The CLI reads the same persisted planning state format as the desktop app and
+returns ranked candidates plus active-site diagnostics.
+
+If diagnostics flag a timezone/longitude mismatch, repair in `Planning -> Sites`
+or rerun with temporary overrides (`--site-lat`, `--site-lon`,
+`--site-timezone`) before starting operator flows.
+
+## Read-Only Stack Watch CLI
+
+For live observing sessions where you need passive progress checks, use the SDK
+stack watcher CLI in `sdk/`.
+
+- Build and run:
+  - `npm --prefix sdk run build`
+  - `npm --prefix sdk run watch:stack -- --host <device-host>`
+- One-shot JSON sample:
+  - `npm --prefix sdk run watch:stack -- --host <device-host> --once --json`
+- Useful options:
+  - `--interval-sec <seconds>`
+  - `--reconnect-delay-sec <seconds>`
+  - `--max-samples <n>`
+
+The watcher only calls read-only RPC helpers (`get_view_state`,
+`scope_get_equ_coord`, and `get_albums`) so it can monitor stack progress
+without sending movement or control actions.
+
+## Latest Subframe Fetch CLI
+
+For quick mid-run quality checks without SMB tooling, use the SDK latest
+subframe fetch CLI in `sdk/`.
+
+- Build and run:
+  - `npm --prefix sdk run build`
+  - `npm --prefix sdk run fetch:latest-subframe -- --host <device-host> --target <target-name> --count 12`
+- Generate an HTML contact sheet while downloading:
+  - `npm --prefix sdk run fetch:latest-subframe -- --host <device-host> --target <target-name> --quick-look --out-dir ./downloads/live-check`
+- Useful options:
+  - `--sub-name <exact-subframe-album-name>`
+  - `--frame-cadence-sec <seconds>`
+  - `--search-window-sec <seconds>`
+  - `--jpg-only`
+
+This command resolves the current subframe album via `get_albums`, then infers
+recent timestamped filenames and fetches assets over HTTP. It writes
+`latest-subframes-manifest.json` and can emit
+`latest-subframes-contact-sheet.html` for fast operator review.
 
 ## Verification Assets
 
