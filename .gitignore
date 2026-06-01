@@ -35,3 +35,5 @@ sdk/**/*.pyc
 
 dist/
 node_modules/
+prototype/
+docs/

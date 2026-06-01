@@ -1,13 +1,30 @@
-# Seestar S30 Local API — Quick Reference
+## Continuum
 
-## Device
+We use the `continuum` to keep track of our tasks and to serve as our tool for saving memory.
+
+At the beginning of a session run these commands:
+
+- `continuum guide` -- explains usage and workflows and links to command specific guides
+- `continuum init`
+
+### Updating long term memory
+
+Use the `memory-manager` skill and keep your memory up to date for these conditions. You are expected to do this regularly and consistently, multiple times, during a session with the user.
+
+- Feature changes or update
+- Discoveries: new learnings or ideas that need to be recalled in the future
+- Troubleshooting: techniques or approaches that will avoid wasting time in the future to solve similar problems
+
+## Seestar S30 Local API — Quick Reference
+
+### Device
 - **Model:** ZWO Seestar S30
 - **Firmware:** 7.32 (`version_int` = 2732)
 - **Network:** station mode on Wi-Fi `chicksdom`
 - **Current IP:** `192.168.4.29` (check app if it changes)
 - **mDNS:** `seestar.local` (may not resolve on all networks)
 
-## Authentication (Firmware 7.18+)
+### Authentication (Firmware 7.18+)
 The S30 requires a challenge-response handshake before accepting control commands.
 - **Algorithm:** RSA PKCS#1 v1.5 with SHA1
 - **PEM key:** `seestar_3.1.2_fw_7.32_interop.pem` (in this workspace root)
@@ -18,7 +35,7 @@ The S30 requires a challenge-response handshake before accepting control command
   4. `pi_is_verified` → confirm success
 - **Source of PEM:** extracted from official Seestar Android app APK v3.1.2 using `bguthro/seestar-tool`
 
-## Native Ports & Protocol
+### Native Ports & Protocol
 - **Control:** TCP `4700` — JSON-RPC messages terminated with `\r\n`
 - **Imaging:** TCP `4800` — binary image/frame data
 - **UDP intro:** `4720` — send `{"id":1,"method":"scan_iscope","params":""}` for guest-mode handshake
@@ -26,17 +43,17 @@ The S30 requires a challenge-response handshake before accepting control command
 - **RTSP:** TCP `4554` — active only when live view/scenery mode is running in the app
 - **SSH:** TCP `22` is open; credentials are unknown
 
-## Common Commands
+### Common Commands
 All are JSON objects sent to port `4700` with an incrementing `id` and `\r\n` terminator.
 
-### Read-only / Safe
+#### Read-only / Safe
 - `scope_get_equ_coord`
 - `get_device_state`
 - `get_view_state`
 - `get_setting`
 - `test_connection`
 
-### Control
+#### Control
 - `iscope_start_view` — start a viewing mode (`star`, `moon`, `scenery`, etc.)
 - `iscope_stop_view` — stop current view
 - `iscope_start_stack` — begin stacking
@@ -48,35 +65,17 @@ All are JSON objects sent to port `4700` with an incrementing `id` and `\r\n` te
 - `set_setting` / `set_user_location` / `pi_set_time`
 - `pi_shutdown` / `pi_reboot`
 
-### Events (pushed by device)
+#### Events (pushed by device)
 - `AutoGoto`, `Stack`, `AutoFocus`, `ScopeHome`, `ScopeTrack`, `Client`
 
-## Safety Notes
+### Safety Notes
 - Verify the device is in a safe position before sending movement commands.
 - The mount is **alt-az**; RA/Dec coordinates may not reflect true sky pointing exactly.
 - Do not flash firmware or upload files unless explicitly asked.
 - The PEM is sensitive; do not commit it to public repositories.
 
-## Upstream Projects
+### Upstream Projects
 - `smart-underworld/seestar_alp` — full ASCOM Alpaca proxy with web UI
 - `bguthro/seestar-tool` — firmware manager and PEM extractor
 - `astrophotograph/scopinator-seestar` / `pyscopinator` — lightweight Rust/Python clients
 - `astrophotograph/seestar-proxy` — TCP proxy for multi-client access
-
-
-## Continuum
-
-We use the `continuum` to keep track of our tasks and to serve as our tool for saving memory.
-
-At the beginning of a session run these commands:
-
-- `continuum guide` -- explains usage and workflows and links to command specific guides
-- `continuum init`
-
-## Output
-
-When it makes sense for large output or explaining things for the user, user **HTML**. Use tmux to run an http server against the output directory. Make links work over the Tailscale network host: `chicks-arch`
-
-Output dir: `./.www`
-Tmux session id: `seestar-www`
-URL base: `http://chicks-arch[:port]`
