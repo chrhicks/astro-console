@@ -31,6 +31,7 @@ const PLANNING_FILENAME = "planning-state.json";
 interface PlanningStoreOptions {
   getUserDataDir?(): string;
   getPlanningRootDir?(): string;
+  getPlanningFilePath?(): string;
 }
 
 export class PlanningStore {
@@ -211,12 +212,21 @@ export class PlanningStore {
   }
 
   getStorageInfo(): PlanningStorageInfo {
-    const rootDir = this.resolvePlanningRootDir();
+    const filePath = this.resolvePlanningFilePath();
+    const rootDir = path.dirname(filePath);
     return {
       rootDir,
-      filePath: path.join(rootDir, PLANNING_FILENAME),
+      filePath,
       schemaVersion: PLANNING_SCHEMA_VERSION,
     };
+  }
+
+  private resolvePlanningFilePath(): string {
+    if (this.options.getPlanningFilePath) {
+      return this.options.getPlanningFilePath();
+    }
+
+    return path.join(this.resolvePlanningRootDir(), PLANNING_FILENAME);
   }
 
   private resolvePlanningRootDir(): string {

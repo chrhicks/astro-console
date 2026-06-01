@@ -1,4 +1,3 @@
-import path from "node:path";
 import { type VisibilityWindow, rankTargetsForTonight } from "../shared/visibility-engine";
 import { type CatalogTarget, type PlanningSnapshot, type RankedTarget, type SiteProfile, validateSiteProfile } from "../shared/planning";
 import { evaluateSiteDiagnostics, type SiteDiagnostic } from "../shared/site-diagnostics";
@@ -160,8 +159,11 @@ export function createPlanningContextServiceFromStorage(input: PlanningContextSt
 }
 
 export function createPlanningContextServiceFromStateFile(filePath: string): PlanningContextService {
-  return createPlanningContextServiceFromStorage({
-    planningRootDir: path.dirname(filePath),
+  const store = new PlanningStore({
+    getPlanningFilePath: () => filePath,
+  });
+  return new PlanningContextService({
+    getPlanningSnapshot: () => store.getSnapshot(),
   });
 }
 
