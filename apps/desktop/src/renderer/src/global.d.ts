@@ -1,9 +1,9 @@
-import type { SeestarDesktopApi } from "../../shared/api";
+import type { SeestarDesktopApi } from '../../shared/api'
 
 declare global {
   interface Window {
-    seestar: SeestarDesktopApi;
+    seestar: SeestarDesktopApi
   }
 }
 
-export {};
+export {}

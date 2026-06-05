@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import type {
   DesktopCommandAction,
   DesktopDiscoveredDevice,
@@ -7,11 +7,21 @@ import type {
   DesktopPreviewFrame,
   DesktopStatus,
   DesktopViewMode,
-} from "../../shared/api";
-import type { CatalogTarget, PlanningSnapshot, QueueItem, RankedTarget, SiteProfile, SiteProfileDraft } from "../../shared/planning";
-import { evaluateSiteDiagnostics } from "../../shared/site-diagnostics";
-import { createQueueItem, validateSiteProfileDraft } from "../../shared/planning";
-import { rankTargetsForTonight } from "../../shared/visibility-engine";
+} from '../../shared/api'
+import type {
+  CatalogTarget,
+  PlanningSnapshot,
+  QueueItem,
+  RankedTarget,
+  SiteProfile,
+  SiteProfileDraft,
+} from '../../shared/planning'
+import { evaluateSiteDiagnostics } from '../../shared/site-diagnostics'
+import {
+  createQueueItem,
+  validateSiteProfileDraft,
+} from '../../shared/planning'
+import { rankTargetsForTonight } from '../../shared/visibility-engine'
 
 const EMPTY_STATUS: DesktopStatus = {
   connected: false,
@@ -20,7 +30,7 @@ const EMPTY_STATUS: DesktopStatus = {
   viewState: null,
   preview: {
     active: false,
-    mode: "rtsp-mjpeg",
+    mode: 'rtsp-mjpeg',
   },
   recording: {
     active: false,
@@ -33,7 +43,7 @@ const EMPTY_STATUS: DesktopStatus = {
     ready: false,
     discovery: {
       attempted: false,
-      mode: "direct",
+      mode: 'direct',
     },
     clock: {
       attempted: false,
@@ -51,222 +61,317 @@ const EMPTY_STATUS: DesktopStatus = {
     active: false,
     dryRun: false,
     stopRequested: false,
-    phase: "idle",
+    phase: 'idle',
     queueLength: 0,
     completedCount: 0,
   },
-};
+}
 
-const VIEW_MODES: DesktopViewMode[] = ["scenery", "star", "moon", "sun", "planet"];
+const VIEW_MODES: DesktopViewMode[] = [
+  'scenery',
+  'star',
+  'moon',
+  'sun',
+  'planet',
+]
 
 export function App() {
-  const [devices, setDevices] = useState<DesktopDiscoveredDevice[]>([]);
-  const [status, setStatus] = useState<DesktopStatus>(EMPTY_STATUS);
-  const [logs, setLogs] = useState<DesktopLogEntry[]>([]);
-  const [planning, setPlanning] = useState<PlanningSnapshot | null>(null);
-  const [previewFrame, setPreviewFrame] = useState<DesktopPreviewFrame | null>(null);
-  const [host, setHost] = useState("192.168.4.29");
-  const [viewMode, setViewMode] = useState<DesktopViewMode>("scenery");
-  const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [siteError, setSiteError] = useState<string | null>(null);
-  const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
-  const [siteForm, setSiteForm] = useState<SiteFormState>(() => createDefaultSiteFormState());
-  const [tonightFilter, setTonightFilter] = useState("");
-  const [tonightSort, setTonightSort] = useState<TonightSortKey>("score");
-  const [queueSearch, setQueueSearch] = useState("");
-  const [queueError, setQueueError] = useState<string | null>(null);
-  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("observe");
-  const [planningPane, setPlanningPane] = useState<PlanningPane>("tonight");
+  const [devices, setDevices] = useState<DesktopDiscoveredDevice[]>([])
+  const [status, setStatus] = useState<DesktopStatus>(EMPTY_STATUS)
+  const [logs, setLogs] = useState<DesktopLogEntry[]>([])
+  const [planning, setPlanning] = useState<PlanningSnapshot | null>(null)
+  const [previewFrame, setPreviewFrame] = useState<DesktopPreviewFrame | null>(
+    null,
+  )
+  const [host, setHost] = useState('192.168.4.29')
+  const [viewMode, setViewMode] = useState<DesktopViewMode>('scenery')
+  const [busyAction, setBusyAction] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [siteError, setSiteError] = useState<string | null>(null)
+  const [editingSiteId, setEditingSiteId] = useState<string | null>(null)
+  const [siteForm, setSiteForm] = useState<SiteFormState>(() =>
+    createDefaultSiteFormState(),
+  )
+  const [tonightFilter, setTonightFilter] = useState('')
+  const [tonightSort, setTonightSort] = useState<TonightSortKey>('score')
+  const [queueSearch, setQueueSearch] = useState('')
+  const [queueError, setQueueError] = useState<string | null>(null)
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('observe')
+  const [planningPane, setPlanningPane] = useState<PlanningPane>('tonight')
 
   useEffect(() => {
-    void Promise.all([window.seestar.getStatus(), window.seestar.getLogs(), window.seestar.getPlanningSnapshot()])
+    void Promise.all([
+      window.seestar.getStatus(),
+      window.seestar.getLogs(),
+      window.seestar.getPlanningSnapshot(),
+    ])
       .then(([nextStatus, nextLogs, nextPlanning]) => {
-        setStatus(nextStatus);
-        setLogs(nextLogs);
-        setPlanning(nextPlanning);
+        setStatus(nextStatus)
+        setLogs(nextLogs)
+        setPlanning(nextPlanning)
       })
       .catch((startupError: unknown) => {
-        setError(toErrorMessage(startupError));
-      });
+        setError(toErrorMessage(startupError))
+      })
 
     const offLog = window.seestar.onLog((entry) => {
-      setLogs((current) => [...current.slice(-199), entry]);
-    });
+      setLogs((current) => [...current.slice(-199), entry])
+    })
     const offStatus = window.seestar.onStatus((nextStatus) => {
-      setStatus(nextStatus);
-    });
+      setStatus(nextStatus)
+    })
     const offPreviewFrame = window.seestar.onPreviewFrame((nextFrame) => {
-      setPreviewFrame(nextFrame);
-    });
+      setPreviewFrame(nextFrame)
+    })
 
     return () => {
-      offLog();
-      offStatus();
-      offPreviewFrame();
-    };
-  }, []);
+      offLog()
+      offStatus()
+      offPreviewFrame()
+    }
+  }, [])
 
   useEffect(() => {
-    if (status.preview.active) return;
-    setPreviewFrame(null);
-  }, [status.preview.active]);
+    if (status.preview.active) return
+    setPreviewFrame(null)
+  }, [status.preview.active])
 
   useEffect(() => {
-    if (!status.connected) return;
+    if (!status.connected) return
     const timer = window.setInterval(() => {
       void window.seestar.refreshState().catch((refreshError: unknown) => {
-        setError(toErrorMessage(refreshError));
-      });
-    }, 15000);
+        setError(toErrorMessage(refreshError))
+      })
+    }, 15000)
     return () => {
-      window.clearInterval(timer);
-    };
-  }, [status.connected]);
+      window.clearInterval(timer)
+    }
+  }, [status.connected])
 
   useEffect(() => {
     if (status.host) {
-      setHost(status.host);
+      setHost(status.host)
     }
-  }, [status.host]);
+  }, [status.host])
 
   const statusTone = useMemo(() => {
-    if (status.reconnect.active) return "reconnecting";
-    if (status.connected && status.authenticated) return "healthy";
-    if (status.lastError) return "error";
-    return "idle";
-  }, [status.authenticated, status.connected, status.lastError, status.reconnect.active]);
+    if (status.reconnect.active) return 'reconnecting'
+    if (status.connected && status.authenticated) return 'healthy'
+    if (status.lastError) return 'error'
+    return 'idle'
+  }, [
+    status.authenticated,
+    status.connected,
+    status.lastError,
+    status.reconnect.active,
+  ])
 
-  const summary = useMemo(() => summarizeStatus(status), [status]);
+  const summary = useMemo(() => summarizeStatus(status), [status])
 
   const alerts = useMemo(() => {
-    const nextAlerts: string[] = [];
+    const nextAlerts: string[] = []
 
-    if (typeof summary.batteryPercent === "number" && summary.batteryPercent < 20) {
-      nextAlerts.push(`Battery is low at ${summary.batteryPercent}%`);
+    if (
+      typeof summary.batteryPercent === 'number' &&
+      summary.batteryPercent < 20
+    ) {
+      nextAlerts.push(`Battery is low at ${summary.batteryPercent}%`)
     }
-    if (typeof summary.deviceTempC === "number" && summary.deviceTempC >= 55) {
-      nextAlerts.push(`Device temperature is elevated at ${summary.deviceTempC} C`);
+    if (typeof summary.deviceTempC === 'number' && summary.deviceTempC >= 55) {
+      nextAlerts.push(
+        `Device temperature is elevated at ${summary.deviceTempC} C`,
+      )
     }
-    if (typeof summary.batteryTempC === "number" && summary.batteryTempC >= 45) {
-      nextAlerts.push(`Battery temperature is elevated at ${summary.batteryTempC} C`);
+    if (
+      typeof summary.batteryTempC === 'number' &&
+      summary.batteryTempC >= 45
+    ) {
+      nextAlerts.push(
+        `Battery temperature is elevated at ${summary.batteryTempC} C`,
+      )
     }
     if (summary.mountClosed) {
-      nextAlerts.push("Mount is currently parked/closed");
+      nextAlerts.push('Mount is currently parked/closed')
     }
 
-    return nextAlerts;
-  }, [summary.batteryPercent, summary.batteryTempC, summary.deviceTempC, summary.mountClosed]);
+    return nextAlerts
+  }, [
+    summary.batteryPercent,
+    summary.batteryTempC,
+    summary.deviceTempC,
+    summary.mountClosed,
+  ])
 
   const rawStatusJson = useMemo(
     () =>
       JSON.stringify(
-        { deviceState: status.deviceState, viewState: status.viewState, preview: status.preview, planner: status.planner, runner: status.runner },
+        {
+          deviceState: status.deviceState,
+          viewState: status.viewState,
+          preview: status.preview,
+          planner: status.planner,
+          runner: status.runner,
+        },
         null,
-        2
-      ) ?? "null",
-    [status.deviceState, status.planner, status.preview, status.runner, status.viewState]
-  );
+        2,
+      ) ?? 'null',
+    [
+      status.deviceState,
+      status.planner,
+      status.preview,
+      status.runner,
+      status.viewState,
+    ],
+  )
 
-  const previewUpdatedAt = previewFrame?.ts ?? status.preview.lastFrameAt;
-  const isConnected = status.connected && status.authenticated;
-  const showDiscoveryPanel = !isConnected || devices.length > 0;
-  const siteProfiles = planning?.state.sites ?? [];
-  const activeSiteId = planning?.state.activeSiteId;
-  const selectableSites = useMemo(() => siteProfiles.filter((site) => !site.archivedAt), [siteProfiles]);
-  const archivedSites = useMemo(() => siteProfiles.filter((site) => Boolean(site.archivedAt)), [siteProfiles]);
-  const siteById = useMemo(() => new Map(siteProfiles.map((site) => [site.id, site])), [siteProfiles]);
+  const previewUpdatedAt = previewFrame?.ts ?? status.preview.lastFrameAt
+  const isConnected = status.connected && status.authenticated
+  const showDiscoveryPanel = !isConnected || devices.length > 0
+  const siteProfiles = planning?.state.sites ?? []
+  const activeSiteId = planning?.state.activeSiteId
+  const selectableSites = useMemo(
+    () => siteProfiles.filter((site) => !site.archivedAt),
+    [siteProfiles],
+  )
+  const archivedSites = useMemo(
+    () => siteProfiles.filter((site) => Boolean(site.archivedAt)),
+    [siteProfiles],
+  )
+  const siteById = useMemo(
+    () => new Map(siteProfiles.map((site) => [site.id, site])),
+    [siteProfiles],
+  )
   const activeSite = useMemo(
     () => selectableSites.find((site) => site.id === activeSiteId) ?? null,
-    [activeSiteId, selectableSites]
-  );
-  const siteDiagnostics = useMemo(() => (activeSite ? evaluateSiteDiagnostics(activeSite) : []), [activeSite]);
-  const hasActiveDeviceView = Boolean(summary.viewMode && summary.viewMode !== "none" && summary.viewState !== "cancel");
-  const selectedViewAlreadyActive = isConnected && hasActiveDeviceView && summary.viewMode === viewMode;
-  const canAttachSceneryPreview = summary.viewMode === "scenery" && !status.preview.active;
-  const catalogById = useMemo(() => new Map((planning?.state.catalog ?? []).map((target) => [target.id, target])), [planning?.state.catalog]);
+    [activeSiteId, selectableSites],
+  )
+  const siteDiagnostics = useMemo(
+    () => (activeSite ? evaluateSiteDiagnostics(activeSite) : []),
+    [activeSite],
+  )
+  const hasActiveDeviceView = Boolean(
+    summary.viewMode &&
+    summary.viewMode !== 'none' &&
+    summary.viewState !== 'cancel',
+  )
+  const selectedViewAlreadyActive =
+    isConnected && hasActiveDeviceView && summary.viewMode === viewMode
+  const canAttachSceneryPreview =
+    summary.viewMode === 'scenery' && !status.preview.active
+  const catalogById = useMemo(
+    () =>
+      new Map(
+        (planning?.state.catalog ?? []).map((target) => [target.id, target]),
+      ),
+    [planning?.state.catalog],
+  )
   const tonightTargets = useMemo(() => {
-    if (!activeSite || !planning) return [];
+    if (!activeSite || !planning) return []
     return rankTargetsForTonight({
       site: activeSite,
       targets: planning.state.catalog,
-    });
-  }, [activeSite, planning]);
+    })
+  }, [activeSite, planning])
   const filteredTonightTargets = useMemo(() => {
-    const needle = tonightFilter.trim().toLowerCase();
-    const filtered = needle.length === 0
-      ? tonightTargets
-      : tonightTargets.filter((entry) => matchesTonightFilter(entry, catalogById.get(entry.targetId), needle));
-    return [...filtered].sort((left, right) => compareTonightTargets(left, right, tonightSort));
-  }, [catalogById, tonightFilter, tonightSort, tonightTargets]);
-  const tonightBuckets = useMemo(() => groupTonightTargets(filteredTonightTargets), [filteredTonightTargets]);
-  const queueItems = planning?.state.queue ?? [];
-  const queueItemCounts = useMemo(() => buildQueueItemCounts(queueItems), [queueItems]);
+    const needle = tonightFilter.trim().toLowerCase()
+    const filtered =
+      needle.length === 0
+        ? tonightTargets
+        : tonightTargets.filter((entry) =>
+            matchesTonightFilter(
+              entry,
+              catalogById.get(entry.targetId),
+              needle,
+            ),
+          )
+    return [...filtered].sort((left, right) =>
+      compareTonightTargets(left, right, tonightSort),
+    )
+  }, [catalogById, tonightFilter, tonightSort, tonightTargets])
+  const tonightBuckets = useMemo(
+    () => groupTonightTargets(filteredTonightTargets),
+    [filteredTonightTargets],
+  )
+  const queueItems = planning?.state.queue ?? []
+  const queueItemCounts = useMemo(
+    () => buildQueueItemCounts(queueItems),
+    [queueItems],
+  )
   const queueSearchResults = useMemo(() => {
-    const needle = queueSearch.trim().toLowerCase();
-    if (!needle) return [];
+    const needle = queueSearch.trim().toLowerCase()
+    if (!needle) return []
     return (planning?.state.catalog ?? [])
       .filter((target) => matchesCatalogSearch(target, needle))
-      .slice(0, 6);
-  }, [planning?.state.catalog, queueSearch]);
+      .slice(0, 6)
+  }, [planning?.state.catalog, queueSearch])
   const queueDiagnostics = useMemo(
     () => buildQueueDiagnostics(queueItems, catalogById, siteById),
-    [catalogById, queueItems, siteById]
-  );
+    [catalogById, queueItems, siteById],
+  )
   const queueWarningCount = useMemo(
-    () => [...queueDiagnostics.values()].reduce((total, entry) => total + entry.warnings.length, 0),
-    [queueDiagnostics]
-  );
+    () =>
+      [...queueDiagnostics.values()].reduce(
+        (total, entry) => total + entry.warnings.length,
+        0,
+      ),
+    [queueDiagnostics],
+  )
 
   async function runAction(action: string, work: () => Promise<void>) {
-    setBusyAction(action);
-    setError(null);
+    setBusyAction(action)
+    setError(null)
     try {
-      await work();
+      await work()
     } catch (actionError) {
-      setError(toErrorMessage(actionError));
+      setError(toErrorMessage(actionError))
     } finally {
-      setBusyAction(null);
+      setBusyAction(null)
     }
   }
 
-  function runDeviceCommand(action: DesktopCommandAction, input: { action: DesktopCommandAction; mode?: DesktopViewMode }) {
+  function runDeviceCommand(
+    action: DesktopCommandAction,
+    input: { action: DesktopCommandAction; mode?: DesktopViewMode },
+  ) {
     return runAction(action, async () => {
-      const nextStatus = await window.seestar.runCommand(input);
-      setStatus(nextStatus);
-    });
+      const nextStatus = await window.seestar.runCommand(input)
+      setStatus(nextStatus)
+    })
   }
 
   function resetSiteEditor() {
-    setEditingSiteId(null);
-    setSiteForm(createDefaultSiteFormState());
-    setSiteError(null);
+    setEditingSiteId(null)
+    setSiteForm(createDefaultSiteFormState())
+    setSiteError(null)
   }
 
   function beginSiteEdit(site: SiteProfile) {
-    setEditingSiteId(site.id);
-    setSiteForm(createSiteFormState(site, site.id === activeSiteId));
-    setSiteError(null);
+    setEditingSiteId(site.id)
+    setSiteForm(createSiteFormState(site, site.id === activeSiteId))
+    setSiteError(null)
   }
 
   async function submitSiteProfile() {
-    setSiteError(null);
+    setSiteError(null)
 
-    let parsedSite: SiteProfileDraft;
+    let parsedSite: SiteProfileDraft
     try {
-      parsedSite = parseSiteForm(siteForm);
+      parsedSite = parseSiteForm(siteForm)
     } catch (formError) {
-      setSiteError(toErrorMessage(formError));
-      return;
+      setSiteError(toErrorMessage(formError))
+      return
     }
 
-    const validationErrors = validateSiteProfileDraft(parsedSite, editingSiteId ? "site" : "new site");
+    const validationErrors = validateSiteProfileDraft(
+      parsedSite,
+      editingSiteId ? 'site' : 'new site',
+    )
     if (validationErrors.length > 0) {
-      setSiteError(validationErrors.join(". "));
-      return;
+      setSiteError(validationErrors.join('. '))
+      return
     }
 
-    await runAction(editingSiteId ? "update-site" : "create-site", async () => {
+    await runAction(editingSiteId ? 'update-site' : 'create-site', async () => {
       const nextPlanning = editingSiteId
         ? await window.seestar.updateSiteProfile({
             siteId: editingSiteId,
@@ -275,38 +380,48 @@ export function App() {
         : await window.seestar.createSiteProfile({
             site: parsedSite,
             makeActive: siteForm.makeActive,
-          });
-      setPlanning(nextPlanning);
-      resetSiteEditor();
-    });
+          })
+      setPlanning(nextPlanning)
+      resetSiteEditor()
+    })
   }
 
-  function setSiteField<K extends keyof SiteFormState>(key: K, value: SiteFormState[K]) {
+  function setSiteField<K extends keyof SiteFormState>(
+    key: K,
+    value: SiteFormState[K],
+  ) {
     setSiteForm((current) => ({
       ...current,
       [key]: value,
-    }));
+    }))
   }
 
   async function persistQueue(nextItems: QueueItem[]) {
-    setQueueError(null);
+    setQueueError(null)
     try {
-      const nextPlanning = await window.seestar.replaceQueue({ items: nextItems });
-      setPlanning(nextPlanning);
+      const nextPlanning = await window.seestar.replaceQueue({
+        items: nextItems,
+      })
+      setPlanning(nextPlanning)
     } catch (queueUpdateError) {
-      setQueueError(toErrorMessage(queueUpdateError));
+      setQueueError(toErrorMessage(queueUpdateError))
     }
   }
 
   async function addTargetToQueue(target: CatalogTarget) {
     if (!activeSite) {
-      setQueueError("Select an active site before adding targets to the queue");
-      return;
+      setQueueError('Select an active site before adding targets to the queue')
+      return
     }
 
-    if ((queueItemCounts.get(buildQueueTargetKey(activeSite.id, target.id)) ?? 0) > 0) {
-      setQueueError(`${target.primaryName} is already in the queue for ${activeSite.name}`);
-      return;
+    if (
+      (queueItemCounts.get(buildQueueTargetKey(activeSite.id, target.id)) ??
+        0) > 0
+    ) {
+      setQueueError(
+        `${target.primaryName} is already in the queue for ${activeSite.name}`,
+      )
+      return
     }
 
     const nextItem = createQueueItem(window.crypto.randomUUID(), {
@@ -322,55 +437,59 @@ export function App() {
       stopAtDawn: true,
       autofocusBeforeStart: true,
       restartStack: true,
-    });
+    })
 
-    await persistQueue([...queueItems, nextItem]);
-    setQueueSearch("");
+    await persistQueue([...queueItems, nextItem])
+    setQueueSearch('')
   }
 
   async function updateQueueItem(itemId: string, patch: Partial<QueueItem>) {
-    await persistQueue(queueItems.map((item) => (item.id === itemId ? { ...item, ...patch } : item)));
+    await persistQueue(
+      queueItems.map((item) =>
+        item.id === itemId ? { ...item, ...patch } : item,
+      ),
+    )
   }
 
   async function removeQueueItem(itemId: string) {
-    await persistQueue(queueItems.filter((item) => item.id !== itemId));
+    await persistQueue(queueItems.filter((item) => item.id !== itemId))
   }
 
   async function moveQueueItem(itemId: string, direction: -1 | 1) {
-    const currentIndex = queueItems.findIndex((item) => item.id === itemId);
-    if (currentIndex === -1) return;
+    const currentIndex = queueItems.findIndex((item) => item.id === itemId)
+    if (currentIndex === -1) return
 
-    const nextIndex = currentIndex + direction;
-    if (nextIndex < 0 || nextIndex >= queueItems.length) return;
+    const nextIndex = currentIndex + direction
+    if (nextIndex < 0 || nextIndex >= queueItems.length) return
 
-    const reordered = [...queueItems];
-    const [item] = reordered.splice(currentIndex, 1);
-    reordered.splice(nextIndex, 0, item);
-    await persistQueue(reordered);
+    const reordered = [...queueItems]
+    const [item] = reordered.splice(currentIndex, 1)
+    reordered.splice(nextIndex, 0, item)
+    await persistQueue(reordered)
   }
 
   async function startQueueRun(dryRun: boolean) {
-    setQueueError(null);
+    setQueueError(null)
     try {
-      const nextStatus = await window.seestar.startQueueRun({ dryRun });
-      setStatus(nextStatus);
+      const nextStatus = await window.seestar.startQueueRun({ dryRun })
+      setStatus(nextStatus)
     } catch (runnerError) {
-      setQueueError(toErrorMessage(runnerError));
+      setQueueError(toErrorMessage(runnerError))
     }
   }
 
   async function stopQueueRun() {
-    setQueueError(null);
+    setQueueError(null)
     try {
-      const nextStatus = await window.seestar.stopQueueRun();
-      setStatus(nextStatus);
+      const nextStatus = await window.seestar.stopQueueRun()
+      setStatus(nextStatus)
     } catch (runnerError) {
-      setQueueError(toErrorMessage(runnerError));
+      setQueueError(toErrorMessage(runnerError))
     }
   }
 
   return (
-    <div className={`app-shell ${isConnected ? "connected" : "disconnected"}`}>
+    <div className={`app-shell ${isConnected ? 'connected' : 'disconnected'}`}>
       <header className="topbar">
         <div className="topbar-copy">
           <p className="eyebrow">Seestar Console</p>
@@ -380,77 +499,93 @@ export function App() {
               ? hasActiveDeviceView
                 ? `Connected to ${status.host ?? host}. The scope is already in ${formatView(summary)}. Use Observe for live control, Planning for targets, and Diagnostics for low-level inspection.`
                 : `Connected to ${status.host ?? host}. Operate the scope, plan the night, and keep diagnostics off the operator path.`
-              : "Run the session from one place: Observe for live control, Planning for targets and queue drafts, Diagnostics for logs and raw state."}
+              : 'Run the session from one place: Observe for live control, Planning for targets and queue drafts, Diagnostics for logs and raw state.'}
           </p>
         </div>
         <div className="topbar-actions">
           <div className="status-meta">
-            <div className={`status-pill ${statusTone}`}>{isConnected ? "Connected" : "Disconnected"}</div>
+            <div className={`status-pill ${statusTone}`}>
+              {isConnected ? 'Connected' : 'Disconnected'}
+            </div>
             <p className="status-caption">
               {status.reconnect.active
                 ? formatReconnectCaption(status)
                 : status.lastUpdatedAt
                   ? `Updated ${new Date(status.lastUpdatedAt).toLocaleTimeString()}`
-                  : "No telemetry yet"}
+                  : 'No telemetry yet'}
             </p>
           </div>
         </div>
       </header>
 
       {error ? <p className="message error global-message">{error}</p> : null}
-      {status.lastError ? <p className="message error global-message">{status.lastError}</p> : null}
+      {status.lastError ? (
+        <p className="message error global-message">{status.lastError}</p>
+      ) : null}
 
       <section className="panel session-strip">
         <div className="session-strip-main">
           <div className="session-strip-copy">
             <p className="eyebrow">Session bus</p>
-            <h2>{isConnected ? `Scope online at ${status.host ?? host}` : "Scope offline"}</h2>
+            <h2>
+              {isConnected
+                ? `Scope online at ${status.host ?? host}`
+                : 'Scope offline'}
+            </h2>
             <p>
               {activeSite
-                ? `Active site: ${activeSite.name}. Planner is ${status.planner.ready ? "ready" : "flagging issues"}.`
-                : "No active site selected yet. Planning and queue work will stay limited until one is selected."}
+                ? `Active site: ${activeSite.name}. Planner is ${status.planner.ready ? 'ready' : 'flagging issues'}.`
+                : 'No active site selected yet. Planning and queue work will stay limited until one is selected.'}
             </p>
           </div>
 
           <div className="session-strip-controls">
             <label className="field compact-field session-host-field">
               <span>Host</span>
-              <input value={host} onChange={(event) => setHost(event.target.value)} placeholder="Leave blank to discover" />
+              <input
+                value={host}
+                onChange={(event) => setHost(event.target.value)}
+                placeholder="Leave blank to discover"
+              />
             </label>
 
             <div className="actions session-actions">
               <button
                 type="button"
                 onClick={() =>
-                  void runAction("discover", async () => {
-                    const discovered = await window.seestar.discover();
-                    setDevices(discovered);
-                    if (discovered[0]?.host) setHost(discovered[0].host);
+                  void runAction('discover', async () => {
+                    const discovered = await window.seestar.discover()
+                    setDevices(discovered)
+                    if (discovered[0]?.host) setHost(discovered[0].host)
                   })
                 }
                 disabled={Boolean(busyAction)}
               >
-                {busyAction === "discover" ? "Scanning..." : "Discover"}
+                {busyAction === 'discover' ? 'Scanning...' : 'Discover'}
               </button>
               <button
                 className="primary"
                 type="button"
                 onClick={() =>
-                  void runAction("connect", async () => {
-                    const nextStatus = await window.seestar.connect({ host });
-                    setStatus(nextStatus);
+                  void runAction('connect', async () => {
+                    const nextStatus = await window.seestar.connect({ host })
+                    setStatus(nextStatus)
                   })
                 }
                 disabled={Boolean(busyAction)}
               >
-                {busyAction === "connect" ? "Connecting..." : isConnected ? "Reconnect" : "Connect"}
+                {busyAction === 'connect'
+                  ? 'Connecting...'
+                  : isConnected
+                    ? 'Reconnect'
+                    : 'Connect'}
               </button>
               <button
                 type="button"
                 onClick={() =>
-                  void runAction("refresh", async () => {
-                    const nextStatus = await window.seestar.refreshState();
-                    setStatus(nextStatus);
+                  void runAction('refresh', async () => {
+                    const nextStatus = await window.seestar.refreshState()
+                    setStatus(nextStatus)
                   })
                 }
                 disabled={Boolean(busyAction) || !status.connected}
@@ -460,9 +595,9 @@ export function App() {
               <button
                 type="button"
                 onClick={() =>
-                  void runAction("disconnect", async () => {
-                    const nextStatus = await window.seestar.disconnect();
-                    setStatus(nextStatus);
+                  void runAction('disconnect', async () => {
+                    const nextStatus = await window.seestar.disconnect()
+                    setStatus(nextStatus)
                   })
                 }
                 disabled={Boolean(busyAction) || !status.connected}
@@ -474,21 +609,38 @@ export function App() {
         </div>
 
         <div className="session-strip-metrics">
-          <QuickStat label="Host" value={status.host ?? "None"} />
-          <QuickStat label="Site" value={activeSite?.name ?? "No active site"} />
-          <QuickStat label="Planner" value={status.planner.ready ? "Ready" : "Attention"} />
+          <QuickStat label="Host" value={status.host ?? 'None'} />
+          <QuickStat
+            label="Site"
+            value={activeSite?.name ?? 'No active site'}
+          />
+          <QuickStat
+            label="Planner"
+            value={status.planner.ready ? 'Ready' : 'Attention'}
+          />
           <QuickStat label="Discovery" value={formatDiscoveryMode(status)} />
           <QuickStat label="View" value={formatView(summary)} />
-          <QuickStat label="Preview" value={status.preview.active ? "Live" : "Idle"} />
-          <QuickStat label="Queue" value={`${queueItems.length} item${queueItems.length === 1 ? "" : "s"}`} />
+          <QuickStat
+            label="Preview"
+            value={status.preview.active ? 'Live' : 'Idle'}
+          />
+          <QuickStat
+            label="Queue"
+            value={`${queueItems.length} item${queueItems.length === 1 ? '' : 's'}`}
+          />
           <QuickStat label="Warnings" value={String(queueWarningCount)} />
         </div>
 
-        {status.reconnect.active ? <p className="message info">{formatReconnectMessage(status)}</p> : null}
+        {status.reconnect.active ? (
+          <p className="message info">{formatReconnectMessage(status)}</p>
+        ) : null}
         {!isConnected && siteDiagnostics.length > 0 ? (
           <div className="planner-issues compact-issues">
             {siteDiagnostics.map((diagnostic, index) => (
-              <p key={`${diagnostic.code}-${index}`} className="message warning planner-issue">
+              <p
+                key={`${diagnostic.code}-${index}`}
+                className="message warning planner-issue"
+              >
                 {diagnostic.summary} {diagnostic.repairHint}
               </p>
             ))}
@@ -508,149 +660,200 @@ export function App() {
       <nav className="mode-tabs" aria-label="Workspace modes">
         <button
           type="button"
-          className={workspaceMode === "observe" ? "mode-tab active" : "mode-tab"}
-          onClick={() => setWorkspaceMode("observe")}
+          className={
+            workspaceMode === 'observe' ? 'mode-tab active' : 'mode-tab'
+          }
+          onClick={() => setWorkspaceMode('observe')}
         >
           Observe
         </button>
         <button
           type="button"
-          className={workspaceMode === "planning" ? "mode-tab active" : "mode-tab"}
-          onClick={() => setWorkspaceMode("planning")}
+          className={
+            workspaceMode === 'planning' ? 'mode-tab active' : 'mode-tab'
+          }
+          onClick={() => setWorkspaceMode('planning')}
         >
           Planning
         </button>
         <button
           type="button"
-          className={workspaceMode === "diagnostics" ? "mode-tab active" : "mode-tab"}
-          onClick={() => setWorkspaceMode("diagnostics")}
+          className={
+            workspaceMode === 'diagnostics' ? 'mode-tab active' : 'mode-tab'
+          }
+          onClick={() => setWorkspaceMode('diagnostics')}
         >
           Diagnostics
         </button>
       </nav>
 
       <main className={`workspace workspace-${workspaceMode}`}>
-        {workspaceMode === "diagnostics" ? <aside className="side-rail diagnostics-rail">
-          <section className="panel controls connect-panel">
-            <div className="panel-heading">
-              <h2>Connection lab</h2>
-              <p>
-                {isConnected
-                  ? "Inspect connection state, discovery fallback, and planner sync from one diagnostics surface."
-                  : "Run explicit discovery and direct-host tests without leaving diagnostics."}
-              </p>
-            </div>
+        {workspaceMode === 'diagnostics' ? (
+          <aside className="side-rail diagnostics-rail">
+            <section className="panel controls connect-panel">
+              <div className="panel-heading">
+                <h2>Connection lab</h2>
+                <p>
+                  {isConnected
+                    ? 'Inspect connection state, discovery fallback, and planner sync from one diagnostics surface.'
+                    : 'Run explicit discovery and direct-host tests without leaving diagnostics.'}
+                </p>
+              </div>
 
-            <label className="field">
-              <span>Host</span>
-              <input value={host} onChange={(event) => setHost(event.target.value)} placeholder="Leave blank to discover" />
-            </label>
+              <label className="field">
+                <span>Host</span>
+                <input
+                  value={host}
+                  onChange={(event) => setHost(event.target.value)}
+                  placeholder="Leave blank to discover"
+                />
+              </label>
 
-            <div className="actions connect-actions">
-              <button
-                onClick={() =>
-                  void runAction("discover", async () => {
-                    const discovered = await window.seestar.discover();
-                    setDevices(discovered);
-                    if (discovered[0]?.host) setHost(discovered[0].host);
-                  })
-                }
-                disabled={Boolean(busyAction)}
-              >
-                {busyAction === "discover" ? "Scanning..." : "Discover"}
-              </button>
-              <button
-                className="primary"
-                onClick={() =>
-                  void runAction("connect", async () => {
-                    const nextStatus = await window.seestar.connect({ host });
-                    setStatus(nextStatus);
-                  })
-                }
-                disabled={Boolean(busyAction)}
-              >
-                {busyAction === "connect" ? "Connecting..." : isConnected ? "Reconnect" : "Connect"}
-              </button>
-            </div>
+              <div className="actions connect-actions">
+                <button
+                  onClick={() =>
+                    void runAction('discover', async () => {
+                      const discovered = await window.seestar.discover()
+                      setDevices(discovered)
+                      if (discovered[0]?.host) setHost(discovered[0].host)
+                    })
+                  }
+                  disabled={Boolean(busyAction)}
+                >
+                  {busyAction === 'discover' ? 'Scanning...' : 'Discover'}
+                </button>
+                <button
+                  className="primary"
+                  onClick={() =>
+                    void runAction('connect', async () => {
+                      const nextStatus = await window.seestar.connect({ host })
+                      setStatus(nextStatus)
+                    })
+                  }
+                  disabled={Boolean(busyAction)}
+                >
+                  {busyAction === 'connect'
+                    ? 'Connecting...'
+                    : isConnected
+                      ? 'Reconnect'
+                      : 'Connect'}
+                </button>
+              </div>
 
-            <div className="connection-summary">
-              <QuickStat label="Current host" value={status.host ?? "None"} />
-              <QuickStat label="Discovery" value={formatDiscoveryMode(status)} />
-              <QuickStat label="Planner" value={status.planner.ready ? "Ready" : "Attention"} />
-              <QuickStat label="Clock sync" value={formatClockSync(status)} />
-              <QuickStat label="Site sync" value={formatLocationSync(status)} />
-              <QuickStat label="View" value={formatView(summary)} />
-              <QuickStat label="Preview" value={status.preview.active ? "Live" : "Idle"} />
-              <QuickStat label="Recorder" value={status.recording.active ? "Active" : "Idle"} />
-              <QuickStat label="Firmware" value={summary.firmwareVersion ?? "Unknown"} />
-            </div>
+              <div className="connection-summary">
+                <QuickStat label="Current host" value={status.host ?? 'None'} />
+                <QuickStat
+                  label="Discovery"
+                  value={formatDiscoveryMode(status)}
+                />
+                <QuickStat
+                  label="Planner"
+                  value={status.planner.ready ? 'Ready' : 'Attention'}
+                />
+                <QuickStat label="Clock sync" value={formatClockSync(status)} />
+                <QuickStat
+                  label="Site sync"
+                  value={formatLocationSync(status)}
+                />
+                <QuickStat label="View" value={formatView(summary)} />
+                <QuickStat
+                  label="Preview"
+                  value={status.preview.active ? 'Live' : 'Idle'}
+                />
+                <QuickStat
+                  label="Recorder"
+                  value={status.recording.active ? 'Active' : 'Idle'}
+                />
+                <QuickStat
+                  label="Firmware"
+                  value={summary.firmwareVersion ?? 'Unknown'}
+                />
+              </div>
 
-            {status.recording.sessionDir ? (
-              <p className="message recorder-message">
-                Recording session bundle to <code>{status.recording.sessionDir}</code>
-              </p>
-            ) : null}
-          </section>
+              {status.recording.sessionDir ? (
+                <p className="message recorder-message">
+                  Recording session bundle to{' '}
+                  <code>{status.recording.sessionDir}</code>
+                </p>
+              ) : null}
+            </section>
 
-          {showDiscoveryPanel ? (
-            <details className="panel discovered-panel" open={!isConnected}>
-              <summary>
-                <div>
-                  <h2>Device drawer</h2>
-                  <p>
-                    {devices.length === 0
-                      ? "No discovery results yet. Scan when you need another device."
-                      : `${devices.length} discovered device${devices.length === 1 ? "" : "s"}.`}
+            {showDiscoveryPanel ? (
+              <details className="panel discovered-panel" open={!isConnected}>
+                <summary>
+                  <div>
+                    <h2>Device drawer</h2>
+                    <p>
+                      {devices.length === 0
+                        ? 'No discovery results yet. Scan when you need another device.'
+                        : `${devices.length} discovered device${devices.length === 1 ? '' : 's'}.`}
+                    </p>
+                  </div>
+                  <span className="drawer-state">
+                    {isConnected ? 'Collapsed' : 'Open'}
+                  </span>
+                </summary>
+
+                {devices.length === 0 ? (
+                  <p className="empty drawer-empty">
+                    No discovery results yet.
                   </p>
-                </div>
-                <span className="drawer-state">{isConnected ? "Collapsed" : "Open"}</span>
-              </summary>
-
-              {devices.length === 0 ? (
-                <p className="empty drawer-empty">No discovery results yet.</p>
-              ) : (
-                <div className="device-list">
-                  {devices.map((device) => (
-                    <button
-                      key={device.host}
-                      className="device-card"
-                      onClick={() => setHost(device.host)}
-                      type="button"
-                    >
-                      <strong>{device.productModel ?? "Seestar"}</strong>
-                      <span>{device.host}</span>
-                      <span>{device.serialNumber ?? "No serial reported"}</span>
-                      <span>{device.ssid ?? "SSID unavailable"}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </details>
-          ) : null}
-        </aside> : null}
+                ) : (
+                  <div className="device-list">
+                    {devices.map((device) => (
+                      <button
+                        key={device.host}
+                        className="device-card"
+                        onClick={() => setHost(device.host)}
+                        type="button"
+                      >
+                        <strong>{device.productModel ?? 'Seestar'}</strong>
+                        <span>{device.host}</span>
+                        <span>
+                          {device.serialNumber ?? 'No serial reported'}
+                        </span>
+                        <span>{device.ssid ?? 'SSID unavailable'}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </details>
+            ) : null}
+          </aside>
+        ) : null}
 
         <section className="main-stage">
-          {workspaceMode === "planning" ? (
+          {workspaceMode === 'planning' ? (
             <>
-              <div className="submode-tabs" role="tablist" aria-label="Planning modes">
+              <div
+                className="submode-tabs"
+                role="tablist"
+                aria-label="Planning modes"
+              >
                 <button
                   type="button"
-                  className={planningPane === "tonight" ? "mode-tab active" : "mode-tab"}
-                  onClick={() => setPlanningPane("tonight")}
+                  className={
+                    planningPane === 'tonight' ? 'mode-tab active' : 'mode-tab'
+                  }
+                  onClick={() => setPlanningPane('tonight')}
                 >
                   Tonight
                 </button>
                 <button
                   type="button"
-                  className={planningPane === "queue" ? "mode-tab active" : "mode-tab"}
-                  onClick={() => setPlanningPane("queue")}
+                  className={
+                    planningPane === 'queue' ? 'mode-tab active' : 'mode-tab'
+                  }
+                  onClick={() => setPlanningPane('queue')}
                 >
                   Queue
                 </button>
                 <button
                   type="button"
-                  className={planningPane === "sites" ? "mode-tab active" : "mode-tab"}
-                  onClick={() => setPlanningPane("sites")}
+                  className={
+                    planningPane === 'sites' ? 'mode-tab active' : 'mode-tab'
+                  }
+                  onClick={() => setPlanningPane('sites')}
                 >
                   Sites
                 </button>
@@ -658,742 +861,1104 @@ export function App() {
             </>
           ) : null}
 
-          {workspaceMode === "planning" && planningPane === "sites" ? (
+          {workspaceMode === 'planning' && planningPane === 'sites' ? (
             <section className="panel site-panel">
-            <div className="panel-heading">
-              <h2>Site library</h2>
-              <p>Manage observing locations, masks, and the session’s active site without mixing them into diagnostics.</p>
-            </div>
+              <div className="panel-heading">
+                <h2>Site library</h2>
+                <p>
+                  Manage observing locations, masks, and the session’s active
+                  site without mixing them into diagnostics.
+                </p>
+              </div>
 
-            {planning ? (
-              <>
-                <div className="connection-summary">
-                  <QuickStat label="Active site" value={activeSite?.name ?? "None selected"} />
-                  <QuickStat label="Timezone" value={activeSite?.timezone ?? "Unknown"} />
-                  <QuickStat
-                    label="Min altitude"
-                    value={typeof activeSite?.minAltitudeDeg === "number" ? `${activeSite.minAltitudeDeg} deg` : "Unknown"}
-                  />
-                  <QuickStat label="Masks" value={String(activeSite?.blockedAzimuthRanges.length ?? 0)} />
+              {planning ? (
+                <>
+                  <div className="connection-summary">
+                    <QuickStat
+                      label="Active site"
+                      value={activeSite?.name ?? 'None selected'}
+                    />
+                    <QuickStat
+                      label="Timezone"
+                      value={activeSite?.timezone ?? 'Unknown'}
+                    />
+                    <QuickStat
+                      label="Min altitude"
+                      value={
+                        typeof activeSite?.minAltitudeDeg === 'number'
+                          ? `${activeSite.minAltitudeDeg} deg`
+                          : 'Unknown'
+                      }
+                    />
+                    <QuickStat
+                      label="Masks"
+                      value={String(
+                        activeSite?.blockedAzimuthRanges.length ?? 0,
+                      )}
+                    />
+                  </div>
+
+                  {selectableSites.length === 0 ? (
+                    <p className="message info">
+                      No site profiles yet. Save a backyard or dark-site profile
+                      to unlock planning work.
+                    </p>
+                  ) : (
+                    <div className="site-list">
+                      {selectableSites.map((site) => {
+                        const isActiveSite = site.id === activeSiteId
+
+                        return (
+                          <article
+                            key={site.id}
+                            className={`site-card ${isActiveSite ? 'active' : ''}`}
+                          >
+                            <div className="site-card-copy">
+                              <div className="site-card-heading">
+                                <strong>{site.name}</strong>
+                                {isActiveSite ? (
+                                  <span className="drawer-state">Active</span>
+                                ) : null}
+                              </div>
+                              <p>
+                                {site.lat.toFixed(4)}, {site.lon.toFixed(4)} •{' '}
+                                {site.timezone}
+                              </p>
+                              <p>
+                                Floor {site.minAltitudeDeg} deg •{' '}
+                                {formatBlockedAzimuthSummary(site)}
+                              </p>
+                            </div>
+                            <div className="actions site-card-actions">
+                              <button
+                                className={isActiveSite ? 'primary' : undefined}
+                                onClick={() =>
+                                  void runAction(
+                                    'set-active-site',
+                                    async () => {
+                                      const nextPlanning =
+                                        await window.seestar.setActiveSite({
+                                          siteId: site.id,
+                                        })
+                                      setPlanning(nextPlanning)
+                                      setSiteForm((current) => ({
+                                        ...current,
+                                        makeActive: true,
+                                      }))
+                                    },
+                                  )
+                                }
+                                disabled={Boolean(busyAction) || isActiveSite}
+                              >
+                                {isActiveSite ? 'Active site' : 'Use tonight'}
+                              </button>
+                              <button
+                                onClick={() => beginSiteEdit(site)}
+                                disabled={Boolean(busyAction)}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() =>
+                                  void runAction('duplicate-site', async () => {
+                                    const nextPlanning =
+                                      await window.seestar.duplicateSiteProfile(
+                                        { siteId: site.id },
+                                      )
+                                    setPlanning(nextPlanning)
+                                  })
+                                }
+                                disabled={Boolean(busyAction)}
+                              >
+                                Duplicate
+                              </button>
+                              <button
+                                onClick={() =>
+                                  void runAction('archive-site', async () => {
+                                    const nextPlanning =
+                                      await window.seestar.archiveSiteProfile({
+                                        siteId: site.id,
+                                      })
+                                    setPlanning(nextPlanning)
+                                    if (editingSiteId === site.id) {
+                                      resetSiteEditor()
+                                    }
+                                  })
+                                }
+                                disabled={Boolean(busyAction)}
+                              >
+                                Archive
+                              </button>
+                            </div>
+                          </article>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {archivedSites.length > 0 ? (
+                    <details className="archived-sites">
+                      <summary>Archived sites ({archivedSites.length})</summary>
+                      <div className="site-list archived-site-list">
+                        {archivedSites.map((site) => (
+                          <article key={site.id} className="site-card archived">
+                            <div className="site-card-copy">
+                              <div className="site-card-heading">
+                                <strong>{site.name}</strong>
+                                <span className="drawer-state">Archived</span>
+                              </div>
+                              <p>
+                                {site.lat.toFixed(4)}, {site.lon.toFixed(4)} •{' '}
+                                {site.timezone}
+                              </p>
+                            </div>
+                            <div className="actions site-card-actions">
+                              <button
+                                onClick={() =>
+                                  void runAction(
+                                    'duplicate-archived-site',
+                                    async () => {
+                                      const nextPlanning =
+                                        await window.seestar.duplicateSiteProfile(
+                                          { siteId: site.id },
+                                        )
+                                      setPlanning(nextPlanning)
+                                    },
+                                  )
+                                }
+                                disabled={Boolean(busyAction)}
+                              >
+                                Duplicate
+                              </button>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
+
+                  <section className="site-editor">
+                    <div className="panel-heading panel-subheading">
+                      <h3>{editingSiteId ? 'Edit site' : 'Add site'}</h3>
+                      <p>
+                        {editingSiteId
+                          ? 'Update the saved site profile and keep the planning store well-formed.'
+                          : 'Create a reusable site profile for your backyard, travel setup, or dark-sky location.'}
+                      </p>
+                    </div>
+
+                    <label className="field compact-field">
+                      <span>Site name</span>
+                      <input
+                        value={siteForm.name}
+                        onChange={(event) =>
+                          setSiteField('name', event.target.value)
+                        }
+                        placeholder="Backyard"
+                      />
+                    </label>
+
+                    <div className="site-grid compact-site-grid">
+                      <label className="field compact-field">
+                        <span>Latitude</span>
+                        <input
+                          value={siteForm.lat}
+                          onChange={(event) =>
+                            setSiteField('lat', event.target.value)
+                          }
+                          placeholder="37.7749"
+                        />
+                      </label>
+
+                      <label className="field compact-field">
+                        <span>Longitude</span>
+                        <input
+                          value={siteForm.lon}
+                          onChange={(event) =>
+                            setSiteField('lon', event.target.value)
+                          }
+                          placeholder="-122.4194"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="site-grid compact-site-grid">
+                      <label className="field compact-field">
+                        <span>Timezone</span>
+                        <input
+                          value={siteForm.timezone}
+                          onChange={(event) =>
+                            setSiteField('timezone', event.target.value)
+                          }
+                          placeholder="America/Los_Angeles"
+                        />
+                      </label>
+
+                      <label className="field compact-field">
+                        <span>Min altitude</span>
+                        <input
+                          value={siteForm.minAltitudeDeg}
+                          onChange={(event) =>
+                            setSiteField('minAltitudeDeg', event.target.value)
+                          }
+                          placeholder="25"
+                        />
+                      </label>
+                    </div>
+
+                    <label className="field compact-field">
+                      <span>Blocked azimuth ranges</span>
+                      <textarea
+                        value={siteForm.blockedAzimuthText}
+                        onChange={(event) =>
+                          setSiteField('blockedAzimuthText', event.target.value)
+                        }
+                        placeholder={'215-260:House\n300-332:Trees'}
+                        rows={4}
+                      />
+                    </label>
+
+                    <p className="message info inline-message">
+                      One blocked azimuth range per line:{' '}
+                      <code>start-end:label</code>. The label is optional, and
+                      ranges may wrap across north if needed.
+                    </p>
+
+                    <label className="site-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={siteForm.makeActive}
+                        onChange={(event) =>
+                          setSiteField('makeActive', event.target.checked)
+                        }
+                      />
+                      <span>
+                        Use this site for the current planning session after
+                        saving
+                      </span>
+                    </label>
+
+                    {siteError ? (
+                      <p className="message error">{siteError}</p>
+                    ) : null}
+
+                    <div className="actions site-editor-actions">
+                      <button
+                        className="primary"
+                        onClick={() => void submitSiteProfile()}
+                        disabled={Boolean(busyAction)}
+                      >
+                        {busyAction === 'create-site'
+                          ? 'Saving site...'
+                          : busyAction === 'update-site'
+                            ? 'Updating site...'
+                            : editingSiteId
+                              ? 'Update site'
+                              : 'Save site'}
+                      </button>
+                      <button
+                        onClick={resetSiteEditor}
+                        disabled={Boolean(busyAction)}
+                      >
+                        {editingSiteId ? 'Cancel edit' : 'Reset'}
+                      </button>
+                    </div>
+                  </section>
+
+                  <details className="storage-note">
+                    <summary>Planning storage path</summary>
+                    <p className="message recorder-message">
+                      Planning data is stored at{' '}
+                      <code>{planning.storage.filePath}</code>
+                    </p>
+                  </details>
+                </>
+              ) : (
+                <p className="message info">Loading site profiles...</p>
+              )}
+            </section>
+          ) : null}
+
+          {workspaceMode === 'observe' ? (
+            <>
+              {alerts.length > 0 ? (
+                <section className="panel alerts-panel compact-panel">
+                  <div className="panel-heading">
+                    <h2>Operator alerts</h2>
+                    <p>
+                      Issues that should stay visible while you are slewing,
+                      previewing, or acquiring.
+                    </p>
+                  </div>
+                  {alerts.map((message) => (
+                    <p key={message} className="message warning inline-message">
+                      {message}
+                    </p>
+                  ))}
+                </section>
+              ) : null}
+
+              <section className="panel live-workspace instrument-panel">
+                <div className="preview-stage">
+                  <div className="live-heading">
+                    <div className="panel-heading">
+                      <h2>Observe</h2>
+                      <p>
+                        Keep the acquisition path tight: preview, mode control,
+                        and scope actions in one instrument surface.
+                      </p>
+                    </div>
+
+                    <div className="metric-grid hero-metrics">
+                      <QuickStat
+                        label="Target"
+                        value={summary.targetName ?? 'No target'}
+                      />
+                      <QuickStat label="View" value={formatView(summary)} />
+                      <QuickStat
+                        label="Battery"
+                        value={formatPercent(summary.batteryPercent)}
+                      />
+                      <QuickStat
+                        label="Last frame"
+                        value={
+                          previewUpdatedAt
+                            ? new Date(previewUpdatedAt).toLocaleTimeString()
+                            : 'Waiting'
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  {summary.viewMode !== 'scenery' ? (
+                    <p className="message warning inline-message">
+                      Start Scenery view first. The Seestar only exposes this
+                      RTSP feed while that mode is active.
+                    </p>
+                  ) : null}
+                  {status.preview.lastError ? (
+                    <p className="message error inline-message">
+                      {status.preview.lastError}
+                    </p>
+                  ) : null}
+
+                  <div className="preview-meta">
+                    <QuickStat label="Transport" value={status.preview.mode} />
+                    <QuickStat
+                      label="Source"
+                      value={status.preview.rtspUrl ?? 'Not active'}
+                    />
+                    <QuickStat
+                      label="Frame status"
+                      value={
+                        previewFrame
+                          ? 'Receiving frames'
+                          : status.preview.active
+                            ? 'Starting stream'
+                            : 'Stopped'
+                      }
+                    />
+                  </div>
+
+                  <div className="preview-shell">
+                    {previewFrame ? (
+                      <img
+                        className="preview-frame"
+                        src={previewFrame.dataUrl}
+                        alt="Live Seestar preview"
+                      />
+                    ) : (
+                      <div className="preview-placeholder">
+                        {status.preview.active
+                          ? 'Waiting for the first frame from ffmpeg...'
+                          : canAttachSceneryPreview
+                            ? 'The device is already in Scenery mode. Start preview to attach the local viewer.'
+                            : 'No live preview yet. Connect, start Scenery mode, then start preview.'}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                {selectableSites.length === 0 ? (
-                  <p className="message info">No site profiles yet. Save a backyard or dark-site profile to unlock planning work.</p>
-                ) : (
-                  <div className="site-list">
-                    {selectableSites.map((site) => {
-                      const isActiveSite = site.id === activeSiteId;
-
-                      return (
-                        <article key={site.id} className={`site-card ${isActiveSite ? "active" : ""}`}>
-                          <div className="site-card-copy">
-                            <div className="site-card-heading">
-                              <strong>{site.name}</strong>
-                              {isActiveSite ? <span className="drawer-state">Active</span> : null}
-                            </div>
-                            <p>
-                              {site.lat.toFixed(4)}, {site.lon.toFixed(4)} • {site.timezone}
-                            </p>
-                            <p>
-                              Floor {site.minAltitudeDeg} deg • {formatBlockedAzimuthSummary(site)}
-                            </p>
-                          </div>
-                          <div className="actions site-card-actions">
-                            <button
-                              className={isActiveSite ? "primary" : undefined}
-                              onClick={() =>
-                                void runAction("set-active-site", async () => {
-                                  const nextPlanning = await window.seestar.setActiveSite({ siteId: site.id });
-                                  setPlanning(nextPlanning);
-                                  setSiteForm((current) => ({ ...current, makeActive: true }));
-                                })
-                              }
-                              disabled={Boolean(busyAction) || isActiveSite}
-                            >
-                              {isActiveSite ? "Active site" : "Use tonight"}
-                            </button>
-                            <button onClick={() => beginSiteEdit(site)} disabled={Boolean(busyAction)}>
-                              Edit
-                            </button>
-                            <button
-                              onClick={() =>
-                                void runAction("duplicate-site", async () => {
-                                  const nextPlanning = await window.seestar.duplicateSiteProfile({ siteId: site.id });
-                                  setPlanning(nextPlanning);
-                                })
-                              }
-                              disabled={Boolean(busyAction)}
-                            >
-                              Duplicate
-                            </button>
-                            <button
-                              onClick={() =>
-                                void runAction("archive-site", async () => {
-                                  const nextPlanning = await window.seestar.archiveSiteProfile({ siteId: site.id });
-                                  setPlanning(nextPlanning);
-                                  if (editingSiteId === site.id) {
-                                    resetSiteEditor();
-                                  }
-                                })
-                              }
-                              disabled={Boolean(busyAction)}
-                            >
-                              Archive
-                            </button>
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {archivedSites.length > 0 ? (
-                  <details className="archived-sites">
-                    <summary>Archived sites ({archivedSites.length})</summary>
-                    <div className="site-list archived-site-list">
-                      {archivedSites.map((site) => (
-                        <article key={site.id} className="site-card archived">
-                          <div className="site-card-copy">
-                            <div className="site-card-heading">
-                              <strong>{site.name}</strong>
-                              <span className="drawer-state">Archived</span>
-                            </div>
-                            <p>
-                              {site.lat.toFixed(4)}, {site.lon.toFixed(4)} • {site.timezone}
-                            </p>
-                          </div>
-                          <div className="actions site-card-actions">
-                            <button
-                              onClick={() =>
-                                void runAction("duplicate-archived-site", async () => {
-                                  const nextPlanning = await window.seestar.duplicateSiteProfile({ siteId: site.id });
-                                  setPlanning(nextPlanning);
-                                })
-                              }
-                              disabled={Boolean(busyAction)}
-                            >
-                              Duplicate
-                            </button>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  </details>
-                ) : null}
-
-                <section className="site-editor">
-                  <div className="panel-heading panel-subheading">
-                    <h3>{editingSiteId ? "Edit site" : "Add site"}</h3>
+                <section className="operator-panel">
+                  <div className="panel-heading">
+                    <h2>Control deck</h2>
                     <p>
-                      {editingSiteId
-                        ? "Update the saved site profile and keep the planning store well-formed."
-                        : "Create a reusable site profile for your backyard, travel setup, or dark-sky location."}
+                      Common scope actions stay beside the preview instead of
+                      below it.
                     </p>
                   </div>
 
-                  <label className="field compact-field">
-                    <span>Site name</span>
-                    <input
-                      value={siteForm.name}
-                      onChange={(event) => setSiteField("name", event.target.value)}
-                      placeholder="Backyard"
+                  <div className="metric-grid compact-metrics">
+                    <QuickStat
+                      label="Mount"
+                      value={formatBoolean(
+                        summary.mountClosed,
+                        'Parked',
+                        'Ready',
+                      )}
                     />
-                  </label>
-
-                  <div className="site-grid compact-site-grid">
-                    <label className="field compact-field">
-                      <span>Latitude</span>
-                      <input
-                        value={siteForm.lat}
-                        onChange={(event) => setSiteField("lat", event.target.value)}
-                        placeholder="37.7749"
-                      />
-                    </label>
-
-                    <label className="field compact-field">
-                      <span>Longitude</span>
-                      <input
-                        value={siteForm.lon}
-                        onChange={(event) => setSiteField("lon", event.target.value)}
-                        placeholder="-122.4194"
-                      />
-                    </label>
+                    <QuickStat
+                      label="Tracking"
+                      value={formatBoolean(summary.tracking, 'On', 'Off')}
+                    />
+                    <QuickStat
+                      label="Focus"
+                      value={formatFocusState(summary.focusState)}
+                    />
+                    <QuickStat
+                      label="EQ mode"
+                      value={formatBoolean(summary.equMode, 'On', 'Off')}
+                    />
+                    <QuickStat
+                      label="Temp"
+                      value={formatTemperature(
+                        summary.deviceTempC,
+                        summary.tempUnit,
+                      )}
+                    />
                   </div>
 
-                  <div className="site-grid compact-site-grid">
-                    <label className="field compact-field">
-                      <span>Timezone</span>
-                      <input
-                        value={siteForm.timezone}
-                        onChange={(event) => setSiteField("timezone", event.target.value)}
-                        placeholder="America/Los_Angeles"
-                      />
-                    </label>
+                  <section className="control-section">
+                    <div className="panel-heading panel-subheading">
+                      <h3>View and preview</h3>
+                      <p>
+                        Start a mode, then promote Scenery into the main preview
+                        surface.
+                      </p>
+                    </div>
 
                     <label className="field compact-field">
-                      <span>Min altitude</span>
-                      <input
-                        value={siteForm.minAltitudeDeg}
-                        onChange={(event) => setSiteField("minAltitudeDeg", event.target.value)}
-                        placeholder="25"
-                      />
+                      <span>View mode</span>
+                      <select
+                        value={viewMode}
+                        onChange={(event) =>
+                          setViewMode(event.target.value as DesktopViewMode)
+                        }
+                      >
+                        {VIEW_MODES.map((mode) => (
+                          <option key={mode} value={mode}>
+                            {toTitleCase(mode)}
+                          </option>
+                        ))}
+                      </select>
                     </label>
-                  </div>
 
-                  <label className="field compact-field">
-                    <span>Blocked azimuth ranges</span>
-                    <textarea
-                      value={siteForm.blockedAzimuthText}
-                      onChange={(event) => setSiteField("blockedAzimuthText", event.target.value)}
-                      placeholder={"215-260:House\n300-332:Trees"}
-                      rows={4}
-                    />
-                  </label>
+                    {selectedViewAlreadyActive ? (
+                      <p className="message info inline-message">
+                        {viewMode === 'scenery' && !status.preview.active
+                          ? 'The device is already in Scenery mode. Start preview to attach locally without restarting the view.'
+                          : `The device already reports ${toTitleCase(viewMode)} mode as active.`}
+                      </p>
+                    ) : null}
 
-                  <p className="message info inline-message">
-                    One blocked azimuth range per line: <code>start-end:label</code>. The label is optional, and ranges may wrap
-                    across north if needed.
-                  </p>
+                    <div className="actions state-action-row">
+                      <button
+                        className="primary"
+                        onClick={() =>
+                          void runDeviceCommand('start-view', {
+                            action: 'start-view',
+                            mode: viewMode,
+                          })
+                        }
+                        disabled={
+                          Boolean(busyAction) ||
+                          !status.connected ||
+                          selectedViewAlreadyActive
+                        }
+                      >
+                        {busyAction === 'start-view'
+                          ? 'Starting...'
+                          : selectedViewAlreadyActive
+                            ? 'View active'
+                            : 'Start view'}
+                      </button>
 
-                  <label className="site-checkbox">
-                    <input
-                      type="checkbox"
-                      checked={siteForm.makeActive}
-                      onChange={(event) => setSiteField("makeActive", event.target.checked)}
-                    />
-                    <span>Use this site for the current planning session after saving</span>
-                  </label>
+                      <button
+                        onClick={() =>
+                          void runDeviceCommand('stop-view', {
+                            action: 'stop-view',
+                          })
+                        }
+                        disabled={Boolean(busyAction) || !status.connected}
+                      >
+                        {busyAction === 'stop-view'
+                          ? 'Stopping...'
+                          : 'Stop view'}
+                      </button>
 
-                  {siteError ? <p className="message error">{siteError}</p> : null}
+                      <button
+                        className="primary"
+                        onClick={() =>
+                          void runAction('start-preview', async () => {
+                            const nextStatus =
+                              await window.seestar.startPreview()
+                            setStatus(nextStatus)
+                          })
+                        }
+                        disabled={
+                          Boolean(busyAction) ||
+                          !status.connected ||
+                          status.preview.active ||
+                          summary.viewMode !== 'scenery'
+                        }
+                      >
+                        {busyAction === 'start-preview'
+                          ? 'Starting preview...'
+                          : canAttachSceneryPreview
+                            ? 'Attach preview'
+                            : 'Start preview'}
+                      </button>
 
-                  <div className="actions site-editor-actions">
-                    <button className="primary" onClick={() => void submitSiteProfile()} disabled={Boolean(busyAction)}>
-                      {busyAction === "create-site"
-                        ? "Saving site..."
-                        : busyAction === "update-site"
-                          ? "Updating site..."
-                          : editingSiteId
-                            ? "Update site"
-                            : "Save site"}
-                    </button>
-                    <button onClick={resetSiteEditor} disabled={Boolean(busyAction)}>
-                      {editingSiteId ? "Cancel edit" : "Reset"}
-                    </button>
-                  </div>
+                      <button
+                        onClick={() =>
+                          void runAction('stop-preview', async () => {
+                            const nextStatus =
+                              await window.seestar.stopPreview()
+                            setStatus(nextStatus)
+                          })
+                        }
+                        disabled={Boolean(busyAction) || !status.preview.active}
+                      >
+                        {busyAction === 'stop-preview'
+                          ? 'Stopping preview...'
+                          : 'Stop preview'}
+                      </button>
+                    </div>
+                  </section>
+
+                  <section className="control-section">
+                    <div className="panel-heading panel-subheading">
+                      <h3>Scope actions</h3>
+                      <p>
+                        Manual device commands sent over the authenticated SDK
+                        connection.
+                      </p>
+                    </div>
+
+                    <div className="actions state-action-row top-action-row">
+                      <button
+                        className="primary"
+                        onClick={() =>
+                          void runDeviceCommand('open-arm', {
+                            action: 'open-arm',
+                          })
+                        }
+                        disabled={
+                          Boolean(busyAction) ||
+                          !status.connected ||
+                          summary.mountClosed === false
+                        }
+                      >
+                        {busyAction === 'open-arm'
+                          ? 'Opening arm...'
+                          : 'Open arm'}
+                      </button>
+                      <button
+                        onClick={() =>
+                          void runDeviceCommand('park', { action: 'park' })
+                        }
+                        disabled={
+                          Boolean(busyAction) ||
+                          !status.connected ||
+                          summary.mountClosed === true
+                        }
+                      >
+                        {busyAction === 'park' ? 'Parking...' : 'Park'}
+                      </button>
+                      <button
+                        onClick={() =>
+                          void runDeviceCommand('autofocus', {
+                            action: 'autofocus',
+                          })
+                        }
+                        disabled={Boolean(busyAction) || !status.connected}
+                      >
+                        {busyAction === 'autofocus'
+                          ? 'Running autofocus...'
+                          : 'Autofocus'}
+                      </button>
+                    </div>
+
+                    <div className="actions state-action-row">
+                      <button
+                        onClick={() =>
+                          void runDeviceCommand('start-stack', {
+                            action: 'start-stack',
+                          })
+                        }
+                        disabled={Boolean(busyAction) || !status.connected}
+                      >
+                        {busyAction === 'start-stack'
+                          ? 'Starting stack...'
+                          : 'Start stack'}
+                      </button>
+                      <button
+                        onClick={() =>
+                          void runDeviceCommand('stop-stack', {
+                            action: 'stop-stack',
+                          })
+                        }
+                        disabled={Boolean(busyAction) || !status.connected}
+                      >
+                        {busyAction === 'stop-stack'
+                          ? 'Stopping stack...'
+                          : 'Stop stack'}
+                      </button>
+                    </div>
+                  </section>
                 </section>
-
-                <details className="storage-note">
-                  <summary>Planning storage path</summary>
-                  <p className="message recorder-message">
-                    Planning data is stored at <code>{planning.storage.filePath}</code>
-                  </p>
-                </details>
-              </>
-            ) : (
-              <p className="message info">Loading site profiles...</p>
-            )}
-          </section>
+              </section>
+            </>
           ) : null}
 
-          {workspaceMode === "observe" ? (
-          <>
-          {alerts.length > 0 ? (
-            <section className="panel alerts-panel compact-panel">
-              <div className="panel-heading">
-                <h2>Operator alerts</h2>
-                <p>Issues that should stay visible while you are slewing, previewing, or acquiring.</p>
-              </div>
-              {alerts.map((message) => (
-                <p key={message} className="message warning inline-message">
-                  {message}
-                </p>
-              ))}
-            </section>
-          ) : null}
-
-          <section className="panel live-workspace instrument-panel">
-            <div className="preview-stage">
-              <div className="live-heading">
+          {workspaceMode === 'planning' && planningPane === 'tonight' ? (
+            <section className="panel tonight-browser instrument-panel">
+              <div className="tonight-header">
                 <div className="panel-heading">
-                  <h2>Observe</h2>
-                  <p>Keep the acquisition path tight: preview, mode control, and scope actions in one instrument surface.</p>
+                  <h2>Tonight browser</h2>
+                  <p>
+                    Ranked observing candidates for the active site, optimized
+                    for reading rather than diagnostics.
+                  </p>
                 </div>
 
-                <div className="metric-grid hero-metrics">
-                  <QuickStat label="Target" value={summary.targetName ?? "No target"} />
-                  <QuickStat label="View" value={formatView(summary)} />
-                  <QuickStat label="Battery" value={formatPercent(summary.batteryPercent)} />
+                <div className="tonight-meta">
                   <QuickStat
-                    label="Last frame"
-                    value={previewUpdatedAt ? new Date(previewUpdatedAt).toLocaleTimeString() : "Waiting"}
+                    label="Active site"
+                    value={activeSite?.name ?? 'None selected'}
+                  />
+                  <QuickStat
+                    label="Catalog"
+                    value={String(planning?.state.catalog.length ?? 0)}
+                  />
+                  <QuickStat
+                    label="Good now"
+                    value={String(tonightBuckets.goodNow.length)}
+                  />
+                  <QuickStat
+                    label="Later"
+                    value={String(tonightBuckets.laterTonight.length)}
                   />
                 </div>
               </div>
 
-              {summary.viewMode !== "scenery" ? (
-                <p className="message warning inline-message">
-                  Start Scenery view first. The Seestar only exposes this RTSP feed while that mode is active.
+              {!activeSite ? (
+                <p className="message info">
+                  Select an active site to generate Tonight results.
                 </p>
-              ) : null}
-              {status.preview.lastError ? (
-                <p className="message error inline-message">{status.preview.lastError}</p>
-              ) : null}
+              ) : (
+                <>
+                  <div className="tonight-toolbar">
+                    <label className="field compact-field">
+                      <span>Filter</span>
+                      <input
+                        value={tonightFilter}
+                        onChange={(event) =>
+                          setTonightFilter(event.target.value)
+                        }
+                        placeholder="M42, galaxy, nebula, North America..."
+                      />
+                    </label>
 
-              <div className="preview-meta">
-                <QuickStat label="Transport" value={status.preview.mode} />
-                <QuickStat label="Source" value={status.preview.rtspUrl ?? "Not active"} />
-                <QuickStat
-                  label="Frame status"
-                  value={previewFrame ? "Receiving frames" : status.preview.active ? "Starting stream" : "Stopped"}
-                />
-              </div>
-
-              <div className="preview-shell">
-                {previewFrame ? (
-                  <img className="preview-frame" src={previewFrame.dataUrl} alt="Live Seestar preview" />
-                ) : (
-                  <div className="preview-placeholder">
-                    {status.preview.active
-                      ? "Waiting for the first frame from ffmpeg..."
-                      : canAttachSceneryPreview
-                        ? "The device is already in Scenery mode. Start preview to attach the local viewer."
-                        : "No live preview yet. Connect, start Scenery mode, then start preview."}
+                    <label className="field compact-field">
+                      <span>Sort</span>
+                      <select
+                        value={tonightSort}
+                        onChange={(event) =>
+                          setTonightSort(event.target.value as TonightSortKey)
+                        }
+                      >
+                        <option value="score">Score</option>
+                        <option value="altitude">Altitude now</option>
+                        <option value="visibility">Usable minutes</option>
+                        <option value="moon">Moon separation</option>
+                      </select>
+                    </label>
                   </div>
-                )}
-              </div>
-            </div>
 
-            <section className="operator-panel">
-              <div className="panel-heading">
-                <h2>Control deck</h2>
-                <p>Common scope actions stay beside the preview instead of below it.</p>
-              </div>
+                  <div className="tonight-buckets">
+                    <TonightBucket
+                      title="Good Now"
+                      caption="Targets that are currently usable from the active site."
+                      targets={tonightBuckets.goodNow}
+                      catalogById={catalogById}
+                      activeSite={activeSite}
+                      queueItemCounts={queueItemCounts}
+                      runnerActive={status.runner.active}
+                      onAddToQueue={addTargetToQueue}
+                    />
+                    <TonightBucket
+                      title="Later Tonight"
+                      caption="Targets that clear the site constraints later in the night window."
+                      targets={tonightBuckets.laterTonight}
+                      catalogById={catalogById}
+                      activeSite={activeSite}
+                      queueItemCounts={queueItemCounts}
+                      runnerActive={status.runner.active}
+                      onAddToQueue={addTargetToQueue}
+                    />
+                    <TonightBucket
+                      title="Blocked / Not Tonight"
+                      caption="Targets that never become usable or are fully blocked by the current site mask."
+                      targets={tonightBuckets.notTonight}
+                      catalogById={catalogById}
+                      activeSite={activeSite}
+                      queueItemCounts={queueItemCounts}
+                      runnerActive={status.runner.active}
+                      onAddToQueue={addTargetToQueue}
+                    />
+                  </div>
+                </>
+              )}
+            </section>
+          ) : null}
 
-              <div className="metric-grid compact-metrics">
-                <QuickStat label="Mount" value={formatBoolean(summary.mountClosed, "Parked", "Ready")} />
-                <QuickStat label="Tracking" value={formatBoolean(summary.tracking, "On", "Off")} />
-                <QuickStat label="Focus" value={formatFocusState(summary.focusState)} />
-                <QuickStat label="EQ mode" value={formatBoolean(summary.equMode, "On", "Off")} />
-                <QuickStat label="Temp" value={formatTemperature(summary.deviceTempC, summary.tempUnit)} />
-              </div>
-
-              <section className="control-section">
-                <div className="panel-heading panel-subheading">
-                  <h3>View and preview</h3>
-                  <p>Start a mode, then promote Scenery into the main preview surface.</p>
+          {workspaceMode === 'planning' && planningPane === 'queue' ? (
+            <section className="panel queue-editor instrument-panel">
+              <div className="tonight-header">
+                <div className="panel-heading">
+                  <h2>Queue editor</h2>
+                  <p>
+                    Build a local observing draft from Tonight results or direct
+                    catalog search. Nothing executes yet.
+                  </p>
                 </div>
 
-                <label className="field compact-field">
-                  <span>View mode</span>
-                  <select value={viewMode} onChange={(event) => setViewMode(event.target.value as DesktopViewMode)}>
-                    {VIEW_MODES.map((mode) => (
-                      <option key={mode} value={mode}>
-                        {toTitleCase(mode)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <div className="tonight-meta">
+                  <QuickStat
+                    label="Queue items"
+                    value={String(queueItems.length)}
+                  />
+                  <QuickStat
+                    label="Active site"
+                    value={activeSite?.name ?? 'None selected'}
+                  />
+                  <QuickStat
+                    label="Warnings"
+                    value={String(
+                      [...queueDiagnostics.values()].reduce(
+                        (total, entry) => total + entry.warnings.length,
+                        0,
+                      ),
+                    )}
+                  />
+                  <QuickStat
+                    label="Runner"
+                    value={formatRunnerPhase(status.runner)}
+                  />
+                </div>
+              </div>
 
-                {selectedViewAlreadyActive ? (
-                  <p className="message info inline-message">
-                    {viewMode === "scenery" && !status.preview.active
-                      ? "The device is already in Scenery mode. Start preview to attach locally without restarting the view."
-                      : `The device already reports ${toTitleCase(viewMode)} mode as active.`}
+              <div className="queue-runner-strip">
+                <div className="queue-runner-summary">
+                  <p>
+                    {status.runner.active
+                      ? `${status.runner.dryRun ? 'Dry run' : 'Live run'} in ${formatRunnerPhase(status.runner)}${status.runner.currentTargetName ? ` on ${status.runner.currentTargetName}` : ''}.`
+                      : (status.runner.summary ?? 'Runner idle.')}
                   </p>
-                ) : null}
-
-                <div className="actions state-action-row">
+                  {status.runner.lastError ? (
+                    <p className="message error queue-runner-message">
+                      {status.runner.lastError}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="actions queue-runner-actions">
                   <button
-                    className="primary"
-                    onClick={() =>
-                      void runDeviceCommand("start-view", { action: "start-view", mode: viewMode })
-                    }
-                    disabled={Boolean(busyAction) || !status.connected || selectedViewAlreadyActive}
-                  >
-                    {busyAction === "start-view" ? "Starting..." : selectedViewAlreadyActive ? "View active" : "Start view"}
-                  </button>
-
-                  <button
-                    onClick={() => void runDeviceCommand("stop-view", { action: "stop-view" })}
-                    disabled={Boolean(busyAction) || !status.connected}
-                  >
-                    {busyAction === "stop-view" ? "Stopping..." : "Stop view"}
-                  </button>
-
-                  <button
-                    className="primary"
-                    onClick={() =>
-                      void runAction("start-preview", async () => {
-                        const nextStatus = await window.seestar.startPreview();
-                        setStatus(nextStatus);
-                      })
-                    }
+                    type="button"
+                    onClick={() => void startQueueRun(true)}
                     disabled={
                       Boolean(busyAction) ||
-                      !status.connected ||
-                      status.preview.active ||
-                      summary.viewMode !== "scenery"
+                      status.runner.active ||
+                      queueItems.length === 0
                     }
                   >
-                    {busyAction === "start-preview"
-                      ? "Starting preview..."
-                      : canAttachSceneryPreview
-                        ? "Attach preview"
-                        : "Start preview"}
+                    Dry run
                   </button>
-
-                  <button
-                    onClick={() =>
-                      void runAction("stop-preview", async () => {
-                        const nextStatus = await window.seestar.stopPreview();
-                        setStatus(nextStatus);
-                      })
-                    }
-                    disabled={Boolean(busyAction) || !status.preview.active}
-                  >
-                    {busyAction === "stop-preview" ? "Stopping preview..." : "Stop preview"}
-                  </button>
-                </div>
-              </section>
-
-              <section className="control-section">
-                <div className="panel-heading panel-subheading">
-                  <h3>Scope actions</h3>
-                  <p>Manual device commands sent over the authenticated SDK connection.</p>
-                </div>
-
-                <div className="actions state-action-row top-action-row">
                   <button
                     className="primary"
-                    onClick={() => void runDeviceCommand("open-arm", { action: "open-arm" })}
-                    disabled={Boolean(busyAction) || !status.connected || summary.mountClosed === false}
+                    type="button"
+                    onClick={() => void startQueueRun(false)}
+                    disabled={
+                      Boolean(busyAction) ||
+                      status.runner.active ||
+                      queueItems.length === 0
+                    }
                   >
-                    {busyAction === "open-arm" ? "Opening arm..." : "Open arm"}
+                    Run queue
                   </button>
                   <button
-                    onClick={() => void runDeviceCommand("park", { action: "park" })}
-                    disabled={Boolean(busyAction) || !status.connected || summary.mountClosed === true}
+                    type="button"
+                    onClick={() => void stopQueueRun()}
+                    disabled={!status.runner.active}
                   >
-                    {busyAction === "park" ? "Parking..." : "Park"}
-                  </button>
-                  <button
-                    onClick={() => void runDeviceCommand("autofocus", { action: "autofocus" })}
-                    disabled={Boolean(busyAction) || !status.connected}
-                  >
-                    {busyAction === "autofocus" ? "Running autofocus..." : "Autofocus"}
+                    {status.runner.stopRequested ? 'Stopping...' : 'Stop'}
                   </button>
                 </div>
+              </div>
 
-                <div className="actions state-action-row">
-                  <button
-                    onClick={() => void runDeviceCommand("start-stack", { action: "start-stack" })}
-                    disabled={Boolean(busyAction) || !status.connected}
-                  >
-                    {busyAction === "start-stack" ? "Starting stack..." : "Start stack"}
-                  </button>
-                  <button
-                    onClick={() => void runDeviceCommand("stop-stack", { action: "stop-stack" })}
-                    disabled={Boolean(busyAction) || !status.connected}
-                  >
-                    {busyAction === "stop-stack" ? "Stopping stack..." : "Stop stack"}
-                  </button>
+              <div className="queue-toolbar">
+                <label className="field compact-field">
+                  <span>Add from catalog</span>
+                  <input
+                    value={queueSearch}
+                    onChange={(event) => setQueueSearch(event.target.value)}
+                    placeholder="Search catalog or manual targets"
+                  />
+                </label>
+              </div>
+
+              {queueSearchResults.length > 0 ? (
+                <div className="queue-search-results">
+                  {queueSearchResults.map((target) => (
+                    <QueueSearchResultCard
+                      key={target.id}
+                      target={target}
+                      activeSite={activeSite}
+                      queuedCount={
+                        activeSite
+                          ? (queueItemCounts.get(
+                              buildQueueTargetKey(activeSite.id, target.id),
+                            ) ?? 0)
+                          : 0
+                      }
+                      runnerActive={status.runner.active}
+                      onAddToQueue={addTargetToQueue}
+                    />
+                  ))}
                 </div>
-              </section>
+              ) : null}
+
+              {queueError ? (
+                <p className="message error">{queueError}</p>
+              ) : null}
+
+              {queueItems.length === 0 ? (
+                <p className="message info">
+                  Add targets from Tonight or use the catalog search above to
+                  start a queue draft.
+                </p>
+              ) : (
+                <div className="queue-item-list">
+                  {queueItems.map((item, index) => (
+                    <QueueItemCard
+                      key={item.id}
+                      item={item}
+                      index={index}
+                      total={queueItems.length}
+                      site={siteById.get(item.siteId)}
+                      warnings={queueDiagnostics.get(item.id)?.warnings ?? []}
+                      disabled={status.runner.active}
+                      onMove={moveQueueItem}
+                      onRemove={removeQueueItem}
+                      onUpdate={updateQueueItem}
+                    />
+                  ))}
+                </div>
+              )}
             </section>
-          </section>
-          </>
           ) : null}
 
-          {workspaceMode === "planning" && planningPane === "tonight" ? <section className="panel tonight-browser instrument-panel">
-            <div className="tonight-header">
-              <div className="panel-heading">
-                <h2>Tonight browser</h2>
-                <p>Ranked observing candidates for the active site, optimized for reading rather than diagnostics.</p>
-              </div>
+          {workspaceMode === 'observe' || workspaceMode === 'diagnostics' ? (
+            <div className="lower-grid">
+              <section className="panel state-overview">
+                <div className="panel-heading">
+                  <h2>
+                    {workspaceMode === 'observe'
+                      ? 'Telemetry'
+                      : 'Device overview'}
+                  </h2>
+                  <p>
+                    {workspaceMode === 'observe'
+                      ? 'Compact telemetry for the current observing session.'
+                      : 'Readable status plus a compact snapshot of device and environment telemetry.'}
+                  </p>
+                </div>
 
-              <div className="tonight-meta">
-                <QuickStat label="Active site" value={activeSite?.name ?? "None selected"} />
-                <QuickStat label="Catalog" value={String(planning?.state.catalog.length ?? 0)} />
-                <QuickStat label="Good now" value={String(tonightBuckets.goodNow.length)} />
-                <QuickStat label="Later" value={String(tonightBuckets.laterTonight.length)} />
-              </div>
-            </div>
-
-            {!activeSite ? (
-              <p className="message info">Select an active site to generate Tonight results.</p>
-            ) : (
-              <>
-                <div className="tonight-toolbar">
-                  <label className="field compact-field">
-                    <span>Filter</span>
-                    <input
-                      value={tonightFilter}
-                      onChange={(event) => setTonightFilter(event.target.value)}
-                      placeholder="M42, galaxy, nebula, North America..."
+                <div className="status-grid">
+                  <StatusCard title="Device">
+                    <StatusField
+                      label="Model"
+                      value={summary.productModel ?? 'Unknown'}
                     />
-                  </label>
+                    <StatusField
+                      label="Firmware"
+                      value={summary.firmwareVersion ?? 'Unknown'}
+                    />
+                    <StatusField
+                      label="Serial"
+                      value={summary.serialNumber ?? 'Unknown'}
+                    />
+                    <StatusField
+                      label="Verified"
+                      value={formatBoolean(summary.verified, 'Yes', 'No')}
+                    />
+                  </StatusCard>
 
-                  <label className="field compact-field">
-                    <span>Sort</span>
-                    <select value={tonightSort} onChange={(event) => setTonightSort(event.target.value as TonightSortKey)}>
-                      <option value="score">Score</option>
-                      <option value="altitude">Altitude now</option>
-                      <option value="visibility">Usable minutes</option>
-                      <option value="moon">Moon separation</option>
-                    </select>
-                  </label>
+                  <StatusCard title="Power and thermal">
+                    <StatusField
+                      label="Battery"
+                      value={formatPercent(summary.batteryPercent)}
+                    />
+                    <StatusField
+                      label="Device temp"
+                      value={formatTemperature(
+                        summary.deviceTempC,
+                        summary.tempUnit,
+                      )}
+                    />
+                    <StatusField
+                      label="Battery temp"
+                      value={formatTemperature(
+                        summary.batteryTempC,
+                        summary.tempUnit,
+                      )}
+                    />
+                    <StatusField
+                      label="Heaters"
+                      value={formatHeaters(
+                        summary.exposureHeaterEnabled,
+                        summary.dewHeaterEnabled,
+                      )}
+                    />
+                  </StatusCard>
+
+                  <StatusCard title="Mount and view">
+                    <StatusField
+                      label="Mount"
+                      value={formatBoolean(
+                        summary.mountClosed,
+                        'Parked',
+                        'Ready',
+                      )}
+                    />
+                    <StatusField
+                      label="Tracking"
+                      value={formatBoolean(summary.tracking, 'On', 'Off')}
+                    />
+                    <StatusField
+                      label="Focus"
+                      value={formatFocusState(summary.focusState)}
+                    />
+                    <StatusField
+                      label="EQ mode"
+                      value={formatBoolean(summary.equMode, 'On', 'Off')}
+                    />
+                    <StatusField label="View" value={formatView(summary)} />
+                  </StatusCard>
+
+                  <StatusCard title="Environment">
+                    <StatusField
+                      label="Target"
+                      value={summary.targetName ?? 'None'}
+                    />
+                    <StatusField
+                      label="SSID"
+                      value={summary.stationSsid ?? 'Unknown'}
+                    />
+                    <StatusField
+                      label="Location"
+                      value={formatLocation(summary.location)}
+                    />
+                    <StatusField label="Host" value={status.host ?? 'None'} />
+                  </StatusCard>
+
+                  <StatusCard title="Planner sync">
+                    <StatusField
+                      label="Discovery"
+                      value={formatDiscoveryMode(status)}
+                    />
+                    <StatusField
+                      label="Active site"
+                      value={status.planner.activeSite?.name ?? 'None selected'}
+                    />
+                    <StatusField
+                      label="Clock"
+                      value={formatClockSync(status)}
+                    />
+                    <StatusField
+                      label="Location"
+                      value={formatLocationSync(status)}
+                    />
+                    <StatusField
+                      label="Device time"
+                      value={formatPlannerDeviceTime(status)}
+                    />
+                  </StatusCard>
                 </div>
+              </section>
 
-                <div className="tonight-buckets">
-                  <TonightBucket
-                    title="Good Now"
-                    caption="Targets that are currently usable from the active site."
-                    targets={tonightBuckets.goodNow}
-                    catalogById={catalogById}
-                    activeSite={activeSite}
-                    queueItemCounts={queueItemCounts}
-                    runnerActive={status.runner.active}
-                    onAddToQueue={addTargetToQueue}
-                  />
-                  <TonightBucket
-                    title="Later Tonight"
-                    caption="Targets that clear the site constraints later in the night window."
-                    targets={tonightBuckets.laterTonight}
-                    catalogById={catalogById}
-                    activeSite={activeSite}
-                    queueItemCounts={queueItemCounts}
-                    runnerActive={status.runner.active}
-                    onAddToQueue={addTargetToQueue}
-                  />
-                  <TonightBucket
-                    title="Blocked / Not Tonight"
-                    caption="Targets that never become usable or are fully blocked by the current site mask."
-                    targets={tonightBuckets.notTonight}
-                    catalogById={catalogById}
-                    activeSite={activeSite}
-                    queueItemCounts={queueItemCounts}
-                    runnerActive={status.runner.active}
-                    onAddToQueue={addTargetToQueue}
-                  />
-                </div>
-              </>
-            )}
-          </section> : null}
-
-          {workspaceMode === "planning" && planningPane === "queue" ? <section className="panel queue-editor instrument-panel">
-            <div className="tonight-header">
-              <div className="panel-heading">
-                <h2>Queue editor</h2>
-                <p>Build a local observing draft from Tonight results or direct catalog search. Nothing executes yet.</p>
-              </div>
-
-              <div className="tonight-meta">
-                <QuickStat label="Queue items" value={String(queueItems.length)} />
-                <QuickStat label="Active site" value={activeSite?.name ?? "None selected"} />
-                <QuickStat
-                  label="Warnings"
-                  value={String([...queueDiagnostics.values()].reduce((total, entry) => total + entry.warnings.length, 0))}
-                />
-                <QuickStat label="Runner" value={formatRunnerPhase(status.runner)} />
-              </div>
+              {workspaceMode === 'diagnostics' ? (
+                <section className="panel logs">
+                  <div className="panel-heading">
+                    <h2>SDK logs</h2>
+                    <p>Live logs streamed from the Electron main process.</p>
+                  </div>
+                  <div className="log-list">
+                    {logs.length === 0 ? (
+                      <p className="empty">No logs yet.</p>
+                    ) : null}
+                    {logs
+                      .slice()
+                      .reverse()
+                      .map((entry, index) => (
+                        <article
+                          key={`${entry.ts}-${entry.event}-${index}`}
+                          className={`log-entry level-${entry.level}`}
+                        >
+                          <div className="log-meta">
+                            <span>
+                              {new Date(entry.ts).toLocaleTimeString()}
+                            </span>
+                            <span>{entry.level}</span>
+                            <span>{entry.component}</span>
+                            <span>{entry.event}</span>
+                          </div>
+                          <strong>{entry.summary ?? 'Log event'}</strong>
+                          {entry.details ? (
+                            <p className="log-detail">{entry.details}</p>
+                          ) : null}
+                          {entry.error ? (
+                            <p className="log-error">{entry.error}</p>
+                          ) : null}
+                        </article>
+                      ))}
+                  </div>
+                </section>
+              ) : null}
             </div>
+          ) : null}
 
-            <div className="queue-runner-strip">
-              <div className="queue-runner-summary">
-                <p>
-                  {status.runner.active
-                    ? `${status.runner.dryRun ? "Dry run" : "Live run"} in ${formatRunnerPhase(status.runner)}${status.runner.currentTargetName ? ` on ${status.runner.currentTargetName}` : ""}.`
-                    : status.runner.summary ?? "Runner idle."}
-                </p>
-                {status.runner.lastError ? <p className="message error queue-runner-message">{status.runner.lastError}</p> : null}
-              </div>
-              <div className="actions queue-runner-actions">
-                <button
-                  type="button"
-                  onClick={() => void startQueueRun(true)}
-                  disabled={Boolean(busyAction) || status.runner.active || queueItems.length === 0}
-                >
-                  Dry run
-                </button>
-                <button
-                  className="primary"
-                  type="button"
-                  onClick={() => void startQueueRun(false)}
-                  disabled={Boolean(busyAction) || status.runner.active || queueItems.length === 0}
-                >
-                  Run queue
-                </button>
-                <button type="button" onClick={() => void stopQueueRun()} disabled={!status.runner.active}>
-                  {status.runner.stopRequested ? "Stopping..." : "Stop"}
-                </button>
-              </div>
-            </div>
-
-            <div className="queue-toolbar">
-              <label className="field compact-field">
-                <span>Add from catalog</span>
-                <input
-                  value={queueSearch}
-                  onChange={(event) => setQueueSearch(event.target.value)}
-                  placeholder="Search catalog or manual targets"
-                />
-              </label>
-            </div>
-
-            {queueSearchResults.length > 0 ? (
-              <div className="queue-search-results">
-                {queueSearchResults.map((target) => (
-                  <QueueSearchResultCard
-                    key={target.id}
-                    target={target}
-                    activeSite={activeSite}
-                    queuedCount={activeSite ? queueItemCounts.get(buildQueueTargetKey(activeSite.id, target.id)) ?? 0 : 0}
-                    runnerActive={status.runner.active}
-                    onAddToQueue={addTargetToQueue}
-                  />
-                ))}
-              </div>
-            ) : null}
-
-            {queueError ? <p className="message error">{queueError}</p> : null}
-
-            {queueItems.length === 0 ? (
-              <p className="message info">Add targets from Tonight or use the catalog search above to start a queue draft.</p>
-            ) : (
-              <div className="queue-item-list">
-                {queueItems.map((item, index) => (
-                  <QueueItemCard
-                    key={item.id}
-                    item={item}
-                    index={index}
-                    total={queueItems.length}
-                    site={siteById.get(item.siteId)}
-                    warnings={queueDiagnostics.get(item.id)?.warnings ?? []}
-                    disabled={status.runner.active}
-                    onMove={moveQueueItem}
-                    onRemove={removeQueueItem}
-                    onUpdate={updateQueueItem}
-                  />
-                ))}
-              </div>
-            )}
-          </section> : null}
-
-          {(workspaceMode === "observe" || workspaceMode === "diagnostics") ? <div className="lower-grid">
-            <section className="panel state-overview">
-              <div className="panel-heading">
-                <h2>{workspaceMode === "observe" ? "Telemetry" : "Device overview"}</h2>
-                <p>
-                  {workspaceMode === "observe"
-                    ? "Compact telemetry for the current observing session."
-                    : "Readable status plus a compact snapshot of device and environment telemetry."}
-                </p>
-              </div>
-
-              <div className="status-grid">
-                <StatusCard title="Device">
-                  <StatusField label="Model" value={summary.productModel ?? "Unknown"} />
-                  <StatusField label="Firmware" value={summary.firmwareVersion ?? "Unknown"} />
-                  <StatusField label="Serial" value={summary.serialNumber ?? "Unknown"} />
-                  <StatusField label="Verified" value={formatBoolean(summary.verified, "Yes", "No")} />
-                </StatusCard>
-
-                <StatusCard title="Power and thermal">
-                  <StatusField label="Battery" value={formatPercent(summary.batteryPercent)} />
-                  <StatusField
-                    label="Device temp"
-                    value={formatTemperature(summary.deviceTempC, summary.tempUnit)}
-                  />
-                  <StatusField
-                    label="Battery temp"
-                    value={formatTemperature(summary.batteryTempC, summary.tempUnit)}
-                  />
-                  <StatusField
-                    label="Heaters"
-                    value={formatHeaters(summary.exposureHeaterEnabled, summary.dewHeaterEnabled)}
-                  />
-                </StatusCard>
-
-                <StatusCard title="Mount and view">
-                  <StatusField label="Mount" value={formatBoolean(summary.mountClosed, "Parked", "Ready")} />
-                  <StatusField label="Tracking" value={formatBoolean(summary.tracking, "On", "Off")} />
-                  <StatusField label="Focus" value={formatFocusState(summary.focusState)} />
-                  <StatusField label="EQ mode" value={formatBoolean(summary.equMode, "On", "Off")} />
-                  <StatusField label="View" value={formatView(summary)} />
-                </StatusCard>
-
-                <StatusCard title="Environment">
-                  <StatusField label="Target" value={summary.targetName ?? "None"} />
-                  <StatusField label="SSID" value={summary.stationSsid ?? "Unknown"} />
-                  <StatusField label="Location" value={formatLocation(summary.location)} />
-                  <StatusField label="Host" value={status.host ?? "None"} />
-                </StatusCard>
-
-                <StatusCard title="Planner sync">
-                  <StatusField label="Discovery" value={formatDiscoveryMode(status)} />
-                  <StatusField label="Active site" value={status.planner.activeSite?.name ?? "None selected"} />
-                  <StatusField label="Clock" value={formatClockSync(status)} />
-                  <StatusField label="Location" value={formatLocationSync(status)} />
-                  <StatusField label="Device time" value={formatPlannerDeviceTime(status)} />
-                </StatusCard>
-              </div>
-            </section>
-
-            {workspaceMode === "diagnostics" ? <section className="panel logs">
-              <div className="panel-heading">
-                <h2>SDK logs</h2>
-                <p>Live logs streamed from the Electron main process.</p>
-              </div>
-              <div className="log-list">
-                {logs.length === 0 ? <p className="empty">No logs yet.</p> : null}
-                {logs
-                  .slice()
-                  .reverse()
-                  .map((entry, index) => (
-                    <article key={`${entry.ts}-${entry.event}-${index}`} className={`log-entry level-${entry.level}`}>
-                      <div className="log-meta">
-                        <span>{new Date(entry.ts).toLocaleTimeString()}</span>
-                        <span>{entry.level}</span>
-                        <span>{entry.component}</span>
-                        <span>{entry.event}</span>
-                      </div>
-                      <strong>{entry.summary ?? "Log event"}</strong>
-                      {entry.details ? <p className="log-detail">{entry.details}</p> : null}
-                      {entry.error ? <p className="log-error">{entry.error}</p> : null}
-                    </article>
-                  ))}
-              </div>
-            </section> : null}
-          </div> : null}
-
-          {workspaceMode === "diagnostics" ? <details className="panel raw-state">
-            <summary>Raw status JSON</summary>
-            <pre>{rawStatusJson}</pre>
-          </details> : null}
+          {workspaceMode === 'diagnostics' ? (
+            <details className="panel raw-state">
+              <summary>Raw status JSON</summary>
+              <pre>{rawStatusJson}</pre>
+            </details>
+          ) : null}
         </section>
       </main>
     </div>
-  );
+  )
 }
 
 function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
+  if (error instanceof Error) return error.message
+  return String(error)
 }
 
 function summarizeStatus(status: DesktopStatus): DeviceSummary {
-  const deviceState = asRecord(status.deviceState);
-  const device = asRecord(deviceState?.device);
-  const piStatus = asRecord(deviceState?.pi_status);
-  const mount = asRecord(deviceState?.mount);
-  const focuser = asRecord(deviceState?.focuser);
-  const station = asRecord(deviceState?.station);
-  const setting = asRecord(deviceState?.setting);
-  const viewState = asRecord(status.viewState);
-  const view = asRecord(viewState?.View);
+  const deviceState = asRecord(status.deviceState)
+  const device = asRecord(deviceState?.device)
+  const piStatus = asRecord(deviceState?.pi_status)
+  const mount = asRecord(deviceState?.mount)
+  const focuser = asRecord(deviceState?.focuser)
+  const station = asRecord(deviceState?.station)
+  const setting = asRecord(deviceState?.setting)
+  const viewState = asRecord(status.viewState)
+  const view = asRecord(viewState?.View)
 
   return {
-    productModel: asString(device?.product_model) ?? asString(device?.user_product_model),
+    productModel:
+      asString(device?.product_model) ?? asString(device?.user_product_model),
     serialNumber: asString(device?.sn),
     firmwareVersion: asString(device?.firmware_ver_string),
     verified: asBoolean(device?.is_verified),
@@ -1413,195 +1978,212 @@ function summarizeStatus(status: DesktopStatus): DeviceSummary {
     tempUnit: asString(setting?.temp_unit),
     exposureHeaterEnabled: asBoolean(setting?.exp_heater_enable),
     dewHeaterEnabled: asBoolean(setting?.heater_enable),
-  };
+  }
 }
 
 function formatPercent(value: number | undefined): string {
-  return typeof value === "number" ? `${value}%` : "Unknown";
+  return typeof value === 'number' ? `${value}%` : 'Unknown'
 }
 
-function formatTemperature(value: number | undefined, unit = "C"): string {
-  if (typeof value !== "number") return "Unknown";
-  const rounded = Number.isInteger(value) ? String(value) : value.toFixed(1);
-  return `${rounded} ${unit}`;
+function formatTemperature(value: number | undefined, unit = 'C'): string {
+  if (typeof value !== 'number') return 'Unknown'
+  const rounded = Number.isInteger(value) ? String(value) : value.toFixed(1)
+  return `${rounded} ${unit}`
 }
 
 function formatBoolean(
   value: boolean | undefined,
   truthy: string,
   falsy: string,
-  fallback = "Unknown"
+  fallback = 'Unknown',
 ): string {
-  if (typeof value !== "boolean") return fallback;
-  return value ? truthy : falsy;
+  if (typeof value !== 'boolean') return fallback
+  return value ? truthy : falsy
 }
 
-function formatHeaters(exposure: boolean | undefined, dew: boolean | undefined): string {
-  const parts: string[] = [];
+function formatHeaters(
+  exposure: boolean | undefined,
+  dew: boolean | undefined,
+): string {
+  const parts: string[] = []
 
-  if (typeof exposure === "boolean") parts.push(`Lens ${exposure ? "on" : "off"}`);
-  if (typeof dew === "boolean") parts.push(`Dew ${dew ? "on" : "off"}`);
+  if (typeof exposure === 'boolean')
+    parts.push(`Lens ${exposure ? 'on' : 'off'}`)
+  if (typeof dew === 'boolean') parts.push(`Dew ${dew ? 'on' : 'off'}`)
 
-  return parts.length > 0 ? parts.join(" / ") : "Unknown";
+  return parts.length > 0 ? parts.join(' / ') : 'Unknown'
 }
 
 function formatFocusState(value: string | undefined): string {
-  if (!value) return "Idle";
-  if (value === "working" || value === "moving" || value === "start") return "Running";
-  if (value === "complete" || value === "idle" || value === "none") return "Idle";
-  return toTitleCase(value);
+  if (!value) return 'Idle'
+  if (value === 'working' || value === 'moving' || value === 'start')
+    return 'Running'
+  if (value === 'complete' || value === 'idle' || value === 'none')
+    return 'Idle'
+  return toTitleCase(value)
 }
 
 function formatReconnectCaption(status: DesktopStatus): string {
-  const host = status.reconnect.host ?? status.host ?? "device";
-  const attempt = status.reconnect.attempt;
+  const host = status.reconnect.host ?? status.host ?? 'device'
+  const attempt = status.reconnect.attempt
   if (status.reconnect.nextRetryAt) {
-    return `Attempt ${attempt} to ${host} at ${new Date(status.reconnect.nextRetryAt).toLocaleTimeString()}`;
+    return `Attempt ${attempt} to ${host} at ${new Date(status.reconnect.nextRetryAt).toLocaleTimeString()}`
   }
-  return `Attempt ${attempt} to ${host} in progress`;
+  return `Attempt ${attempt} to ${host} in progress`
 }
 
 function formatReconnectMessage(status: DesktopStatus): string {
-  const host = status.reconnect.host ?? status.host ?? "the device";
+  const host = status.reconnect.host ?? status.host ?? 'the device'
   if (status.reconnect.nextRetryAt) {
-    return `Unexpected disconnect. Retrying ${host} at ${new Date(status.reconnect.nextRetryAt).toLocaleTimeString()} (attempt ${status.reconnect.attempt}).`;
+    return `Unexpected disconnect. Retrying ${host} at ${new Date(status.reconnect.nextRetryAt).toLocaleTimeString()} (attempt ${status.reconnect.attempt}).`
   }
-  return `Unexpected disconnect. Reconnecting to ${host} now (attempt ${status.reconnect.attempt}).`;
+  return `Unexpected disconnect. Reconnecting to ${host} now (attempt ${status.reconnect.attempt}).`
 }
 
 function formatDiscoveryMode(status: DesktopStatus): string {
   switch (status.planner.discovery.mode) {
-    case "discovered":
-      return "Discovery";
-    case "fallback":
-      return "Fallback";
+    case 'discovered':
+      return 'Discovery'
+    case 'fallback':
+      return 'Fallback'
     default:
-      return "Direct";
+      return 'Direct'
   }
 }
 
 function formatClockSync(status: DesktopStatus): string {
   if (!status.planner.clock.attempted) {
-    return status.planner.clock.deviceTime ? "Observed" : "Unknown";
+    return status.planner.clock.deviceTime ? 'Observed' : 'Unknown'
   }
-  if (status.planner.clock.synced) return "Synced";
-  if (status.planner.clock.lastError) return "Failed";
-  if (status.planner.clock.deviceTime) return "Needs attention";
-  return "Unknown";
+  if (status.planner.clock.synced) return 'Synced'
+  if (status.planner.clock.lastError) return 'Failed'
+  if (status.planner.clock.deviceTime) return 'Needs attention'
+  return 'Unknown'
 }
 
 function formatLocationSync(status: DesktopStatus): string {
-  if (!status.planner.activeSite) return "No active site";
-  if (status.planner.location.matchesActiveSite) return "Matched";
-  if (status.planner.location.lastError) return "Failed";
-  if (!status.planner.location.deviceLocation) return "Missing";
-  return "Mismatch";
+  if (!status.planner.activeSite) return 'No active site'
+  if (status.planner.location.matchesActiveSite) return 'Matched'
+  if (status.planner.location.lastError) return 'Failed'
+  if (!status.planner.location.deviceLocation) return 'Missing'
+  return 'Mismatch'
 }
 
 function formatPlannerDeviceTime(status: DesktopStatus): string {
-  const deviceTime = status.planner.clock.deviceTime;
-  if (!deviceTime) return "Unknown";
+  const deviceTime = status.planner.clock.deviceTime
+  if (!deviceTime) return 'Unknown'
 
   const date = [deviceTime.year, deviceTime.mon, deviceTime.day]
-    .map((value, index) => String(value).padStart(index === 0 ? 4 : 2, "0"))
-    .join("-");
-  const time = [deviceTime.hour, deviceTime.min, deviceTime.sec].map((value) => String(value).padStart(2, "0")).join(":");
-  return `${date} ${time}${deviceTime.timeZone ? ` ${deviceTime.timeZone}` : ""}`;
+    .map((value, index) => String(value).padStart(index === 0 ? 4 : 2, '0'))
+    .join('-')
+  const time = [deviceTime.hour, deviceTime.min, deviceTime.sec]
+    .map((value) => String(value).padStart(2, '0'))
+    .join(':')
+  return `${date} ${time}${deviceTime.timeZone ? ` ${deviceTime.timeZone}` : ''}`
 }
 
-function formatRunnerPhase(runner: DesktopStatus["runner"]): string {
+function formatRunnerPhase(runner: DesktopStatus['runner']): string {
   switch (runner.phase) {
-    case "validating":
-      return "Validating";
-    case "waiting":
-      return "Waiting";
-    case "slewing":
-      return "Slewing";
-    case "focusing":
-      return "Focusing";
-    case "stacking":
-      return "Stacking";
-    case "stopping":
-      return "Stopping";
-    case "completed":
-      return "Completed";
-    case "stopped":
-      return "Stopped";
-    case "failed":
-      return "Failed";
+    case 'validating':
+      return 'Validating'
+    case 'waiting':
+      return 'Waiting'
+    case 'slewing':
+      return 'Slewing'
+    case 'focusing':
+      return 'Focusing'
+    case 'stacking':
+      return 'Stacking'
+    case 'stopping':
+      return 'Stopping'
+    case 'completed':
+      return 'Completed'
+    case 'stopped':
+      return 'Stopped'
+    case 'failed':
+      return 'Failed'
     default:
-      return runner.active ? "Running" : "Idle";
+      return runner.active ? 'Running' : 'Idle'
   }
 }
 
 function formatView(summary: DeviceSummary): string {
-  if (!summary.viewMode || summary.viewMode === "none" || summary.viewState === "cancel") {
-    return "Idle";
+  if (
+    !summary.viewMode ||
+    summary.viewMode === 'none' ||
+    summary.viewState === 'cancel'
+  ) {
+    return 'Idle'
   }
 
   const parts = [summary.viewMode, summary.viewStage, summary.viewState].filter(
-    (part): part is string => Boolean(part)
-  );
+    (part): part is string => Boolean(part),
+  )
 
-  return parts.length > 0 ? parts.join(" / ") : "Idle";
+  return parts.length > 0 ? parts.join(' / ') : 'Idle'
 }
 
-function formatLocation(location: DeviceSummary["location"]): string {
-  if (!location) return "Unknown";
-  return `${location.lat.toFixed(4)}, ${location.lon.toFixed(4)}`;
+function formatLocation(location: DeviceSummary['location']): string {
+  if (!location) return 'Unknown'
+  return `${location.lat.toFixed(4)}, ${location.lon.toFixed(4)}`
 }
 
 function toTitleCase(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
+  return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
+  return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
-    : undefined;
+    : undefined
 }
 
 function asString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+  return typeof value === 'string' && value.length > 0 ? value : undefined
 }
 
 function asNumber(value: unknown): number | undefined {
-  return typeof value === "number" ? value : undefined;
+  return typeof value === 'number' ? value : undefined
 }
 
 function asBoolean(value: unknown): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
+  return typeof value === 'boolean' ? value : undefined
 }
 
-function readLocation(value: unknown): { lat: number; lon: number } | undefined {
-  if (!Array.isArray(value) || value.length < 2) return undefined;
+function readLocation(
+  value: unknown,
+): { lat: number; lon: number } | undefined {
+  if (!Array.isArray(value) || value.length < 2) return undefined
 
-  const [lon, lat] = value;
-  if (typeof lat !== "number" || typeof lon !== "number") return undefined;
+  const [lon, lat] = value
+  if (typeof lat !== 'number' || typeof lon !== 'number') return undefined
 
-  return { lat, lon };
+  return { lat, lon }
 }
 
 function formatBlockedAzimuthSummary(site: SiteProfile): string {
-  const count = site.blockedAzimuthRanges.length;
-  if (count === 0) return "No blocked sectors";
-  if (count === 1) return "1 blocked sector";
-  return `${count} blocked sectors`;
+  const count = site.blockedAzimuthRanges.length
+  if (count === 0) return 'No blocked sectors'
+  if (count === 1) return '1 blocked sector'
+  return `${count} blocked sectors`
 }
 
 function createDefaultSiteFormState(): SiteFormState {
   return {
-    name: "",
-    lat: "",
-    lon: "",
+    name: '',
+    lat: '',
+    lon: '',
     timezone: resolveLocalTimeZone(),
-    minAltitudeDeg: "25",
-    blockedAzimuthText: "",
+    minAltitudeDeg: '25',
+    blockedAzimuthText: '',
     makeActive: true,
-  };
+  }
 }
 
-function createSiteFormState(site: SiteProfile, makeActive: boolean): SiteFormState {
+function createSiteFormState(
+  site: SiteProfile,
+  makeActive: boolean,
+): SiteFormState {
   return {
     name: site.name,
     lat: String(site.lat),
@@ -1609,25 +2191,28 @@ function createSiteFormState(site: SiteProfile, makeActive: boolean): SiteFormSt
     timezone: site.timezone,
     minAltitudeDeg: String(site.minAltitudeDeg),
     blockedAzimuthText: site.blockedAzimuthRanges
-      .map((range) => `${range.startDeg}-${range.endDeg}${range.label ? `:${range.label}` : ""}`)
-      .join("\n"),
+      .map(
+        (range) =>
+          `${range.startDeg}-${range.endDeg}${range.label ? `:${range.label}` : ''}`,
+      )
+      .join('\n'),
     makeActive,
-  };
+  }
 }
 
 function parseSiteForm(form: SiteFormState): SiteProfileDraft {
-  const lat = Number(form.lat);
-  const lon = Number(form.lon);
-  const minAltitudeDeg = Number(form.minAltitudeDeg);
+  const lat = Number(form.lat)
+  const lon = Number(form.lon)
+  const minAltitudeDeg = Number(form.minAltitudeDeg)
 
   if (!Number.isFinite(lat)) {
-    throw new Error("Latitude must be a number");
+    throw new Error('Latitude must be a number')
   }
   if (!Number.isFinite(lon)) {
-    throw new Error("Longitude must be a number");
+    throw new Error('Longitude must be a number')
   }
   if (!Number.isFinite(minAltitudeDeg)) {
-    throw new Error("Minimum altitude must be a number");
+    throw new Error('Minimum altitude must be a number')
   }
 
   return {
@@ -1637,36 +2222,42 @@ function parseSiteForm(form: SiteFormState): SiteProfileDraft {
     timezone: form.timezone.trim(),
     minAltitudeDeg,
     blockedAzimuthRanges: parseBlockedAzimuthRanges(form.blockedAzimuthText),
-  };
+  }
 }
 
-function parseBlockedAzimuthRanges(value: string): SiteProfileDraft["blockedAzimuthRanges"] {
+function parseBlockedAzimuthRanges(
+  value: string,
+): SiteProfileDraft['blockedAzimuthRanges'] {
   return value
     .split(/\r?\n/u)
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line, index) => {
-      const [rangePart, ...labelParts] = line.split(":");
-      const match = rangePart.trim().match(/^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)$/u);
+      const [rangePart, ...labelParts] = line.split(':')
+      const match = rangePart
+        .trim()
+        .match(/^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)$/u)
 
       if (!match) {
-        throw new Error(`Blocked azimuth line ${index + 1} must use start-end or start-end:label`);
+        throw new Error(
+          `Blocked azimuth line ${index + 1} must use start-end or start-end:label`,
+        )
       }
 
-      const startDeg = Number(match[1]);
-      const endDeg = Number(match[2]);
-      const label = labelParts.join(":").trim();
+      const startDeg = Number(match[1])
+      const endDeg = Number(match[2])
+      const label = labelParts.join(':').trim()
 
       return {
         startDeg,
         endDeg,
         ...(label ? { label } : {}),
-      };
-    });
+      }
+    })
 }
 
 function resolveLocalTimeZone(): string {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 }
 
 function StatusCard(props: { title: string; children: ReactNode }) {
@@ -1675,7 +2266,7 @@ function StatusCard(props: { title: string; children: ReactNode }) {
       <h3>{props.title}</h3>
       <div className="status-card-body">{props.children}</div>
     </article>
-  );
+  )
 }
 
 function StatusField(props: { label: string; value: string }) {
@@ -1684,7 +2275,7 @@ function StatusField(props: { label: string; value: string }) {
       <span className="meta-label">{props.label}</span>
       <strong>{props.value}</strong>
     </div>
-  );
+  )
 }
 
 function QuickStat(props: { label: string; value: string }) {
@@ -1693,18 +2284,18 @@ function QuickStat(props: { label: string; value: string }) {
       <span className="meta-label">{props.label}</span>
       <strong>{props.value}</strong>
     </div>
-  );
+  )
 }
 
 function TonightBucket(props: {
-  title: string;
-  caption: string;
-  targets: RankedTarget[];
-  catalogById: Map<string, CatalogTarget>;
-  activeSite: SiteProfile | null;
-  queueItemCounts: Map<string, number>;
-  runnerActive: boolean;
-  onAddToQueue(target: CatalogTarget): Promise<void> | void;
+  title: string
+  caption: string
+  targets: RankedTarget[]
+  catalogById: Map<string, CatalogTarget>
+  activeSite: SiteProfile | null
+  queueItemCounts: Map<string, number>
+  runnerActive: boolean
+  onAddToQueue(target: CatalogTarget): Promise<void> | void
 }) {
   return (
     <section className="tonight-bucket">
@@ -1724,7 +2315,9 @@ function TonightBucket(props: {
               activeSite={props.activeSite}
               queuedCount={
                 props.activeSite
-                  ? props.queueItemCounts.get(buildQueueTargetKey(props.activeSite.id, entry.targetId)) ?? 0
+                  ? (props.queueItemCounts.get(
+                      buildQueueTargetKey(props.activeSite.id, entry.targetId),
+                    ) ?? 0)
                   : 0
               }
               runnerActive={props.runnerActive}
@@ -1734,48 +2327,79 @@ function TonightBucket(props: {
         </div>
       )}
     </section>
-  );
+  )
 }
 
 function TonightTargetCard(props: {
-  target: CatalogTarget | undefined;
-  ranking: RankedTarget;
-  activeSite: SiteProfile | null;
-  queuedCount: number;
-  runnerActive: boolean;
-  onAddToQueue(target: CatalogTarget): Promise<void> | void;
+  target: CatalogTarget | undefined
+  ranking: RankedTarget
+  activeSite: SiteProfile | null
+  queuedCount: number
+  runnerActive: boolean
+  onAddToQueue(target: CatalogTarget): Promise<void> | void
 }) {
-  const addLabel = props.queuedCount > 0 ? `In queue (${props.queuedCount})` : "Add to queue";
-  const canAdd = Boolean(props.target) && Boolean(props.activeSite) && props.queuedCount === 0 && !props.runnerActive;
+  const addLabel =
+    props.queuedCount > 0 ? `In queue (${props.queuedCount})` : 'Add to queue'
+  const canAdd =
+    Boolean(props.target) &&
+    Boolean(props.activeSite) &&
+    props.queuedCount === 0 &&
+    !props.runnerActive
 
   return (
-    <article className={`tonight-target-card recommendation-${props.ranking.recommendation}`}>
+    <article
+      className={`tonight-target-card recommendation-${props.ranking.recommendation}`}
+    >
       <div className="tonight-target-header">
         <div>
           <strong>{props.target?.primaryName ?? props.ranking.targetId}</strong>
           <p>
-            {props.target?.objectType ?? "target"}
-            {props.target?.constellation ? ` • ${props.target.constellation}` : ""}
+            {props.target?.objectType ?? 'target'}
+            {props.target?.constellation
+              ? ` • ${props.target.constellation}`
+              : ''}
           </p>
         </div>
         <div className="tonight-target-score">
-          <span className="drawer-state">{formatTonightRecommendation(props.ranking.recommendation)}</span>
+          <span className="drawer-state">
+            {formatTonightRecommendation(props.ranking.recommendation)}
+          </span>
           <strong>{props.ranking.score.toFixed(1)}</strong>
         </div>
       </div>
 
       <div className="metric-grid tonight-target-metrics">
-        <QuickStat label="Altitude now" value={formatTonightNumber(props.ranking.altitudeNowDeg, "deg")} />
-        <QuickStat label="Peak altitude" value={formatTonightNumber(props.ranking.bestAltitudeDeg, "deg")} />
-        <QuickStat label="Usable" value={formatTonightMinutes(props.ranking.visibleMinutes)} />
-        <QuickStat label="Sky-visible" value={formatTonightMinutes(props.ranking.skyVisibleMinutes)} />
-        <QuickStat label="Moon" value={formatTonightNumber(props.ranking.moonSeparationDeg, "deg")} />
+        <QuickStat
+          label="Altitude now"
+          value={formatTonightNumber(props.ranking.altitudeNowDeg, 'deg')}
+        />
+        <QuickStat
+          label="Peak altitude"
+          value={formatTonightNumber(props.ranking.bestAltitudeDeg, 'deg')}
+        />
+        <QuickStat
+          label="Usable"
+          value={formatTonightMinutes(props.ranking.visibleMinutes)}
+        />
+        <QuickStat
+          label="Sky-visible"
+          value={formatTonightMinutes(props.ranking.skyVisibleMinutes)}
+        />
+        <QuickStat
+          label="Moon"
+          value={formatTonightNumber(props.ranking.moonSeparationDeg, 'deg')}
+        />
         <QuickStat label="Window" value={formatTonightWindow(props.ranking)} />
       </div>
 
       {props.target ? (
         <div className="actions tonight-target-actions">
-          <button className="primary" type="button" onClick={() => void props.onAddToQueue(props.target)} disabled={!canAdd}>
+          <button
+            className="primary"
+            type="button"
+            onClick={() => void props.onAddToQueue(props.target)}
+            disabled={!canAdd}
+          >
             {addLabel}
           </button>
         </div>
@@ -1799,17 +2423,18 @@ function TonightTargetCard(props: {
         </div>
       ) : null}
     </article>
-  );
+  )
 }
 
 function QueueSearchResultCard(props: {
-  target: CatalogTarget;
-  activeSite: SiteProfile | null;
-  queuedCount: number;
-  runnerActive: boolean;
-  onAddToQueue(target: CatalogTarget): Promise<void> | void;
+  target: CatalogTarget
+  activeSite: SiteProfile | null
+  queuedCount: number
+  runnerActive: boolean
+  onAddToQueue(target: CatalogTarget): Promise<void> | void
 }) {
-  const canAdd = Boolean(props.activeSite) && props.queuedCount === 0 && !props.runnerActive;
+  const canAdd =
+    Boolean(props.activeSite) && props.queuedCount === 0 && !props.runnerActive
 
   return (
     <button
@@ -1821,45 +2446,53 @@ function QueueSearchResultCard(props: {
       <strong>{props.target.primaryName}</strong>
       <span>
         {props.target.objectType}
-        {props.target.constellation ? ` • ${props.target.constellation}` : ""}
+        {props.target.constellation ? ` • ${props.target.constellation}` : ''}
       </span>
       <span>
         {props.runnerActive
-          ? "Runner active"
+          ? 'Runner active'
           : !props.activeSite
-          ? "Select a site first"
-          : props.queuedCount > 0
-            ? `Already in queue (${props.queuedCount})`
-            : `Add for ${props.activeSite.name}`}
+            ? 'Select a site first'
+            : props.queuedCount > 0
+              ? `Already in queue (${props.queuedCount})`
+              : `Add for ${props.activeSite.name}`}
       </span>
     </button>
-  );
+  )
 }
 
 function QueueItemCard(props: {
-  item: QueueItem;
-  index: number;
-  total: number;
-  site: SiteProfile | undefined;
-  warnings: string[];
-  disabled: boolean;
-  onMove(itemId: string, direction: -1 | 1): Promise<void> | void;
-  onRemove(itemId: string): Promise<void> | void;
-  onUpdate(itemId: string, patch: Partial<QueueItem>): Promise<void> | void;
+  item: QueueItem
+  index: number
+  total: number
+  site: SiteProfile | undefined
+  warnings: string[]
+  disabled: boolean
+  onMove(itemId: string, direction: -1 | 1): Promise<void> | void
+  onRemove(itemId: string): Promise<void> | void
+  onUpdate(itemId: string, patch: Partial<QueueItem>): Promise<void> | void
 }) {
-  const [durationInput, setDurationInput] = useState(String(props.item.desiredDurationMin));
+  const [durationInput, setDurationInput] = useState(
+    String(props.item.desiredDurationMin),
+  )
   const [altitudeInput, setAltitudeInput] = useState(
-    typeof props.item.stopWhenBelowAltitudeDeg === "number" ? String(props.item.stopWhenBelowAltitudeDeg) : ""
-  );
-  const [notBeforeInput, setNotBeforeInput] = useState(props.item.notBeforeLocal ?? "");
+    typeof props.item.stopWhenBelowAltitudeDeg === 'number'
+      ? String(props.item.stopWhenBelowAltitudeDeg)
+      : '',
+  )
+  const [notBeforeInput, setNotBeforeInput] = useState(
+    props.item.notBeforeLocal ?? '',
+  )
 
   useEffect(() => {
-    setDurationInput(String(props.item.desiredDurationMin));
+    setDurationInput(String(props.item.desiredDurationMin))
     setAltitudeInput(
-      typeof props.item.stopWhenBelowAltitudeDeg === "number" ? String(props.item.stopWhenBelowAltitudeDeg) : ""
-    );
-    setNotBeforeInput(props.item.notBeforeLocal ?? "");
-  }, [props.item]);
+      typeof props.item.stopWhenBelowAltitudeDeg === 'number'
+        ? String(props.item.stopWhenBelowAltitudeDeg)
+        : '',
+    )
+    setNotBeforeInput(props.item.notBeforeLocal ?? '')
+  }, [props.item])
 
   return (
     <article className="queue-item-card">
@@ -1867,17 +2500,31 @@ function QueueItemCard(props: {
         <div>
           <strong>{props.item.targetName}</strong>
           <p>
-            {props.site?.name ?? "Unknown site"} • RA {props.item.targetRaHours.toFixed(4)} • Dec {props.item.targetDecDeg.toFixed(4)}
+            {props.site?.name ?? 'Unknown site'} • RA{' '}
+            {props.item.targetRaHours.toFixed(4)} • Dec{' '}
+            {props.item.targetDecDeg.toFixed(4)}
           </p>
         </div>
         <div className="actions queue-item-actions">
-          <button onClick={() => void props.onMove(props.item.id, -1)} disabled={props.disabled || props.index === 0} type="button">
+          <button
+            onClick={() => void props.onMove(props.item.id, -1)}
+            disabled={props.disabled || props.index === 0}
+            type="button"
+          >
             Up
           </button>
-          <button onClick={() => void props.onMove(props.item.id, 1)} disabled={props.disabled || props.index === props.total - 1} type="button">
+          <button
+            onClick={() => void props.onMove(props.item.id, 1)}
+            disabled={props.disabled || props.index === props.total - 1}
+            type="button"
+          >
             Down
           </button>
-          <button onClick={() => void props.onRemove(props.item.id)} disabled={props.disabled} type="button">
+          <button
+            onClick={() => void props.onRemove(props.item.id)}
+            disabled={props.disabled}
+            type="button"
+          >
             Remove
           </button>
         </div>
@@ -1891,11 +2538,13 @@ function QueueItemCard(props: {
             disabled={props.disabled}
             onChange={(event) => setDurationInput(event.target.value)}
             onBlur={() => {
-              const parsed = Number(durationInput);
+              const parsed = Number(durationInput)
               if (Number.isFinite(parsed) && parsed > 0) {
-                void props.onUpdate(props.item.id, { desiredDurationMin: parsed });
+                void props.onUpdate(props.item.id, {
+                  desiredDurationMin: parsed,
+                })
               } else {
-                setDurationInput(String(props.item.desiredDurationMin));
+                setDurationInput(String(props.item.desiredDurationMin))
               }
             }}
           />
@@ -1908,15 +2557,17 @@ function QueueItemCard(props: {
             disabled={props.disabled}
             onChange={(event) => setNotBeforeInput(event.target.value)}
             onBlur={() => {
-              const trimmed = notBeforeInput.trim();
+              const trimmed = notBeforeInput.trim()
               if (trimmed.length === 0) {
-                void props.onUpdate(props.item.id, { notBeforeLocal: undefined });
-                return;
+                void props.onUpdate(props.item.id, {
+                  notBeforeLocal: undefined,
+                })
+                return
               }
               if (/^([01]?\d|2[0-3]):[0-5]\d$/u.test(trimmed)) {
-                void props.onUpdate(props.item.id, { notBeforeLocal: trimmed });
+                void props.onUpdate(props.item.id, { notBeforeLocal: trimmed })
               } else {
-                setNotBeforeInput(props.item.notBeforeLocal ?? "");
+                setNotBeforeInput(props.item.notBeforeLocal ?? '')
               }
             }}
             placeholder="22:30"
@@ -1930,20 +2581,24 @@ function QueueItemCard(props: {
             disabled={props.disabled}
             onChange={(event) => setAltitudeInput(event.target.value)}
             onBlur={() => {
-              const trimmed = altitudeInput.trim();
+              const trimmed = altitudeInput.trim()
               if (trimmed.length === 0) {
-                void props.onUpdate(props.item.id, { stopWhenBelowAltitudeDeg: undefined });
-                return;
+                void props.onUpdate(props.item.id, {
+                  stopWhenBelowAltitudeDeg: undefined,
+                })
+                return
               }
-              const parsed = Number(trimmed);
+              const parsed = Number(trimmed)
               if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 90) {
-                void props.onUpdate(props.item.id, { stopWhenBelowAltitudeDeg: parsed });
+                void props.onUpdate(props.item.id, {
+                  stopWhenBelowAltitudeDeg: parsed,
+                })
               } else {
                 setAltitudeInput(
-                  typeof props.item.stopWhenBelowAltitudeDeg === "number"
+                  typeof props.item.stopWhenBelowAltitudeDeg === 'number'
                     ? String(props.item.stopWhenBelowAltitudeDeg)
-                    : ""
-                );
+                    : '',
+                )
               }
             }}
             placeholder="28"
@@ -1953,11 +2608,13 @@ function QueueItemCard(props: {
         <label className="field compact-field">
           <span>Filter</span>
           <select
-            value={props.item.requestedFilter ?? ""}
+            value={props.item.requestedFilter ?? ''}
             disabled={props.disabled}
             onChange={(event) =>
               void props.onUpdate(props.item.id, {
-                requestedFilter: event.target.value ? (event.target.value as QueueItem["requestedFilter"]) : undefined,
+                requestedFilter: event.target.value
+                  ? (event.target.value as QueueItem['requestedFilter'])
+                  : undefined,
               })
             }
           >
@@ -1975,7 +2632,11 @@ function QueueItemCard(props: {
             type="checkbox"
             checked={props.item.stopWhenBackyardHidden}
             disabled={props.disabled}
-            onChange={(event) => void props.onUpdate(props.item.id, { stopWhenBackyardHidden: event.target.checked })}
+            onChange={(event) =>
+              void props.onUpdate(props.item.id, {
+                stopWhenBackyardHidden: event.target.checked,
+              })
+            }
           />
           <span>Stop when backyard hidden</span>
         </label>
@@ -1984,7 +2645,11 @@ function QueueItemCard(props: {
             type="checkbox"
             checked={props.item.stopAtDawn}
             disabled={props.disabled}
-            onChange={(event) => void props.onUpdate(props.item.id, { stopAtDawn: event.target.checked })}
+            onChange={(event) =>
+              void props.onUpdate(props.item.id, {
+                stopAtDawn: event.target.checked,
+              })
+            }
           />
           <span>Stop at dawn</span>
         </label>
@@ -1993,7 +2658,11 @@ function QueueItemCard(props: {
             type="checkbox"
             checked={props.item.autofocusBeforeStart}
             disabled={props.disabled}
-            onChange={(event) => void props.onUpdate(props.item.id, { autofocusBeforeStart: event.target.checked })}
+            onChange={(event) =>
+              void props.onUpdate(props.item.id, {
+                autofocusBeforeStart: event.target.checked,
+              })
+            }
           />
           <span>Autofocus before start</span>
         </label>
@@ -2002,7 +2671,11 @@ function QueueItemCard(props: {
             type="checkbox"
             checked={props.item.restartStack}
             disabled={props.disabled}
-            onChange={(event) => void props.onUpdate(props.item.id, { restartStack: event.target.checked })}
+            onChange={(event) =>
+              void props.onUpdate(props.item.id, {
+                restartStack: event.target.checked,
+              })
+            }
           />
           <span>Restart stack</span>
         </label>
@@ -2018,81 +2691,97 @@ function QueueItemCard(props: {
         </div>
       ) : null}
     </article>
-  );
+  )
 }
 
 function buildQueueDiagnostics(
   items: QueueItem[],
   catalogById: Map<string, CatalogTarget>,
-  siteById: Map<string, SiteProfile>
+  siteById: Map<string, SiteProfile>,
 ): Map<string, { warnings: string[] }> {
-  const diagnostics = new Map<string, { warnings: string[] }>();
+  const diagnostics = new Map<string, { warnings: string[] }>()
 
   for (const item of items) {
-    const warnings: string[] = [];
-    const site = siteById.get(item.siteId);
-    const target = catalogById.get(item.targetId);
+    const warnings: string[] = []
+    const site = siteById.get(item.siteId)
+    const target = catalogById.get(item.targetId)
 
     if (!site) {
-      warnings.push("The selected site is no longer available");
+      warnings.push('The selected site is no longer available')
     }
     if (!target) {
-      warnings.push("The catalog target is missing from the current planning state");
+      warnings.push(
+        'The catalog target is missing from the current planning state',
+      )
     }
-    if (item.notBeforeLocal && !/^([01]?\d|2[0-3]):[0-5]\d$/u.test(item.notBeforeLocal)) {
-      warnings.push("Not-before time should use HH:MM local format");
+    if (
+      item.notBeforeLocal &&
+      !/^([01]?\d|2[0-3]):[0-5]\d$/u.test(item.notBeforeLocal)
+    ) {
+      warnings.push('Not-before time should use HH:MM local format')
     }
 
     if (site && target) {
-      const ranking = rankTargetsForTonight({ site, targets: [target] })[0];
+      const ranking = rankTargetsForTonight({ site, targets: [target] })[0]
       if (ranking.visibleMinutes < item.desiredDurationMin) {
         warnings.push(
-          `Usable window is about ${ranking.visibleMinutes} minutes, shorter than the requested ${item.desiredDurationMin} minutes`
-        );
+          `Usable window is about ${ranking.visibleMinutes} minutes, shorter than the requested ${item.desiredDurationMin} minutes`,
+        )
       }
       if (!ranking.backyardVisible && item.stopWhenBackyardHidden) {
-        warnings.push("Current site mask blocks this target tonight");
+        warnings.push('Current site mask blocks this target tonight')
       }
       if (
-        typeof item.stopWhenBelowAltitudeDeg === "number" &&
+        typeof item.stopWhenBelowAltitudeDeg === 'number' &&
         item.stopWhenBelowAltitudeDeg < site.minAltitudeDeg
       ) {
         warnings.push(
-          `Stop altitude ${item.stopWhenBelowAltitudeDeg} deg is below the site's planning floor ${site.minAltitudeDeg} deg`
-        );
+          `Stop altitude ${item.stopWhenBelowAltitudeDeg} deg is below the site's planning floor ${site.minAltitudeDeg} deg`,
+        )
       }
     }
 
-    diagnostics.set(item.id, { warnings });
+    diagnostics.set(item.id, { warnings })
   }
 
-  return diagnostics;
+  return diagnostics
 }
 
 function matchesCatalogSearch(target: CatalogTarget, needle: string): boolean {
-  return [target.id, target.primaryName, ...target.aliases, target.objectType, target.constellation, ...(target.tags ?? [])]
+  return [
+    target.id,
+    target.primaryName,
+    ...target.aliases,
+    target.objectType,
+    target.constellation,
+    ...(target.tags ?? []),
+  ]
     .filter((value): value is string => Boolean(value))
-    .join(" ")
+    .join(' ')
     .toLowerCase()
-    .includes(needle);
+    .includes(needle)
 }
 
 function buildQueueItemCounts(items: QueueItem[]): Map<string, number> {
-  const counts = new Map<string, number>();
+  const counts = new Map<string, number>()
 
   for (const item of items) {
-    const key = buildQueueTargetKey(item.siteId, item.targetId);
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+    const key = buildQueueTargetKey(item.siteId, item.targetId)
+    counts.set(key, (counts.get(key) ?? 0) + 1)
   }
 
-  return counts;
+  return counts
 }
 
 function buildQueueTargetKey(siteId: string, targetId: string): string {
-  return `${siteId}::${targetId}`;
+  return `${siteId}::${targetId}`
 }
 
-function matchesTonightFilter(ranking: RankedTarget, target: CatalogTarget | undefined, needle: string): boolean {
+function matchesTonightFilter(
+  ranking: RankedTarget,
+  target: CatalogTarget | undefined,
+  needle: string,
+): boolean {
   const haystack = [
     ranking.targetId,
     target?.primaryName,
@@ -2104,106 +2793,126 @@ function matchesTonightFilter(ranking: RankedTarget, target: CatalogTarget | und
     ...ranking.rejectionReasons,
   ]
     .filter((value): value is string => Boolean(value))
-    .join(" ")
-    .toLowerCase();
+    .join(' ')
+    .toLowerCase()
 
-  return haystack.includes(needle);
+  return haystack.includes(needle)
 }
 
-function compareTonightTargets(left: RankedTarget, right: RankedTarget, sortKey: TonightSortKey): number {
+function compareTonightTargets(
+  left: RankedTarget,
+  right: RankedTarget,
+  sortKey: TonightSortKey,
+): number {
   switch (sortKey) {
-    case "altitude":
-      return (right.altitudeNowDeg ?? -90) - (left.altitudeNowDeg ?? -90) || right.score - left.score;
-    case "visibility":
-      return right.visibleMinutes - left.visibleMinutes || right.score - left.score;
-    case "moon":
-      return (right.moonSeparationDeg ?? 0) - (left.moonSeparationDeg ?? 0) || right.score - left.score;
+    case 'altitude':
+      return (
+        (right.altitudeNowDeg ?? -90) - (left.altitudeNowDeg ?? -90) ||
+        right.score - left.score
+      )
+    case 'visibility':
+      return (
+        right.visibleMinutes - left.visibleMinutes || right.score - left.score
+      )
+    case 'moon':
+      return (
+        (right.moonSeparationDeg ?? 0) - (left.moonSeparationDeg ?? 0) ||
+        right.score - left.score
+      )
     default:
-      return right.score - left.score || right.visibleMinutes - left.visibleMinutes;
+      return (
+        right.score - left.score || right.visibleMinutes - left.visibleMinutes
+      )
   }
 }
 
 function groupTonightTargets(targets: RankedTarget[]): TonightBuckets {
   return {
-    goodNow: targets.filter((target) => target.recommendation === "good_now"),
-    laterTonight: targets.filter((target) => target.recommendation === "later_tonight"),
-    notTonight: targets.filter((target) => target.recommendation === "not_tonight"),
-  };
+    goodNow: targets.filter((target) => target.recommendation === 'good_now'),
+    laterTonight: targets.filter(
+      (target) => target.recommendation === 'later_tonight',
+    ),
+    notTonight: targets.filter(
+      (target) => target.recommendation === 'not_tonight',
+    ),
+  }
 }
 
-function formatTonightRecommendation(value: RankedTarget["recommendation"]): string {
+function formatTonightRecommendation(
+  value: RankedTarget['recommendation'],
+): string {
   switch (value) {
-    case "good_now":
-      return "Good now";
-    case "later_tonight":
-      return "Later";
+    case 'good_now':
+      return 'Good now'
+    case 'later_tonight':
+      return 'Later'
     default:
-      return "Blocked";
+      return 'Blocked'
   }
 }
 
 function formatTonightMinutes(value: number): string {
-  return value > 0 ? `${value} min` : "0 min";
+  return value > 0 ? `${value} min` : '0 min'
 }
 
 function formatTonightNumber(value: number | undefined, unit: string): string {
-  return typeof value === "number" ? `${value.toFixed(1)} ${unit}` : "Unknown";
+  return typeof value === 'number' ? `${value.toFixed(1)} ${unit}` : 'Unknown'
 }
 
 function formatTonightWindow(ranking: RankedTarget): string {
   if (!ranking.windowStartAt || !ranking.windowEndAt) {
-    return ranking.visibleMinutes > 0 ? "Check reasons" : "None";
+    return ranking.visibleMinutes > 0 ? 'Check reasons' : 'None'
   }
 
-  return `${new Date(ranking.windowStartAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} - ${new Date(
-    ranking.windowEndAt
-  ).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  return `${new Date(ranking.windowStartAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - ${new Date(
+    ranking.windowEndAt,
+  ).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
 }
 
 interface DeviceSummary {
-  productModel?: string;
-  serialNumber?: string;
-  firmwareVersion?: string;
-  verified?: boolean;
-  stationSsid?: string;
-  batteryPercent?: number;
-  deviceTempC?: number;
-  batteryTempC?: number;
-  mountClosed?: boolean;
-  tracking?: boolean;
-  focusState?: string;
-  equMode?: boolean;
-  viewMode?: string;
-  viewStage?: string;
-  viewState?: string;
-  targetName?: string;
+  productModel?: string
+  serialNumber?: string
+  firmwareVersion?: string
+  verified?: boolean
+  stationSsid?: string
+  batteryPercent?: number
+  deviceTempC?: number
+  batteryTempC?: number
+  mountClosed?: boolean
+  tracking?: boolean
+  focusState?: string
+  equMode?: boolean
+  viewMode?: string
+  viewStage?: string
+  viewState?: string
+  targetName?: string
   location?: {
-    lat: number;
-    lon: number;
-  };
-  tempUnit?: string;
-  exposureHeaterEnabled?: boolean;
-  dewHeaterEnabled?: boolean;
+    lat: number
+    lon: number
+  }
+  tempUnit?: string
+  exposureHeaterEnabled?: boolean
+  dewHeaterEnabled?: boolean
 }
 
 interface TonightBuckets {
-  goodNow: RankedTarget[];
-  laterTonight: RankedTarget[];
-  notTonight: RankedTarget[];
+  goodNow: RankedTarget[]
+  laterTonight: RankedTarget[]
+  notTonight: RankedTarget[]
 }
 
-type TonightSortKey = "score" | "altitude" | "visibility" | "moon";
+type TonightSortKey = 'score' | 'altitude' | 'visibility' | 'moon'
 
-type WorkspaceMode = "observe" | "planning" | "diagnostics";
+type WorkspaceMode = 'observe' | 'planning' | 'diagnostics'
 
-type PlanningPane = "tonight" | "queue" | "sites";
+type PlanningPane = 'tonight' | 'queue' | 'sites'
 
 interface SiteFormState {
-  name: string;
-  lat: string;
-  lon: string;
-  timezone: string;
-  minAltitudeDeg: string;
-  blockedAzimuthText: string;
-  makeActive: boolean;
+  name: string
+  lat: string
+  lon: string
+  timezone: string
+  minAltitudeDeg: string
+  blockedAzimuthText: string
+  makeActive: boolean
 }
