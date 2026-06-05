@@ -1,129 +1,129 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
-import { resolveSeestarPemPath } from "../config.js";
-import { SeestarDevice } from "../device.js";
-import type { AlbumsResult } from "../types.js";
+import { mkdir, writeFile } from 'node:fs/promises'
+import { basename, join, resolve } from 'node:path'
+import { resolveSeestarPemPath } from '../config.js'
+import { SeestarDevice } from '../device.js'
+import type { AlbumsResult } from '../types.js'
 
-const DEFAULT_COUNT = 12;
-const DEFAULT_FRAME_CADENCE_SEC = 10;
-const DEFAULT_SEARCH_WINDOW_SEC = 20;
-const DEFAULT_TIMEOUT_MS = 15000;
-const DEFAULT_QUICK_LOOK_COLUMNS = 4;
+const DEFAULT_COUNT = 12
+const DEFAULT_FRAME_CADENCE_SEC = 10
+const DEFAULT_SEARCH_WINDOW_SEC = 20
+const DEFAULT_TIMEOUT_MS = 15000
+const DEFAULT_QUICK_LOOK_COLUMNS = 4
 
 type FetchArgs = {
-  help?: boolean;
-  host?: string;
-  pemPath?: string;
-  outDir?: string;
-  targetName?: string;
-  subName?: string;
-  count: number;
-  frameCadenceSec: number;
-  searchWindowSec: number;
-  timeoutMs: number;
-  includeFit: boolean;
-  quickLook: boolean;
-  quickLookColumns: number;
-  json: boolean;
-};
+  help?: boolean
+  host?: string
+  pemPath?: string
+  outDir?: string
+  targetName?: string
+  subName?: string
+  count: number
+  frameCadenceSec: number
+  searchWindowSec: number
+  timeoutMs: number
+  includeFit: boolean
+  quickLook: boolean
+  quickLookColumns: number
+  json: boolean
+}
 
 type AlbumAssetEntry = {
-  groupName?: string;
-  name: string;
-  thn: string;
-  count?: number;
-  type?: number;
-};
+  groupName?: string
+  name: string
+  thn: string
+  count?: number
+  type?: number
+}
 
 type DownloadedAsset = {
-  fileName: string;
-  bytes: number;
-  sourceUrl: string;
-};
+  fileName: string
+  bytes: number
+  sourceUrl: string
+}
 
 type DownloadedSubframe = {
-  name: string;
-  capturedAt: string;
-  token: string;
-  jpg: DownloadedAsset;
-  fit?: DownloadedAsset;
-};
+  name: string
+  capturedAt: string
+  token: string
+  jpg: DownloadedAsset
+  fit?: DownloadedAsset
+}
 
 type SubframeManifest = {
-  generatedAt: string;
-  host: string;
-  albumPath: string;
-  targetName?: string;
+  generatedAt: string
+  host: string
+  albumPath: string
+  targetName?: string
   subframeAlbum: {
-    name: string;
-    groupName?: string;
-    thumbPath: string;
-    count: number | null;
-    type: number | null;
-  };
+    name: string
+    groupName?: string
+    thumbPath: string
+    count: number | null
+    type: number | null
+  }
   strategy: {
-    method: string;
-    frameCadenceSec: number;
-    searchWindowSec: number;
-  };
-  requestedCount: number;
-  targetCount: number;
-  downloadedCount: number;
-  includeFit: boolean;
-  downloads: DownloadedSubframe[];
-  warnings: string[];
+    method: string
+    frameCadenceSec: number
+    searchWindowSec: number
+  }
+  requestedCount: number
+  targetCount: number
+  downloadedCount: number
+  includeFit: boolean
+  downloads: DownloadedSubframe[]
+  warnings: string[]
   quickLook: {
-    enabled: boolean;
-    fileName?: string;
-  };
-};
+    enabled: boolean
+    fileName?: string
+  }
+}
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+  const args = parseArgs(process.argv.slice(2))
   if (args.help) {
-    printHelp();
-    process.exit(0);
+    printHelp()
+    process.exit(0)
   }
 
-  const host = args.host ?? process.env.SEESTAR_HOST;
+  const host = args.host ?? process.env.SEESTAR_HOST
   if (!host) {
-    throw new Error("Provide --host <ip-or-hostname> or set SEESTAR_HOST");
+    throw new Error('Provide --host <ip-or-hostname> or set SEESTAR_HOST')
   }
 
-  const pemPath = resolveSeestarPemPath({ explicitPath: args.pemPath });
+  const pemPath = resolveSeestarPemPath({ explicitPath: args.pemPath })
   const outDir = resolve(
-    args.outDir
-      ?? process.env.OUT_DIR
-      ?? `./downloads/${sanitizePathSegment(args.targetName ?? args.subName ?? "latest-subframes")}`
-  );
-  await mkdir(outDir, { recursive: true });
+    args.outDir ??
+      process.env.OUT_DIR ??
+      `./downloads/${sanitizePathSegment(args.targetName ?? args.subName ?? 'latest-subframes')}`,
+  )
+  await mkdir(outDir, { recursive: true })
 
   const device = new SeestarDevice({
     host,
     pemPath,
     timeoutMs: args.timeoutMs,
-  });
+  })
 
   try {
-    const authenticated = await device.connectAndAuth();
+    const authenticated = await device.connectAndAuth()
     if (!authenticated) {
-      throw new Error("Authentication failed");
+      throw new Error('Authentication failed')
     }
 
-    const albums = await device.getAlbums();
+    const albums = await device.getAlbums()
     if (!albums) {
-      throw new Error("get_albums returned no result");
+      throw new Error('get_albums returned no result')
     }
 
-    const allEntries = flattenAlbumEntries(albums.list);
+    const allEntries = flattenAlbumEntries(albums.list)
     const subframeEntry = pickSubframeEntry(allEntries, {
       targetName: args.targetName,
       subName: args.subName,
-    });
+    })
 
-    const latestDate = parseTimestampToken(subframeEntry.thn);
-    const targetCount = deriveTargetCount(subframeEntry.count, args.count);
-    const warnings: string[] = [];
+    const latestDate = parseTimestampToken(subframeEntry.thn)
+    const targetCount = deriveTargetCount(subframeEntry.count, args.count)
+    const warnings: string[] = []
     const downloaded = await fetchLatestSubframes(device, {
       latestThumbPath: subframeEntry.thn,
       latestDate,
@@ -134,17 +134,17 @@ async function main(): Promise<void> {
       includeFit: args.includeFit,
       warnings,
       quiet: args.json,
-    });
+    })
 
     const quickLookFileName = args.quickLook
       ? await writeQuickLook(outDir, {
-        host,
-        subframeName: subframeEntry.name,
-        downloaded,
-        frameCadenceSec: args.frameCadenceSec,
-        columns: args.quickLookColumns,
-      })
-      : undefined;
+          host,
+          subframeName: subframeEntry.name,
+          downloaded,
+          frameCadenceSec: args.frameCadenceSec,
+          columns: args.quickLookColumns,
+        })
+      : undefined
 
     const manifest: SubframeManifest = {
       generatedAt: new Date().toISOString(),
@@ -159,7 +159,7 @@ async function main(): Promise<void> {
         type: subframeEntry.type ?? null,
       },
       strategy: {
-        method: "get_albums + HTTP timestamp inference",
+        method: 'get_albums + HTTP timestamp inference',
         frameCadenceSec: args.frameCadenceSec,
         searchWindowSec: args.searchWindowSec,
       },
@@ -173,28 +173,36 @@ async function main(): Promise<void> {
         enabled: args.quickLook,
         fileName: quickLookFileName,
       },
-    };
-
-    const manifestPath = join(outDir, "latest-subframes-manifest.json");
-    await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
-
-    if (args.json) {
-      console.log(JSON.stringify(manifest, null, 2));
-      return;
     }
 
-    console.log(`Downloaded ${downloaded.length}/${targetCount} recent subframes from ${subframeEntry.name}`);
-    console.log(`Saved manifest: ${manifestPath}`);
+    const manifestPath = join(outDir, 'latest-subframes-manifest.json')
+    await writeFile(
+      manifestPath,
+      JSON.stringify(manifest, null, 2) + '\n',
+      'utf8',
+    )
+
+    if (args.json) {
+      console.log(JSON.stringify(manifest, null, 2))
+      return
+    }
+
+    console.log(
+      `Downloaded ${downloaded.length}/${targetCount} recent subframes from ${subframeEntry.name}`,
+    )
+    console.log(`Saved manifest: ${manifestPath}`)
     if (quickLookFileName) {
-      console.log(`Saved quick-look contact sheet: ${join(outDir, quickLookFileName)}`);
+      console.log(
+        `Saved quick-look contact sheet: ${join(outDir, quickLookFileName)}`,
+      )
     }
     if (warnings.length > 0) {
       for (const warning of warnings) {
-        console.warn(`Warning: ${warning}`);
+        console.warn(`Warning: ${warning}`)
       }
     }
   } finally {
-    device.disconnect();
+    device.disconnect()
   }
 }
 
@@ -208,97 +216,103 @@ function parseArgs(argv: string[]): FetchArgs {
     quickLook: false,
     quickLookColumns: DEFAULT_QUICK_LOOK_COLUMNS,
     json: false,
-  };
+  }
 
   for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (arg === "--help" || arg === "-h") {
-      out.help = true;
-      continue;
+    const arg = argv[index]
+    if (arg === '--help' || arg === '-h') {
+      out.help = true
+      continue
     }
-    if (arg === "--json") {
-      out.json = true;
-      continue;
+    if (arg === '--json') {
+      out.json = true
+      continue
     }
-    if (arg === "--quick-look") {
-      out.quickLook = true;
-      continue;
+    if (arg === '--quick-look') {
+      out.quickLook = true
+      continue
     }
-    if (arg === "--jpg-only") {
-      out.includeFit = false;
-      continue;
+    if (arg === '--jpg-only') {
+      out.includeFit = false
+      continue
     }
-    if (!arg.startsWith("--")) {
-      continue;
+    if (!arg.startsWith('--')) {
+      continue
     }
 
-    const key = arg.slice(2);
-    const value = argv[index + 1];
-    if (value === undefined || value.startsWith("--")) {
-      throw new Error(`Missing value for --${key}`);
+    const key = arg.slice(2)
+    const value = argv[index + 1]
+    if (value === undefined || value.startsWith('--')) {
+      throw new Error(`Missing value for --${key}`)
     }
-    index += 1;
+    index += 1
 
     switch (key) {
-      case "host":
-        out.host = value;
-        break;
-      case "pem-path":
-        out.pemPath = value;
-        break;
-      case "out-dir":
-        out.outDir = value;
-        break;
-      case "target":
-        out.targetName = value;
-        break;
-      case "sub-name":
-        out.subName = value;
-        break;
-      case "count":
-        out.count = parsePositiveInteger("--count", value);
-        break;
-      case "frame-cadence-sec":
-        out.frameCadenceSec = parsePositiveInteger("--frame-cadence-sec", value);
-        break;
-      case "search-window-sec":
-        out.searchWindowSec = parseNonNegativeInteger("--search-window-sec", value);
-        break;
-      case "timeout-ms":
-        out.timeoutMs = parsePositiveInteger("--timeout-ms", value);
-        break;
-      case "quick-look-columns":
-        out.quickLookColumns = parsePositiveInteger("--quick-look-columns", value);
-        break;
+      case 'host':
+        out.host = value
+        break
+      case 'pem-path':
+        out.pemPath = value
+        break
+      case 'out-dir':
+        out.outDir = value
+        break
+      case 'target':
+        out.targetName = value
+        break
+      case 'sub-name':
+        out.subName = value
+        break
+      case 'count':
+        out.count = parsePositiveInteger('--count', value)
+        break
+      case 'frame-cadence-sec':
+        out.frameCadenceSec = parsePositiveInteger('--frame-cadence-sec', value)
+        break
+      case 'search-window-sec':
+        out.searchWindowSec = parseNonNegativeInteger(
+          '--search-window-sec',
+          value,
+        )
+        break
+      case 'timeout-ms':
+        out.timeoutMs = parsePositiveInteger('--timeout-ms', value)
+        break
+      case 'quick-look-columns':
+        out.quickLookColumns = parsePositiveInteger(
+          '--quick-look-columns',
+          value,
+        )
+        break
       default:
-        throw new Error(`Unknown option: --${key}`);
+        throw new Error(`Unknown option: --${key}`)
     }
   }
 
   if (out.quickLookColumns < 1) {
-    out.quickLookColumns = 1;
+    out.quickLookColumns = 1
   }
 
-  return out;
+  return out
 }
 
 function parsePositiveInteger(label: string, value: string): number {
-  const parsed = Number(value);
+  const parsed = Number(value)
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`Invalid ${label}: ${value}`);
+    throw new Error(`Invalid ${label}: ${value}`)
   }
-  return parsed;
+  return parsed
 }
 
 function parseNonNegativeInteger(label: string, value: string): number {
-  const parsed = Number(value);
+  const parsed = Number(value)
   if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new Error(`Invalid ${label}: ${value}`);
+    throw new Error(`Invalid ${label}: ${value}`)
   }
-  return parsed;
+  return parsed
 }
 
-function flattenAlbumEntries(entries: AlbumsResult["list"]): AlbumAssetEntry[] {
+function flattenAlbumEntries(entries: AlbumsResult['list']): AlbumAssetEntry[] {
   return entries.flatMap((entry) =>
     entry.files.map((file) => ({
       groupName: entry.groupName,
@@ -306,135 +320,157 @@ function flattenAlbumEntries(entries: AlbumsResult["list"]): AlbumAssetEntry[] {
       thn: file.thn,
       count: file.count,
       type: file.type,
-    }))
-  );
+    })),
+  )
 }
 
 function pickSubframeEntry(
   entries: AlbumAssetEntry[],
-  options: { targetName?: string; subName?: string }
+  options: { targetName?: string; subName?: string },
 ): AlbumAssetEntry {
   if (options.subName) {
-    return pickAlbumEntryByName(entries, options.subName);
+    return pickAlbumEntryByName(entries, options.subName)
   }
 
-  const subframeEntries = entries.filter((entry) => isLikelySubframeEntry(entry.name));
+  const subframeEntries = entries.filter((entry) =>
+    isLikelySubframeEntry(entry.name),
+  )
   if (subframeEntries.length === 0) {
-    throw new Error("No subframe album entries found from get_albums");
+    throw new Error('No subframe album entries found from get_albums')
   }
 
   if (options.targetName) {
-    const normalizedTarget = normalizeAlbumName(options.targetName);
+    const normalizedTarget = normalizeAlbumName(options.targetName)
     const targetEntries = subframeEntries.filter((entry) => {
-      const normalizedName = normalizeAlbumName(entry.name);
+      const normalizedName = normalizeAlbumName(entry.name)
       return (
-        normalizedName === `${normalizedTarget}_sub`
-        || normalizedName.startsWith(`${normalizedTarget}_sub`)
-        || normalizedName.startsWith(normalizedTarget)
-      );
-    });
+        normalizedName === `${normalizedTarget}_sub` ||
+        normalizedName.startsWith(`${normalizedTarget}_sub`) ||
+        normalizedName.startsWith(normalizedTarget)
+      )
+    })
     if (targetEntries.length > 0) {
-      return pickLatestEntry(targetEntries);
+      return pickLatestEntry(targetEntries)
     }
   }
 
-  return pickLatestEntry(subframeEntries);
+  return pickLatestEntry(subframeEntries)
 }
 
-function pickAlbumEntryByName(entries: AlbumAssetEntry[], requestedName: string): AlbumAssetEntry {
-  const exactMatches = entries.filter((entry) => entry.name === requestedName);
+function pickAlbumEntryByName(
+  entries: AlbumAssetEntry[],
+  requestedName: string,
+): AlbumAssetEntry {
+  const exactMatches = entries.filter((entry) => entry.name === requestedName)
   if (exactMatches.length > 0) {
-    return pickLatestEntry(exactMatches);
+    return pickLatestEntry(exactMatches)
   }
 
-  const normalizedRequestedName = normalizeAlbumName(requestedName);
-  const normalizedMatches = entries.filter((entry) => normalizeAlbumName(entry.name) === normalizedRequestedName);
+  const normalizedRequestedName = normalizeAlbumName(requestedName)
+  const normalizedMatches = entries.filter(
+    (entry) => normalizeAlbumName(entry.name) === normalizedRequestedName,
+  )
   if (normalizedMatches.length > 0) {
-    return pickLatestEntry(normalizedMatches);
+    return pickLatestEntry(normalizedMatches)
   }
 
-  const available = entries.map((entry) => entry.name).join(", ");
-  throw new Error(`Album entry ${requestedName} not found. Available entries: ${available}`);
+  const available = entries.map((entry) => entry.name).join(', ')
+  throw new Error(
+    `Album entry ${requestedName} not found. Available entries: ${available}`,
+  )
 }
 
 function normalizeAlbumName(value: string): string {
-  return value.trim().replace(/\s+/g, "").toLowerCase();
+  return value.trim().replace(/\s+/g, '').toLowerCase()
 }
 
 function isLikelySubframeEntry(name: string): boolean {
-  const normalized = normalizeAlbumName(name);
-  return normalized.endsWith("_sub") || normalized.endsWith("sub");
+  const normalized = normalizeAlbumName(name)
+  return normalized.endsWith('_sub') || normalized.endsWith('sub')
 }
 
 function pickLatestEntry(entries: AlbumAssetEntry[]): AlbumAssetEntry {
   if (entries.length === 0) {
-    throw new Error("Cannot choose latest entry from an empty list");
+    throw new Error('Cannot choose latest entry from an empty list')
   }
-  return [...entries].sort((left, right) => compareTimestampTokens(right.thn, left.thn))[0]!;
+  return [...entries].sort((left, right) =>
+    compareTimestampTokens(right.thn, left.thn),
+  )[0]!
 }
 
 function compareTimestampTokens(left: string, right: string): number {
-  const leftToken = extractTimestampToken(left) ?? "";
-  const rightToken = extractTimestampToken(right) ?? "";
+  const leftToken = extractTimestampToken(left) ?? ''
+  const rightToken = extractTimestampToken(right) ?? ''
   if (leftToken === rightToken) {
-    return 0;
+    return 0
   }
-  return leftToken.localeCompare(rightToken);
+  return leftToken.localeCompare(rightToken)
 }
 
 function extractTimestampToken(value: string): string | undefined {
-  const match = value.match(/(\d{8}-\d{6})/);
-  return match?.[1];
+  const match = value.match(/(\d{8}-\d{6})/)
+  return match?.[1]
 }
 
 function parseTimestampToken(value: string): Date {
-  const token = extractTimestampToken(value);
+  const token = extractTimestampToken(value)
   if (!token) {
-    throw new Error(`No timestamp token found in ${value}`);
+    throw new Error(`No timestamp token found in ${value}`)
   }
 
-  const [date, time] = token.split("-");
-  return new Date(`${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}T${time.slice(0, 2)}:${time.slice(2, 4)}:${time.slice(4, 6)}`);
+  const [date, time] = token.split('-')
+  return new Date(
+    `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}T${time.slice(0, 2)}:${time.slice(2, 4)}:${time.slice(4, 6)}`,
+  )
 }
 
 function formatTimestampToken(date: Date): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
 }
 
-function deriveTargetCount(availableCount: number | undefined, requestedCount: number): number {
-  const normalizedRequested = Math.max(1, requestedCount);
+function deriveTargetCount(
+  availableCount: number | undefined,
+  requestedCount: number,
+): number {
+  const normalizedRequested = Math.max(1, requestedCount)
   if (availableCount === undefined || availableCount <= 0) {
-    return normalizedRequested;
+    return normalizedRequested
   }
-  return Math.min(normalizedRequested, availableCount);
+  return Math.min(normalizedRequested, availableCount)
 }
 
 async function fetchLatestSubframes(
   device: SeestarDevice,
   options: {
-    latestThumbPath: string;
-    latestDate: Date;
-    outDir: string;
-    targetCount: number;
-    frameCadenceSec: number;
-    searchWindowSec: number;
-    includeFit: boolean;
-    warnings: string[];
-    quiet: boolean;
-  }
+    latestThumbPath: string
+    latestDate: Date
+    outDir: string
+    targetCount: number
+    frameCadenceSec: number
+    searchWindowSec: number
+    includeFit: boolean
+    warnings: string[]
+    quiet: boolean
+  },
 ): Promise<DownloadedSubframe[]> {
-  const downloaded: DownloadedSubframe[] = [];
-  const savedTokens = new Set<string>();
-  const attemptedTokens = new Set<string>();
-  const maxFrameOffsets = Math.max(options.targetCount * 4, options.targetCount + 12);
+  const downloaded: DownloadedSubframe[] = []
+  const savedTokens = new Set<string>()
+  const attemptedTokens = new Set<string>()
+  const maxFrameOffsets = Math.max(
+    options.targetCount * 4,
+    options.targetCount + 12,
+  )
 
   for (let frameOffset = 0; frameOffset < maxFrameOffsets; frameOffset += 1) {
     if (downloaded.length >= options.targetCount) {
-      break;
+      break
     }
 
-    const estimate = new Date(options.latestDate.getTime() - frameOffset * options.frameCadenceSec * 1000);
+    const estimate = new Date(
+      options.latestDate.getTime() -
+        frameOffset * options.frameCadenceSec * 1000,
+    )
     const matched = await findNearbySubframe(device, {
       latestThumbPath: options.latestThumbPath,
       estimate,
@@ -443,49 +479,59 @@ async function fetchLatestSubframes(
       includeFit: options.includeFit,
       savedTokens,
       attemptedTokens,
-    });
+    })
     if (!matched) {
-      continue;
+      continue
     }
 
-    downloaded.push(matched);
+    downloaded.push(matched)
     if (!options.quiet) {
-      console.log(`Downloaded subframe ${matched.name} captured at ${matched.capturedAt}`);
+      console.log(
+        `Downloaded subframe ${matched.name} captured at ${matched.capturedAt}`,
+      )
     }
   }
 
   if (downloaded.length < options.targetCount) {
     options.warnings.push(
-      `Requested ${options.targetCount} recent subframes but downloaded ${downloaded.length}. Increase --search-window-sec or adjust --frame-cadence-sec if needed.`
-    );
+      `Requested ${options.targetCount} recent subframes but downloaded ${downloaded.length}. Increase --search-window-sec or adjust --frame-cadence-sec if needed.`,
+    )
   }
 
-  return downloaded;
+  return downloaded
 }
 
 async function findNearbySubframe(
   device: SeestarDevice,
   options: {
-    latestThumbPath: string;
-    estimate: Date;
-    outDir: string;
-    searchWindowSec: number;
-    includeFit: boolean;
-    savedTokens: Set<string>;
-    attemptedTokens: Set<string>;
-  }
+    latestThumbPath: string
+    estimate: Date
+    outDir: string
+    searchWindowSec: number
+    includeFit: boolean
+    savedTokens: Set<string>
+    attemptedTokens: Set<string>
+  },
 ): Promise<DownloadedSubframe | null> {
   for (let delta = 0; delta <= options.searchWindowSec; delta += 1) {
-    const secondOffsets = delta === 0 ? [0] : [-delta, delta];
+    const secondOffsets = delta === 0 ? [0] : [-delta, delta]
     for (const offsetSeconds of secondOffsets) {
-      const candidateDate = new Date(options.estimate.getTime() + offsetSeconds * 1000);
-      const token = formatTimestampToken(candidateDate);
-      if (options.savedTokens.has(token) || options.attemptedTokens.has(token)) {
-        continue;
+      const candidateDate = new Date(
+        options.estimate.getTime() + offsetSeconds * 1000,
+      )
+      const token = formatTimestampToken(candidateDate)
+      if (
+        options.savedTokens.has(token) ||
+        options.attemptedTokens.has(token)
+      ) {
+        continue
       }
 
-      options.attemptedTokens.add(token);
-      const candidateThumbPath = options.latestThumbPath.replace(/\d{8}-\d{6}/, token);
+      options.attemptedTokens.add(token)
+      const candidateThumbPath = options.latestThumbPath.replace(
+        /\d{8}-\d{6}/,
+        token,
+      )
 
       try {
         const downloaded = await downloadKnownSubframe(device, {
@@ -493,78 +539,89 @@ async function findNearbySubframe(
           capturedAt: candidateDate,
           outDir: options.outDir,
           includeFit: options.includeFit,
-        });
-        options.savedTokens.add(token);
-        return downloaded;
+        })
+        options.savedTokens.add(token)
+        return downloaded
       } catch {
         // Keep searching nearby timestamp candidates.
       }
     }
   }
 
-  return null;
+  return null
 }
 
 async function downloadKnownSubframe(
   device: SeestarDevice,
   options: {
-    candidateThumbPath: string;
-    capturedAt: Date;
-    outDir: string;
-    includeFit: boolean;
-  }
+    candidateThumbPath: string
+    capturedAt: Date
+    outDir: string
+    includeFit: boolean
+  },
 ): Promise<DownloadedSubframe> {
-  const token = formatTimestampToken(options.capturedAt);
-  const jpgUrl = device.resolveImageUrl(options.candidateThumbPath, false, ".jpg");
-  const jpg = await downloadAsset(jpgUrl, options.outDir);
+  const token = formatTimestampToken(options.capturedAt)
+  const jpgUrl = device.resolveImageUrl(
+    options.candidateThumbPath,
+    false,
+    '.jpg',
+  )
+  const jpg = await downloadAsset(jpgUrl, options.outDir)
 
-  let fit: DownloadedAsset | undefined;
+  let fit: DownloadedAsset | undefined
   if (options.includeFit) {
     try {
-      const fitUrl = device.resolveImageUrl(options.candidateThumbPath, false, ".fit");
-      fit = await downloadAsset(fitUrl, options.outDir);
+      const fitUrl = device.resolveImageUrl(
+        options.candidateThumbPath,
+        false,
+        '.fit',
+      )
+      fit = await downloadAsset(fitUrl, options.outDir)
     } catch {
-      fit = undefined;
+      fit = undefined
     }
   }
 
   return {
-    name: basename(options.candidateThumbPath).replace("_thn.jpg", ""),
+    name: basename(options.candidateThumbPath).replace('_thn.jpg', ''),
     capturedAt: options.capturedAt.toISOString(),
     token,
     jpg,
     fit,
-  };
+  }
 }
 
-async function downloadAsset(url: string, outDir: string): Promise<DownloadedAsset> {
-  const response = await fetch(url);
+async function downloadAsset(
+  url: string,
+  outDir: string,
+): Promise<DownloadedAsset> {
+  const response = await fetch(url)
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status} for ${url}`);
+    throw new Error(`HTTP ${response.status} for ${url}`)
   }
 
-  const bytes = Buffer.from(await response.arrayBuffer());
-  const fileName = basename(url);
-  await writeFile(join(outDir, fileName), bytes);
+  const bytes = Buffer.from(await response.arrayBuffer())
+  const fileName = basename(url)
+  await writeFile(join(outDir, fileName), bytes)
 
   return {
     fileName,
     bytes: bytes.length,
     sourceUrl: url,
-  };
+  }
 }
 
 async function writeQuickLook(
   outDir: string,
   options: {
-    host: string;
-    subframeName: string;
-    downloaded: DownloadedSubframe[];
-    frameCadenceSec: number;
-    columns: number;
-  }
+    host: string
+    subframeName: string
+    downloaded: DownloadedSubframe[]
+    frameCadenceSec: number
+    columns: number
+  },
 ): Promise<string> {
-  const fileName = "latest-subframes-contact-sheet.html";
+  const fileName = 'latest-subframes-contact-sheet.html'
   const html = buildQuickLookHtml({
     generatedAt: new Date().toISOString(),
     host: options.host,
@@ -572,25 +629,25 @@ async function writeQuickLook(
     downloaded: options.downloaded,
     frameCadenceSec: options.frameCadenceSec,
     columns: options.columns,
-  });
-  await writeFile(join(outDir, fileName), html, "utf8");
-  return fileName;
+  })
+  await writeFile(join(outDir, fileName), html, 'utf8')
+  return fileName
 }
 
 function buildQuickLookHtml(input: {
-  generatedAt: string;
-  host: string;
-  subframeName: string;
-  downloaded: DownloadedSubframe[];
-  frameCadenceSec: number;
-  columns: number;
+  generatedAt: string
+  host: string
+  subframeName: string
+  downloaded: DownloadedSubframe[]
+  frameCadenceSec: number
+  columns: number
 }): string {
   const cards = input.downloaded
     .map((frame) => {
-      const capturedAt = new Date(frame.capturedAt).toLocaleString();
-      return `<article class="card"><img loading="lazy" src="${escapeHtml(frame.jpg.fileName)}" alt="${escapeHtml(frame.name)}" /><p><strong>${escapeHtml(frame.name)}</strong><br/>${escapeHtml(capturedAt)}<br/>JPG ${frame.jpg.bytes} bytes${frame.fit ? `<br/>FIT ${frame.fit.bytes} bytes` : ""}</p></article>`;
+      const capturedAt = new Date(frame.capturedAt).toLocaleString()
+      return `<article class="card"><img loading="lazy" src="${escapeHtml(frame.jpg.fileName)}" alt="${escapeHtml(frame.name)}" /><p><strong>${escapeHtml(frame.name)}</strong><br/>${escapeHtml(capturedAt)}<br/>JPG ${frame.jpg.bytes} bytes${frame.fit ? `<br/>FIT ${frame.fit.bytes} bytes` : ''}</p></article>`
     })
-    .join("\n");
+    .join('\n')
 
   return `<!doctype html>
 <html lang="en">
@@ -631,25 +688,28 @@ function buildQuickLookHtml(input: {
   </main>
 </body>
 </html>
-`;
+`
 }
 
 function escapeHtml(value: string): string {
   return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll("\"", "&quot;")
-    .replaceAll("'", "&#39;");
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
 }
 
 function sanitizePathSegment(value: string): string {
-  const cleaned = value.trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/-+/g, "-");
-  return cleaned.replace(/^-|-$/g, "") || "latest-subframes";
+  const cleaned = value
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+  return cleaned.replace(/^-|-$/g, '') || 'latest-subframes'
 }
 
 function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return error instanceof Error ? error.message : String(error)
 }
 
 function printHelp(): void {
@@ -673,10 +733,10 @@ Options:
 
 This command uses get_albums metadata plus HTTP file downloads to fetch recent accepted subframes
 without requiring smbclient or issuing movement/control RPCs.
-`);
+`)
 }
 
 void main().catch((error) => {
-  console.error(toErrorMessage(error));
-  process.exit(1);
-});
+  console.error(toErrorMessage(error))
+  process.exit(1)
+})
