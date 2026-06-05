@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
+    "format": "prettier --write .",
     "run": "node dist/index.js",
     "solar:process": "node dist/cli/solar-process.js",
     "dev:smoke": "node dist/cli/dev-smoke.js",
@@ -17,6 +18,10 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "prettier": "^3.6.2",
     "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "effect": "^3.21.3"
   }
 }
