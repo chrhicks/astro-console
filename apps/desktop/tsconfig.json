@@ -1,14 +1,7 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "jsx": "react-jsx",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "types": ["vite/client"]
-  },
-  "include": ["src/renderer/**/*", "src/shared/**/*"]
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.renderer.json" },
+    { "path": "./tsconfig.main.editor.json" }
+  ]
 }

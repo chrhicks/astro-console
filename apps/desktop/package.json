@@ -19,8 +19,10 @@
     "start": "npm run build && electron dist/main/index.js"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.101.0",
     "astronomy-engine": "^2.1.19",
-    "electron": "^35.2.0",
+    "effect": "^3.21.3",
+    "electron": "^39.8.6",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
@@ -29,7 +31,7 @@
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.1",
-    "concurrently": "^9.1.2",
+    "concurrently": "^10.0.3",
     "cross-env": "^7.0.3",
     "prettier": "^3.6.2",
     "typescript": "^5.8.3",
