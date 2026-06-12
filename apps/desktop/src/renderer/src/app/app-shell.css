@@ -1,0 +1,14 @@
+.app-shell-header {
+  padding: 0.35rem 0.5rem 0.35rem 80px;
+  padding-left: 80px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  -webkit-app-region: drag;
+}
+
+.app-shell-header button,
+.app-shell-header input,
+.app-shell-header select,
+.app-shell-header a {
+  -webkit-app-region: no-drag;
+}

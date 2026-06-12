@@ -1,0 +1,34 @@
+.session-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  -webkit-app-region: drag;
+}
+
+.session-bar .brand {
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.session-bar .actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.status-led {
+  width: 8px;
+  height: 8px;
+  box-shadow: 0 0 8px var(--ok);
+}
+
+.status-led.off {
+  background: #4a5568;
+  box-shadow: none;
+}
+
+.status-led.warn {
+  background: var(--warn);
+  box-shadow: 0 0 8px var(--warn);
+}
