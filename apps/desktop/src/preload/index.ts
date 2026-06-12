@@ -9,7 +9,6 @@ import type {
   DesktopDiscoveredDevice,
   DuplicateSiteProfileRequest,
   DesktopLogEntry,
-  DesktopPreviewFrame,
   DesktopStatus,
   ReplaceQueueRequest,
   SearchCatalogTargetsRequest,
@@ -20,6 +19,8 @@ import type {
 } from '../shared/api'
 import type { PlanningSnapshot } from '../shared/planning'
 import type { CatalogSearchResult } from '../shared/starter-catalog'
+import { SeestarDesktopApiV2 } from '../shared/api-v2'
+import type { DesktopStatus as DesktopStatusV2 } from '../shared/api-v2'
 
 const api: SeestarDesktopApi = {
   discover: () =>
@@ -102,7 +103,19 @@ const api: SeestarDesktopApi = {
   onPreviewFrame: (listener) => subscribe('seestar:preview-frame', listener),
 }
 
+export const apiV2: SeestarDesktopApiV2 = {
+  getStatus: () =>
+    ipcRenderer.invoke('seestar:v2:get-status') as Promise<DesktopStatusV2>,
+  connect: (input: ConnectRequest) =>
+    ipcRenderer.invoke('seestar:v2:fake-connect', input) as Promise<DesktopStatusV2>,
+  disconnect: () =>
+    ipcRenderer.invoke('seestar:v2:fake-disconnect') as Promise<DesktopStatusV2>,
+  
+  onStatus: (listener) => subscribe('seestar:v2:status', listener),
+}
+
 contextBridge.exposeInMainWorld('seestar', api)
+contextBridge.exposeInMainWorld('seestarV2', apiV2)
 
 function subscribe<T>(
   channel: string,

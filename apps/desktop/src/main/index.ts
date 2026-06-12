@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, WebContents } from 'electron'
 import path from 'node:path'
 import { SeestarDesktopService } from './seestar-service'
 import type {
@@ -15,6 +15,7 @@ import type {
   StartQueueRunRequest,
   UpdateSiteProfileRequest,
 } from '../shared/api'
+import { attachIpcV2StatusListener, registerIpcV2Handlers } from './effect/ipc/ipc-v2'
 
 const service = new SeestarDesktopService()
 const rendererDevUrl = process.env.VITE_DEV_SERVER_URL
@@ -27,7 +28,7 @@ function createMainWindow(): BrowserWindow {
     minHeight: 720,
     backgroundColor: '#0a1220',
     ...(process.platform === 'darwin'
-      ? { titleBarStyle: 'hiddenInset' as const }
+      ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 14, y: 14 } }
       : {}),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
@@ -37,6 +38,7 @@ function createMainWindow(): BrowserWindow {
   })
 
   service.attachRenderer(window.webContents)
+  attachIpcV2StatusListener(window.webContents)
 
   if (rendererDevUrl) {
     void window.loadURL(rendererDevUrl)
@@ -117,6 +119,7 @@ function registerIpcHandlers(): void {
 
 app.whenReady().then(() => {
   registerIpcHandlers()
+  registerIpcV2Handlers()
   createMainWindow()
 
   app.on('activate', () => {
