@@ -1,4 +1,5 @@
 import { Effect } from "effect"
+import type { LiveDeviceSession } from "../device/device-plugin"
 import { AggregateStore } from "../state/aggregate-store"
 import { EventBus } from "../event/event-bus"
 import { SessionManager } from "../session/session-manager"
@@ -8,24 +9,35 @@ export const runFakeConnect = (input: { host: string }) =>
     const store = yield* AggregateStore
     const bus = yield* EventBus
     const sessions = yield* SessionManager
+    const host = input.host.trim()
     
     yield* store.update((current) => ({
       ...current,
       session: {
         ...current.session,
         phase: 'connecting',
-        host: input.host,
+        host,
         lastError: undefined,
       }
     }))
 
     const started = yield* bus.publish('session.fake-connect.started', {
-      host: input.host,
+      host,
     })
     
     yield* Effect.sleep('500 millis')
 
-    const connected = yield* sessions.connectFake({ host: input.host})
+    const connected = {
+      sessionId: crypto.randomUUID(),
+      pluginKind: 'fake-seestar',
+      deviceId: 'fake-seestar-s30',
+      host,
+      productModel: 'Seestar S30 (fake)',
+      openedAt: new Date().toISOString(),
+      disconnect: Effect.sleep('200 millis').pipe(Effect.asVoid),
+    } satisfies LiveDeviceSession
+
+    yield* sessions.setCurrent(connected)
 
     yield* store.update((current) => ({
       ...current,
@@ -51,10 +63,10 @@ export const runFakeConnect = (input: { host: string }) =>
     return started.eventId
   })
 
-  export const runFakeDisconnect = Effect.gen(function* () {
-    const store = yield* AggregateStore
-    const bus = yield* EventBus
-    const sessions = yield* SessionManager
+export const runFakeDisconnect = Effect.gen(function* () {
+  const store = yield* AggregateStore
+  const bus = yield* EventBus
+  const sessions = yield* SessionManager
 
     const current = yield* sessions.getCurrent
 
@@ -73,8 +85,11 @@ export const runFakeConnect = (input: { host: string }) =>
       current ? { sessionId: current.sessionId, host: current.host } : undefined
     )
 
-    yield* Effect.sleep('300 millis')
-    yield* sessions.disconnectFake
+  yield* Effect.sleep('300 millis')
+  if (current) {
+    yield* current.disconnect
+  }
+  yield* sessions.clearCurrent
 
     yield* store.update((aggregate) => ({
       ...aggregate,

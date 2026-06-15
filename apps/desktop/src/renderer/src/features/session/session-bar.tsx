@@ -1,7 +1,11 @@
+import { useState } from 'react'
+import type { DesktopDiscoveredDeviceV2 } from '../../../../shared/api-v2'
 import { selectSessionBarModel } from '../../state/projection-selectors'
 import { useProjectionStore } from '../../state/projection-store'
 import './session-bar.css'
 import { useConnectMutation } from './use-connect-mutation'
+import { useDiscoverMutation } from './use-discover-mutation'
+import { useDisconnectMutation } from './use-disconnect-mutation'
 
 export function SessionBar() {
   const { phase, host, productModel, discovering } =
@@ -10,11 +14,42 @@ export function SessionBar() {
   const isConnecting = phase === 'connecting'
   const isDisconnecting = phase === 'disconnecting'
 
+  const [discoveredDevices, setDiscoveredDevices] = useState<
+    DesktopDiscoveredDeviceV2[]
+  >([])
   const connectMutation = useConnectMutation()
+  const discoverMutation = useDiscoverMutation()
+  const disconnectMutation = useDisconnectMutation()
+
+  const selectedDevice = selectPreferredDevice(discoveredDevices)
+  const isBusy =
+    isConnecting ||
+    isDisconnecting ||
+    connectMutation.isPending ||
+    disconnectMutation.isPending ||
+    discoverMutation.isPending
+
+  const handleDiscover = () => {
+    discoverMutation.mutate(undefined, {
+      onSuccess: (devices) => {
+        setDiscoveredDevices(devices)
+      },
+    })
+  }
+
   const handleConnect = () => {
+    if (isConnected) {
+      disconnectMutation.mutate()
+      return
+    }
+
+    if (!selectedDevice) {
+      return
+    }
+
     connectMutation.mutate({
-      pluginKind: 'fake-seestar',
-      deviceId: 'fake-seestar-s30',
+      pluginKind: selectedDevice.pluginKind,
+      deviceId: selectedDevice.deviceId,
     })
   }
 
@@ -28,23 +63,24 @@ export function SessionBar() {
         type="button"
         className="btn btn-sm"
         id="btnDiscover"
-        disabled={discovering}
+        disabled={discovering || isBusy}
+        onClick={handleDiscover}
       >
-        {discovering ? 'Discovering...' : 'Discover'}
+        {discovering || discoverMutation.isPending ? 'Discovering...' : 'Discover'}
       </button>
       <button
         type="button"
         className="btn btn-sm primary"
         id="btnConnect"
-        disabled={isConnecting || isDisconnecting || connectMutation.isPending}
+        disabled={isConnected ? isBusy : isBusy || !selectedDevice}
         onClick={handleConnect}
       >
         {isConnecting || connectMutation.isPending
           ? 'Connecting...'
-          : isDisconnecting
+          : isDisconnecting || disconnectMutation.isPending
             ? 'Disconnecting...'
             : isConnected
-              ? 'Connected'
+              ? 'Disconnect'
               : 'Connect'}
       </button>
       <span className="chip">{productModel ?? 'Device: Unknown'}</span>
@@ -75,4 +111,10 @@ export function SessionBar() {
       </button>
     </header>
   )
+}
+
+function selectPreferredDevice(
+  devices: DesktopDiscoveredDeviceV2[],
+): DesktopDiscoveredDeviceV2 | undefined {
+  return devices.find((device) => device.pluginKind === 'seestar') ?? devices[0]
 }

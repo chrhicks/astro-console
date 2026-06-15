@@ -2,8 +2,9 @@ import { WebContents, ipcMain } from 'electron'
 import { Effect } from 'effect'
 
 import { appRuntime } from '../runtime/app-runtime'
+import type { ConnectRequestV2 } from '../../../shared/api-v2'
+import { runConnect, runDiscover, runDisconnect } from '../workflows/session-workflows'
 import { StatusProjector } from '../state/status-projector'
-import { runFakeConnect, runFakeDisconnect } from '../workflows/fake-connect-workflow'
 import { StatusStream } from '../event/status-stream'
 
 export function registerIpcV2Handlers() {
@@ -16,27 +17,30 @@ export function registerIpcV2Handlers() {
     )
   )
 
-  ipcMain.handle('seestar:v2:fake-connect', (_event, input) =>
+  ipcMain.handle('seestar:v2:discover', () =>
     appRuntime.runPromise(
-      runFakeConnect(input).pipe(
-        Effect.flatMap(() => Effect.gen(function* () {
-          const projector = yield* StatusProjector
-          return yield* projector.snapshot
-        }))
-      )
+      runDiscover,
     )
   )
 
-  ipcMain.handle('seestar:v2:fake-disconnect', () =>
+  ipcMain.handle('seestar:v2:connect', (_event, input: ConnectRequestV2) =>
     appRuntime.runPromise(
-      runFakeDisconnect.pipe(
-        Effect.flatMap(() => Effect.gen(function* () {
-          const projector = yield* StatusProjector
-          return yield* projector.snapshot
-        }))
-      )
+      runConnect(input).pipe(Effect.flatMap(() => getProjectedStatus()))
     )
   )
+
+  ipcMain.handle('seestar:v2:disconnect', () =>
+    appRuntime.runPromise(
+      runDisconnect.pipe(Effect.flatMap(() => getProjectedStatus()))
+    )
+  )
+}
+
+function getProjectedStatus() {
+  return Effect.gen(function* () {
+    const projector = yield* StatusProjector
+    return yield* projector.snapshot
+  })
 }
 
 export function attachIpcV2StatusListener(webContents: WebContents) {

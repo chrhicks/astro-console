@@ -1,0 +1,16 @@
+import { Effect, Layer, Ref } from 'effect'
+import type { LiveDeviceSession } from '../device/device-plugin'
+import { SessionManager } from './session-manager'
+
+export const SessionManagerLive = Layer.effect(
+  SessionManager,
+  Effect.gen(function* () {
+    const ref = yield* Ref.make<LiveDeviceSession | null>(null)
+
+    return {
+      getCurrent: Ref.get(ref),
+      setCurrent: (session) => Ref.set(ref, session),
+      clearCurrent: Ref.set(ref, null),
+    } satisfies SessionManager
+  })
+)

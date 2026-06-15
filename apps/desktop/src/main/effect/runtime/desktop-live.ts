@@ -2,7 +2,7 @@ import { Layer } from 'effect'
 import { DeviceRegistryLive } from '../device/device-registry'
 import { AggregateStoreLive } from '../state/aggregate-store'
 import { EventBusLive } from '../event/event-bus'
-import { SessionManagerFake } from '../session/session-manager.fake'
+import { SessionManagerLive } from '../session/session-manager.live'
 import { StatusProjectorLive } from '../state/status-projector'
 import { StatusStreamLive } from '../event/status-stream'
 
@@ -10,7 +10,7 @@ const baseLayer = Layer.mergeAll(
   AggregateStoreLive,
   EventBusLive,
   DeviceRegistryLive,
-  SessionManagerFake
+  SessionManagerLive
 )
 
 const projectorLayer = Layer.provide(StatusProjectorLive, baseLayer)

@@ -113,9 +113,9 @@ export const apiV2: SeestarDesktopApiV2 = {
   getStatus: () =>
     ipcRenderer.invoke('seestar:v2:get-status') as Promise<DesktopStatusV2>,
   connect: (input: ConnectRequestV2) =>
-    ipcRenderer.invoke('seestar:v2:fake-connect', input) as Promise<DesktopStatusV2>,
+    ipcRenderer.invoke('seestar:v2:connect', input) as Promise<DesktopStatusV2>,
   disconnect: () =>
-    ipcRenderer.invoke('seestar:v2:fake-disconnect') as Promise<DesktopStatusV2>,
+    ipcRenderer.invoke('seestar:v2:disconnect') as Promise<DesktopStatusV2>,
 
   onStatus: (listener) => subscribe('seestar:v2:status', listener),
 }

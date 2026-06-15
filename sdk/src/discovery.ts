@@ -1,7 +1,12 @@
 import * as dgram from 'node:dgram'
+import * as dns from 'node:dns/promises'
+import * as net from 'node:net'
 import { networkInterfaces } from 'node:os'
 import type { Logger } from './logging.js'
 import { emitLog } from './logging.js'
+
+const MDNS_SEESTAR_HOSTNAME = 'seestar.local'
+const CONTROL_PORT = 4700
 
 export interface DiscoveryOptions {
   port?: number
@@ -25,13 +30,23 @@ export async function discoverSeestars(
   const timeoutMs = options.timeoutMs ?? 3000
   const broadcastAddress = options.broadcastAddress ?? '255.255.255.255'
   const targetAddresses = resolveDiscoveryTargets(broadcastAddress)
+  const mdnsTimeoutMs = Math.max(250, Math.min(1000, Math.floor(timeoutMs / 3)))
   const payload = Buffer.from(
     JSON.stringify({ id: 1, method: 'scan_iscope', params: '' }) + '\r\n',
   )
 
+  const mdnsDevice = await probeMdnsSeestar({
+    timeoutMs: mdnsTimeoutMs,
+    logger: options.logger,
+    sessionId: options.sessionId,
+  })
+
   return new Promise((resolve, reject) => {
     const socket = dgram.createSocket('udp4')
     const devices = new Map<string, DiscoveredSeestar>()
+    if (mdnsDevice) {
+      devices.set(mdnsDevice.host, mdnsDevice)
+    }
     let settled = false
 
     emitLog(options.logger, {
@@ -41,13 +56,15 @@ export async function discoverSeestars(
       phase: 'connect',
       sessionId: options.sessionId,
       summary: 'Started UDP scan for Seestar devices',
-      data: {
-        port: discoveryPort,
-        timeoutMs,
-        broadcastAddress,
-        targetAddresses,
-      },
-    })
+        data: {
+          port: discoveryPort,
+          timeoutMs,
+          mdnsTimeoutMs,
+          broadcastAddress,
+          targetAddresses,
+          usedMdnsProbe: true,
+        },
+      })
 
     const finish = () => {
       if (settled) return
@@ -125,14 +142,42 @@ export async function discoverSeestars(
     socket.bind(() => {
       socket.setBroadcast(true)
       let pendingSends = targetAddresses.length
+      let successfulSends = 0
+      const failedTargets: Array<{ targetAddress: string; error: string }> = []
+
+      if (pendingSends === 0) {
+        emitLog(options.logger, {
+          level: 'warn',
+          event: 'discovery.scan.broadcast.skipped',
+          component: 'discovery',
+          phase: 'connect',
+          sessionId: options.sessionId,
+          summary: 'No broadcast targets were available for UDP discovery',
+        })
+      }
+
       for (const targetAddress of targetAddresses) {
         socket.send(payload, discoveryPort, targetAddress, (err) => {
           if (settled) return
           if (err) {
-            clearTimeout(timer)
-            fail(err)
-            return
+            failedTargets.push({
+              targetAddress,
+              error: err.message,
+            })
+            emitLog(options.logger, {
+              level: 'warn',
+              event: 'discovery.scan.broadcast.failed',
+              component: 'discovery',
+              phase: 'connect',
+              sessionId: options.sessionId,
+              host: targetAddress,
+              summary: 'UDP discovery payload failed for one broadcast target',
+              error: err.message,
+            })
+          } else {
+            successfulSends += 1
           }
+
           pendingSends -= 1
           if (pendingSends === 0) {
             emitLog(options.logger, {
@@ -142,7 +187,11 @@ export async function discoverSeestars(
               phase: 'connect',
               sessionId: options.sessionId,
               summary: `Sent UDP discovery payload to ${targetAddresses.length} broadcast target(s)`,
-              data: { targetAddresses },
+              data: {
+                targetAddresses,
+                successfulSends,
+                failedTargets,
+              },
             })
           }
         })
@@ -163,7 +212,7 @@ export async function discoverSeestarHost(
 }
 
 function resolveDiscoveryTargets(globalBroadcastAddress: string): string[] {
-  const targets = new Set<string>([globalBroadcastAddress])
+  const targets = new Set<string>()
 
   for (const interfaceEntries of Object.values(networkInterfaces())) {
     if (!interfaceEntries) continue
@@ -174,7 +223,110 @@ function resolveDiscoveryTargets(globalBroadcastAddress: string): string[] {
     }
   }
 
+  if (globalBroadcastAddress && !targets.has(globalBroadcastAddress)) {
+    targets.add(globalBroadcastAddress)
+  }
+
   return [...targets]
+}
+
+async function probeMdnsSeestar(options: {
+  timeoutMs: number
+  logger?: Logger
+  sessionId?: string
+}): Promise<DiscoveredSeestar | null> {
+  emitLog(options.logger, {
+    level: 'debug',
+    event: 'discovery.mdns.started',
+    component: 'discovery',
+    phase: 'connect',
+    sessionId: options.sessionId,
+    summary: `Probing ${MDNS_SEESTAR_HOSTNAME} over mDNS`,
+    data: { timeoutMs: options.timeoutMs },
+  })
+
+  try {
+    const resolved = await withTimeout(
+      dns.lookup(MDNS_SEESTAR_HOSTNAME, { family: 4 }),
+      options.timeoutMs,
+      `mDNS lookup timed out for ${MDNS_SEESTAR_HOSTNAME}`,
+    )
+
+    await withTimeout(
+      probeTcpPort(resolved.address, CONTROL_PORT),
+      options.timeoutMs,
+      `TCP probe timed out for ${resolved.address}:${CONTROL_PORT}`,
+    )
+
+    emitLog(options.logger, {
+      level: 'info',
+      event: 'discovery.mdns.succeeded',
+      component: 'discovery',
+      phase: 'connect',
+      sessionId: options.sessionId,
+      host: resolved.address,
+      summary: `Resolved ${MDNS_SEESTAR_HOSTNAME} to reachable Seestar host`,
+    })
+
+    return {
+      host: resolved.address,
+      port: CONTROL_PORT,
+      result: {
+        source: 'mdns',
+        hostname: MDNS_SEESTAR_HOSTNAME,
+      },
+    }
+  } catch (error) {
+    emitLog(options.logger, {
+      level: 'debug',
+      event: 'discovery.mdns.failed',
+      component: 'discovery',
+      phase: 'connect',
+      sessionId: options.sessionId,
+      summary: `mDNS probe failed for ${MDNS_SEESTAR_HOSTNAME}`,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return null
+  }
+}
+
+function probeTcpPort(host: string, port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection({ host, port })
+
+    socket.once('connect', () => {
+      socket.destroy()
+      resolve()
+    })
+
+    socket.once('error', (error) => {
+      socket.destroy()
+      reject(error)
+    })
+  })
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(message))
+    }, timeoutMs)
+
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
 }
 
 function calculateBroadcastAddress(

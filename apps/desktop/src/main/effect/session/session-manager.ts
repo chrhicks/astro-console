@@ -1,15 +1,10 @@
 import { Effect, Context } from 'effect'
-
-export interface ConnectedSession {
-  sessionId: string
-  host: string
-  openedAt: string
-}
+import type { LiveDeviceSession } from '../device/device-plugin'
 
 export interface SessionManager {
-  readonly connectFake: (input: { host: string }) => Effect.Effect<ConnectedSession>
-  readonly getCurrent: Effect.Effect<ConnectedSession | null>
-  readonly disconnectFake: Effect.Effect<void>
+  readonly getCurrent: Effect.Effect<LiveDeviceSession | null>
+  readonly setCurrent: (session: LiveDeviceSession) => Effect.Effect<void>
+  readonly clearCurrent: Effect.Effect<void>
 }
 
 export const SessionManager = Context.GenericTag<SessionManager>('SessionManager')
