@@ -1,5 +1,5 @@
 import './app-shell.css'
-import { SessionBar } from '../features/session-bar'
+import { SessionBar } from '../features/session/session-bar'
 
 export function AppShell() {
   return (

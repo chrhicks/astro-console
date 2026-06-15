@@ -47,7 +47,10 @@ export const StatusStreamLive = Layer.effect(
 
           const fiber = yield* Stream.fromQueue(queue).pipe(
             Stream.runForEach((status) => Effect.sync(() => onStatus(status))),
-            Effect.fork
+            // This single status stream is currently owned by Electron-side
+            // unsubscribe cleanup. If we add more pushed streams, switch to a
+            // scoped subscription model owned per WebContents instead.
+            Effect.forkDaemon
           )
 
           return () => {

@@ -1,6 +1,7 @@
-import { selectSessionBarModel } from '../state/projection-selectors'
-import { useProjectionStore } from '../state/projection-store'
+import { selectSessionBarModel } from '../../state/projection-selectors'
+import { useProjectionStore } from '../../state/projection-store'
 import './session-bar.css'
+import { useConnectMutation } from './use-connect-mutation'
 
 export function SessionBar() {
   const { phase, host, productModel, discovering } =
@@ -8,6 +9,12 @@ export function SessionBar() {
   const isConnected = phase === 'connected'
   const isConnecting = phase === 'connecting'
   const isDisconnecting = phase === 'disconnecting'
+
+  const connectMutation = useConnectMutation()
+  const draftHost = '192.168.1.100'
+  const handleConnect = () => {
+    connectMutation.mutate({ host: draftHost || undefined })
+  }
 
   return (
     <header className="session-bar">
@@ -27,9 +34,10 @@ export function SessionBar() {
         type="button"
         className="btn btn-sm primary"
         id="btnConnect"
-        disabled={isConnecting || isDisconnecting}
+        disabled={isConnecting || isDisconnecting || connectMutation.isPending}
+        onClick={handleConnect}
       >
-        {isConnecting
+        {isConnecting || connectMutation.isPending
           ? 'Connecting...'
           : isDisconnecting
             ? 'Disconnecting...'
