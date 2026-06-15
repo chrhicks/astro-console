@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, WebContents } from 'electron'
 import path from 'node:path'
-import { SeestarDesktopService } from './seestar-service'
+import { SeestarDesktopService } from './legacy/seestar-service'
 import type {
   AddManualCatalogTargetRequest,
   ArchiveSiteProfileRequest,

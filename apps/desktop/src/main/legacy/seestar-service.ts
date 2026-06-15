@@ -9,7 +9,7 @@ import {
   discoverSeestars,
   type LogEvent,
   type Logger,
-} from '../../../../sdk/dist/index.js'
+} from '../../../../../sdk/dist/index.js'
 import type {
   AddManualCatalogTargetRequest,
   ArchiveSiteProfileRequest,
@@ -33,10 +33,10 @@ import type {
   DesktopStatus,
   SetActiveSiteRequest,
   UpdateSiteProfileRequest,
-} from '../shared/api'
-import type { PlanningSnapshot, SiteProfile } from '../shared/planning'
-import { evaluateSiteDiagnostics } from '../shared/site-diagnostics'
-import type { CatalogSearchResult } from '../shared/starter-catalog'
+} from '../../shared/api.js'
+import type { PlanningSnapshot, SiteProfile } from '../../shared/planning.js'
+import { evaluateSiteDiagnostics } from '../../shared/site-diagnostics.js'
+import type { CatalogSearchResult } from '../../shared/starter-catalog.js'
 import { PlanningContextService } from './planning-context'
 import { PlanningStore } from './planning-store'
 import { QueueRunner, createDefaultQueueRunnerState } from './queue-runner'

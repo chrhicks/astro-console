@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
-import type { RankedTarget, SiteAzimuthRange } from '../shared/planning'
-import type { SiteDiagnostic } from '../shared/site-diagnostics'
+import type { RankedTarget, SiteAzimuthRange } from '../../shared/planning'
+import type { SiteDiagnostic } from '../../shared/site-diagnostics'
 import {
   createPlanningContextServiceFromStateFile,
   type ActiveSiteSource,

@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { appendFile, mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { LogEvent } from '../../../../sdk/dist/index.js'
+import type { LogEvent } from '../../../../../sdk/dist/index.js'
 import type {
   DesktopPlannerHealth,
   DesktopQueueRunnerState,
   DesktopRecordingState,
   DesktopStatus,
-} from '../shared/api'
+} from '../../shared/api.js'
 
 const ARTIFACT_FILES = {
   session: 'session.json',
