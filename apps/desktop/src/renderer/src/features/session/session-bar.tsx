@@ -11,9 +11,11 @@ export function SessionBar() {
   const isDisconnecting = phase === 'disconnecting'
 
   const connectMutation = useConnectMutation()
-  const draftHost = '192.168.1.100'
   const handleConnect = () => {
-    connectMutation.mutate({ host: draftHost || undefined })
+    connectMutation.mutate({
+      pluginKind: 'fake-seestar',
+      deviceId: 'fake-seestar-s30',
+    })
   }
 
   return (

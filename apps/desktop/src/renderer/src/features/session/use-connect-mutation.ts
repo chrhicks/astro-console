@@ -1,10 +1,10 @@
-import { useMutation } from "@tanstack/react-query";
-import { electronApi } from "../../lib/electron-api";
-import type { ConnectRequest } from "../../../../shared/api";
+import { useMutation } from '@tanstack/react-query'
+import type { ConnectRequestV2 } from '../../../../shared/api-v2'
+import { electronApi } from '../../lib/electron-api'
 
 export function useConnectMutation() {
   return useMutation({
     mutationKey: ['session', 'connect'],
-    mutationFn: (input: ConnectRequest) => electronApi.connect(input),
+    mutationFn: (input: ConnectRequestV2) => electronApi.connect(input),
   })
 }

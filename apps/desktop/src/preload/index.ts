@@ -2,9 +2,9 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AddManualCatalogTargetRequest,
   ArchiveSiteProfileRequest,
+  ConnectRequest,
   CreateQueueFromDraftsRequest,
   DesktopCommandRequest,
-  ConnectRequest,
   CreateSiteProfileRequest,
   DesktopDiscoveredDevice,
   DuplicateSiteProfileRequest,
@@ -19,8 +19,12 @@ import type {
 } from '../shared/api'
 import type { PlanningSnapshot } from '../shared/planning'
 import type { CatalogSearchResult } from '../shared/starter-catalog'
-import { SeestarDesktopApiV2 } from '../shared/api-v2'
-import type { DesktopStatus as DesktopStatusV2 } from '../shared/api-v2'
+import type {
+  ConnectRequestV2,
+  DesktopDiscoveredDeviceV2,
+  DesktopStatus as DesktopStatusV2,
+  SeestarDesktopApiV2,
+} from '../shared/api-v2'
 
 const api: SeestarDesktopApi = {
   discover: () =>
@@ -104,13 +108,15 @@ const api: SeestarDesktopApi = {
 }
 
 export const apiV2: SeestarDesktopApiV2 = {
+  discover: () =>
+    ipcRenderer.invoke('seestar:v2:discover') as Promise<DesktopDiscoveredDeviceV2[]>,
   getStatus: () =>
     ipcRenderer.invoke('seestar:v2:get-status') as Promise<DesktopStatusV2>,
-  connect: (input: ConnectRequest) =>
+  connect: (input: ConnectRequestV2) =>
     ipcRenderer.invoke('seestar:v2:fake-connect', input) as Promise<DesktopStatusV2>,
   disconnect: () =>
     ipcRenderer.invoke('seestar:v2:fake-disconnect') as Promise<DesktopStatusV2>,
-  
+
   onStatus: (listener) => subscribe('seestar:v2:status', listener),
 }
 

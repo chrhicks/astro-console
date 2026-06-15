@@ -1,5 +1,8 @@
-import type { ConnectRequest } from '../../../shared/api'
-import type { DesktopStatus, SeestarDesktopApiV2 } from '../../../shared/api-v2'
+import type {
+  ConnectRequestV2,
+  DesktopStatus,
+  SeestarDesktopApiV2,
+} from '../../../shared/api-v2'
 
 function getApi(): SeestarDesktopApiV2 {
   if (!window.seestarV2) {
@@ -10,7 +13,8 @@ function getApi(): SeestarDesktopApiV2 {
 
 export const electronApi = {
   getStatus: () => getApi().getStatus(),
-  connect: (input: ConnectRequest) => getApi().connect(input),
+  discover: () => getApi().discover(),
+  connect: (input: ConnectRequestV2) => getApi().connect(input),
   disconnect: () => getApi().disconnect(),
   onStatus: (listener: (status: DesktopStatus) => void) =>
     getApi().onStatus(listener),
