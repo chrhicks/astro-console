@@ -22,6 +22,7 @@ import type { CatalogSearchResult } from '../shared/starter-catalog'
 import type {
   ConnectRequestV2,
   DesktopDiscoveredDeviceV2,
+  DesktopLogEntryV2,
   DesktopStatus as DesktopStatusV2,
   SeestarDesktopApiV2,
 } from '../shared/api-v2'
@@ -116,7 +117,10 @@ export const apiV2: SeestarDesktopApiV2 = {
     ipcRenderer.invoke('seestar:v2:connect', input) as Promise<DesktopStatusV2>,
   disconnect: () =>
     ipcRenderer.invoke('seestar:v2:disconnect') as Promise<DesktopStatusV2>,
+  getLogs: () =>
+    ipcRenderer.invoke('seestar:v2:get-logs') as Promise<DesktopLogEntryV2[]>,
 
+  onLog: (listener) => subscribe('seestar:v2:log', listener),
   onStatus: (listener) => subscribe('seestar:v2:status', listener),
 }
 

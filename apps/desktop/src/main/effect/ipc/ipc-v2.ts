@@ -4,6 +4,8 @@ import { Effect } from 'effect'
 import { appRuntime } from '../runtime/app-runtime'
 import type { ConnectRequestV2 } from '../../../shared/api-v2'
 import { runConnect, runDiscover, runDisconnect } from '../workflows/session-workflows'
+import { LogSink } from '../log/log-sink'
+import { LogStream } from '../log/log-stream'
 import { StatusProjector } from '../state/status-projector'
 import { StatusStream } from '../event/status-stream'
 
@@ -34,6 +36,15 @@ export function registerIpcV2Handlers() {
       runDisconnect.pipe(Effect.flatMap(() => getProjectedStatus()))
     )
   )
+
+  ipcMain.handle('seestar:v2:get-logs', () =>
+    appRuntime.runPromise(
+      Effect.gen(function* () {
+        const sink = yield* LogSink
+        return yield* sink.list
+      }),
+    )
+  )
 }
 
 function getProjectedStatus() {
@@ -53,6 +64,21 @@ export function attachIpcV2StatusListener(webContents: WebContents) {
         }
       })
       
+      webContents.once('destroyed', unsubscribe)
+    })
+  )
+}
+
+export function attachIpcV2LogListener(webContents: WebContents) {
+  appRuntime.runPromise(
+    Effect.gen(function* () {
+      const stream = yield* LogStream
+      const unsubscribe = yield* stream.subscribe((entry) => {
+        if (!webContents.isDestroyed()) {
+          webContents.send('seestar:v2:log', entry)
+        }
+      })
+
       webContents.once('destroyed', unsubscribe)
     })
   )

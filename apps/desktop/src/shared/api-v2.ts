@@ -70,10 +70,24 @@ export interface ConnectRequestV2 {
   deviceId: string
 }
 
+export interface DesktopLogEntryV2 {
+  ts: string
+  level: 'debug' | 'info' | 'warn' | 'error'
+  event: string
+  component: string
+  summary?: string
+  error?: string
+  host?: string
+  sessionId?: string
+  data?: unknown
+}
+
 export interface SeestarDesktopApiV2 {
   discover(): Promise<DesktopDiscoveredDeviceV2[]>
   connect(input: ConnectRequestV2): Promise<DesktopStatus>
   disconnect(): Promise<DesktopStatus>
   getStatus(): Promise<DesktopStatus>
+  getLogs(): Promise<DesktopLogEntryV2[]>
+  onLog(listener: (entry: DesktopLogEntryV2) => void): () => void
   onStatus(listener: (status: DesktopStatus) => void): () => void
 }

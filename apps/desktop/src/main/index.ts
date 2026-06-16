@@ -15,7 +15,11 @@ import type {
   StartQueueRunRequest,
   UpdateSiteProfileRequest,
 } from '../shared/api'
-import { attachIpcV2StatusListener, registerIpcV2Handlers } from './effect/ipc/ipc-v2'
+import {
+  attachIpcV2LogListener,
+  attachIpcV2StatusListener,
+  registerIpcV2Handlers,
+} from './effect/ipc/ipc-v2'
 
 const service = new SeestarDesktopService()
 const rendererDevUrl = process.env.VITE_DEV_SERVER_URL
@@ -39,6 +43,7 @@ function createMainWindow(): BrowserWindow {
 
   service.attachRenderer(window.webContents)
   attachIpcV2StatusListener(window.webContents)
+  attachIpcV2LogListener(window.webContents)
 
   if (rendererDevUrl) {
     void window.loadURL(rendererDevUrl)
