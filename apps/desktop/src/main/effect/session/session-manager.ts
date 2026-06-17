@@ -7,4 +7,5 @@ export interface SessionManager {
   readonly clearCurrent: Effect.Effect<void>
 }
 
-export const SessionManager = Context.GenericTag<SessionManager>('SessionManager')
+export const SessionManager =
+  Context.GenericTag<SessionManager>('SessionManager')

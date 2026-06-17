@@ -110,7 +110,9 @@ const api: SeestarDesktopApi = {
 
 export const apiV2: SeestarDesktopApiV2 = {
   discover: () =>
-    ipcRenderer.invoke('seestar:v2:discover') as Promise<DesktopDiscoveredDeviceV2[]>,
+    ipcRenderer.invoke('seestar:v2:discover') as Promise<
+      DesktopDiscoveredDeviceV2[]
+    >,
   getStatus: () =>
     ipcRenderer.invoke('seestar:v2:get-status') as Promise<DesktopStatusV2>,
   connect: (input: ConnectRequestV2) =>

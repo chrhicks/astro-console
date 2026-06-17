@@ -1,5 +1,8 @@
 import { Context, Effect, Layer } from 'effect'
-import type { DevicePluginKind, DesktopDiscoveredDeviceV2 } from '../../../shared/api-v2'
+import type {
+  DevicePluginKind,
+  DesktopDiscoveredDeviceV2,
+} from '../../../shared/api-v2'
 import type { DevicePlugin } from './device-plugin'
 import { createFakeSeestarPlugin } from './fake-seestar-plugin'
 import { createSeestarPlugin } from './seestar-plugin'
@@ -9,7 +12,8 @@ export interface DeviceRegistry {
   readonly get: (kind: DevicePluginKind) => Effect.Effect<DevicePlugin, unknown>
 }
 
-export const DeviceRegistry = Context.GenericTag<DeviceRegistry>('DeviceRegistry')
+export const DeviceRegistry =
+  Context.GenericTag<DeviceRegistry>('DeviceRegistry')
 
 export const DeviceRegistryLive = Layer.sync(DeviceRegistry, () => {
   const fakeSeestar = createFakeSeestarPlugin()
@@ -21,9 +25,9 @@ export const DeviceRegistryLive = Layer.sync(DeviceRegistry, () => {
   ])
 
   return {
-    discoverAll: Effect.all([...plugins.values()].map((plugin) => plugin.discover)).pipe(
-      Effect.map((discovered) => discovered.flat()),
-    ),
+    discoverAll: Effect.all(
+      [...plugins.values()].map((plugin) => plugin.discover),
+    ).pipe(Effect.map((discovered) => discovered.flat())),
     get: (kind) => {
       const plugin = plugins.get(kind)
       if (!plugin) {

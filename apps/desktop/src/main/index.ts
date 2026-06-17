@@ -32,7 +32,10 @@ function createMainWindow(): BrowserWindow {
     minHeight: 720,
     backgroundColor: '#0a1220',
     ...(process.platform === 'darwin'
-      ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 14, y: 14 } }
+      ? {
+          titleBarStyle: 'hidden' as const,
+          trafficLightPosition: { x: 14, y: 14 },
+        }
       : {}),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),

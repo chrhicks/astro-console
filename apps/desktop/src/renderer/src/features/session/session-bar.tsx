@@ -8,8 +8,17 @@ import { useDiscoverMutation } from './use-discover-mutation'
 import { useDisconnectMutation } from './use-disconnect-mutation'
 
 export function SessionBar() {
-  const { phase, host, productModel, discovering, deviceId, serialNumber, batteryPercent, tracking, pluginKind } =
-    useProjectionStore(selectSessionBarModel)
+  const {
+    phase,
+    host,
+    productModel,
+    discovering,
+    deviceId,
+    serialNumber,
+    batteryPercent,
+    tracking,
+    pluginKind,
+  } = useProjectionStore(selectSessionBarModel)
   const isConnected = phase === 'connected'
   const isConnecting = phase === 'connecting'
   const isDisconnecting = phase === 'disconnecting'
@@ -128,9 +137,9 @@ export function SessionBar() {
         </span>
       ) : null}
       {pluginKind?.startsWith('fake-') ? (
-        <span className='chip warn'>Fake</span>
-      ): null}
-      
+        <span className="chip warn">Fake</span>
+      ) : null}
+
       <span className="spacer"></span>
       <button type="button" className="btn btn-sm" id="btnPark">
         Park
@@ -149,12 +158,9 @@ export function SessionBar() {
 
 function formatDeviceOptionLabel(device: DesktopDiscoveredDeviceV2): string {
   const source = device.pluginKind === 'fake-seestar' ? 'fake' : 'live'
-  return [
-    device.displayName,
-    device.host,
-    device.serialNumber,
-    source
-  ].filter(Boolean).join(' . ')
+  return [device.displayName, device.host, device.serialNumber, source]
+    .filter(Boolean)
+    .join(' . ')
 }
 
 function selectPreferredDevice(

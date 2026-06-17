@@ -1,12 +1,12 @@
-import { DeviceProjection } from "../../../shared/api-v2"
+import { DeviceProjection } from '../../../shared/api-v2'
 
-export interface SessionAggregate { 
+export interface SessionAggregate {
   session: {
-      phase: 'disconnected' | 'connecting' | 'connected' | 'disconnecting'
-      host?: string
-      productModel?: string
-      discovering: boolean
-      lastError?: string
+    phase: 'disconnected' | 'connecting' | 'connected' | 'disconnecting'
+    host?: string
+    productModel?: string
+    discovering: boolean
+    lastError?: string
   }
   pointing: { phase: 'idle' }
   capture: { phase: 'idle' }
@@ -15,7 +15,7 @@ export interface SessionAggregate {
   library: { scope: 'current_target'; assets: []; polling: false }
   currentTarget: null
   runner: { owner: 'idle' }
-  diagnostics: { }
+  diagnostics: {}
   lastUpdatedAt: string
 }
 

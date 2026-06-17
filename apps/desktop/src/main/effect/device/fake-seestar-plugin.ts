@@ -1,5 +1,8 @@
 import { Effect } from 'effect'
-import type { DesktopDiscoveredDeviceV2, ConnectRequestV2 } from '../../../shared/api-v2'
+import type {
+  DesktopDiscoveredDeviceV2,
+  ConnectRequestV2,
+} from '../../../shared/api-v2'
 import type { DevicePlugin, LiveDeviceSession } from './device-plugin'
 
 const FAKE_HOST = '192.168.1.100'
@@ -46,7 +49,7 @@ export function createFakeSeestarPlugin(): DevicePlugin {
             productModel: FAKE_MODEL,
             serialNumber: FAKE_SERIAL_NUMBER,
             connectedAt: new Date().toISOString(),
-          }
+          },
         } satisfies LiveDeviceSession
       }),
   }

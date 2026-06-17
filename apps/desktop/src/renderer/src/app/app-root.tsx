@@ -1,11 +1,16 @@
-import { useEffect } from "react"
-import { disposeProjectionStore, initializeProjectionStore, useProjectionStore } from "../state/projection-store"
-import { Providers } from "./providers"
-import { AppShell } from "./app-shell"
-import { selectProjectionBoot } from "../state/projection-selectors"
+import { useEffect } from 'react'
+import {
+  disposeProjectionStore,
+  initializeProjectionStore,
+  useProjectionStore,
+} from '../state/projection-store'
+import { Providers } from './providers'
+import { AppShell } from './app-shell'
+import { selectProjectionBoot } from '../state/projection-selectors'
 
 function AppBootstrap() {
-  const { hydrated, error, hasStatus } = useProjectionStore(selectProjectionBoot)
+  const { hydrated, error, hasStatus } =
+    useProjectionStore(selectProjectionBoot)
   useEffect(() => {
     void initializeProjectionStore()
     return () => {

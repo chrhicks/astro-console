@@ -86,8 +86,8 @@ export function disposeProjectionStore() {
 }
 
 export function useProjectionStore<T>(
-  selector: (state: ProjectionState) => T
-): T { 
+  selector: (state: ProjectionState) => T,
+): T {
   const snapshot = useSyncExternalStore(subscribe, getState, getState)
   return selector(snapshot)
 }

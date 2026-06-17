@@ -1,4 +1,4 @@
-import type { ProjectionState } from "./projection-store"
+import type { ProjectionState } from './projection-store'
 
 export function selectProjectionBoot(state: ProjectionState) {
   return {

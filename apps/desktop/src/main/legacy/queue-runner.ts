@@ -7,7 +7,10 @@ import {
 } from '../../../../../sdk/dist/index.js'
 import { resolvePlanningActiveSite } from './planning-context'
 import { isAzimuthBlocked } from '../../shared/backyard-mask.js'
-import type { DesktopQueueRunnerState, DesktopStatus } from '../../shared/api.js'
+import type {
+  DesktopQueueRunnerState,
+  DesktopStatus,
+} from '../../shared/api.js'
 import type {
   PlanningSnapshot,
   QueueItem,

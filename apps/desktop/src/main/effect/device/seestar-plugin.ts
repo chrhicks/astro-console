@@ -63,7 +63,7 @@ export function createSeestarPlugin(): DevicePlugin {
     connect: (input: ConnectRequestV2) =>
       Effect.gen(function* () {
         const bus = yield* EventBus
-        
+
         const discovered = yield* Ref.get(discoveredRef)
         const target = discovered.get(input.deviceId)
 
@@ -90,7 +90,7 @@ export function createSeestarPlugin(): DevicePlugin {
             ],
           }),
           discoveryTimeoutMs: 2500,
-          logger: createConsoleLogger('debug')
+          logger: createConsoleLogger('debug'),
         })
 
         yield* bus.publish('session.connect.step.started', {
@@ -102,16 +102,20 @@ export function createSeestarPlugin(): DevicePlugin {
         yield* Effect.tryPromise({
           try: () => device.connect(),
           catch: (error) =>
-            new Error(`device.connect failed for ${host}: ${toErrorMessage(error)}`)
+            new Error(
+              `device.connect failed for ${host}: ${toErrorMessage(error)}`,
+            ),
         }).pipe(
           Effect.catchAll((error) =>
-            bus.publish('session.connect.step.failed', {
-              step: 'device.connect',
-              host,
-              deviceId: input.deviceId,
-              error: toErrorMessage(error),
-            }).pipe(Effect.zipRight(Effect.fail(error)))
-          )
+            bus
+              .publish('session.connect.step.failed', {
+                step: 'device.connect',
+                host,
+                deviceId: input.deviceId,
+                error: toErrorMessage(error),
+              })
+              .pipe(Effect.zipRight(Effect.fail(error))),
+          ),
         )
 
         yield* bus.publish('session.connect.step.succeeded', {
@@ -119,7 +123,6 @@ export function createSeestarPlugin(): DevicePlugin {
           host,
           deviceId: target.deviceId,
         })
-
 
         yield* bus.publish('session.authenticate.step.started', {
           step: 'device.authenticate',
@@ -130,16 +133,20 @@ export function createSeestarPlugin(): DevicePlugin {
         const authenticated = yield* Effect.tryPromise({
           try: () => device.authenticate(),
           catch: (error) =>
-            new Error(`device.authenticate failed for ${host}: ${toErrorMessage(error)}`)
-         }).pipe(
-          Effect.catchAll((error) => 
-            bus.publish('session.authenticate.step.failed', {
-              step: 'device.authenticate',
-              host,
-              deviceId: input.deviceId,
-              error: toErrorMessage(error),
-            }).pipe(Effect.zipRight(Effect.fail(error)))
-          )
+            new Error(
+              `device.authenticate failed for ${host}: ${toErrorMessage(error)}`,
+            ),
+        }).pipe(
+          Effect.catchAll((error) =>
+            bus
+              .publish('session.authenticate.step.failed', {
+                step: 'device.authenticate',
+                host,
+                deviceId: input.deviceId,
+                error: toErrorMessage(error),
+              })
+              .pipe(Effect.zipRight(Effect.fail(error))),
+          ),
         )
 
         yield* bus.publish('session.authenticate.step.succeeded', {
@@ -164,16 +171,20 @@ export function createSeestarPlugin(): DevicePlugin {
         const summary = yield* Effect.tryPromise({
           try: () => device.preflightCheck(),
           catch: (error) =>
-            new Error(`device.preflightCheck failed for ${host}: ${toErrorMessage(error)}`)
+            new Error(
+              `device.preflightCheck failed for ${host}: ${toErrorMessage(error)}`,
+            ),
         }).pipe(
           Effect.catchAll((error) =>
-            bus.publish('session.preflightCheck.step.failed', {
-              step: 'device.preflightCheck',
-              host,
-              deviceId: input.deviceId,
-              error: toErrorMessage(error),
-            }).pipe(Effect.zipRight(Effect.fail(error)))
-          )
+            bus
+              .publish('session.preflightCheck.step.failed', {
+                step: 'device.preflightCheck',
+                host,
+                deviceId: input.deviceId,
+                error: toErrorMessage(error),
+              })
+              .pipe(Effect.zipRight(Effect.fail(error))),
+          ),
         )
 
         yield* bus.publish('session.preflightCheck.step.succeeded', {

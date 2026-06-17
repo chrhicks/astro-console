@@ -12,5 +12,5 @@ export const SessionManagerLive = Layer.effect(
       setCurrent: (session) => Ref.set(ref, session),
       clearCurrent: Ref.set(ref, null),
     } satisfies SessionManager
-  })
+  }),
 )

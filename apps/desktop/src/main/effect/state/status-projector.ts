@@ -1,15 +1,15 @@
-import { Effect, Context, Layer } from "effect";
-import { SessionAggregate } from "./aggregate";
-import { DesktopStatus } from "../../../shared/api-v2";
-import { AggregateStore } from "./aggregate-store";
+import { Effect, Context, Layer } from 'effect'
+import { SessionAggregate } from './aggregate'
+import { DesktopStatus } from '../../../shared/api-v2'
+import { AggregateStore } from './aggregate-store'
 
 export interface StatusProjector {
   readonly project: (aggregate: SessionAggregate) => DesktopStatus
   readonly snapshot: Effect.Effect<DesktopStatus>
-
 }
 
-export const StatusProjector = Context.GenericTag<StatusProjector>('StatusProjector')
+export const StatusProjector =
+  Context.GenericTag<StatusProjector>('StatusProjector')
 
 function project(session: SessionAggregate): DesktopStatus {
   return {
@@ -21,7 +21,7 @@ function project(session: SessionAggregate): DesktopStatus {
     preview: session.preview,
     currentTarget: session.currentTarget,
     lastUpdatedAt: session.lastUpdatedAt,
-    lastError: session.session.lastError
+    lastError: session.session.lastError,
   }
 }
 
@@ -32,7 +32,7 @@ export const StatusProjectorLive = Layer.effect(
 
     return {
       project,
-      snapshot: store.get.pipe(Effect.map(project))
+      snapshot: store.get.pipe(Effect.map(project)),
     }
-  })
+  }),
 )

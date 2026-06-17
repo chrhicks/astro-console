@@ -12,7 +12,7 @@ const baseLayer = Layer.mergeAll(
   AggregateStoreLive,
   EventBusLive,
   DeviceRegistryLive,
-  SessionManagerLive
+  SessionManagerLive,
 )
 
 const logLayer = Layer.provide(LogSinkLive, baseLayer)
@@ -29,5 +29,5 @@ export const DesktopLiveLayer = Layer.mergeAll(
   logLayer,
   projectorLayer,
   statusStreamLayer,
-  logStreamLayer
+  logStreamLayer,
 )

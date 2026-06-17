@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react"
+import { useSyncExternalStore } from 'react'
 
 export type UIShellState = {
   settings: 'open' | 'closed'
@@ -38,9 +38,7 @@ function getState(): UIShellState {
   return uiShellState
 }
 
-export function useShellStore<T>(
-  selector: (state: UIShellState) => T
-): T {
+export function useShellStore<T>(selector: (state: UIShellState) => T): T {
   const snapshot = useSyncExternalStore(subscribe, getState, getState)
   return selector(snapshot)
 }

@@ -18,7 +18,8 @@ export const electronApi = {
   discover: () => getApi().discover(),
   connect: (input: ConnectRequestV2) => getApi().connect(input),
   disconnect: () => getApi().disconnect(),
-  onLog: (listener: (entry: DesktopLogEntryV2) => void) => getApi().onLog(listener),
+  onLog: (listener: (entry: DesktopLogEntryV2) => void) =>
+    getApi().onLog(listener),
   onStatus: (listener: (status: DesktopStatus) => void) =>
     getApi().onStatus(listener),
 }

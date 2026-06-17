@@ -4,7 +4,9 @@ import { EventBus } from './event-bus'
 import { StatusProjector } from '../state/status-projector'
 
 export interface StatusStream {
-  readonly subscribe: (onStatus: (status: DesktopStatus) => void) => Effect.Effect<() => void>
+  readonly subscribe: (
+    onStatus: (status: DesktopStatus) => void,
+  ) => Effect.Effect<() => void>
   readonly publishSnapshot: Effect.Effect<void>
 }
 
@@ -19,10 +21,10 @@ export const StatusStreamLive = Layer.effect(
     const publishSnapshot = projector.snapshot.pipe(
       Effect.flatMap((status) =>
         bus.publish('status.snapshot.emitted', {
-          lastUpdatedAt: status.lastUpdatedAt
-        })
+          lastUpdatedAt: status.lastUpdatedAt,
+        }),
       ),
-      Effect.asVoid
+      Effect.asVoid,
     )
 
     return {
@@ -39,7 +41,7 @@ export const StatusStreamLive = Layer.effect(
             }
 
             return projector.snapshot.pipe(
-              Effect.flatMap((status) => Queue.offer(queue, status))
+              Effect.flatMap((status) => Queue.offer(queue, status)),
             )
           })
 
@@ -50,7 +52,7 @@ export const StatusStreamLive = Layer.effect(
             // This single status stream is currently owned by Electron-side
             // unsubscribe cleanup. If we add more pushed streams, switch to a
             // scoped subscription model owned per WebContents instead.
-            Effect.forkDaemon
+            Effect.forkDaemon,
           )
 
           return () => {
@@ -60,5 +62,5 @@ export const StatusStreamLive = Layer.effect(
         }),
       publishSnapshot,
     } satisfies StatusStream
-  })
+  }),
 )
