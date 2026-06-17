@@ -24,12 +24,26 @@ export interface PreviewProjection {
   active: false
 }
 
-export interface DeviceProjection {}
-
 export interface LibraryProjection {
   scope: 'current_target'
   assets: []
   polling: false
+}
+
+export interface DeviceProjection {
+  pluginKind?: DevicePluginKind
+  deviceId?: string
+  displayName?: string
+  host?: string
+  productModel?: string
+  serialNumber?: string
+  firmwareVersion?: string
+  batteryPercent?: number
+  deviceTempC?: number
+  batteryTempC?: number
+  tracking?: boolean
+  mountClosed?: boolean
+  connectedAt?: string
 }
 
 export interface TargetSummary {

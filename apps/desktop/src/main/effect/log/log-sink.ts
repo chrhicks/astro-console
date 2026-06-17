@@ -99,6 +99,18 @@ function inferSummary(
       return 'Disconnected device'
     case 'session.disconnect.failed':
       return 'Failed to disconnect device'
+    case 'session.connect.step.started':
+      return `Started connect step ${asString(payload?.step) ?? 'unknown'}`
+    case 'session.connect.step.succeeded':
+      return `Completed connect step ${asString(payload?.step) ?? 'unknown'}`
+    case 'session.authenticate.step.started':
+      return `Started authenticate step ${asString(payload?.step) ?? 'unknown'}`
+    case 'session.authenticate.step.succeeded':
+      return `Completed authenticate step ${asString(payload?.step) ?? 'unknown'}`
+    case 'session.preflightCheck.step.started':
+      return `Started preflight check step ${asString(payload?.step) ?? 'unknown'}`
+    case 'session.preflightCheck.step.succeeded':
+      return `Completed preflight check step ${asString(payload?.step) ?? 'unknown'}`
     default:
       return event.name
   }

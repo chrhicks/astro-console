@@ -13,10 +13,16 @@ export function selectSessionBarModel(state: ProjectionState) {
 
   return {
     phase: status?.session.phase ?? 'disconnected',
-    host: status?.session.host,
-    productModel: status?.session.productModel,
+    host: status?.device.host,
+    productModel: status?.device.productModel,
     reconnect: status?.session.reconnect,
     lastError: status?.lastError ?? null,
     discovering: status?.session.discovering ?? false,
+    deviceId: status?.device.deviceId,
+    pluginKind: status?.device.pluginKind,
+    serialNumber: status?.device.serialNumber,
+    firmwareVersion: status?.device.firmwareVersion,
+    batteryPercent: status?.device.batteryPercent,
+    tracking: status?.device.tracking,
   }
 }

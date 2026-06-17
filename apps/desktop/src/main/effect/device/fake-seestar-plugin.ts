@@ -38,6 +38,15 @@ export function createFakeSeestarPlugin(): DevicePlugin {
           productModel: FAKE_MODEL,
           openedAt: new Date().toISOString(),
           disconnect: Effect.sleep('200 millis').pipe(Effect.asVoid),
+          device: {
+            pluginKind: 'fake-seestar',
+            deviceId: FAKE_DEVICE_ID,
+            displayName: FAKE_MODEL,
+            host: FAKE_HOST,
+            productModel: FAKE_MODEL,
+            serialNumber: FAKE_SERIAL_NUMBER,
+            connectedAt: new Date().toISOString(),
+          }
         } satisfies LiveDeviceSession
       }),
   }

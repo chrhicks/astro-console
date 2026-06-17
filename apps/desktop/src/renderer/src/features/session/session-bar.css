@@ -32,3 +32,8 @@
   background: var(--warn);
   box-shadow: 0 0 8px var(--warn);
 }
+
+.session-bar select {
+  min-width: 220px;
+  max-width: 320px;
+}

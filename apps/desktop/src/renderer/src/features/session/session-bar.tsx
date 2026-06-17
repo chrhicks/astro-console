@@ -8,7 +8,7 @@ import { useDiscoverMutation } from './use-discover-mutation'
 import { useDisconnectMutation } from './use-disconnect-mutation'
 
 export function SessionBar() {
-  const { phase, host, productModel, discovering } =
+  const { phase, host, productModel, discovering, deviceId, serialNumber, batteryPercent, tracking, pluginKind } =
     useProjectionStore(selectSessionBarModel)
   const isConnected = phase === 'connected'
   const isConnecting = phase === 'connecting'
@@ -17,11 +17,18 @@ export function SessionBar() {
   const [discoveredDevices, setDiscoveredDevices] = useState<
     DesktopDiscoveredDeviceV2[]
   >([])
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
+
+  const connectedDeviceId = deviceId
+
   const connectMutation = useConnectMutation()
   const discoverMutation = useDiscoverMutation()
   const disconnectMutation = useDisconnectMutation()
 
-  const selectedDevice = selectPreferredDevice(discoveredDevices)
+  const selectedDevice =
+    discoveredDevices.find((device) => device.deviceId === selectedDeviceId) ??
+    discoveredDevices.find((device) => device.deviceId === connectedDeviceId) ??
+    selectPreferredDevice(discoveredDevices)
   const isBusy =
     isConnecting ||
     isDisconnecting ||
@@ -33,6 +40,11 @@ export function SessionBar() {
     discoverMutation.mutate(undefined, {
       onSuccess: (devices) => {
         setDiscoveredDevices(devices)
+        setSelectedDeviceId((current) =>
+          current && devices.some((device) => device.deviceId === current)
+            ? current
+            : null,
+        )
       },
     })
   }
@@ -66,8 +78,23 @@ export function SessionBar() {
         disabled={discovering || isBusy}
         onClick={handleDiscover}
       >
-        {discovering || discoverMutation.isPending ? 'Discovering...' : 'Discover'}
+        {discovering || discoverMutation.isPending
+          ? 'Discovering...'
+          : 'Discover'}
       </button>
+      <select
+        value={selectedDevice?.deviceId ?? ''}
+        disabled={isBusy || discoveredDevices.length === 0 || isConnected}
+        onChange={(event) =>
+          setSelectedDeviceId(event.currentTarget.value || null)
+        }
+      >
+        {discoveredDevices.map((device) => (
+          <option key={device.deviceId} value={device.deviceId}>
+            {formatDeviceOptionLabel(device)}
+          </option>
+        ))}
+      </select>
       <button
         type="button"
         className="btn btn-sm primary"
@@ -83,20 +110,27 @@ export function SessionBar() {
               ? 'Disconnect'
               : 'Connect'}
       </button>
-      <span className="chip">{productModel ?? 'Device: Unknown'}</span>
+      <span className="chip">
+        {productModel ?? 'Device: Unknown'}
+        {serialNumber ? ` · ${serialNumber}` : ''}
+      </span>
       <span className="chip" id="chipHost">
         {host ?? 'Host: Unknown'}
       </span>
-      {/* TODO: Add battery and temperature and tracking status later */}
-      {/* <span className="chip ok" id="chipBatt">
-        Battery 78%
-      </span>
-      <span className="chip" id="chipTemp">
-        28°C
-      </span> 
-      <span className="chip ok" id="chipTrack" style={{ display: 'none' }}>
-        Tracking on
-      </span>*/}
+      {batteryPercent != null ? (
+        <span className={`chip ${batteryPercent < 20 ? 'warn' : 'ok'}`}>
+          Battery {batteryPercent}%
+        </span>
+      ) : null}
+      {tracking != null ? (
+        <span className={`chip ${tracking ? 'ok' : ''}`}>
+          Tracking {tracking ? 'On' : 'Off'}
+        </span>
+      ) : null}
+      {pluginKind?.startsWith('fake-') ? (
+        <span className='chip warn'>Fake</span>
+      ): null}
+      
       <span className="spacer"></span>
       <button type="button" className="btn btn-sm" id="btnPark">
         Park
@@ -111,6 +145,16 @@ export function SessionBar() {
       </button>
     </header>
   )
+}
+
+function formatDeviceOptionLabel(device: DesktopDiscoveredDeviceV2): string {
+  const source = device.pluginKind === 'fake-seestar' ? 'fake' : 'live'
+  return [
+    device.displayName,
+    device.host,
+    device.serialNumber,
+    source
+  ].filter(Boolean).join(' . ')
 }
 
 function selectPreferredDevice(
