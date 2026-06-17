@@ -1,3 +1,10 @@
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
 .app-shell-header {
   padding: 0.35rem 0.5rem 0.35rem 80px;
   padding-left: 80px;
@@ -11,4 +18,49 @@
 .app-shell-header select,
 .app-shell-header a {
   -webkit-app-region: no-drag;
+}
+
+.workspace-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--col-left, 260px) 1fr var(--col-right, 240px);
+  grid-template-rows: 1fr var(--row-filmstrip, 100px);
+  gap: 1px;
+  background: var(--border);
+  transition: grid-template-columns 0.15s ease, grid-template-rows 0.15s ease;
+}
+
+.workspace-grid > * {
+  min-height: 0;
+  min-width: 0;
+}
+
+.workspace-grid.left-collapsed {
+  --col-left: 36px;
+}
+
+.workspace-grid.filmstrip-expanded {
+  --row-filmstrip: 148px;
+}
+
+.panel-left {
+  grid-row: 1 / 3;
+}
+
+.panel-center {
+  display: flex;
+  flex-direction: column;
+  background: #05080c;
+}
+
+.panel-right {
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-filmstrip {
+  grid-column: 2 / 4;
+  display: flex;
+  flex-direction: column;
 }

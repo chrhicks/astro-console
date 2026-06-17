@@ -1,0 +1,125 @@
+.targets-panel-header {
+  gap: 0.35rem;
+}
+
+.targets-panel-body {
+  padding: 0;
+  overflow: auto;
+}
+
+.filter-row {
+  display: flex;
+  gap: 0.2rem;
+  padding: 0.2rem 0.35rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.filter-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.filter-row input:focus {
+  border-color: var(--border-focus);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+button.target-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: calc(100% - 8px);
+  margin: 2px 4px;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  box-shadow: none;
+}
+
+button.target-row:hover:not(:disabled):not(.selected) {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--border);
+}
+
+button.target-row.selected {
+  background: rgba(61, 139, 253, 0.14);
+  border-color: rgba(90, 150, 255, 0.4);
+  box-shadow: inset 0 0 0 1px rgba(61, 139, 253, 0.08);
+}
+
+button.target-row.selected:hover:not(:disabled) {
+  background: rgba(61, 139, 253, 0.18);
+  border-color: rgba(90, 150, 255, 0.45);
+}
+
+button.target-row.unavailable {
+  opacity: 0.55;
+}
+
+.target-row .id {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.target-row .sub {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.badge {
+  padding: 0.15rem 0.35rem;
+  border-radius: 4px;
+  white-space: nowrap;
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.badge.up {
+  background: rgba(61, 214, 140, 0.15);
+  color: #7ce7b0;
+}
+
+.badge.later {
+  background: rgba(139, 155, 179, 0.12);
+  color: var(--text-muted);
+}
+
+.badge.blocked {
+  background: rgba(240, 113, 120, 0.15);
+  color: #f5a8ad;
+}
+
+.empty-targets {
+  padding: 1.5rem 0.75rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.panel-left.is-collapsed .filter-row,
+.panel-left.is-collapsed .panel-header span:first-child {
+  display: none;
+}
+
+.panel-left.is-collapsed .target-row {
+  justify-content: center;
+  padding: 0.35rem 0.2rem;
+}
+
+.panel-left.is-collapsed .target-row .id,
+.panel-left.is-collapsed .target-row .sub {
+  display: none;
+}
