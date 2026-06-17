@@ -15,6 +15,10 @@ Use the `memory-manager` skill and keep your memory up to date for these conditi
 - Discoveries: new learnings or ideas that need to be recalled in the future
 - Troubleshooting: techniques or approaches that will avoid wasting time in the future to solve similar problems
 
+### Tooling
+
+- Prefer `ast-grep` / `sg` for structural, syntax-aware code search when possible instead of plain text grep-style search. It is usually better for searching through code because it matches language structure, not just raw text.
+
 ## Seestar S30 Local API — Quick Reference
 
 ### Device
