@@ -15,6 +15,7 @@ export interface ConnectedDeviceSession {
   productModel?: string
   openedAt: string
   device: DeviceProjection
+  capabilities: DeviceCapabilities
 }
 
 export interface LiveDeviceSession extends ConnectedDeviceSession {
@@ -30,3 +31,11 @@ export interface DevicePlugin {
 }
 
 export const DevicePlugin = Context.GenericTag<DevicePlugin>('DevicePlugin')
+
+export interface DeviceCapabilities {
+  readonly supportsStacking: boolean      // Seestar: true, Alpaca mount: false
+  readonly supportsLivePreview: boolean   // Seestar: true, Alpaca mount: false
+  readonly supportsFilterWheel: boolean    // Seestar S30: true (3-position), others: varies
+  readonly supportsAutofocus: boolean      // Seestar: true, Alpaca mount: depends
+  readonly supportsStorageAccess: boolean   // Seestar: true, Alpaca mount: false
+}

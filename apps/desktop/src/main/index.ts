@@ -14,7 +14,7 @@ import type {
   SetActiveSiteRequest,
   StartQueueRunRequest,
   UpdateSiteProfileRequest,
-} from '../shared/api'
+} from '../shared/legacy/api'
 import {
   attachIpcV2LogListener,
   attachIpcV2StatusListener,

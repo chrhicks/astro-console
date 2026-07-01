@@ -1,4 +1,4 @@
-import type { SeestarDesktopApi } from '../../shared/api'
+import type { SeestarDesktopApi } from '../../shared/legacy/api'
 import type { SeestarDesktopApiV2 } from '../../shared/api-v2'
 
 declare global {

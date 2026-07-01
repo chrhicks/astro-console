@@ -1,3 +1,7 @@
+import type { TargetSummary } from "./catalog/catalog-schema"
+
+export * from './catalog/catalog-schema'
+
 export interface SessionProjection {
   phase: 'disconnected' | 'connecting' | 'connected' | 'disconnecting'
   host?: string
@@ -44,16 +48,6 @@ export interface DeviceProjection {
   tracking?: boolean
   mountClosed?: boolean
   connectedAt?: string
-}
-
-export interface TargetSummary {
-  id: string
-  short: string
-  name: string
-  visibility: 'later'
-  visibilityLabel: string
-  recommendedFilter: 'clear'
-  type: 'dso'
 }
 
 export interface DesktopStatus {

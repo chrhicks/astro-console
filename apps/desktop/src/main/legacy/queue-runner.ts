@@ -6,16 +6,16 @@ import {
   type Logger,
 } from '../../../../../sdk/dist/index.js'
 import { resolvePlanningActiveSite } from './planning-context'
-import { isAzimuthBlocked } from '../../shared/backyard-mask.js'
+import { isAzimuthBlocked } from '../../shared/legacy/backyard-mask.js'
 import type {
   DesktopQueueRunnerState,
   DesktopStatus,
-} from '../../shared/api.js'
+} from '../../shared/legacy/api.js'
 import type {
   PlanningSnapshot,
   QueueItem,
   SiteProfile,
-} from '../../shared/planning.js'
+} from '../../shared/legacy/planning.js'
 
 const DEFAULT_ACTION_WAIT = {
   waitForCompletion: true,

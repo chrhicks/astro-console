@@ -1,22 +1,22 @@
 import {
   type VisibilityWindow,
   rankTargetsForTonight,
-} from '../../shared/visibility-engine'
+} from '../../shared/legacy/visibility-engine'
 import {
   type CatalogTarget,
   type PlanningSnapshot,
   type RankedTarget,
   type SiteProfile,
   validateSiteProfile,
-} from '../../shared/planning'
+} from '../../shared/legacy/planning'
 import {
   evaluateSiteDiagnostics,
   type SiteDiagnostic,
-} from '../../shared/site-diagnostics'
+} from '../../shared/legacy/site-diagnostics'
 import {
   searchCatalogTargets,
   type CatalogSearchResult,
-} from '../../shared/starter-catalog'
+} from '../../shared/legacy/starter-catalog'
 import { PlanningStore } from './planning-store'
 
 export type ActiveSiteSource = 'requested' | 'state' | 'fallback'

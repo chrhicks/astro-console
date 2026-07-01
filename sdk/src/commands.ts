@@ -3,6 +3,7 @@ import type {
   AlbumsResult,
   AlbumFile,
   EquCoord,
+  HorizCoord,
   DeviceState,
   ViewStateResult,
 } from './types.js'
@@ -45,6 +46,15 @@ export function parseEquCoord(resp: JsonRpcResponse): EquCoord | null {
   const r = resp.result as Record<string, unknown>
   if (typeof r.ra === 'number' && typeof r.dec === 'number') {
     return { ra: r.ra, dec: r.dec }
+  }
+  return null
+}
+
+export function parseHorizCoord(resp: JsonRpcResponse): HorizCoord | null {
+  if (!Array.isArray(resp.result)) return null
+  const [altitudeDeg, azimuthDeg] = resp.result
+  if (typeof altitudeDeg === 'number' && typeof azimuthDeg === 'number') {
+    return { altitudeDeg, azimuthDeg }
   }
   return null
 }

@@ -66,6 +66,17 @@ export interface EquCoord {
   dec: number
 }
 
+export interface HorizCoord {
+  altitudeDeg: number
+  azimuthDeg: number
+}
+
+export interface ManualMoveOptions {
+  directionDeg: number
+  speed: number
+  durationSec: number
+}
+
 export interface ViewStateResult {
   View?: Record<string, unknown>
 }

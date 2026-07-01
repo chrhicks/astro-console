@@ -15,7 +15,7 @@ import {
   validatePersistedPlanningState,
   validateSiteProfile,
   validateSiteProfileDraft,
-} from '../../shared/planning'
+} from '../../shared/legacy/planning'
 import {
   createManualCatalogTarget,
   mergeStarterCatalogTargets,
@@ -23,7 +23,7 @@ import {
   validateStarterCatalogTargets,
   type CatalogSearchResult,
   type ManualCatalogTargetInput,
-} from '../../shared/starter-catalog'
+} from '../../shared/legacy/starter-catalog'
 
 const PLANNING_DIRNAME = 'planning'
 const PLANNING_FILENAME = 'planning-state.json'

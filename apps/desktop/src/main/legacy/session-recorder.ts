@@ -7,7 +7,7 @@ import type {
   DesktopQueueRunnerState,
   DesktopRecordingState,
   DesktopStatus,
-} from '../../shared/api.js'
+} from '../../shared/legacy/api.js'
 
 const ARTIFACT_FILES = {
   session: 'session.json',

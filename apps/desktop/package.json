@@ -33,6 +33,7 @@
     "@vitejs/plugin-react": "^4.4.1",
     "concurrently": "^10.0.3",
     "cross-env": "^7.0.3",
+    "csv-parse": "^7.0.0",
     "prettier": "^3.6.2",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",

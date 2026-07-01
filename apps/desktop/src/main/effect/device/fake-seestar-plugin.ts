@@ -9,6 +9,13 @@ const FAKE_HOST = '192.168.1.100'
 const FAKE_DEVICE_ID = 'fake-seestar-s30'
 const FAKE_MODEL = 'Seestar S30 (fake)'
 const FAKE_SERIAL_NUMBER = 'FAKE-S30-001'
+const FAKE_CAPABILITIES = {
+  supportsStacking: true,
+  supportsLivePreview: true,
+  supportsFilterWheel: true,
+  supportsAutofocus: true,
+  supportsStorageAccess: true,
+} as const
 
 export function createFakeSeestarPlugin(): DevicePlugin {
   return {
@@ -40,6 +47,7 @@ export function createFakeSeestarPlugin(): DevicePlugin {
           host: FAKE_HOST,
           productModel: FAKE_MODEL,
           openedAt: new Date().toISOString(),
+          capabilities: FAKE_CAPABILITIES,
           disconnect: Effect.sleep('200 millis').pipe(Effect.asVoid),
           device: {
             pluginKind: 'fake-seestar',

@@ -5,6 +5,7 @@ import { discoverSeestarHost } from './discovery.js'
 import {
   parseAlbums,
   parseEquCoord,
+  parseHorizCoord,
   parseDeviceState,
   parseViewState,
   buildImageUrl,
@@ -26,6 +27,8 @@ import type {
   ClientConfig,
   ShareEntry,
   StartViewOptions,
+  HorizCoord,
+  ManualMoveOptions,
   PreflightSummary,
   SeestarPushEvent,
   StartupSequenceOptions,
@@ -128,6 +131,11 @@ export class SeestarDevice {
   async getEquCoord(): Promise<EquCoord | null> {
     const resp = await this.client.sendSync('scope_get_equ_coord', '')
     return parseEquCoord(resp)
+  }
+
+  async getHorizCoord(): Promise<HorizCoord | null> {
+    const resp = await this.client.sendSync('scope_get_horiz_coord', '')
+    return parseHorizCoord(resp)
   }
 
   async getViewState(): Promise<ViewStateResult | null> {
@@ -1134,6 +1142,16 @@ export class SeestarDevice {
 
   async sync(ra: number, dec: number): Promise<boolean> {
     const resp = await this.client.sendSync('scope_sync', [ra, dec])
+    return resp.code === 0
+  }
+
+  async manualMove(options: ManualMoveOptions): Promise<boolean> {
+    validateManualMoveOptions(options)
+    const resp = await this.client.sendSync('scope_speed_move', {
+      speed: options.speed,
+      angle: options.directionDeg,
+      dur_sec: options.durationSec,
+    })
     return resp.code === 0
   }
 
@@ -2481,6 +2499,25 @@ function asNumber(value: unknown): number | undefined {
 
 function asBoolean(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined
+}
+
+function validateManualMoveOptions(options: ManualMoveOptions): void {
+  if (!Number.isFinite(options.speed) || options.speed <= 0) {
+    throw new Error('manualMove speed must be a positive number')
+  }
+  if (!Number.isInteger(options.speed)) {
+    throw new Error('manualMove speed must be an integer')
+  }
+  if (!Number.isFinite(options.directionDeg)) {
+    throw new Error('manualMove directionDeg must be a finite number')
+  }
+  if (
+    !Number.isFinite(options.durationSec) ||
+    !Number.isInteger(options.durationSec) ||
+    options.durationSec <= 0
+  ) {
+    throw new Error('manualMove durationSec must be a positive integer')
+  }
 }
 
 function errorMessage(error: unknown): string | undefined {

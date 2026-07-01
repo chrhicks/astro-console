@@ -33,10 +33,10 @@ import type {
   DesktopStatus,
   SetActiveSiteRequest,
   UpdateSiteProfileRequest,
-} from '../../shared/api.js'
-import type { PlanningSnapshot, SiteProfile } from '../../shared/planning.js'
-import { evaluateSiteDiagnostics } from '../../shared/site-diagnostics.js'
-import type { CatalogSearchResult } from '../../shared/starter-catalog.js'
+} from '../../shared/legacy/api.js'
+import type { PlanningSnapshot, SiteProfile } from '../../shared/legacy/planning.js'
+import { evaluateSiteDiagnostics } from '../../shared/legacy/site-diagnostics.js'
+import type { CatalogSearchResult } from '../../shared/legacy/starter-catalog.js'
 import { PlanningContextService } from './planning-context'
 import { PlanningStore } from './planning-store'
 import { QueueRunner, createDefaultQueueRunnerState } from './queue-runner'

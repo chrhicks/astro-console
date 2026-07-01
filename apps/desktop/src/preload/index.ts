@@ -16,9 +16,9 @@ import type {
   SeestarDesktopApi,
   StartQueueRunRequest,
   UpdateSiteProfileRequest,
-} from '../shared/api'
-import type { PlanningSnapshot } from '../shared/planning'
-import type { CatalogSearchResult } from '../shared/starter-catalog'
+} from '../shared/legacy/api'
+import type { PlanningSnapshot } from '../shared/legacy/planning'
+import type { CatalogSearchResult } from '../shared/legacy/starter-catalog'
 import type {
   ConnectRequestV2,
   DesktopDiscoveredDeviceV2,

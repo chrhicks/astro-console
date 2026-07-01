@@ -13,6 +13,14 @@ import type {
 import type { DevicePlugin, LiveDeviceSession } from './device-plugin'
 import { EventBus } from '../event/event-bus.js'
 
+const SEESTAR_CAPABILITIES = {
+  supportsStacking: true,
+  supportsLivePreview: true,
+  supportsFilterWheel: true,
+  supportsAutofocus: true,
+  supportsStorageAccess: true,
+} as const
+
 function toSeestarDeviceId(device: { host: string; serialNumber?: string }) {
   return device.serialNumber
     ? `seestar:sn:${device.serialNumber}`
@@ -200,6 +208,7 @@ export function createSeestarPlugin(): DevicePlugin {
           host,
           productModel: target.productModel,
           openedAt: new Date().toISOString(),
+          capabilities: SEESTAR_CAPABILITIES,
           disconnect: Effect.sync(() => {
             device.disconnect()
           }),
