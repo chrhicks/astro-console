@@ -8,6 +8,11 @@ import type { OpenNgcRow } from './import-openngc-parse.js'
 
 export const OPENNGC_PROVENANCE = {
   upstreamRepo: 'mattiaverga/OpenNGC',
+  attributionName: 'Mattia Verga',
+  projectUrl: 'https://github.com/mattiaverga/OpenNGC',
+  doi: '10.21938/y.1ejWUD_MQ6b_eDFoVbbw',
+  license: 'CC-BY-SA-4.0',
+  licenseUrl: 'https://creativecommons.org/licenses/by-sa/4.0/',
   snapshot: 'checked-in CSV snapshot',
   files: [
     {
