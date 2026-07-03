@@ -2,12 +2,18 @@ import { WebContents, ipcMain } from 'electron'
 import { Effect } from 'effect'
 
 import { appRuntime } from '../runtime/app-runtime'
-import type { ConnectRequestV2 } from '../../../shared/api-v2'
+import type {
+  CatalogQuery,
+  ConnectRequestV2,
+  PointToTargetRequest,
+} from '../../../shared/api-v2'
 import {
   runConnect,
   runDiscover,
   runDisconnect,
 } from '../workflows/session-workflows'
+import { runPointToTarget } from '../workflows/pointing-workflows'
+import { CatalogStore } from '../catalog/catalog-store'
 import { LogSink } from '../log/log-sink'
 import { LogStream } from '../log/log-stream'
 import { StatusProjector } from '../state/status-projector'
@@ -46,6 +52,34 @@ export function registerIpcV2Handlers() {
         return yield* sink.list
       }),
     ),
+  )
+
+  ipcMain.handle('seestar:v2:browse-targets', (_event, query: CatalogQuery) =>
+    appRuntime.runPromise(
+      Effect.gen(function* () {
+        const catalog = yield* CatalogStore
+        return yield* catalog.browse(query)
+      }),
+    ),
+  )
+
+  ipcMain.handle('seestar:v2:get-target-by-id', (_event, targetId: string) =>
+    appRuntime.runPromise(
+      Effect.gen(function* () {
+        const catalog = yield* CatalogStore
+        return yield* catalog.getById(targetId)
+      }),
+    ),
+  )
+
+  ipcMain.handle(
+    'seestar:v2:point-to-target',
+    (_event, input: PointToTargetRequest) =>
+      appRuntime.runPromise(
+        runPointToTarget(input.targetId).pipe(
+          Effect.flatMap(() => getProjectedStatus()),
+        ),
+      ),
   )
 }
 

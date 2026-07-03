@@ -1,4 +1,4 @@
-import { DeviceProjection } from '../../../shared/api-v2'
+import { DeviceProjection, PointingProjection, TargetSummary } from '../../../shared/api-v2'
 
 export interface SessionAggregate {
   session: {
@@ -8,12 +8,12 @@ export interface SessionAggregate {
     discovering: boolean
     lastError?: string
   }
-  pointing: { phase: 'idle' }
+  pointing: PointingProjection
   capture: { phase: 'idle' }
   preview: { source: 'none'; active: false }
   device: DeviceProjection
   library: { scope: 'current_target'; assets: []; polling: false }
-  currentTarget: null
+  currentTarget: TargetSummary | null
   runner: { owner: 'idle' }
   diagnostics: {}
   lastUpdatedAt: string
@@ -22,7 +22,7 @@ export interface SessionAggregate {
 export function createInitialAggregate(): SessionAggregate {
   return {
     session: { phase: 'disconnected', discovering: false },
-    pointing: { phase: 'idle' },
+    pointing: { phase: 'idle', target: null },
     capture: { phase: 'idle' },
     preview: { source: 'none', active: false },
     device: {},

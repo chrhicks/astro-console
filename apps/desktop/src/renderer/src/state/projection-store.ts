@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import type { DesktopStatus } from '../../../shared/api-v2'
 import { electronApi } from '../lib/electron-api'
+import { setSelectedTarget } from './selected-target-store'
 
 export type ProjectionState = {
   status: DesktopStatus | null
@@ -60,6 +61,9 @@ export async function initializeProjectionStore() {
 
       stopStatusSubscription = electronApi.onStatus((nextStatus) => {
         setState({ status: nextStatus, hydrated: true, error: null })
+        if (nextStatus.session.phase === 'disconnected') {
+          setSelectedTarget(null)
+        }
       })
     } catch (error) {
       setState({
@@ -82,6 +86,7 @@ export function disposeProjectionStore() {
     initializePromise = null
   }
 
+  setSelectedTarget(null)
   setState({ status: null, hydrated: false, error: null })
 }
 

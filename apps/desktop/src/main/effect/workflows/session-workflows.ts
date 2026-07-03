@@ -105,6 +105,8 @@ export const runConnect = (input: ConnectRequestV2) =>
               discovering: false,
               lastError: undefined,
             },
+            pointing: { phase: 'idle', target: null },
+            currentTarget: null,
             device: connected.device,
           }))
 
@@ -133,6 +135,8 @@ export const runConnect = (input: ConnectRequestV2) =>
               discovering: false,
               lastError: message,
             },
+            pointing: { phase: 'idle', target: null },
+            currentTarget: null,
             device: {},
           }))
 
@@ -186,6 +190,8 @@ export const runDisconnect = Effect.gen(function* () {
         productModel: undefined,
         lastError: undefined,
       },
+      pointing: { phase: 'idle', target: null },
+      currentTarget: null,
       device: {},
     }))
 
@@ -211,6 +217,8 @@ export const runDisconnect = Effect.gen(function* () {
             discovering: false,
             lastError: message,
           },
+          pointing: { phase: 'idle', target: null },
+          currentTarget: null,
           device: {},
         }))
 

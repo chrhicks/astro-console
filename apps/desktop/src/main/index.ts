@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, WebContents } from 'electron'
+import { Effect } from 'effect'
 import path from 'node:path'
 import { SeestarDesktopService } from './legacy/seestar-service'
 import type {
@@ -20,9 +21,15 @@ import {
   attachIpcV2StatusListener,
   registerIpcV2Handlers,
 } from './effect/ipc/ipc-v2'
+import { EventBus } from './effect/event/event-bus'
+import { appRuntime } from './effect/runtime/app-runtime'
 
 const service = new SeestarDesktopService()
 const rendererDevUrl = process.env.VITE_DEV_SERVER_URL
+const inspectPort = process.env.ELECTRON_INSPECT_PORT
+if (inspectPort) {
+  app.commandLine.appendSwitch('remote-debugging-port', inspectPort)
+}
 
 function createMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -70,26 +77,27 @@ function registerIpcHandlers(): void {
   ipcMain.handle(
     'seestar:create-site-profile',
     (_event, input: CreateSiteProfileRequest) =>
-      service.createSiteProfile(input),
+      notifyObserverContextChanged(service.createSiteProfile(input)),
   )
   ipcMain.handle(
     'seestar:update-site-profile',
     (_event, input: UpdateSiteProfileRequest) =>
-      service.updateSiteProfile(input),
+      notifyObserverContextChanged(service.updateSiteProfile(input)),
   )
   ipcMain.handle(
     'seestar:duplicate-site-profile',
     (_event, input: DuplicateSiteProfileRequest) =>
-      service.duplicateSiteProfile(input),
+      notifyObserverContextChanged(service.duplicateSiteProfile(input)),
   )
   ipcMain.handle(
     'seestar:archive-site-profile',
     (_event, input: ArchiveSiteProfileRequest) =>
-      service.archiveSiteProfile(input),
+      notifyObserverContextChanged(service.archiveSiteProfile(input)),
   )
   ipcMain.handle(
     'seestar:set-active-site',
-    (_event, input: SetActiveSiteRequest) => service.setActiveSite(input),
+    (_event, input: SetActiveSiteRequest) =>
+      notifyObserverContextChanged(service.setActiveSite(input)),
   )
   ipcMain.handle(
     'seestar:search-catalog-targets',
@@ -123,6 +131,22 @@ function registerIpcHandlers(): void {
     (_event, input: DesktopCommandRequest) => service.runCommand(input),
   )
   ipcMain.handle('seestar:get-logs', () => service.getLogs())
+}
+
+// Legacy site mutations drive the V2 observer context (active site / lat-lon /
+// horizon). Publish a V2 event so the status stream repushes a snapshot with
+// the refreshed observerContext, which invalidates the renderer browse query.
+async function notifyObserverContextChanged<T>(
+  work: Promise<T>,
+): Promise<T> {
+  const result = await work
+  void appRuntime.runPromise(
+    Effect.gen(function* () {
+      const bus = yield* EventBus
+      yield* bus.publish('observer.context.changed', {})
+    }),
+  )
+  return result
 }
 
 app.whenReady().then(() => {

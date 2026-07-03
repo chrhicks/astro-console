@@ -1,4 +1,11 @@
-import type { TargetSummary } from "./catalog/catalog-schema"
+import type {
+  CatalogPage,
+  CatalogQuery,
+  DeepSkyTarget,
+  SolarSystemTarget,
+  TargetSummary,
+} from "./catalog/catalog-schema"
+import type { ObserverContext } from './observer-context'
 
 export * from './catalog/catalog-schema'
 
@@ -16,7 +23,11 @@ export interface SessionProjection {
 }
 
 export interface PointingProjection {
-  phase: 'idle'
+  phase: 'idle' | 'slewing' | 'arrived' | 'failed'
+  target: TargetSummary | null
+  targetId?: string
+  startedAt?: string
+  lastError?: string
 }
 
 export interface CaptureProjection {
@@ -58,6 +69,7 @@ export interface DesktopStatus {
   device: DeviceProjection
   library: LibraryProjection
   currentTarget: TargetSummary | null
+  observerContext: ObserverContext | null
   lastUpdatedAt: string
   lastError?: string
 }
@@ -78,6 +90,10 @@ export interface ConnectRequestV2 {
   deviceId: string
 }
 
+export interface PointToTargetRequest {
+  targetId: string
+}
+
 export interface DesktopLogEntryV2 {
   ts: string
   level: 'debug' | 'info' | 'warn' | 'error'
@@ -96,6 +112,11 @@ export interface SeestarDesktopApiV2 {
   disconnect(): Promise<DesktopStatus>
   getStatus(): Promise<DesktopStatus>
   getLogs(): Promise<DesktopLogEntryV2[]>
+  browseTargets(query: CatalogQuery): Promise<CatalogPage>
+  getTargetById(targetId: string): Promise<
+    DeepSkyTarget | SolarSystemTarget | null
+  >
+  pointToTarget(input: PointToTargetRequest): Promise<DesktopStatus>
   onLog(listener: (entry: DesktopLogEntryV2) => void): () => void
   onStatus(listener: (status: DesktopStatus) => void): () => void
 }

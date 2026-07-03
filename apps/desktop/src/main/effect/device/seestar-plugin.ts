@@ -21,6 +21,12 @@ const SEESTAR_CAPABILITIES = {
   supportsStorageAccess: true,
 } as const
 
+const DEFAULT_GOTO_WAIT = {
+  waitForCompletion: true,
+  timeoutMs: 120000,
+  pollIntervalMs: 500,
+} as const
+
 function toSeestarDeviceId(device: { host: string; serialNumber?: string }) {
   return device.serialNumber
     ? `seestar:sn:${device.serialNumber}`
@@ -212,6 +218,21 @@ export function createSeestarPlugin(): DevicePlugin {
           disconnect: Effect.sync(() => {
             device.disconnect()
           }),
+          pointToCoordinates: ({ raHours, decDeg }) =>
+            Effect.tryPromise({
+              try: async () => {
+                const ok = await device.goto(raHours, decDeg, DEFAULT_GOTO_WAIT)
+                if (!ok) {
+                  throw new Error(
+                    `Device rejected goto request for ${raHours}, ${decDeg}`,
+                  )
+                }
+              },
+              catch: (error) =>
+                new Error(
+                  `device.goto failed for ${host}: ${toErrorMessage(error)}`,
+                ),
+            }),
           device: {
             pluginKind: 'seestar',
             deviceId: target.deviceId,

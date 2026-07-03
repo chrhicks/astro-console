@@ -20,6 +20,10 @@ export interface ConnectedDeviceSession {
 
 export interface LiveDeviceSession extends ConnectedDeviceSession {
   disconnect: Effect.Effect<void>
+  pointToCoordinates: (input: {
+    raHours: number
+    decDeg: number
+  }) => Effect.Effect<void, unknown>
 }
 
 export interface DevicePlugin {

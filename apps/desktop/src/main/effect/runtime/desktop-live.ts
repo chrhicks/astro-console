@@ -1,19 +1,25 @@
 import { Layer } from 'effect'
+import { CatalogStoreLive } from '../catalog/catalog-store.live'
 import { DeviceRegistryLive } from '../device/device-registry'
 import { AggregateStoreLive } from '../state/aggregate-store'
 import { EventBusLive } from '../event/event-bus'
 import { LogSinkLive } from '../log/log-sink'
 import { LogStreamLive } from '../log/log-stream'
+import { ObserverContextStoreLive } from '../observer/observer-context-store.live'
 import { SessionManagerLive } from '../session/session-manager.live'
 import { StatusProjectorLive } from '../state/status-projector'
 import { StatusStreamLive } from '../event/status-stream'
+
+const observerLayer = Layer.provideMerge(ObserverContextStoreLive, SessionManagerLive)
 
 const baseLayer = Layer.mergeAll(
   AggregateStoreLive,
   EventBusLive,
   DeviceRegistryLive,
-  SessionManagerLive,
+  observerLayer,
 )
+
+const catalogLayer = Layer.provide(CatalogStoreLive, baseLayer)
 
 const logLayer = Layer.provide(LogSinkLive, baseLayer)
 
@@ -26,6 +32,7 @@ const logStreamLayer = Layer.provide(LogStreamLive, logStreamDeps)
 
 export const DesktopLiveLayer = Layer.mergeAll(
   baseLayer,
+  catalogLayer,
   logLayer,
   projectorLayer,
   statusStreamLayer,

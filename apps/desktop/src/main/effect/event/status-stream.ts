@@ -35,6 +35,8 @@ export const StatusStreamLive = Layer.effect(
           const unsubscribe = yield* bus.listen((event) => {
             if (
               !event.name.startsWith('session.') &&
+              !event.name.startsWith('pointing.') &&
+              !event.name.startsWith('observer.') &&
               event.name !== 'status.snapshot.emitted'
             ) {
               return Effect.void

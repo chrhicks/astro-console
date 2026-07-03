@@ -20,11 +20,16 @@ import type {
 import type { PlanningSnapshot } from '../shared/legacy/planning'
 import type { CatalogSearchResult } from '../shared/legacy/starter-catalog'
 import type {
+  CatalogPage,
+  CatalogQuery,
   ConnectRequestV2,
+  DeepSkyTarget,
   DesktopDiscoveredDeviceV2,
   DesktopLogEntryV2,
   DesktopStatus as DesktopStatusV2,
+  PointToTargetRequest,
   SeestarDesktopApiV2,
+  SolarSystemTarget,
 } from '../shared/api-v2'
 
 const api: SeestarDesktopApi = {
@@ -121,6 +126,19 @@ export const apiV2: SeestarDesktopApiV2 = {
     ipcRenderer.invoke('seestar:v2:disconnect') as Promise<DesktopStatusV2>,
   getLogs: () =>
     ipcRenderer.invoke('seestar:v2:get-logs') as Promise<DesktopLogEntryV2[]>,
+  browseTargets: (query: CatalogQuery) =>
+    ipcRenderer.invoke('seestar:v2:browse-targets', query) as Promise<
+      CatalogPage
+    >,
+  getTargetById: (targetId: string) =>
+    ipcRenderer.invoke('seestar:v2:get-target-by-id', targetId) as Promise<
+      DeepSkyTarget | SolarSystemTarget | null
+    >,
+  pointToTarget: (input: PointToTargetRequest) =>
+    ipcRenderer.invoke(
+      'seestar:v2:point-to-target',
+      input,
+    ) as Promise<DesktopStatusV2>,
 
   onLog: (listener) => subscribe('seestar:v2:log', listener),
   onStatus: (listener) => subscribe('seestar:v2:status', listener),

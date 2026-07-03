@@ -49,6 +49,7 @@ export function createFakeSeestarPlugin(): DevicePlugin {
           openedAt: new Date().toISOString(),
           capabilities: FAKE_CAPABILITIES,
           disconnect: Effect.sleep('200 millis').pipe(Effect.asVoid),
+          pointToCoordinates: () => Effect.sleep('750 millis').pipe(Effect.asVoid),
           device: {
             pluginKind: 'fake-seestar',
             deviceId: FAKE_DEVICE_ID,
