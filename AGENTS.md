@@ -19,6 +19,46 @@ Use the `memory-manager` skill and keep your memory up to date for these conditi
 
 - Prefer `ast-grep` / `sg` for structural, syntax-aware code search when possible instead of plain text grep-style search. It is usually better for searching through code because it matches language structure, not just raw text.
 
+## Coding Delegation
+
+Use `glm-coder` as the default implementation path for coding tasks in this project.
+
+- For code changes, start by delegating the implementation work to the `glm-coder` subagent.
+- Give `glm-coder` the concrete task, affected files or areas, and any verification expectations.
+- Treat `CODING_STANDARDS.md` as the style authority for that work.
+
+## Primary Agent Role
+
+The primary agent remains responsible for the final result.
+
+- Review `glm-coder` output before presenting it to the user.
+- Check that the change actually satisfies the request.
+- Check that the implementation follows `CODING_STANDARDS.md` and nearby project conventions.
+- Request a follow-up iteration from `glm-coder` when the first pass is incomplete, risky, or off-style.
+- Summarize review findings, remaining risks, and verification status clearly.
+
+## When Not To Delegate
+
+Do not use `glm-coder` for:
+
+- purely informational questions
+- repo exploration with no implementation
+- simple non-code operations where a direct tool call is faster
+
+If `glm-coder` is unavailable or blocked, proceed directly only when necessary and still apply `CODING_STANDARDS.md` during implementation and review.
+
+## Desktop Dev Inspection
+
+Run `npm run dev:inspect` from `apps/desktop` to start the same dev stack as `npm run dev` with Electron's remote debugging port exposed on `9222`. The script sets `ELECTRON_INSPECT_PORT=9222`, which the main process forwards to Chromium via `app.commandLine.appendSwitch('remote-debugging-port', ...)` before `app.whenReady()`. The port is opt-in; `npm run dev` does not expose it.
+
+Use `agent-browser` against the running Electron renderer like this:
+
+- `curl http://127.0.0.1:9222/json/list` — get the renderer target and copy its `webSocketDebuggerUrl`
+- `agent-browser connect <webSocketDebuggerUrl>` — attach to the live Electron page
+- `agent-browser snapshot -i` — get interactive elements with refs (`@e1`, `@e2`)
+- `agent-browser click @e1` / `fill @e2 "text"` — interact using refs
+- `agent-browser screenshot /tmp/astro-console.png` — capture visual evidence after UI changes
+
 ## Seestar S30 Local API — Quick Reference
 
 ### Device
