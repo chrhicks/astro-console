@@ -1,4 +1,5 @@
 .continuum/
+.references/
 .agents/
 .env
 .env.local

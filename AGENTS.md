@@ -27,6 +27,14 @@ Use `glm-coder` as the default implementation path for coding tasks in this proj
 - Give `glm-coder` the concrete task, affected files or areas, and any verification expectations.
 - Treat `CODING_STANDARDS.md` as the style authority for that work.
 
+## UI Validation Delegation
+
+Use `ui-validator` as the default subagent for desktop UI smoke validation and screenshot-backed verification.
+
+- Delegate `agent-browser` work, `npm run dev:inspect` flows, fake Seestar scenario checks, and Electron renderer validation to `ui-validator` when the task is primarily about verifying UI behavior rather than implementing code.
+- Give `ui-validator` the exact scenarios or UI states to validate, the evidence you want captured, and any specific DOM assertions or screenshots needed.
+- Keep implementation in the primary agent or `glm-coder`; `ui-validator` is for validation only and should not be used as the coding path.
+
 ## Primary Agent Role
 
 The primary agent remains responsible for the final result.
