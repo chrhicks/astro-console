@@ -108,6 +108,9 @@ export const runConnect = (input: ConnectRequestV2) =>
             pointing: { phase: 'idle', target: null },
             currentTarget: null,
             device: connected.device,
+            preview: connected.preview,
+            capture: connected.capture,
+            library: connected.library,
           }))
 
           yield* bus.publish(
@@ -138,6 +141,9 @@ export const runConnect = (input: ConnectRequestV2) =>
             pointing: { phase: 'idle', target: null },
             currentTarget: null,
             device: {},
+            preview: { phase: 'none', source: 'none', active: false },
+            capture: { phase: 'idle' },
+            library: { scope: 'current_target', assets: [], polling: false },
           }))
 
           yield* bus.publish('session.connect.failed', {
@@ -193,6 +199,9 @@ export const runDisconnect = Effect.gen(function* () {
       pointing: { phase: 'idle', target: null },
       currentTarget: null,
       device: {},
+      preview: { phase: 'none', source: 'none', active: false },
+      capture: { phase: 'idle' },
+      library: { scope: 'current_target', assets: [], polling: false },
     }))
 
     yield* bus.publish(
@@ -220,6 +229,9 @@ export const runDisconnect = Effect.gen(function* () {
           pointing: { phase: 'idle', target: null },
           currentTarget: null,
           device: {},
+          preview: { phase: 'none', source: 'none', active: false },
+          capture: { phase: 'idle' },
+          library: { scope: 'current_target', assets: [], polling: false },
         }))
 
         yield* bus.publish(

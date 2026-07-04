@@ -30,19 +30,48 @@ export interface PointingProjection {
   lastError?: string
 }
 
+export type CapturePhase = 'idle' | 'starting' | 'capturing' | 'stopped' | 'failed'
+
 export interface CaptureProjection {
-  phase: 'idle'
+  phase: CapturePhase
+  stacks?: number
+  frames?: number
+  elapsedSec?: number
+  lastError?: string
 }
+
+export type PreviewPhase = 'none' | 'starting' | 'active' | 'error'
 
 export interface PreviewProjection {
-  source: 'none'
-  active: false
+  phase: PreviewPhase
+  source: 'none' | 'rtsp'
+  active: boolean
+  lastError?: string
 }
 
+export interface LibraryAsset {
+  id: string
+  name: string
+  capturedAt: string
+  kind: 'stack' | 'sub' | 'calibration'
+}
+
+export type LibraryScope = 'current_target' | 'all_targets'
+
 export interface LibraryProjection {
-  scope: 'current_target'
-  assets: []
-  polling: false
+  scope: LibraryScope
+  assets: LibraryAsset[]
+  polling: boolean
+}
+
+export interface DeviceTimeProjection {
+  year: number
+  mon: number
+  day: number
+  hour: number
+  min: number
+  sec: number
+  timeZone?: string
 }
 
 export interface DeviceProjection {
@@ -59,6 +88,61 @@ export interface DeviceProjection {
   tracking?: boolean
   mountClosed?: boolean
   connectedAt?: string
+  location?: { lat: number; lon: number }
+  deviceTime?: DeviceTimeProjection
+  deviceTimeLooksStale?: boolean
+  viewMode?: string
+  viewStage?: string
+  viewState?: string
+  storageFreeMb?: number
+  storageTotalMb?: number
+  warnings?: string[]
+}
+
+export type WorkspaceState =
+  | 'disconnected'
+  | 'idle_no_target'
+  | 'primed'
+  | 'ready_to_slew'
+  | 'slewing'
+  | 'on_target'
+  | 'preview_starting'
+  | 'preview_active'
+  | 'preview_error'
+  | 'capturing'
+  | 'parked'
+
+export type WorkspaceCapabilityTier = 'native' | 'external' | 'unsupported'
+export type WorkspaceCapabilityFlag = 'yes' | 'no'
+
+export interface WorkspaceCapabilities {
+  preview: WorkspaceCapabilityTier
+  capture: WorkspaceCapabilityTier
+  autofocus: WorkspaceCapabilityFlag
+  filterWheel: WorkspaceCapabilityFlag
+  storage: WorkspaceCapabilityFlag
+}
+
+export type WorkspaceSurfaceKind = 'idle' | 'scenery' | 'solar' | 'deepsky'
+
+export interface WorkspaceSurface {
+  kind: WorkspaceSurfaceKind
+  label: string
+}
+
+export interface WorkspaceAction {
+  id: string
+  label: string
+  enabled: boolean
+  active?: boolean
+}
+
+export interface WorkspaceProjection {
+  state: WorkspaceState
+  stateLabel: string
+  surface: WorkspaceSurface
+  capabilities: WorkspaceCapabilities
+  actions: WorkspaceAction[]
 }
 
 export interface DesktopStatus {
@@ -68,6 +152,7 @@ export interface DesktopStatus {
   preview: PreviewProjection
   device: DeviceProjection
   library: LibraryProjection
+  workspace: WorkspaceProjection
   currentTarget: TargetSummary | null
   observerContext: ObserverContext | null
   lastUpdatedAt: string
@@ -117,6 +202,35 @@ export interface SeestarDesktopApiV2 {
     DeepSkyTarget | SolarSystemTarget | null
   >
   pointToTarget(input: PointToTargetRequest): Promise<DesktopStatus>
+  startPreview(): Promise<DesktopStatus>
+  stopPreview(): Promise<DesktopStatus>
+  startCapture(): Promise<DesktopStatus>
+  stopCapture(): Promise<DesktopStatus>
   onLog(listener: (entry: DesktopLogEntryV2) => void): () => void
   onStatus(listener: (status: DesktopStatus) => void): () => void
+}
+
+// Dev-only control surface for the fake Seestar scenario runtime. Not used by
+// product UI; exposed so manual testing and agent-browser loops can inspect,
+// load, and reset fake-device scenarios without restarting the app.
+export interface FakeScenarioSummary {
+  id: string
+  label: string
+  description: string
+}
+
+export interface FakeRuntimeSnapshot {
+  scenarios: FakeScenarioSummary[]
+  activeScenarioId: string
+  connectOutcome: 'success' | 'failure'
+  device: DeviceProjection
+  preview: PreviewProjection
+  capture: CaptureProjection
+  library: LibraryProjection
+}
+
+export interface SeestarDevFakeApi {
+  listScenarios(): Promise<FakeRuntimeSnapshot>
+  loadScenario(scenarioId: string): Promise<FakeRuntimeSnapshot>
+  reset(): Promise<FakeRuntimeSnapshot>
 }

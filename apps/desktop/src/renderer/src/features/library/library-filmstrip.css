@@ -21,6 +21,14 @@
   padding: 0.25rem;
 }
 
+.filmstrip-empty {
+  display: flex;
+  align-items: center;
+  padding: 0.25rem 0.5rem;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
 .thumb-card {
   position: relative;
   flex-shrink: 0;

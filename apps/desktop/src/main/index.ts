@@ -21,6 +21,7 @@ import {
   attachIpcV2StatusListener,
   registerIpcV2Handlers,
 } from './effect/ipc/ipc-v2'
+import { registerIpcV2DevHandlers } from './effect/ipc/ipc-v2-dev'
 import { EventBus } from './effect/event/event-bus'
 import { appRuntime } from './effect/runtime/app-runtime'
 
@@ -152,6 +153,9 @@ async function notifyObserverContextChanged<T>(
 app.whenReady().then(() => {
   registerIpcHandlers()
   registerIpcV2Handlers()
+  if (!app.isPackaged) {
+    registerIpcV2DevHandlers()
+  }
   createMainWindow()
 
   app.on('activate', () => {

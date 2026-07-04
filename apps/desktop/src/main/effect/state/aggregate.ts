@@ -1,4 +1,12 @@
-import { DeviceProjection, PointingProjection, TargetSummary } from '../../../shared/api-v2'
+import {
+  CaptureProjection,
+  DeviceProjection,
+  LibraryProjection,
+  PointingProjection,
+  PreviewProjection,
+  TargetSummary,
+  WorkspaceProjection,
+} from '../../../shared/api-v2'
 
 export interface SessionAggregate {
   session: {
@@ -9,10 +17,11 @@ export interface SessionAggregate {
     lastError?: string
   }
   pointing: PointingProjection
-  capture: { phase: 'idle' }
-  preview: { source: 'none'; active: false }
+  capture: CaptureProjection
+  preview: PreviewProjection
   device: DeviceProjection
-  library: { scope: 'current_target'; assets: []; polling: false }
+  library: LibraryProjection
+  workspace: WorkspaceProjection
   currentTarget: TargetSummary | null
   runner: { owner: 'idle' }
   diagnostics: {}
@@ -24,9 +33,22 @@ export function createInitialAggregate(): SessionAggregate {
     session: { phase: 'disconnected', discovering: false },
     pointing: { phase: 'idle', target: null },
     capture: { phase: 'idle' },
-    preview: { source: 'none', active: false },
+    preview: { phase: 'none', source: 'none', active: false },
     device: {},
     library: { scope: 'current_target', assets: [], polling: false },
+    workspace: {
+      state: 'disconnected',
+      stateLabel: 'Disconnected',
+      surface: { kind: 'idle', label: 'Idle' },
+      capabilities: {
+        preview: 'unsupported',
+        capture: 'unsupported',
+        autofocus: 'no',
+        filterWheel: 'no',
+        storage: 'no',
+      },
+      actions: [],
+    },
     currentTarget: null,
     runner: { owner: 'idle' },
     diagnostics: {},

@@ -23,6 +23,10 @@ export const electronApi = {
   browseTargets: (query: CatalogQuery) => getApi().browseTargets(query),
   getTargetById: (targetId: string) => getApi().getTargetById(targetId),
   pointToTarget: (input: PointToTargetRequest) => getApi().pointToTarget(input),
+  startPreview: () => getApi().startPreview(),
+  stopPreview: () => getApi().stopPreview(),
+  startCapture: () => getApi().startCapture(),
+  stopCapture: () => getApi().stopCapture(),
   onLog: (listener: (entry: DesktopLogEntryV2) => void) =>
     getApi().onLog(listener),
   onStatus: (listener: (status: DesktopStatus) => void) =>

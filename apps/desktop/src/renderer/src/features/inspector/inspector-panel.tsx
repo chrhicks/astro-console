@@ -1,6 +1,8 @@
 import type {
+  CaptureProjection,
   DeepSkyTarget,
   PointingProjection,
+  PreviewProjection,
   SolarSystemTarget,
 } from '../../../../shared/api-v2'
 import { useProjectionStore } from '../../state/projection-store'
@@ -10,7 +12,7 @@ import {
   useSelectedTarget,
 } from '../../state/selected-target-store'
 import { useTargetDetailsQuery } from './use-target-details-query'
-import { usePointToTargetMutation } from './use-point-to-target-mutation'
+import { usePointToTargetMutation } from '../../mutations/use-workspace-mutations'
 import './inspector-panel.css'
 
 const POINTING_PHASE_LABELS: Record<PointingProjection['phase'], string> = {
@@ -20,9 +22,24 @@ const POINTING_PHASE_LABELS: Record<PointingProjection['phase'], string> = {
   failed: 'Failed',
 }
 
+const CAPTURE_PHASE_LABELS: Record<CaptureProjection['phase'], string> = {
+  idle: 'Idle',
+  starting: 'Starting',
+  capturing: 'Capturing',
+  stopped: 'Stopped',
+  failed: 'Failed',
+}
+
+const PREVIEW_PHASE_LABELS: Record<PreviewProjection['phase'], string> = {
+  none: 'None',
+  starting: 'Starting',
+  active: 'Active',
+  error: 'Error',
+}
+
 export default function InspectorPanel() {
   const target = useSelectedTarget((state) => state.target)
-  const { isConnected, pointing, currentTarget } =
+  const { isConnected, pointing, currentTarget, capture, preview, device } =
     useProjectionStore(selectInspectorModel)
   const details = useTargetDetailsQuery(target?.id ?? null)
   const pointMutation = usePointToTargetMutation()
@@ -108,6 +125,19 @@ export default function InspectorPanel() {
         <details className="inspector-acc" open>
           <summary>Capture</summary>
           <div className="acc-body">
+            <div className="kv">
+              <span>Capture</span>
+              <strong id="capturePhase">{CAPTURE_PHASE_LABELS[capture.phase]}</strong>
+              <span>Stacks</span>
+              <strong id="captureStacks">{capture.stacks ?? '—'}</strong>
+              <span>Frames</span>
+              <strong id="captureFrames">{capture.frames ?? '—'}</strong>
+              <span>Elapsed</span>
+              <strong id="captureElapsed">{formatElapsed(capture.elapsedSec)}</strong>
+            </div>
+            {capture.phase === 'failed' && capture.lastError ? (
+              <p className="inspector-pointing-error">{capture.lastError}</p>
+            ) : null}
             <div className="control-block">
               <div className="field-label">Mode</div>
               <select id="captureMode" defaultValue="dso" disabled>
@@ -169,17 +199,26 @@ export default function InspectorPanel() {
               <span>Current target</span>
               <strong>{currentTarget?.short ?? 'None'}</strong>
               <span>Mount</span>
-              <strong id="mountStatus">—</strong>
+              <strong id="mountStatus">{device.mountClosed ? 'Parked' : 'Ready'}</strong>
               <span>Filter wheel</span>
               <strong id="filterWheel">—</strong>
               <span>View mode</span>
-              <strong id="viewMode">—</strong>
+              <strong id="viewMode">{device.viewMode ?? '—'}</strong>
+              <span>Preview</span>
+              <strong id="previewPhase">{PREVIEW_PHASE_LABELS[preview.phase]}</strong>
             </div>
           </div>
         </details>
       </div>
     </div>
   )
+}
+
+function formatElapsed(seconds: number | undefined): string {
+  if (seconds == null) return '—'
+  const minutes = Math.floor(seconds / 60)
+  const remaining = seconds % 60
+  return `${minutes}m ${remaining}s`
 }
 
 function TargetDetails({

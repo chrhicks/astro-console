@@ -1,7 +1,41 @@
-import type { PointingProjection } from '../../../shared/api-v2'
+import type {
+  CaptureProjection,
+  LibraryProjection,
+  PointingProjection,
+  PreviewProjection,
+  WorkspaceProjection,
+} from '../../../shared/api-v2'
 import type { ProjectionState } from './projection-store'
 
 const IDLE_POINTING: PointingProjection = { phase: 'idle', target: null }
+
+const NO_PREVIEW: PreviewProjection = {
+  phase: 'none',
+  source: 'none',
+  active: false,
+}
+
+const NO_CAPTURE: CaptureProjection = { phase: 'idle' }
+
+const NO_LIBRARY: LibraryProjection = {
+  scope: 'current_target',
+  assets: [],
+  polling: false,
+}
+
+const DEFAULT_WORKSPACE: WorkspaceProjection = {
+  state: 'disconnected',
+  stateLabel: 'Disconnected',
+  surface: { kind: 'idle', label: 'Idle' },
+  capabilities: {
+    preview: 'unsupported',
+    capture: 'unsupported',
+    autofocus: 'no',
+    filterWheel: 'no',
+    storage: 'no',
+  },
+  actions: [],
+}
 
 export function selectProjectionBoot(state: ProjectionState) {
   return {
@@ -27,6 +61,9 @@ export function selectSessionBarModel(state: ProjectionState) {
     firmwareVersion: status?.device.firmwareVersion,
     batteryPercent: status?.device.batteryPercent,
     tracking: status?.device.tracking,
+    location: status?.device.location,
+    deviceTimeLooksStale: status?.device.deviceTimeLooksStale,
+    warnings: status?.device.warnings,
   }
 }
 
@@ -40,6 +77,9 @@ export function selectInspectorModel(state: ProjectionState) {
     isConnected: status?.session.phase === 'connected',
     pointing: status?.pointing ?? IDLE_POINTING,
     currentTarget: status?.currentTarget ?? null,
+    capture: status?.capture ?? NO_CAPTURE,
+    preview: status?.preview ?? NO_PREVIEW,
+    device: status?.device ?? {},
   }
 }
 
@@ -47,6 +87,19 @@ export function selectWorkAreaModel(state: ProjectionState) {
   const status = state.status
   return {
     pointing: status?.pointing ?? IDLE_POINTING,
+    currentTarget: status?.currentTarget ?? null,
+    workspace: status?.workspace ?? DEFAULT_WORKSPACE,
+    preview: status?.preview ?? NO_PREVIEW,
+    capture: status?.capture ?? NO_CAPTURE,
+    device: status?.device ?? {},
+    observerContext: status?.observerContext ?? null,
+  }
+}
+
+export function selectLibraryModel(state: ProjectionState) {
+  const status = state.status
+  return {
+    library: status?.library ?? NO_LIBRARY,
     currentTarget: status?.currentTarget ?? null,
   }
 }

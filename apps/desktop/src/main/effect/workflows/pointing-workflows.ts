@@ -7,6 +7,7 @@ import type {
 import { computeSolarSystemCoordinates } from '../../../shared/visibility-engine'
 import { CatalogStore } from '../catalog/catalog-store'
 import { EventBus } from '../event/event-bus'
+import { fakeSeestarRuntime } from '../device/fake-seestar-runtime'
 import { ObserverContextStore } from '../observer/observer-context-store'
 import { SessionManager } from '../session/session-manager'
 import { AggregateStore } from '../state/aggregate-store'
@@ -113,10 +114,22 @@ export const runPointToTarget = (targetId: string) =>
       return
     }
 
+    const afterPoint = session.pluginKind === 'fake-seestar'
+      ? fakeSeestarRuntime.getAfterPointState()
+      : null
+
     yield* store.update((current) => ({
       ...current,
       pointing: { phase: 'arrived', target: summary, targetId, startedAt },
       currentTarget: summary,
+      ...(afterPoint
+        ? {
+            device: afterPoint.device ?? current.device,
+            preview: afterPoint.preview,
+            capture: afterPoint.capture,
+            library: afterPoint.library,
+          }
+        : {}),
     }))
 
     yield* bus.publish('pointing.succeeded', { targetId })

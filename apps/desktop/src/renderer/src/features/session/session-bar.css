@@ -37,3 +37,11 @@
   min-width: 220px;
   max-width: 320px;
 }
+
+.session-bar .chip.danger {
+  border-color: #5c2d2d;
+  color: var(--danger);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -13,6 +13,8 @@ import {
   runDisconnect,
 } from '../workflows/session-workflows'
 import { runPointToTarget } from '../workflows/pointing-workflows'
+import { runStartPreview, runStopPreview } from '../workflows/preview-workflows'
+import { runStartCapture, runStopCapture } from '../workflows/capture-workflows'
 import { CatalogStore } from '../catalog/catalog-store'
 import { LogSink } from '../log/log-sink'
 import { LogStream } from '../log/log-stream'
@@ -80,6 +82,30 @@ export function registerIpcV2Handlers() {
           Effect.flatMap(() => getProjectedStatus()),
         ),
       ),
+  )
+
+  ipcMain.handle('seestar:v2:start-preview', () =>
+    appRuntime.runPromise(
+      runStartPreview.pipe(Effect.flatMap(() => getProjectedStatus())),
+    ),
+  )
+
+  ipcMain.handle('seestar:v2:stop-preview', () =>
+    appRuntime.runPromise(
+      runStopPreview.pipe(Effect.flatMap(() => getProjectedStatus())),
+    ),
+  )
+
+  ipcMain.handle('seestar:v2:start-capture', () =>
+    appRuntime.runPromise(
+      runStartCapture.pipe(Effect.flatMap(() => getProjectedStatus())),
+    ),
+  )
+
+  ipcMain.handle('seestar:v2:stop-capture', () =>
+    appRuntime.runPromise(
+      runStopCapture.pipe(Effect.flatMap(() => getProjectedStatus())),
+    ),
   )
 }
 

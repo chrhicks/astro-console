@@ -27,8 +27,10 @@ import type {
   DesktopDiscoveredDeviceV2,
   DesktopLogEntryV2,
   DesktopStatus as DesktopStatusV2,
+  FakeRuntimeSnapshot,
   PointToTargetRequest,
   SeestarDesktopApiV2,
+  SeestarDevFakeApi,
   SolarSystemTarget,
 } from '../shared/api-v2'
 
@@ -139,13 +141,44 @@ export const apiV2: SeestarDesktopApiV2 = {
       'seestar:v2:point-to-target',
       input,
     ) as Promise<DesktopStatusV2>,
+  startPreview: () =>
+    ipcRenderer.invoke('seestar:v2:start-preview') as Promise<DesktopStatusV2>,
+  stopPreview: () =>
+    ipcRenderer.invoke('seestar:v2:stop-preview') as Promise<DesktopStatusV2>,
+  startCapture: () =>
+    ipcRenderer.invoke('seestar:v2:start-capture') as Promise<DesktopStatusV2>,
+  stopCapture: () =>
+    ipcRenderer.invoke('seestar:v2:stop-capture') as Promise<DesktopStatusV2>,
 
   onLog: (listener) => subscribe('seestar:v2:log', listener),
   onStatus: (listener) => subscribe('seestar:v2:status', listener),
 }
 
+// Dev-only control surface for the fake Seestar scenario runtime. Not used by
+// product UI; exposed for manual testing and agent-browser scenario loops.
+export const seestarDevFake: SeestarDevFakeApi = {
+  listScenarios: () =>
+    ipcRenderer.invoke('seestar:dev:fake:list-scenarios') as Promise<
+      FakeRuntimeSnapshot
+    >,
+  loadScenario: (scenarioId: string) =>
+    ipcRenderer.invoke(
+      'seestar:dev:fake:load-scenario',
+      scenarioId,
+    ) as Promise<FakeRuntimeSnapshot>,
+  reset: () =>
+    ipcRenderer.invoke('seestar:dev:fake:reset') as Promise<FakeRuntimeSnapshot>,
+}
+
+const exposeDevFakeApi = Boolean(
+  process.env.VITE_DEV_SERVER_URL || process.env.ELECTRON_INSPECT_PORT,
+)
+
 contextBridge.exposeInMainWorld('seestar', api)
 contextBridge.exposeInMainWorld('seestarV2', apiV2)
+if (exposeDevFakeApi) {
+  contextBridge.exposeInMainWorld('seestarDevFake', seestarDevFake)
+}
 
 function subscribe<T>(
   channel: string,

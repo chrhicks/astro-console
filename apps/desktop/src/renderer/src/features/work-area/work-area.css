@@ -1,3 +1,11 @@
+.work-area {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
 .work-toolbar {
   display: flex;
   align-items: center;
@@ -5,6 +13,7 @@
   padding: 0.35rem 0.5rem;
   border-bottom: 1px solid var(--border);
   background: rgba(0, 0, 0, 0.35);
+  min-width: 0;
 }
 
 .work-toolbar .seg {
@@ -34,11 +43,64 @@
 .work-target-label {
   font-size: 11px;
   color: var(--text-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .work-target-label strong {
   color: var(--text);
   font-weight: 500;
+}
+
+.work-state-banner {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.4rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.45);
+  min-width: 0;
+}
+
+.work-state-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+
+.work-surface-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.work-state-target {
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.work-status-message {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-context-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding: 0.3rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.35);
+  min-width: 0;
 }
 
 .preview-stage {
@@ -120,8 +182,7 @@
   backdrop-filter: blur(4px);
 }
 
-.preview-stage.slewing .preview-overlay,
-.preview-stage.disconnected .preview-overlay.show {
+.preview-overlay.show {
   display: flex;
 }
 
@@ -135,6 +196,12 @@
   margin: 0;
   color: var(--text-muted);
   font-size: 11px;
+}
+
+.preview-overlay .work-overlay-error {
+  color: var(--danger);
+  max-width: 80%;
+  text-align: center;
 }
 
 .spinner {
@@ -154,6 +221,7 @@
   background: rgba(0, 0, 0, 0.4);
   color: var(--text-muted);
   font-size: 10px;
+  min-width: 0;
 }
 
 .metric-strip .metric strong {
@@ -164,6 +232,83 @@
 
 .metric-strip .metric.stacking strong {
   color: #8ec4ff;
+}
+
+.work-error-strip {
+  padding: 0.35rem 0.65rem;
+  border-top: 1px solid var(--border);
+  background: rgba(80, 16, 20, 0.35);
+  color: var(--danger);
+  font-size: 11px;
+}
+
+.work-info-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.3rem 0.65rem;
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.4);
+  font-size: 10px;
+  min-width: 0;
+}
+
+.work-capabilities {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.work-cap {
+  color: var(--text-muted);
+}
+
+.work-cap strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.work-cap.on strong {
+  color: var(--accent);
+}
+
+.work-actions {
+  display: flex;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.work-action-chip {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.work-action-chip.disabled {
+  opacity: 0.5;
+}
+
+button.work-action-chip {
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+button.work-action-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+button.work-action-chip:disabled {
+  cursor: not-allowed;
+}
+
+.work-action-chip.pending {
+  opacity: 0.6;
 }
 
 @keyframes work-area-scan {

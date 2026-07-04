@@ -18,6 +18,10 @@ export function SessionBar() {
     batteryPercent,
     tracking,
     pluginKind,
+    location,
+    deviceTimeLooksStale,
+    warnings,
+    lastError,
   } = useProjectionStore(selectSessionBarModel)
   const isConnected = phase === 'connected'
   const isConnecting = phase === 'connecting'
@@ -136,8 +140,31 @@ export function SessionBar() {
           Tracking {tracking ? 'On' : 'Off'}
         </span>
       ) : null}
+      {location ? (
+        <span className="chip" title="Device-reported location">
+          Loc {location.lat.toFixed(2)}, {location.lon.toFixed(2)}
+        </span>
+      ) : null}
+      {deviceTimeLooksStale ? (
+        <span className="chip warn" title="Device clock looks out of date">
+          Device time stale
+        </span>
+      ) : null}
+      {warnings && warnings.length > 0 ? (
+        <span className="chip warn" title={warnings.join('\n')}>
+          {warnings.length} warning{warnings.length > 1 ? 's' : ''}
+        </span>
+      ) : null}
       {pluginKind?.startsWith('fake-') ? (
         <span className="chip warn">Fake</span>
+      ) : null}
+      {lastError && !isConnected ? (
+        <span
+          className="chip danger"
+          title={lastError}
+        >
+          {lastError.length > 48 ? `${lastError.slice(0, 48)}…` : lastError}
+        </span>
       ) : null}
 
       <span className="spacer"></span>
