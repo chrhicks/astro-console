@@ -35,7 +35,7 @@ const STATUS_MESSAGES: Record<WorkspaceState, string> = {
   idle_no_target: 'Select a target to point the telescope.',
   primed: 'Primed and ready.',
   ready_to_slew: 'Slew failed. Retry to try again.',
-  slewing: 'Opening arm · setting filter · goto',
+  slewing: 'Slewing to target…',
   on_target: 'Ready to preview or capture.',
   preview_starting: 'Starting live preview…',
   preview_active: 'Live preview active.',
@@ -63,8 +63,15 @@ const CAPABILITY_DEFS = [
 ] as const
 
 export default function WorkArea() {
-  const { pointing, currentTarget, workspace, preview, capture, device, observerContext } =
-    useProjectionStore(selectWorkAreaModel)
+  const {
+    pointing,
+    currentTarget,
+    workspace,
+    preview,
+    capture,
+    device,
+    observerContext,
+  } = useProjectionStore(selectWorkAreaModel)
   const selectedTarget = useSelectedTarget((state) => state.target)
   const pointMutation = usePointToTargetMutation()
   const startPreviewMutation = useStartPreviewMutation()
@@ -74,7 +81,8 @@ export default function WorkArea() {
   const isCapturePending =
     startCaptureMutation.isPending || stopCaptureMutation.isPending
   const isSlewing = workspace.state === 'slewing'
-  const isCapturing = capture.phase === 'capturing' || capture.phase === 'starting'
+  const isCapturing =
+    capture.phase === 'capturing' || capture.phase === 'starting'
   const displayTarget = isSlewing
     ? (pointing.target ?? currentTarget)
     : (selectedTarget ?? currentTarget)
@@ -92,7 +100,9 @@ export default function WorkArea() {
   const statusMessage =
     capture.phase === 'failed'
       ? 'Capture failed. Retry or start preview.'
-      : STATUS_MESSAGES[workspace.state]
+      : pointing.phase === 'failed' && pointing.lastError
+        ? pointing.lastError
+        : STATUS_MESSAGES[workspace.state]
 
   return (
     <div className="work-area">
@@ -156,6 +166,14 @@ export default function WorkArea() {
               Tracking {device.tracking ? 'On' : 'Off'}
             </span>
           ) : null}
+          {device.mountClosed ? (
+            <span
+              className="chip warn"
+              title="Mount is parked — open the arm before slewing"
+            >
+              Mount parked
+            </span>
+          ) : null}
           {observerContext ? (
             <span className="chip" title="Observer location source">
               Loc {observerContext.source}
@@ -166,7 +184,10 @@ export default function WorkArea() {
             </span>
           )}
           {!hasDeviceLocation ? (
-            <span className="chip warn" title="The device did not report a location">
+            <span
+              className="chip warn"
+              title="The device did not report a location"
+            >
               No device location
             </span>
           ) : null}
@@ -177,7 +198,8 @@ export default function WorkArea() {
           ) : null}
           {device.warnings && device.warnings.length > 0 ? (
             <span className="chip warn" title={device.warnings.join('\n')}>
-              {device.warnings.length} warning{device.warnings.length > 1 ? 's' : ''}
+              {device.warnings.length} warning
+              {device.warnings.length > 1 ? 's' : ''}
             </span>
           ) : null}
         </div>
@@ -200,9 +222,19 @@ export default function WorkArea() {
                 ? `Slewing to ${displayTarget?.short ?? 'target'}…`
                 : workspace.stateLabel}
             </h3>
-            <p id="overlayDetail">{STATUS_MESSAGES[workspace.state]}</p>
+            <p id="overlayDetail">
+              {pointing.phase !== 'idle' && pointing.step
+                ? pointing.step
+                : STATUS_MESSAGES[workspace.state]}
+            </p>
+            {isSlewing ? (
+              <p>Slew cannot be cancelled from the console.</p>
+            ) : null}
             {preview.phase === 'error' && preview.lastError ? (
               <p className="work-overlay-error">{preview.lastError}</p>
+            ) : null}
+            {pointing.phase === 'failed' && pointing.lastError ? (
+              <p className="work-overlay-error">{pointing.lastError}</p>
             ) : null}
           </div>
         ) : null}
@@ -213,13 +245,19 @@ export default function WorkArea() {
           Stacks <strong id="metricStacks">{capture.stacks ?? '—'}</strong>
         </span>
         <span className="metric">
-          Elapsed <strong id="metricElapsed">{formatElapsed(capture.elapsedSec)}</strong>
+          Elapsed{' '}
+          <strong id="metricElapsed">
+            {formatElapsed(capture.elapsedSec)}
+          </strong>
         </span>
         <span className="metric">
           Frames <strong id="metricFrames">{capture.frames ?? '—'}</strong>
         </span>
         <span className="metric">
-          Capture <strong id="metricCapture">{CAPTURE_PHASE_LABELS[capture.phase]}</strong>
+          Capture{' '}
+          <strong id="metricCapture">
+            {CAPTURE_PHASE_LABELS[capture.phase]}
+          </strong>
         </span>
       </div>
 
@@ -233,7 +271,8 @@ export default function WorkArea() {
         <div className="work-capabilities" id="workCapabilities">
           {CAPABILITY_DEFS.map(({ key, label }) => {
             const value = workspace.capabilities[key]
-            const on = value === 'native' || value === 'external' || value === 'yes'
+            const on =
+              value === 'native' || value === 'external' || value === 'yes'
             return (
               <span key={key} className={`work-cap${on ? ' on' : ''}`}>
                 {label} <strong>{value}</strong>

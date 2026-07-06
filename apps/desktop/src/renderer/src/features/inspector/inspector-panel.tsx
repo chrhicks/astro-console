@@ -58,8 +58,11 @@ export default function InspectorPanel() {
   }
 
   const isSlewing = pointing.phase === 'slewing'
-  const isAtTarget = currentTarget?.id === target.id
-  const canSlew = isConnected && !isSlewing
+  const isSlewPending = isSlewing || pointMutation.isPending
+  const isBelowHorizon = target.visibility === 'blocked'
+  const isParked = device.mountClosed === true
+  const isAtTarget = !isParked && currentTarget?.id === target.id
+  const canSlew = isConnected && !isSlewPending && !isBelowHorizon && !isParked
 
   return (
     <div>
@@ -99,19 +102,30 @@ export default function InspectorPanel() {
               disabled={!canSlew}
               onClick={() => pointMutation.mutate(target.id)}
             >
-              {isSlewing
+              {isSlewPending
                 ? 'Slewing…'
                 : isAtTarget
                   ? 'At target'
                   : 'Slew to target'}
             </button>
           </div>
+          {isSlewing ? (
+            <p className="help-line">
+              Slew cannot be cancelled from the console.
+            </p>
+          ) : null}
+          {device.mountClosed && !isSlewPending ? (
+            <p className="inspector-pointing-error">
+              Mount is currently parked/closed.
+            </p>
+          ) : null}
           {pointing.phase === 'failed' && pointing.lastError ? (
             <p className="inspector-pointing-error">{pointing.lastError}</p>
           ) : null}
           {pointing.phase !== 'idle' ? (
             <p className="inspector-pointing-phase">
               Pointing: {POINTING_PHASE_LABELS[pointing.phase]}
+              {pointing.step ? ` · ${pointing.step}` : null}
               {isSlewing && pointing.target && pointing.target.id !== target.id
                 ? ` · moving to ${pointing.target.short}`
                 : null}
@@ -127,13 +141,17 @@ export default function InspectorPanel() {
           <div className="acc-body">
             <div className="kv">
               <span>Capture</span>
-              <strong id="capturePhase">{CAPTURE_PHASE_LABELS[capture.phase]}</strong>
+              <strong id="capturePhase">
+                {CAPTURE_PHASE_LABELS[capture.phase]}
+              </strong>
               <span>Stacks</span>
               <strong id="captureStacks">{capture.stacks ?? '—'}</strong>
               <span>Frames</span>
               <strong id="captureFrames">{capture.frames ?? '—'}</strong>
               <span>Elapsed</span>
-              <strong id="captureElapsed">{formatElapsed(capture.elapsedSec)}</strong>
+              <strong id="captureElapsed">
+                {formatElapsed(capture.elapsedSec)}
+              </strong>
             </div>
             {capture.phase === 'failed' && capture.lastError ? (
               <p className="inspector-pointing-error">{capture.lastError}</p>
@@ -199,13 +217,17 @@ export default function InspectorPanel() {
               <span>Current target</span>
               <strong>{currentTarget?.short ?? 'None'}</strong>
               <span>Mount</span>
-              <strong id="mountStatus">{device.mountClosed ? 'Parked' : 'Ready'}</strong>
+              <strong id="mountStatus">
+                {device.mountClosed ? 'Parked' : 'Ready'}
+              </strong>
               <span>Filter wheel</span>
               <strong id="filterWheel">—</strong>
               <span>View mode</span>
               <strong id="viewMode">{device.viewMode ?? '—'}</strong>
               <span>Preview</span>
-              <strong id="previewPhase">{PREVIEW_PHASE_LABELS[preview.phase]}</strong>
+              <strong id="previewPhase">
+                {PREVIEW_PHASE_LABELS[preview.phase]}
+              </strong>
             </div>
           </div>
         </details>
