@@ -39,6 +39,7 @@ export const StatusStreamLive = Layer.effect(
               !event.name.startsWith('preview.') &&
               !event.name.startsWith('capture.') &&
               !event.name.startsWith('observer.') &&
+              !event.name.startsWith('park.') &&
               event.name !== 'status.snapshot.emitted'
             ) {
               return Effect.void

@@ -58,56 +58,110 @@ export const runPointToTarget = (targetId: string) =>
     }
 
     const startedAt = new Date().toISOString()
-    const coordinates = yield* resolvePointingCoordinates(target, observerContextStore).pipe(
-      Effect.catchAll((error) =>
-        Effect.gen(function* () {
-          const message = toErrorMessage(error)
-          yield* store.update((current) => ({
-            ...current,
-            pointing: {
-              phase: 'failed',
-              target: summary,
-              targetId,
-              startedAt,
-              lastError: message,
-            },
-          }))
-          yield* bus.publish('pointing.failed', { targetId, error: message })
+
+    const setStep = (step: string) =>
+      store.update((current) => ({
+        ...current,
+        pointing: {
+          phase: 'slewing',
+          target: summary,
+          targetId,
+          startedAt,
+          step,
+        },
+      }))
+
+    const failStep = (step: string, error: unknown) =>
+      Effect.gen(function* () {
+        const message = toErrorMessage(error)
+        yield* store.update((current) => ({
+          ...current,
+          pointing: {
+            phase: 'failed',
+            target: summary,
+            targetId,
+            startedAt,
+            step,
+            lastError: message,
+          },
+        }))
+        yield* bus.publish('pointing.failed', { targetId, error: message })
+        return yield* Effect.fail(error)
+      })
+
+    const guardSession = (step: string, error: unknown) =>
+      Effect.gen(function* () {
+        if ((yield* sessions.getCurrent) !== session) {
           return yield* Effect.fail(error)
-        }),
-      ),
+        }
+        return yield* failStep(step, error)
+      })
+
+    yield* setStep('Resolving coordinates')
+
+    const coordinates = yield* resolvePointingCoordinates(
+      target,
+      observerContextStore,
+    ).pipe(
+      Effect.catchAll((error) => failStep('Resolving coordinates', error)),
     )
 
-    yield* store.update((current) => ({
-      ...current,
-      pointing: { phase: 'slewing', target: summary, targetId, startedAt },
-    }))
+    // Proven Seestar pre-slew sequence: sync device time and location, then
+    // stop any active view so the mount is in a clean state before slewing.
+    yield* setStep('Preparing device for slew')
+
+    yield* Effect.gen(function* () {
+      const prepLocation = yield* resolvePrepLocation(
+        target,
+        session.device.location,
+        observerContextStore,
+      )
+      yield* session.prepareForPointing(prepLocation)
+    }).pipe(
+      Effect.catchAll((error) => guardSession('Preparing device for slew', error)),
+    )
+
+    if ((yield* sessions.getCurrent) !== session) {
+      return
+    }
+
+    const preSlewRefresh = yield* session.refresh.pipe(
+      Effect.catchAll((error) => guardSession('Preparing device for slew', error)),
+    )
+
+    if ((yield* sessions.getCurrent) !== session) {
+      return
+    }
+
+    // Verified live-device sequence: open the arm first if the mount is
+    // parked/closed, then use the target-aware view path to slew, then stop
+    // the temporary view so the device stays pointed without an active view.
+    if (preSlewRefresh.device.mountClosed) {
+      yield* setStep('Opening arm')
+
+      yield* session.openArm().pipe(
+        Effect.catchAll((error) => guardSession('Opening arm', error)),
+      )
+
+      if ((yield* sessions.getCurrent) !== session) {
+        return
+      }
+    }
+
+    yield* setStep('Slewing to target')
 
     yield* bus.publish('pointing.started', { targetId })
 
-    yield* session.pointToCoordinates(coordinates).pipe(
-      Effect.catchAll((error) =>
-        Effect.gen(function* () {
-          // Session replaced or cleared mid-slew; the new state owns the aggregate.
-          if ((yield* sessions.getCurrent) !== session) {
-            return yield* Effect.fail(error)
-          }
-          const message = toErrorMessage(error)
-          yield* store.update((current) => ({
-            ...current,
-            pointing: {
-              phase: 'failed',
-              target: summary,
-              targetId,
-              startedAt,
-              lastError: message,
-            },
-          }))
-          yield* bus.publish('pointing.failed', { targetId, error: message })
-          return yield* Effect.fail(error)
-        }),
-      ),
-    )
+    yield* session
+      .pointToCoordinates({
+        mode: target.viewMode,
+        targetName: summary.name,
+        raHours: coordinates.raHours,
+        decDeg: coordinates.decDeg,
+      })
+      .pipe(
+        Effect.catchAll((error) => guardSession('Slewing to target', error)),
+      )
 
     // Session replaced or cleared mid-slew; don't restore arrived/currentTarget.
     if ((yield* sessions.getCurrent) !== session) {
@@ -118,19 +172,30 @@ export const runPointToTarget = (targetId: string) =>
       ? fakeSeestarRuntime.getAfterPointState()
       : null
 
-    yield* store.update((current) => ({
-      ...current,
-      pointing: { phase: 'arrived', target: summary, targetId, startedAt },
-      currentTarget: summary,
-      ...(afterPoint
-        ? {
-            device: afterPoint.device ?? current.device,
-            preview: afterPoint.preview,
-            capture: afterPoint.capture,
-            library: afterPoint.library,
-          }
-        : {}),
-    }))
+    if (afterPoint) {
+      yield* store.update((current) => ({
+        ...current,
+        pointing: { phase: 'arrived', target: summary, targetId, startedAt },
+        currentTarget: summary,
+        device: afterPoint.device ?? current.device,
+        preview: afterPoint.preview,
+        capture: afterPoint.capture,
+        library: afterPoint.library,
+      }))
+    } else {
+      const refreshed = yield* session.refresh
+      if ((yield* sessions.getCurrent) !== session) {
+        return
+      }
+      yield* store.update((current) => ({
+        ...current,
+        pointing: { phase: 'arrived', target: summary, targetId, startedAt },
+        currentTarget: summary,
+        device: { ...current.device, ...refreshed.device },
+        preview: refreshed.preview,
+        capture: refreshed.capture,
+      }))
+    }
 
     yield* bus.publish('pointing.succeeded', { targetId })
   })
@@ -158,6 +223,28 @@ function resolvePointingCoordinates(
       return Effect.succeed(
         computeSolarSystemCoordinates(target.body, observer, new Date()),
       )
+    }),
+  )
+}
+
+function resolvePrepLocation(
+  target: DeepSkyTarget | SolarSystemTarget,
+  deviceLocation: { lat: number; lon: number } | undefined,
+  observerContextStore: ObserverContextStore,
+): Effect.Effect<{ lat: number; lon: number }, unknown> {
+  // Deep-sky targets can use the device's existing location; solar-system
+  // targets use the same observer context that feeds coordinate computation.
+  if (!('body' in target) && deviceLocation) {
+    return Effect.succeed(deviceLocation)
+  }
+  return observerContextStore.getCurrent().pipe(
+    Effect.flatMap((observerContext) => {
+      if (!observerContext) {
+        return Effect.fail(
+          new Error('Need observer location before pointing'),
+        )
+      }
+      return Effect.succeed({ lat: observerContext.lat, lon: observerContext.lon })
     }),
   )
 }

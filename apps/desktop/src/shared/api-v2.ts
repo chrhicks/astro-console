@@ -4,16 +4,25 @@ import type {
   DeepSkyTarget,
   SolarSystemTarget,
   TargetSummary,
-} from "./catalog/catalog-schema"
+} from './catalog/catalog-schema'
 import type { ObserverContext } from './observer-context'
 
 export * from './catalog/catalog-schema'
+
+export type LiveSessionHealth = 'healthy' | 'stale' | 'recovering' | 'failed'
+
+export interface LiveSessionHealthState {
+  state: LiveSessionHealth
+  lastCheckedAt?: string
+  lastError?: string
+}
 
 export interface SessionProjection {
   phase: 'disconnected' | 'connecting' | 'connected' | 'disconnecting'
   host?: string
   productModel?: string
   discovering: boolean
+  health?: LiveSessionHealthState
   reconnect?: {
     active: boolean
     attempt: number
@@ -27,6 +36,7 @@ export interface PointingProjection {
   target: TargetSummary | null
   targetId?: string
   startedAt?: string
+  step?: string
   lastError?: string
 }
 
@@ -197,7 +207,7 @@ export interface SeestarDesktopApiV2 {
   disconnect(): Promise<DesktopStatus>
   getStatus(): Promise<DesktopStatus>
   getLogs(): Promise<DesktopLogEntryV2[]>
-  browseTargets(query: CatalogQuery): Promise<CatalogPage>
+  browseTargets(query?: CatalogQuery): Promise<CatalogPage>
   getTargetById(targetId: string): Promise<
     DeepSkyTarget | SolarSystemTarget | null
   >
@@ -206,6 +216,7 @@ export interface SeestarDesktopApiV2 {
   stopPreview(): Promise<DesktopStatus>
   startCapture(): Promise<DesktopStatus>
   stopCapture(): Promise<DesktopStatus>
+  parkMount(): Promise<DesktopStatus>
   onLog(listener: (entry: DesktopLogEntryV2) => void): () => void
   onStatus(listener: (status: DesktopStatus) => void): () => void
 }

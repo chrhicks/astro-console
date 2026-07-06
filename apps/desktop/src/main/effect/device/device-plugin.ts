@@ -6,7 +6,9 @@ import type {
   DevicePluginKind,
   DeviceProjection,
   LibraryProjection,
+  LiveSessionHealthState,
   PreviewProjection,
+  SeestarViewMode,
 } from '../../../shared/api-v2'
 import { EventBus } from '../event/event-bus'
 
@@ -28,17 +30,40 @@ export interface ConnectedDeviceSession {
 // commands. Workflows merge `device` into the existing aggregate device
 // projection; `preview` and `capture` replace the aggregate outright.
 export interface DeviceSessionRefresh {
-  device: Pick<DeviceProjection, 'viewMode' | 'viewStage' | 'viewState' | 'tracking'>
+  device: Pick<
+    DeviceProjection,
+    'viewMode' | 'viewStage' | 'viewState' | 'tracking' | 'mountClosed'
+  >
   preview: PreviewProjection
   capture: CaptureProjection
 }
 
+export interface PointToCoordinatesInput {
+  mode: SeestarViewMode
+  targetName?: string
+  raHours: number
+  decDeg: number
+}
+
+export interface PrepareForPointingInput {
+  lat: number
+  lon: number
+}
+
+// Authoritative background-liveness state for a live session. The keepalive
+// loop updates this; the plugin's command wrappers read it to fail fast on a
+// failed session, and the status projector surfaces it to state consumers.
 export interface LiveDeviceSession extends ConnectedDeviceSession {
+  health: LiveSessionHealthState
   disconnect: Effect.Effect<void>
-  pointToCoordinates: (input: {
-    raHours: number
-    decDeg: number
-  }) => Effect.Effect<void, unknown>
+  prepareForPointing: (
+    input: PrepareForPointingInput,
+  ) => Effect.Effect<void, unknown>
+  openArm: () => Effect.Effect<void, unknown>
+  parkArm: () => Effect.Effect<void, unknown>
+  pointToCoordinates: (
+    input: PointToCoordinatesInput,
+  ) => Effect.Effect<void, unknown>
   startPreview: () => Effect.Effect<void, unknown>
   stopPreview: () => Effect.Effect<void, unknown>
   startCapture: () => Effect.Effect<void, unknown>

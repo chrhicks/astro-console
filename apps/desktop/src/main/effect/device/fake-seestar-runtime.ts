@@ -496,12 +496,26 @@ export const fakeSeestarRuntime = {
     },
 
   // Derive device/preview/capture projections from the active scenario's
-  // afterPoint state and the session's preview/capture flags. Called by the
-  // fake session's refresh after preview/capture commands succeed.
+  // afterPoint state and the session's preview/capture/parked flags. Called by
+  // the fake session's refresh after preview/capture/park commands succeed.
   refresh: (
     previewActive: boolean,
     captureActive: boolean,
+    parked = false,
   ): DeviceSessionRefresh => {
+    if (parked) {
+      return {
+        device: {
+          viewMode: 'idle',
+          viewStage: undefined,
+          viewState: undefined,
+          tracking: false,
+          mountClosed: true,
+        },
+        preview: { phase: 'none', source: 'none', active: false },
+        capture: { phase: 'idle' },
+      }
+    }
     const afterPoint = activeScenario().afterPoint
     const baseDevice = afterPoint?.device
     if (captureActive) {
@@ -511,6 +525,7 @@ export const fakeSeestarRuntime = {
           viewStage: baseDevice?.viewStage ?? 'stacking',
           viewState: baseDevice?.viewState ?? 'working',
           tracking: baseDevice?.tracking ?? true,
+          mountClosed: false,
         },
         preview: { phase: 'active', source: 'rtsp', active: true },
         capture:
@@ -526,6 +541,7 @@ export const fakeSeestarRuntime = {
           viewStage: undefined,
           viewState: undefined,
           tracking: false,
+          mountClosed: false,
         },
         preview: { phase: 'active', source: 'rtsp', active: true },
         capture: { phase: 'idle' },
@@ -537,6 +553,7 @@ export const fakeSeestarRuntime = {
         viewStage: undefined,
         viewState: undefined,
         tracking: false,
+        mountClosed: false,
       },
       preview: { phase: 'none', source: 'none', active: false },
       capture: { phase: 'idle' },

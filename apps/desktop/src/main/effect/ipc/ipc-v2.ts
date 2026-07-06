@@ -15,6 +15,7 @@ import {
 import { runPointToTarget } from '../workflows/pointing-workflows'
 import { runStartPreview, runStopPreview } from '../workflows/preview-workflows'
 import { runStartCapture, runStopCapture } from '../workflows/capture-workflows'
+import { runPark } from '../workflows/park-workflows'
 import { CatalogStore } from '../catalog/catalog-store'
 import { LogSink } from '../log/log-sink'
 import { LogStream } from '../log/log-stream'
@@ -56,13 +57,15 @@ export function registerIpcV2Handlers() {
     ),
   )
 
-  ipcMain.handle('seestar:v2:browse-targets', (_event, query: CatalogQuery) =>
-    appRuntime.runPromise(
-      Effect.gen(function* () {
-        const catalog = yield* CatalogStore
-        return yield* catalog.browse(query)
-      }),
-    ),
+  ipcMain.handle(
+    'seestar:v2:browse-targets',
+    (_event, query: CatalogQuery = {}) =>
+      appRuntime.runPromise(
+        Effect.gen(function* () {
+          const catalog = yield* CatalogStore
+          return yield* catalog.browse(query)
+        }),
+      ),
   )
 
   ipcMain.handle('seestar:v2:get-target-by-id', (_event, targetId: string) =>
@@ -105,6 +108,12 @@ export function registerIpcV2Handlers() {
   ipcMain.handle('seestar:v2:stop-capture', () =>
     appRuntime.runPromise(
       runStopCapture.pipe(Effect.flatMap(() => getProjectedStatus())),
+    ),
+  )
+
+  ipcMain.handle('seestar:v2:park', () =>
+    appRuntime.runPromise(
+      runPark.pipe(Effect.flatMap(() => getProjectedStatus())),
     ),
   )
 }

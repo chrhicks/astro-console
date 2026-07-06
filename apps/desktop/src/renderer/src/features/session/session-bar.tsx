@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { DesktopDiscoveredDeviceV2 } from '../../../../shared/api-v2'
 import { selectSessionBarModel } from '../../state/projection-selectors'
 import { useProjectionStore } from '../../state/projection-store'
+import { useParkMountMutation } from '../../mutations/use-workspace-mutations'
 import './session-bar.css'
 import { useConnectMutation } from './use-connect-mutation'
 import { useDiscoverMutation } from './use-discover-mutation'
@@ -17,6 +18,7 @@ export function SessionBar() {
     serialNumber,
     batteryPercent,
     tracking,
+    mountClosed,
     pluginKind,
     location,
     deviceTimeLooksStale,
@@ -37,6 +39,7 @@ export function SessionBar() {
   const connectMutation = useConnectMutation()
   const discoverMutation = useDiscoverMutation()
   const disconnectMutation = useDisconnectMutation()
+  const parkMutation = useParkMountMutation()
 
   const selectedDevice =
     discoveredDevices.find((device) => device.deviceId === selectedDeviceId) ??
@@ -47,7 +50,8 @@ export function SessionBar() {
     isDisconnecting ||
     connectMutation.isPending ||
     disconnectMutation.isPending ||
-    discoverMutation.isPending
+    discoverMutation.isPending ||
+    parkMutation.isPending
 
   const handleDiscover = () => {
     discoverMutation.mutate(undefined, {
@@ -168,8 +172,14 @@ export function SessionBar() {
       ) : null}
 
       <span className="spacer"></span>
-      <button type="button" className="btn btn-sm" id="btnPark">
-        Park
+      <button
+        type="button"
+        className="btn btn-sm"
+        id="btnPark"
+        disabled={!isConnected || mountClosed || parkMutation.isPending}
+        onClick={() => parkMutation.mutate()}
+      >
+        {parkMutation.isPending ? 'Parking...' : 'Park'}
       </button>
       <button
         type="button"

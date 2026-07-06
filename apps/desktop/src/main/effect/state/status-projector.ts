@@ -2,6 +2,7 @@ import { Effect, Context, Layer } from 'effect'
 import { SessionAggregate } from './aggregate'
 import {
   DesktopStatus,
+  LiveSessionHealthState,
   TargetSummary,
   WorkspaceAction,
   WorkspaceCapabilities,
@@ -16,11 +17,6 @@ import { ObserverContextStore } from '../observer/observer-context-store'
 import { SessionManager } from '../session/session-manager'
 
 export interface StatusProjector {
-  readonly project: (
-    aggregate: SessionAggregate,
-    observerContext: ObserverContext | null,
-    capabilities: DeviceCapabilities | null,
-  ) => DesktopStatus
   readonly snapshot: Effect.Effect<DesktopStatus>
 }
 
@@ -31,9 +27,10 @@ function project(
   aggregate: SessionAggregate,
   observerContext: ObserverContext | null,
   capabilities: DeviceCapabilities | null,
+  health: LiveSessionHealthState | null,
 ): DesktopStatus {
   return {
-    session: aggregate.session,
+    session: { ...aggregate.session, health: health ?? undefined },
     capture: aggregate.capture,
     device: aggregate.device,
     library: aggregate.library,
@@ -95,6 +92,7 @@ function projectState(aggregate: SessionAggregate): WorkspaceState {
     return 'ready_to_slew'
   }
   if (aggregate.currentTarget) return 'on_target'
+  if (aggregate.device.mountClosed) return 'parked'
   return 'idle_no_target'
 }
 
@@ -174,12 +172,16 @@ export const StatusProjectorLive = Layer.effect(
     const sessions = yield* SessionManager
 
     return {
-      project,
       snapshot: Effect.gen(function* () {
         const aggregate = yield* store.get
         const observerContext = yield* observerContextStore.getCurrent()
         const session = yield* sessions.getCurrent
-        return project(aggregate, observerContext, session?.capabilities ?? null)
+        return project(
+          aggregate,
+          observerContext,
+          session?.capabilities ?? null,
+          session?.health ?? null,
+        )
       }),
     }
   }),

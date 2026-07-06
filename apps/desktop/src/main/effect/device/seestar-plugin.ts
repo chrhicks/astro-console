@@ -13,11 +13,15 @@ import type {
 import type {
   ConnectRequestV2,
   DesktopDiscoveredDeviceV2,
+  LiveSessionHealthState,
+  SeestarViewMode,
 } from '../../../shared/api-v2'
 import type {
   DevicePlugin,
   DeviceSessionRefresh,
   LiveDeviceSession,
+  PointToCoordinatesInput,
+  PrepareForPointingInput,
 } from './device-plugin'
 import { EventBus } from '../event/event-bus.js'
 
@@ -150,6 +154,124 @@ export function createSeestarPlugin(): DevicePlugin {
           deviceId: target.deviceId,
         })
 
+        const sessionId = crypto.randomUUID()
+
+        const health: LiveSessionHealthState = {
+          state: 'healthy',
+          lastCheckedAt: new Date().toISOString(),
+        }
+
+        // Last view mode used by pointing; startCapture restarts a view with
+        // this mode so stacking begins without re-slewing to the target.
+        let lastViewMode: SeestarViewMode = 'star'
+
+        let keepaliveHandle: ReturnType<typeof setTimeout> | undefined
+        let keepaliveStopped = false
+
+        const stopKeepalive = () => {
+          keepaliveStopped = true
+          if (keepaliveHandle !== undefined) {
+            clearTimeout(keepaliveHandle)
+            keepaliveHandle = undefined
+          }
+        }
+
+        const scheduleKeepalive = () => {
+          if (keepaliveStopped) return
+          keepaliveHandle = setTimeout(() => {
+            void runKeepalive()
+          }, 3000)
+        }
+
+        const runKeepalive = async () => {
+          keepaliveHandle = undefined
+          try {
+            try {
+              await device.testConnection()
+              health.state = 'healthy'
+              health.lastCheckedAt = new Date().toISOString()
+              health.lastError = undefined
+              return
+            } catch {
+              if (keepaliveStopped) return
+            }
+
+            health.state = 'stale'
+            health.lastCheckedAt = new Date().toISOString()
+
+            Effect.runFork(
+              bus.publish(
+                'session.keepalive.stale',
+                { deviceId: target.deviceId, host },
+                { sessionId, host },
+              ),
+            )
+            try {
+              health.state = 'recovering'
+              const recovered = await device.connectAndAuth()
+              if (recovered) {
+                health.state = 'healthy'
+                health.lastCheckedAt = new Date().toISOString()
+                health.lastError = undefined
+                Effect.runFork(
+                  bus.publish(
+                    'session.keepalive.recovered',
+                    { deviceId: target.deviceId, host },
+                    { sessionId, host },
+                  ),
+                )
+              } else {
+                health.state = 'failed'
+                health.lastError = 'Authentication failed after reconnect'
+                Effect.runFork(
+                  bus.publish(
+                    'session.keepalive.failed',
+                    {
+                      deviceId: target.deviceId,
+                      host,
+                      error: 'Authentication failed after reconnect',
+                    },
+                    { sessionId, host },
+                  ),
+                )
+              }
+            } catch (error) {
+              health.state = 'failed'
+              health.lastError = toErrorMessage(error)
+              Effect.runFork(
+                bus.publish(
+                  'session.keepalive.failed',
+                  {
+                    deviceId: target.deviceId,
+                    host,
+                    error: toErrorMessage(error),
+                  },
+                  { sessionId, host },
+                ),
+              )
+            }
+          } finally {
+            scheduleKeepalive()
+          }
+        }
+
+        // Foreground commands consult the keepalive-maintained health state
+        // before issuing device commands. A failed session fails fast with a
+        // useful error; healthy/stale/recovering sessions proceed normally.
+        const guardHealth = <A, E>(
+          run: Effect.Effect<A, E>,
+        ): Effect.Effect<A, E | Error> =>
+          Effect.gen(function* () {
+            if (health.state === 'failed') {
+              return yield* Effect.fail(
+                new Error(
+                  `Session is failed: ${health.lastError ?? 'unknown error'}`,
+                ),
+              )
+            }
+            return yield* run
+          })
+
         return yield* Effect.gen(function* () {
           yield* bus.publish('session.authenticate.step.started', {
             step: 'device.authenticate',
@@ -221,34 +343,126 @@ export function createSeestarPlugin(): DevicePlugin {
             deviceId: target.deviceId,
           })
 
+          scheduleKeepalive()
+
           return {
-            sessionId: crypto.randomUUID(),
+            sessionId,
             pluginKind: 'seestar',
             deviceId: target.deviceId,
             host,
             productModel: target.productModel,
             openedAt: new Date().toISOString(),
             capabilities: SEESTAR_CAPABILITIES,
+            health,
             disconnect: Effect.sync(() => {
+              stopKeepalive()
               device.disconnect()
             }),
-            pointToCoordinates: ({ raHours, decDeg }) =>
-              Effect.tryPromise({
+            prepareForPointing: (input: PrepareForPointingInput) =>
+              guardHealth(Effect.tryPromise({
                 try: async () => {
-                  const ok = await device.goto(raHours, decDeg, DEFAULT_GOTO_WAIT)
-                  if (!ok) {
-                    throw new Error(
-                      `Device rejected goto request for ${raHours}, ${decDeg}`,
-                    )
+                  const timeOk = await device.setTime()
+                  if (!timeOk) {
+                    throw new Error('Device rejected set-time request')
+                  }
+                  const locationOk = await device.setUserLocation(
+                    input.lat,
+                    input.lon,
+                  )
+                  if (!locationOk) {
+                    throw new Error('Device rejected set-user-location request')
+                  }
+                  const [deviceState, viewState] = await Promise.all([
+                    device.getDeviceState(),
+                    device.getViewState(),
+                  ])
+                  if (mapSeestarRefresh(deviceState, viewState).preview.active) {
+                    const stopOk = await device.stopView(undefined, {
+                      waitForCompletion: true,
+                      timeoutMs: 30000,
+                      pollIntervalMs: 500,
+                    })
+                    if (!stopOk) {
+                      throw new Error('Device rejected stop-view request')
+                    }
                   }
                 },
                 catch: (error) =>
                   new Error(
-                    `device.goto failed for ${host}: ${toErrorMessage(error)}`,
+                    `device.prepareForPointing failed for ${host}: ${toErrorMessage(error)}`,
                   ),
-              }),
+              })),
+            openArm: () =>
+              guardHealth(Effect.tryPromise({
+                try: async () => {
+                  const ok = await device.moveToHorizon({
+                    waitForCompletion: true,
+                    timeoutMs: 60000,
+                    pollIntervalMs: 500,
+                  })
+                  if (!ok) {
+                    throw new Error('Device rejected move-to-horizon request')
+                  }
+                },
+                catch: (error) =>
+                  new Error(
+                    `device.moveToHorizon failed for ${host}: ${toErrorMessage(error)}`,
+                  ),
+              })),
+            parkArm: () =>
+              guardHealth(Effect.tryPromise({
+                try: async () => {
+                  const ok = await device.park({
+                    waitForCompletion: true,
+                    timeoutMs: 60000,
+                    pollIntervalMs: 500,
+                  })
+                  if (!ok) {
+                    throw new Error('Device rejected park request')
+                  }
+                },
+                catch: (error) =>
+                  new Error(
+                    `device.park failed for ${host}: ${toErrorMessage(error)}`,
+                  ),
+              })),
+            pointToCoordinates: (input: PointToCoordinatesInput) =>
+              guardHealth(Effect.tryPromise({
+                try: async () => {
+                  // Verified live-device sequence: start a target-aware star
+                  // view (which slews to target_ra_dec), then stop the view so
+                  // the device stays pointed without an active view session.
+                  // Raw scope_goto is not sufficient from a parked/closed mount.
+                  lastViewMode = input.mode
+                  const viewOk = await device.startViewDetailed(
+                    {
+                      mode: input.mode,
+                      targetName: input.targetName,
+                      targetRaDec: [input.raHours, input.decDeg],
+                    },
+                    DEFAULT_GOTO_WAIT,
+                  )
+                  if (!viewOk) {
+                    throw new Error(
+                      `Device rejected start-view request for ${input.targetName ?? 'target'}`,
+                    )
+                  }
+                  const stopOk = await device.stopView(undefined, {
+                    waitForCompletion: true,
+                    timeoutMs: 30000,
+                    pollIntervalMs: 500,
+                  })
+                  if (!stopOk) {
+                    throw new Error('Device rejected stop-view request')
+                  }
+                },
+                catch: (error) =>
+                  new Error(
+                    `device.pointToCoordinates failed for ${host}: ${toErrorMessage(error)}`,
+                  ),
+              })),
             startPreview: () =>
-              Effect.tryPromise({
+              guardHealth(Effect.tryPromise({
                 try: async () => {
                   const ok = await device.startView('scenery', undefined, {
                     waitForCompletion: true,
@@ -263,9 +477,9 @@ export function createSeestarPlugin(): DevicePlugin {
                   new Error(
                     `device.startView failed for ${host}: ${toErrorMessage(error)}`,
                   ),
-              }),
+              })),
             stopPreview: () =>
-              Effect.tryPromise({
+              guardHealth(Effect.tryPromise({
                 try: async () => {
                   const ok = await device.stopView(undefined, {
                     waitForCompletion: true,
@@ -280,10 +494,28 @@ export function createSeestarPlugin(): DevicePlugin {
                   new Error(
                     `device.stopView failed for ${host}: ${toErrorMessage(error)}`,
                   ),
-              }),
+              })),
             startCapture: () =>
-              Effect.tryPromise({
+              guardHealth(Effect.tryPromise({
                 try: async () => {
+                  // Stacking requires an active view. After pointing the view
+                  // is stopped, so restart it with the last target's view mode
+                  // before stacking. No target_ra_dec is sent, so the mount
+                  // stays at its current position instead of re-slewing.
+                  const [deviceState, viewState] = await Promise.all([
+                    device.getDeviceState(),
+                    device.getViewState(),
+                  ])
+                  if (!mapSeestarRefresh(deviceState, viewState).preview.active) {
+                    const viewOk = await device.startView(lastViewMode, undefined, {
+                      waitForCompletion: true,
+                      timeoutMs: 30000,
+                      pollIntervalMs: 500,
+                    })
+                    if (!viewOk) {
+                      throw new Error('Device rejected start-view request before stacking')
+                    }
+                  }
                   const ok = await device.startStack(true, {
                     waitForCompletion: true,
                     timeoutMs: 30000,
@@ -297,9 +529,9 @@ export function createSeestarPlugin(): DevicePlugin {
                   new Error(
                     `device.startStack failed for ${host}: ${toErrorMessage(error)}`,
                   ),
-              }),
+              })),
             stopCapture: () =>
-              Effect.tryPromise({
+              guardHealth(Effect.tryPromise({
                 try: async () => {
                   const ok = await device.stopStack({
                     waitForCompletion: true,
@@ -314,8 +546,8 @@ export function createSeestarPlugin(): DevicePlugin {
                   new Error(
                     `device.stopStack failed for ${host}: ${toErrorMessage(error)}`,
                   ),
-              }),
-            refresh: Effect.tryPromise({
+              })),
+            refresh: guardHealth(Effect.tryPromise({
               try: async () => {
                 const [deviceState, viewState] = await Promise.all([
                   device.getDeviceState(),
@@ -327,7 +559,7 @@ export function createSeestarPlugin(): DevicePlugin {
                 new Error(
                   `device.refresh failed for ${host}: ${toErrorMessage(error)}`,
                 ),
-            }),
+            })),
             device: {
               pluginKind: 'seestar',
               deviceId: target.deviceId,
@@ -359,6 +591,7 @@ export function createSeestarPlugin(): DevicePlugin {
         }).pipe(
           Effect.catchAll((error) =>
             Effect.sync(() => {
+              stopKeepalive()
               device.disconnect()
             }).pipe(Effect.zipRight(Effect.fail(error))),
           ),
@@ -384,6 +617,8 @@ function mapSeestarRefresh(
       : undefined
   const tracking =
     mount && typeof mount.tracking === 'boolean' ? mount.tracking : undefined
+  const mountClosed =
+    mount && typeof mount.close === 'boolean' ? mount.close : undefined
   const view = viewState?.View
   const viewMode = view && typeof view.mode === 'string' ? view.mode : undefined
   const viewStage =
@@ -394,7 +629,7 @@ function mapSeestarRefresh(
     Boolean(viewMode) && viewMode !== 'none' && viewStateName !== 'cancel'
   const stacking = viewStage === 'Stack' && viewStateName !== 'cancel'
   return {
-    device: { viewMode, viewStage, viewState: viewStateName, tracking },
+    device: { viewMode, viewStage, viewState: viewStateName, tracking, mountClosed },
     preview: viewActive
       ? { phase: 'active', source: 'rtsp', active: true }
       : { phase: 'none', source: 'none', active: false },

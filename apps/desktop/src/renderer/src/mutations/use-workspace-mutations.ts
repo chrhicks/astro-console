@@ -36,3 +36,10 @@ export function useStopCaptureMutation() {
     mutationFn: () => electronApi.stopCapture(),
   })
 }
+
+export function useParkMountMutation() {
+  return useMutation({
+    mutationKey: ['mount', 'park'],
+    mutationFn: () => electronApi.parkMount(),
+  })
+}

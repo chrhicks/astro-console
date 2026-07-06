@@ -20,13 +20,14 @@ export const electronApi = {
   discover: () => getApi().discover(),
   connect: (input: ConnectRequestV2) => getApi().connect(input),
   disconnect: () => getApi().disconnect(),
-  browseTargets: (query: CatalogQuery) => getApi().browseTargets(query),
+  browseTargets: (query?: CatalogQuery) => getApi().browseTargets(query),
   getTargetById: (targetId: string) => getApi().getTargetById(targetId),
   pointToTarget: (input: PointToTargetRequest) => getApi().pointToTarget(input),
   startPreview: () => getApi().startPreview(),
   stopPreview: () => getApi().stopPreview(),
   startCapture: () => getApi().startCapture(),
   stopCapture: () => getApi().stopCapture(),
+  parkMount: () => getApi().parkMount(),
   onLog: (listener: (entry: DesktopLogEntryV2) => void) =>
     getApi().onLog(listener),
   onStatus: (listener: (status: DesktopStatus) => void) =>

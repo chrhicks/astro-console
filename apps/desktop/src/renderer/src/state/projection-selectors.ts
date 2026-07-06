@@ -61,6 +61,7 @@ export function selectSessionBarModel(state: ProjectionState) {
     firmwareVersion: status?.device.firmwareVersion,
     batteryPercent: status?.device.batteryPercent,
     tracking: status?.device.tracking,
+    mountClosed: status?.device.mountClosed,
     location: status?.device.location,
     deviceTimeLooksStale: status?.device.deviceTimeLooksStale,
     warnings: status?.device.warnings,

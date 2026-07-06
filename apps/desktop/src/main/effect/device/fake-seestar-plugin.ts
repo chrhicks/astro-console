@@ -3,7 +3,12 @@ import type {
   DesktopDiscoveredDeviceV2,
   ConnectRequestV2,
 } from '../../../shared/api-v2'
-import type { DevicePlugin, LiveDeviceSession } from './device-plugin'
+import type {
+  DevicePlugin,
+  LiveDeviceSession,
+  PointToCoordinatesInput,
+  PrepareForPointingInput,
+} from './device-plugin'
 import {
   fakeSeestarRuntime,
   type FakeScenarioAfterPoint,
@@ -51,6 +56,7 @@ export function createFakeSeestarPlugin(): DevicePlugin {
         const connected = scenario.connected ?? CONNECTED_IDLE
         let previewActive = false
         let captureActive = false
+        let parked = false
         return {
           sessionId: crypto.randomUUID(),
           pluginKind: 'fake-seestar',
@@ -59,8 +65,26 @@ export function createFakeSeestarPlugin(): DevicePlugin {
           productModel: outcome.device.productModel,
           openedAt: new Date().toISOString(),
           capabilities: FAKE_CAPABILITIES,
+          health: { state: 'healthy', lastCheckedAt: new Date().toISOString() },
           disconnect: Effect.sleep('200 millis').pipe(Effect.asVoid),
-          pointToCoordinates: () =>
+          prepareForPointing: (_input: PrepareForPointingInput) =>
+            Effect.gen(function* () {
+              yield* Effect.sleep('100 millis')
+              parked = false
+            }),
+          openArm: () =>
+            Effect.gen(function* () {
+              yield* Effect.sleep('300 millis')
+              parked = false
+            }),
+          parkArm: () =>
+            Effect.gen(function* () {
+              yield* Effect.sleep('300 millis')
+              previewActive = false
+              captureActive = false
+              parked = true
+            }),
+          pointToCoordinates: (_input: PointToCoordinatesInput) =>
             Effect.gen(function* () {
               const pointScenario = fakeSeestarRuntime.getActiveScenario()
               yield* Effect.sleep(pointScenario.point.delayMs)
@@ -99,7 +123,7 @@ export function createFakeSeestarPlugin(): DevicePlugin {
               captureActive = false
             }),
           refresh: Effect.sync(() =>
-            fakeSeestarRuntime.refresh(previewActive, captureActive),
+            fakeSeestarRuntime.refresh(previewActive, captureActive, parked),
           ),
           device: outcome.device,
           preview: connected.preview,

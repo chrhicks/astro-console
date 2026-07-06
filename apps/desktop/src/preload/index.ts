@@ -128,7 +128,7 @@ export const apiV2: SeestarDesktopApiV2 = {
     ipcRenderer.invoke('seestar:v2:disconnect') as Promise<DesktopStatusV2>,
   getLogs: () =>
     ipcRenderer.invoke('seestar:v2:get-logs') as Promise<DesktopLogEntryV2[]>,
-  browseTargets: (query: CatalogQuery) =>
+  browseTargets: (query?: CatalogQuery) =>
     ipcRenderer.invoke('seestar:v2:browse-targets', query) as Promise<
       CatalogPage
     >,
@@ -149,6 +149,8 @@ export const apiV2: SeestarDesktopApiV2 = {
     ipcRenderer.invoke('seestar:v2:start-capture') as Promise<DesktopStatusV2>,
   stopCapture: () =>
     ipcRenderer.invoke('seestar:v2:stop-capture') as Promise<DesktopStatusV2>,
+  parkMount: () =>
+    ipcRenderer.invoke('seestar:v2:park') as Promise<DesktopStatusV2>,
 
   onLog: (listener) => subscribe('seestar:v2:log', listener),
   onStatus: (listener) => subscribe('seestar:v2:status', listener),

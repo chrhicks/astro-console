@@ -61,7 +61,9 @@ function inferLevel(
     return 'error'
   }
   if (event.name.endsWith('.failed')) return 'error'
+  if (event.name.endsWith('.stale')) return 'warn'
   if (event.name.endsWith('.warning')) return 'warn'
+  if (event.name.endsWith('.recovered')) return 'info'
   if (event.name.endsWith('.started')) return 'info'
   if (event.name.endsWith('.completed')) return 'info'
   if (event.name.endsWith('.succeeded')) return 'info'
@@ -111,6 +113,10 @@ function inferSummary(
       return `Started preflight check step ${asString(payload?.step) ?? 'unknown'}`
     case 'session.preflightCheck.step.succeeded':
       return `Completed preflight check step ${asString(payload?.step) ?? 'unknown'}`
+    case 'session.keepalive.stale':
+      return 'Session heartbeat detected stale connection'
+    case 'session.keepalive.recovered':
+      return 'Session heartbeat recovered connection'
     default:
       return event.name
   }
