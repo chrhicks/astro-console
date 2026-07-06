@@ -36,6 +36,15 @@ import type {
   StartupStepReport,
 } from './types.js'
 
+interface SequenceStepLoggers {
+  steps: StartupStepReport[]
+  report: (ok: boolean) => StartupSequenceReport
+  stepStarted: (step: string, summary: string) => void
+  stepCompleted: (step: string, summary: string, changed?: boolean, data?: unknown) => void
+  stepSkipped: (step: string, summary: string, data?: unknown) => void
+  fail: (name: string, summary: string, error?: unknown) => StartupSequenceReport
+}
+
 /**
  * High-level SDK for the ZWO Seestar S30.
  * Manages connection, authentication, and exposes typed command helpers.
@@ -50,6 +59,7 @@ export class SeestarDevice {
   private deviceModel?: string
   private deviceSn?: string
   private startupSequenceCount = 0
+  private authenticated = false
 
   constructor(private config: ClientConfig) {
     this.host = config.host
@@ -79,6 +89,7 @@ export class SeestarDevice {
 
   async connect(): Promise<void> {
     if (this.isConnected()) return
+    this.authenticated = false
     if (!this.host) {
       this.host = await discoverSeestarHost({
         timeoutMs: this.config.discoveryTimeoutMs,
@@ -91,7 +102,10 @@ export class SeestarDevice {
   }
 
   async authenticate(): Promise<boolean> {
-    return this.auth.authenticate()
+    if (this.isConnected() && this.authenticated) return true
+    const authenticated = await this.auth.authenticate()
+    this.authenticated = authenticated
+    return authenticated
   }
 
   async connectAndAuth(): Promise<boolean> {
@@ -100,6 +114,7 @@ export class SeestarDevice {
   }
 
   disconnect(): void {
+    this.authenticated = false
     this.client?.disconnect()
     this.log({
       level: 'info',
@@ -196,91 +211,16 @@ export class SeestarDevice {
     let preflight: PreflightSummary | undefined
     const sequenceId = `dev_smoke_${String(++this.startupSequenceCount).padStart(2, '0')}`
 
-    const report = (ok: boolean): StartupSequenceReport => ({
-      ok,
+    const loggers = this.createSequenceStepLoggers(
+      'smoke',
+      'Development smoke test',
+      sequenceId,
       dryRun,
-      resolvedHost: this.host ?? '',
-      preflight,
       steps,
       warnings,
-    })
-
-    const stepStarted = (step: string, summary: string) => {
-      this.log({
-        level: 'info',
-        event: 'smoke.step.started',
-        component: 'smoke',
-        phase: 'startup',
-        sequenceId,
-        step,
-        summary,
-      })
-    }
-
-    const stepCompleted = (
-      step: string,
-      summary: string,
-      changed?: boolean,
-      data?: unknown,
-    ) => {
-      this.log({
-        level: 'info',
-        event: 'smoke.step.completed',
-        component: 'smoke',
-        phase: 'startup',
-        sequenceId,
-        step,
-        changed,
-        ok: true,
-        summary,
-        data,
-      })
-    }
-
-    const stepSkipped = (step: string, summary: string, data?: unknown) => {
-      this.log({
-        level: 'info',
-        event: 'smoke.step.skipped',
-        component: 'smoke',
-        phase: 'startup',
-        sequenceId,
-        step,
-        ok: true,
-        summary,
-        data,
-      })
-    }
-
-    const fail = (
-      name: string,
-      summary: string,
-      error?: unknown,
-    ): StartupSequenceReport => {
-      const detail = errorMessage(error)
-      steps.push({ name, ok: false, summary, error: detail })
-      this.log({
-        level: 'error',
-        event: 'smoke.step.failed',
-        component: 'smoke',
-        phase: 'startup',
-        sequenceId,
-        step: name,
-        ok: false,
-        summary,
-        error: detail,
-      })
-      this.log({
-        level: 'error',
-        event: 'smoke.sequence.failed',
-        component: 'smoke',
-        phase: 'startup',
-        sequenceId,
-        ok: false,
-        summary: `Development smoke test failed at ${name}`,
-        error: detail,
-      })
-      return report(false)
-    }
+      () => preflight,
+    )
+    const { report, stepStarted, stepCompleted, stepSkipped, fail } = loggers
 
     this.log({
       level: 'info',
@@ -292,44 +232,15 @@ export class SeestarDevice {
       data: { dryRun, mode, openArm, parkAtEnd },
     })
 
-    try {
-      stepStarted('connect', 'Connecting and authenticating with device')
-      await this.connect()
-      const authenticated = await this.authenticate()
-      if (!authenticated) {
-        return fail('connect', 'Authentication failed')
-      }
-      steps.push({
-        name: 'connect',
-        ok: true,
-        changed: true,
-        summary: `Connected and authenticated at ${this.resolvedHost()}`,
-      })
-      stepCompleted(
-        'connect',
-        `Connected and authenticated at ${this.resolvedHost()}`,
-        true,
-      )
-    } catch (error) {
-      return fail('connect', 'Failed to connect and authenticate', error)
-    }
+    const connectFailure = await this.runSequenceConnectStep(loggers)
+    if (connectFailure) return connectFailure
 
-    try {
-      stepStarted('preflight', 'Collecting device status and warnings')
-      preflight = await this.collectPreflightSummary()
-      warnings.push(...preflight.warnings)
-      steps.push({
-        name: 'preflight',
-        ok: true,
-        summary: summarizePreflight(preflight),
-        data: preflight,
-      })
-      stepCompleted('preflight', summarizePreflight(preflight), false, {
-        warningCount: preflight.warnings.length,
-      })
-    } catch (error) {
-      return fail('preflight', 'Failed to collect device status', error)
-    }
+    const preflightResult = await this.runSequencePreflightStep(
+      loggers,
+      warnings,
+    )
+    if (!preflightResult.ok) return preflightResult.report
+    preflight = preflightResult.summary
 
     if (preflight && isViewActive(preflight)) {
       return fail(
@@ -521,91 +432,16 @@ export class SeestarDevice {
     let preflight: PreflightSummary | undefined
     const sequenceId = `startup_${String(++this.startupSequenceCount).padStart(2, '0')}`
 
-    const report = (ok: boolean): StartupSequenceReport => ({
-      ok,
+    const loggers = this.createSequenceStepLoggers(
+      'startup',
+      'Startup sequence',
+      sequenceId,
       dryRun,
-      resolvedHost: this.host ?? '',
-      preflight,
       steps,
       warnings,
-    })
-
-    const stepStarted = (step: string, summary: string) => {
-      this.log({
-        level: 'info',
-        event: 'startup.step.started',
-        component: 'startup',
-        phase: 'startup',
-        sequenceId,
-        step,
-        summary,
-      })
-    }
-
-    const stepCompleted = (
-      step: string,
-      summary: string,
-      changed?: boolean,
-      data?: unknown,
-    ) => {
-      this.log({
-        level: 'info',
-        event: 'startup.step.completed',
-        component: 'startup',
-        phase: 'startup',
-        sequenceId,
-        step,
-        changed,
-        ok: true,
-        summary,
-        data,
-      })
-    }
-
-    const stepSkipped = (step: string, summary: string, data?: unknown) => {
-      this.log({
-        level: 'info',
-        event: 'startup.step.skipped',
-        component: 'startup',
-        phase: 'startup',
-        sequenceId,
-        step,
-        ok: true,
-        summary,
-        data,
-      })
-    }
-
-    const fail = (
-      name: string,
-      summary: string,
-      error?: unknown,
-    ): StartupSequenceReport => {
-      const detail = errorMessage(error)
-      steps.push({ name, ok: false, summary, error: detail })
-      this.log({
-        level: 'error',
-        event: 'startup.step.failed',
-        component: 'startup',
-        phase: 'startup',
-        sequenceId,
-        step: name,
-        ok: false,
-        summary,
-        error: detail,
-      })
-      this.log({
-        level: 'error',
-        event: 'startup.sequence.failed',
-        component: 'startup',
-        phase: 'startup',
-        sequenceId,
-        ok: false,
-        summary: `Startup sequence failed at ${name}`,
-        error: detail,
-      })
-      return report(false)
-    }
+      () => preflight,
+    )
+    const { report, stepStarted, stepCompleted, stepSkipped, fail } = loggers
 
     this.log({
       level: 'info',
@@ -626,44 +462,15 @@ export class SeestarDevice {
       },
     })
 
-    try {
-      stepStarted('connect', 'Connecting and authenticating with device')
-      await this.connect()
-      const authenticated = await this.authenticate()
-      if (!authenticated) {
-        return fail('connect', 'Authentication failed')
-      }
-      steps.push({
-        name: 'connect',
-        ok: true,
-        changed: true,
-        summary: `Connected and authenticated at ${this.resolvedHost()}`,
-      })
-      stepCompleted(
-        'connect',
-        `Connected and authenticated at ${this.resolvedHost()}`,
-        true,
-      )
-    } catch (error) {
-      return fail('connect', 'Failed to connect and authenticate', error)
-    }
+    const connectFailure = await this.runSequenceConnectStep(loggers)
+    if (connectFailure) return connectFailure
 
-    try {
-      stepStarted('preflight', 'Collecting device status and warnings')
-      preflight = await this.collectPreflightSummary()
-      warnings.push(...preflight.warnings)
-      steps.push({
-        name: 'preflight',
-        ok: true,
-        summary: summarizePreflight(preflight),
-        data: preflight,
-      })
-      stepCompleted('preflight', summarizePreflight(preflight), false, {
-        warningCount: preflight.warnings.length,
-      })
-    } catch (error) {
-      return fail('preflight', 'Failed to collect device status', error)
-    }
+    const preflightResult = await this.runSequencePreflightStep(
+      loggers,
+      warnings,
+    )
+    if (!preflightResult.ok) return preflightResult.report
+    preflight = preflightResult.summary
 
     if (preflight && isViewActive(preflight)) {
       return fail(
@@ -1044,6 +851,160 @@ export class SeestarDevice {
     return report(true)
   }
 
+  private createSequenceStepLoggers(
+    component: 'smoke' | 'startup',
+    sequenceLabel: string,
+    sequenceId: string,
+    dryRun: boolean,
+    steps: StartupStepReport[],
+    warnings: string[],
+    getPreflight: () => PreflightSummary | undefined,
+  ): SequenceStepLoggers {
+    const report = (ok: boolean): StartupSequenceReport => ({
+      ok,
+      dryRun,
+      resolvedHost: this.host ?? '',
+      preflight: getPreflight(),
+      steps,
+      warnings,
+    })
+
+    const stepStarted = (step: string, summary: string) => {
+      this.log({
+        level: 'info',
+        event: `${component}.step.started`,
+        component,
+        phase: 'startup',
+        sequenceId,
+        step,
+        summary,
+      })
+    }
+
+    const stepCompleted = (
+      step: string,
+      summary: string,
+      changed?: boolean,
+      data?: unknown,
+    ) => {
+      this.log({
+        level: 'info',
+        event: `${component}.step.completed`,
+        component,
+        phase: 'startup',
+        sequenceId,
+        step,
+        changed,
+        ok: true,
+        summary,
+        data,
+      })
+    }
+
+    const stepSkipped = (step: string, summary: string, data?: unknown) => {
+      this.log({
+        level: 'info',
+        event: `${component}.step.skipped`,
+        component,
+        phase: 'startup',
+        sequenceId,
+        step,
+        ok: true,
+        summary,
+        data,
+      })
+    }
+
+    const fail = (
+      name: string,
+      summary: string,
+      error?: unknown,
+    ): StartupSequenceReport => {
+      const detail = errorMessage(error)
+      steps.push({ name, ok: false, summary, error: detail })
+      this.log({
+        level: 'error',
+        event: `${component}.step.failed`,
+        component,
+        phase: 'startup',
+        sequenceId,
+        step: name,
+        ok: false,
+        summary,
+        error: detail,
+      })
+      this.log({
+        level: 'error',
+        event: `${component}.sequence.failed`,
+        component,
+        phase: 'startup',
+        sequenceId,
+        ok: false,
+        summary: `${sequenceLabel} failed at ${name}`,
+        error: detail,
+      })
+      return report(false)
+    }
+
+    return { steps, report, stepStarted, stepCompleted, stepSkipped, fail }
+  }
+
+  private async runSequenceConnectStep(
+    loggers: SequenceStepLoggers,
+  ): Promise<StartupSequenceReport | undefined> {
+    loggers.stepStarted('connect', 'Connecting and authenticating with device')
+    try {
+      await this.connect()
+      const authenticated = await this.authenticate()
+      if (!authenticated) {
+        return loggers.fail('connect', 'Authentication failed')
+      }
+      loggers.steps.push({
+        name: 'connect',
+        ok: true,
+        changed: true,
+        summary: `Connected and authenticated at ${this.resolvedHost()}`,
+      })
+      loggers.stepCompleted(
+        'connect',
+        `Connected and authenticated at ${this.resolvedHost()}`,
+        true,
+      )
+      return undefined
+    } catch (error) {
+      return loggers.fail('connect', 'Failed to connect and authenticate', error)
+    }
+  }
+
+  private async runSequencePreflightStep(
+    loggers: SequenceStepLoggers,
+    warnings: string[],
+  ): Promise<
+    | { ok: true; summary: PreflightSummary }
+    | { ok: false; report: StartupSequenceReport }
+  > {
+    loggers.stepStarted('preflight', 'Collecting device status and warnings')
+    try {
+      const summary = await this.collectPreflightSummary()
+      warnings.push(...summary.warnings)
+      loggers.steps.push({
+        name: 'preflight',
+        ok: true,
+        summary: summarizePreflight(summary),
+        data: summary,
+      })
+      loggers.stepCompleted('preflight', summarizePreflight(summary), false, {
+        warningCount: summary.warnings.length,
+      })
+      return { ok: true, summary }
+    } catch (error) {
+      return {
+        ok: false,
+        report: loggers.fail('preflight', 'Failed to collect device status', error),
+      }
+    }
+  }
+
   // --- Album / Image ---
 
   async getAlbums(): Promise<AlbumsResult | null> {
@@ -1087,6 +1048,7 @@ export class SeestarDevice {
     dec: number,
     wait: ActionWaitOptions = {},
   ): Promise<boolean> {
+    await this.ensureAuthenticated()
     const resp = await this.client.sendSync('scope_goto', [ra, dec])
     const ok = resp.code === 0
     if (ok && wait.waitForCompletion) {
@@ -1096,6 +1058,7 @@ export class SeestarDevice {
   }
 
   async moveToHorizon(wait: ActionWaitOptions = {}): Promise<boolean> {
+    await this.ensureAuthenticated()
     const resp = await this.client.sendSync('scope_move_to_horizon', '')
     const ok = resp.code === 0
     if (ok) {
@@ -1121,6 +1084,7 @@ export class SeestarDevice {
   }
 
   async park(wait: ActionWaitOptions = {}): Promise<boolean> {
+    await this.ensureAuthenticated()
     const resp = await this.client.sendSync('scope_park', '')
     const ok = resp.code === 0
     if (ok) {
@@ -1141,6 +1105,7 @@ export class SeestarDevice {
   }
 
   async sync(ra: number, dec: number): Promise<boolean> {
+    await this.ensureAuthenticated()
     const resp = await this.client.sendSync('scope_sync', [ra, dec])
     return resp.code === 0
   }
@@ -1173,6 +1138,7 @@ export class SeestarDevice {
     options: StartViewOptions,
     wait: ActionWaitOptions = {},
   ): Promise<boolean> {
+    await this.ensureAuthenticated()
     const params: Record<string, unknown> = { mode: options.mode }
     if (options.targetName) params.target_name = options.targetName
     if (options.targetRaDec) params.target_ra_dec = options.targetRaDec
@@ -1183,6 +1149,13 @@ export class SeestarDevice {
     if (ok) {
       if (wait.waitForCompletion) {
         await this.waitForViewStarted(options, wait)
+        if (options.targetRaDec) {
+          await this.waitForGotoCompletion(
+            options.targetRaDec[0],
+            options.targetRaDec[1],
+            wait,
+          )
+        }
       }
       this.log({
         level: 'info',
@@ -1211,6 +1184,7 @@ export class SeestarDevice {
     stage?: string,
     wait: ActionWaitOptions = {},
   ): Promise<boolean> {
+    await this.ensureAuthenticated()
     const params = stage ? { stage } : ''
     const resp = await this.client.sendSync('iscope_stop_view', params)
     const ok = resp.code === 0
@@ -1555,17 +1529,28 @@ export class SeestarDevice {
     dec: number,
     wait: ActionWaitOptions,
   ): Promise<void> {
-    await this.waitForPushCompletion({
+    await this.waitForStateConvergence({
       action: `goto ${ra}, ${dec}`,
       wait,
-      predicate: (event) => {
-        if (event.Event !== 'AutoGoto' && event.Event !== 'ScopeGoto')
-          return false
-        const state = normalizeEventState(event)
-        return state === 'complete' || state === 'fail'
+      eventNames: ['AutoGoto', 'ScopeGoto'],
+      readState: async () => {
+        await this.ensureAuthenticated()
+        const [deviceState, currentRaDec] = await Promise.all([
+          this.getDeviceState(['mount']),
+          this.getEquCoord(),
+        ])
+        return { deviceState, currentRaDec }
       },
-      getFailure: (event) =>
+      isComplete: (state) =>
+        readMountMoveType(state.deviceState) === 'none' &&
+        isCoordinateNearTarget(state.currentRaDec, ra, dec),
+      getFailure: (_state, event) =>
         failureFromPushEvent(event, ['AutoGoto', 'ScopeGoto']),
+      summarizeState: (state) => ({
+        currentRaDec: state.currentRaDec,
+        mountClosed: readMountClosed(state.deviceState),
+        mountMoveType: readMountMoveType(state.deviceState),
+      }),
     })
   }
 
@@ -2112,6 +2097,7 @@ export class SeestarDevice {
 
   private async ensureAuthenticated(): Promise<void> {
     if (!this.isConnected()) {
+      this.authenticated = false
       await this.connect()
     }
     const authenticated = await this.authenticate()
@@ -2350,6 +2336,18 @@ function isStackActive(viewState: ViewStateResult | null): boolean {
     asString(view?.stage) === 'Stack' &&
     readViewStateName(viewState) !== 'cancel'
   )
+}
+
+function isCoordinateNearTarget(
+  current: EquCoord | null,
+  targetRa: number,
+  targetDec: number,
+): boolean {
+  if (!current) return false
+  const raDelta = Math.abs(current.ra - targetRa)
+  const wrappedRaDelta = Math.min(raDelta, 24 - raDelta)
+  const decDelta = Math.abs(current.dec - targetDec)
+  return wrappedRaDelta <= 0.25 && decDelta <= 3
 }
 
 function summarizeViewState(viewState: ViewStateResult | null): unknown {
