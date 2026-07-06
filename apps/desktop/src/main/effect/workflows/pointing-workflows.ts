@@ -8,7 +8,6 @@ import { computeSolarSystemCoordinates } from '../../../shared/visibility-engine
 import { CatalogStore } from '../catalog/catalog-store'
 import { EventBus } from '../event/event-bus'
 import { fakeSeestarRuntime } from '../device/fake-seestar-runtime'
-import { ObserverContextStore } from '../observer/observer-context-store'
 import { SessionManager } from '../session/session-manager'
 import { AggregateStore } from '../state/aggregate-store'
 
@@ -18,7 +17,6 @@ export const runPointToTarget = (targetId: string) =>
     const bus = yield* EventBus
     const sessions = yield* SessionManager
     const catalog = yield* CatalogStore
-    const observerContextStore = yield* ObserverContextStore
 
     const session = yield* sessions.getCurrent
     if (!session) {
@@ -101,7 +99,7 @@ export const runPointToTarget = (targetId: string) =>
 
     const coordinates = yield* resolvePointingCoordinates(
       target,
-      observerContextStore,
+      session.device.location,
     ).pipe(
       Effect.catchAll((error) => failStep('Resolving coordinates', error)),
     )
@@ -111,12 +109,12 @@ export const runPointToTarget = (targetId: string) =>
     yield* setStep('Preparing device for slew')
 
     yield* Effect.gen(function* () {
-      const prepLocation = yield* resolvePrepLocation(
-        target,
-        session.device.location,
-        observerContextStore,
-      )
-      yield* session.prepareForPointing(prepLocation)
+      if (!session.device.location) {
+        return yield* Effect.fail(
+          new Error('Need observer location before pointing'),
+        )
+      }
+      yield* session.prepareForPointing(session.device.location)
     }).pipe(
       Effect.catchAll((error) => guardSession('Preparing device for slew', error)),
     )
@@ -202,8 +200,8 @@ export const runPointToTarget = (targetId: string) =>
 
 function resolvePointingCoordinates(
   target: DeepSkyTarget | SolarSystemTarget,
-  observerContextStore: ObserverContextStore,
-) {
+  deviceLocation: { lat: number; lon: number } | undefined,
+): Effect.Effect<{ raHours: number; decDeg: number }, Error> {
   if (!('body' in target)) {
     return Effect.succeed({
       raHours: target.raHours,
@@ -211,41 +209,15 @@ function resolvePointingCoordinates(
     })
   }
 
-  return observerContextStore.getCurrent().pipe(
-    Effect.flatMap((observerContext) => {
-      if (!observerContext) {
-        return Effect.fail(
-          new Error('Need observer location before pointing at solar-system targets'),
-        )
-      }
-
-      const observer = new Observer(observerContext.lat, observerContext.lon, 0)
-      return Effect.succeed(
-        computeSolarSystemCoordinates(target.body, observer, new Date()),
-      )
-    }),
-  )
-}
-
-function resolvePrepLocation(
-  target: DeepSkyTarget | SolarSystemTarget,
-  deviceLocation: { lat: number; lon: number } | undefined,
-  observerContextStore: ObserverContextStore,
-): Effect.Effect<{ lat: number; lon: number }, unknown> {
-  // Deep-sky targets can use the device's existing location; solar-system
-  // targets use the same observer context that feeds coordinate computation.
-  if (!('body' in target) && deviceLocation) {
-    return Effect.succeed(deviceLocation)
+  if (!deviceLocation) {
+    return Effect.fail(
+      new Error('Need observer location before pointing at solar-system targets'),
+    )
   }
-  return observerContextStore.getCurrent().pipe(
-    Effect.flatMap((observerContext) => {
-      if (!observerContext) {
-        return Effect.fail(
-          new Error('Need observer location before pointing'),
-        )
-      }
-      return Effect.succeed({ lat: observerContext.lat, lon: observerContext.lon })
-    }),
+
+  const observer = new Observer(deviceLocation.lat, deviceLocation.lon, 0)
+  return Effect.succeed(
+    computeSolarSystemCoordinates(target.body, observer, new Date()),
   )
 }
 

@@ -5,7 +5,6 @@ import type {
   SolarSystemTarget,
   TargetSummary,
 } from './catalog/catalog-schema'
-import type { ObserverContext } from './observer-context'
 
 export * from './catalog/catalog-schema'
 
@@ -164,7 +163,6 @@ export interface DesktopStatus {
   library: LibraryProjection
   workspace: WorkspaceProjection
   currentTarget: TargetSummary | null
-  observerContext: ObserverContext | null
   lastUpdatedAt: string
   lastError?: string
 }

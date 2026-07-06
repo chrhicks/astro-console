@@ -18,7 +18,6 @@ import {
   type VisibilityTarget,
 } from '../../../shared/visibility-engine'
 import type { DeviceCapabilities } from '../device/device-plugin'
-import { ObserverContextStore } from '../observer/observer-context-store'
 import { SessionManager } from '../session/session-manager'
 import { CatalogStore } from './catalog-store'
 
@@ -30,13 +29,12 @@ export const CatalogStoreLive = Layer.effect(
   CatalogStore,
   Effect.gen(function* () {
     const sessions = yield* SessionManager
-    const observerContextStore = yield* ObserverContextStore
 
     return {
       browse: (query) =>
         Effect.gen(function* () {
           const session = yield* sessions.getCurrent
-          const observerContext = yield* observerContextStore.getCurrent()
+          const location = session?.device.location ?? null
           const search = query.search?.trim() ?? ''
           const hasSearch = search.length > 0
           const capabilities = session?.capabilities ?? null
@@ -56,15 +54,15 @@ export const CatalogStoreLive = Layer.effect(
             search,
           )
 
-          if (query.upNowOnly && observerContext === null) {
+          if (query.upNowOnly && location === null) {
             return buildCatalogPage([], query, false)
           }
 
-          const visibilityById = observerContext
+          const visibilityById = location
             ? new Map(
                 rankTargetsLight(
                   orderedTargets.map(toVisibilityTarget),
-                  observerContext,
+                  location,
                 ).map((entry) => [entry.id, entry] as const),
               )
             : new Map<string, RankedVisibilityEntry>()
@@ -75,11 +73,11 @@ export const CatalogStoreLive = Layer.effect(
             )
             .filter((target) => !query.upNowOnly || target.visibility === 'up')
 
-          if (!hasSearch && observerContext) {
+          if (!hasSearch && location) {
             targets.sort(compareVisibleTargets)
           }
 
-          return buildCatalogPage(targets, query, observerContext !== null)
+          return buildCatalogPage(targets, query, location !== null)
         }),
       getById: (targetId) =>
         Effect.succeed(

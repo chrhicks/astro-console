@@ -78,7 +78,6 @@ export default function WorkArea() {
     preview,
     capture,
     device,
-    observerContext,
   } = useProjectionStore(selectWorkAreaModel)
   const selectedTarget = useSelectedTarget((state) => state.target)
   const pointMutation = usePointToTargetMutation()
@@ -172,15 +171,6 @@ export default function WorkArea() {
               Mount parked
             </span>
           ) : null}
-          {observerContext ? (
-            <span className="chip" title="Observer location source">
-              Loc {observerContext.source}
-            </span>
-          ) : (
-            <span className="chip warn" title="No observer location available">
-              No location
-            </span>
-          )}
           {!hasDeviceLocation ? (
             <span
               className="chip warn"

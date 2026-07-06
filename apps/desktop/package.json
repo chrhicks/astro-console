@@ -10,7 +10,6 @@
     "build:renderer": "vite build",
     "build": "npm run build:sdk && npm run build:main && npm run build:renderer",
     "format": "prettier --write .",
-    "planning:context": "npm run build:main && node dist/main/planning-context-cli.js",
     "dev:sdk": "npm --prefix ../../sdk run dev",
     "dev:main": "tsc -p tsconfig.main.json --watch",
     "dev:renderer": "vite",

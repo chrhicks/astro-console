@@ -93,7 +93,6 @@ export function selectWorkAreaModel(state: ProjectionState) {
     preview: status?.preview ?? NO_PREVIEW,
     capture: status?.capture ?? NO_CAPTURE,
     device: status?.device ?? {},
-    observerContext: status?.observerContext ?? null,
   }
 }
 
@@ -111,6 +110,6 @@ export function selectBrowseContextKey(state: ProjectionState) {
     phase: status?.session.phase ?? 'disconnected',
     pluginKind: status?.device.pluginKind ?? null,
     deviceId: status?.device.deviceId ?? null,
-    observerContext: status?.observerContext ?? null,
+    location: status?.device.location ?? null,
   }
 }

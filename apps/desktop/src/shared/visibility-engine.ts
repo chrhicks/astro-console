@@ -6,7 +6,12 @@ import {
   SearchAltitude,
 } from 'astronomy-engine'
 import type { SolarSystemBody } from './catalog/catalog-schema'
-import type { SiteAzimuthRange } from './observer-context'
+
+export interface SiteAzimuthRange {
+  startDeg: number
+  endDeg: number
+  label?: string
+}
 
 const ASTRONOMICAL_TWILIGHT_ALTITUDE_DEG = -18
 const DEFAULT_MIN_ALTITUDE_DEG = 10
