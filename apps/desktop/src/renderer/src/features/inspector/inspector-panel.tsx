@@ -62,7 +62,7 @@ export default function InspectorPanel() {
   const isBelowHorizon = target.visibility === 'blocked'
   const isParked = device.mountClosed === true
   const isAtTarget = !isParked && currentTarget?.id === target.id
-  const canSlew = isConnected && !isSlewPending && !isBelowHorizon && !isParked
+  const canSlew = isConnected && !isSlewPending && !isBelowHorizon
 
   return (
     <div>
@@ -105,7 +105,7 @@ export default function InspectorPanel() {
               {isSlewPending
                 ? 'Slewing…'
                 : isAtTarget
-                  ? 'At target'
+                  ? 'Re-slew to target'
                   : 'Slew to target'}
             </button>
           </div>
@@ -116,7 +116,7 @@ export default function InspectorPanel() {
           ) : null}
           {device.mountClosed && !isSlewPending ? (
             <p className="inspector-pointing-error">
-              Mount is currently parked/closed.
+              Mount is parked. Slew to a target to open the arm and resume.
             </p>
           ) : null}
           {pointing.phase === 'failed' && pointing.lastError ? (
@@ -204,7 +204,7 @@ export default function InspectorPanel() {
               </button>
             </div>
             <p className="help-line">
-              Capture controls are not yet connected to the device.
+              Capture runs from the work area action bar. These inspector settings are not yet wired.
             </p>
           </div>
         </details>

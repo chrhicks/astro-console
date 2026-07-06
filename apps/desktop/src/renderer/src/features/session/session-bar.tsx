@@ -179,15 +179,7 @@ export function SessionBar() {
         disabled={!isConnected || mountClosed || parkMutation.isPending}
         onClick={() => parkMutation.mutate()}
       >
-        {parkMutation.isPending ? 'Parking...' : 'Park'}
-      </button>
-      <button
-        type="button"
-        className="btn btn-sm icon-btn"
-        id="btnSettings"
-        title="Settings"
-      >
-        ⚙
+        {parkMutation.isPending ? 'Parking...' : mountClosed ? 'Parked' : 'Park'}
       </button>
     </header>
   )

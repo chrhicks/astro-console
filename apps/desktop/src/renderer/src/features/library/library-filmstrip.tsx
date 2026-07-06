@@ -17,13 +17,6 @@ export default function LibraryFilmstrip() {
             ? `${scopeLabel} · polling while capturing`
             : `${scopeLabel} · ${library.assets.length} asset${library.assets.length === 1 ? '' : 's'}`}
         </span>
-        <span className="spacer"></span>
-        <button type="button" className="btn btn-sm" id="expandFilm">
-          Expand strip
-        </button>
-        <button type="button" className="btn btn-sm" id="libraryScope">
-          {library.scope === 'all_targets' ? 'Current target' : 'All targets'}
-        </button>
       </div>
       <div className="filmstrip-body" id="filmstripBody">
         {library.assets.length === 0 ? (

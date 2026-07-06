@@ -41,7 +41,7 @@ const STATUS_MESSAGES: Record<WorkspaceState, string> = {
   preview_active: 'Live preview active.',
   preview_error: 'Preview failed to start.',
   capturing: 'Stacking frames.',
-  parked: 'Mount is parked.',
+  parked: 'Mount is parked. Slew to a target to open the arm and resume.',
 }
 
 const OVERLAY_STATES: ReadonlySet<WorkspaceState> = new Set([
@@ -61,6 +61,14 @@ const CAPABILITY_DEFS = [
   { key: 'filterWheel', label: 'Filter' },
   { key: 'storage', label: 'Storage' },
 ] as const
+
+const CAPABILITY_VALUE_LABELS = {
+  native: 'yes',
+  external: 'ext',
+  unsupported: 'no',
+  yes: 'yes',
+  no: 'no',
+} as const
 
 export default function WorkArea() {
   const {
@@ -111,8 +119,6 @@ export default function WorkArea() {
           <span className="on" data-mode="live">
             Live
           </span>
-          <span data-mode="point">Point</span>
-          <span data-mode="view">View</span>
         </div>
         <span className="spacer"></span>
         <span className="work-target-label" id="workTargetLabel">
@@ -124,14 +130,6 @@ export default function WorkArea() {
             <span className="work-target-none">No target selected</span>
           )}
         </span>
-        <button
-          type="button"
-          className="btn btn-sm icon-btn"
-          title="Fullscreen preview"
-          disabled
-        >
-          ⛶
-        </button>
       </div>
 
       <div className="work-state-banner" id="workStateBanner">
@@ -169,7 +167,7 @@ export default function WorkArea() {
           {device.mountClosed ? (
             <span
               className="chip warn"
-              title="Mount is parked — open the arm before slewing"
+              title="Mount is parked — slewing opens the arm automatically"
             >
               Mount parked
             </span>
@@ -268,14 +266,15 @@ export default function WorkArea() {
       ) : null}
 
       <div className="work-info-strip">
-        <div className="work-capabilities" id="workCapabilities">
+        <div className="work-capabilities" id="workCapabilities" aria-label="Device capabilities">
+          <span className="work-cap-label">Device</span>
           {CAPABILITY_DEFS.map(({ key, label }) => {
             const value = workspace.capabilities[key]
             const on =
               value === 'native' || value === 'external' || value === 'yes'
             return (
               <span key={key} className={`work-cap${on ? ' on' : ''}`}>
-                {label} <strong>{value}</strong>
+                {label} <strong>{CAPABILITY_VALUE_LABELS[value]}</strong>
               </span>
             )
           })}

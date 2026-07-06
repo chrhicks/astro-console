@@ -1,30 +1,39 @@
 import { useEffect, useState } from 'react'
-import type { FakeRuntimeSnapshot } from '../../../../shared/api-v2'
+import type {
+  FakeRuntimeSnapshot,
+  SeestarDevFakeApi,
+} from '../../../../shared/api-v2'
+import { useProjectionStore } from '../../state/projection-store'
 import './dev-scenario-panel.css'
 
 // Development-only scenario control panel. Rendered only when the preload
 // dev fake API (window.seestarDevFake) is present, which happens only in
-// unpackaged builds. Not product UI.
+// unpackaged builds, and no live device is connected. Not product UI.
 export function DevScenarioPanel() {
-  if (!window.seestarDevFake) return null
+  const pluginKind = useProjectionStore(
+    (state) => state.status?.device.pluginKind ?? null,
+  )
+  const devFake = window.seestarDevFake
+  if (!devFake) return null
+  if (pluginKind === 'seestar') return null
 
-  return <DevScenarioPanelBody />
+  return <DevScenarioPanelBody devFake={devFake} />
 }
 
-function DevScenarioPanelBody() {
+function DevScenarioPanelBody({ devFake }: { devFake: SeestarDevFakeApi }) {
   const [snapshot, setSnapshot] = useState<FakeRuntimeSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    void window.seestarDevFake
+    void devFake
       .listScenarios()
       .then(setSnapshot)
       .catch((loadError: unknown) => setError(toMessage(loadError)))
-  }, [])
+  }, [devFake])
 
   function handleLoad(scenarioId: string) {
     setError(null)
-    void window.seestarDevFake
+    void devFake
       .loadScenario(scenarioId)
       .then(setSnapshot)
       .catch((loadError: unknown) => setError(toMessage(loadError)))
@@ -32,7 +41,7 @@ function DevScenarioPanelBody() {
 
   function handleReset() {
     setError(null)
-    void window.seestarDevFake
+    void devFake
       .reset()
       .then(setSnapshot)
       .catch((resetError: unknown) => setError(toMessage(resetError)))

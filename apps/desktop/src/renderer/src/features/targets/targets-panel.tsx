@@ -47,16 +47,6 @@ export default function TargetsPanel() {
       <div className="panel-header targets-panel-header">
         <span>Targets</span>
         {data ? <span className="targets-count">{data.total}</span> : null}
-        <span className="spacer"></span>
-        <button
-          type="button"
-          className="btn btn-sm icon-btn"
-          id="collapseLeft"
-          title="Collapse panel"
-          disabled
-        >
-          ◧
-        </button>
       </div>
       <div className="filter-row">
         <input
@@ -67,15 +57,6 @@ export default function TargetsPanel() {
           value={search}
           onChange={(event) => setSearch(event.currentTarget.value)}
         />
-        <button
-          type="button"
-          className="btn btn-sm icon-btn"
-          id="btnFavorites"
-          title="Favorites only"
-          disabled
-        >
-          ★
-        </button>
         <button
           type="button"
           className={`btn btn-sm${upNowOnly ? ' primary' : ''}`}

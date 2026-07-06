@@ -261,6 +261,13 @@
   min-width: 0;
 }
 
+.work-cap-label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 9px;
+}
+
 .work-cap {
   color: var(--text-muted);
 }
