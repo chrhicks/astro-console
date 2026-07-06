@@ -21,6 +21,7 @@ export function SessionBar() {
     mountClosed,
     pluginKind,
     location,
+    locationSource,
     deviceTimeLooksStale,
     warnings,
     lastError,
@@ -145,8 +146,16 @@ export function SessionBar() {
         </span>
       ) : null}
       {location ? (
-        <span className="chip" title="Device-reported location">
-          Loc {location.lat.toFixed(2)}, {location.lon.toFixed(2)}
+        <span
+          className="chip"
+          title={
+            locationSource === 'geoip'
+              ? 'Approximate location from IP lookup'
+              : 'Device-reported location'
+          }
+        >
+          {locationSource === 'geoip' ? 'Approx Loc ' : 'Loc '}
+          {location.lat.toFixed(2)}, {location.lon.toFixed(2)}
         </span>
       ) : null}
       {deviceTimeLooksStale ? (

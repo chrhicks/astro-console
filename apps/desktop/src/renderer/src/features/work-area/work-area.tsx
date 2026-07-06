@@ -174,9 +174,9 @@ export default function WorkArea() {
           {!hasDeviceLocation ? (
             <span
               className="chip warn"
-              title="The device did not report a location"
+              title="Device did not report a location and IP-based lookup failed"
             >
-              No device location
+              No location
             </span>
           ) : null}
           {device.deviceTimeLooksStale ? (

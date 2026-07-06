@@ -1,6 +1,7 @@
 import { Layer } from 'effect'
 import { CatalogStoreLive } from '../catalog/catalog-store.live'
 import { DeviceRegistryLive } from '../device/device-registry'
+import { GeoServiceLive } from '../geo/geo-service.live'
 import { AggregateStoreLive } from '../state/aggregate-store'
 import { EventBusLive } from '../event/event-bus'
 import { LogSinkLive } from '../log/log-sink'
@@ -13,6 +14,7 @@ const baseLayer = Layer.mergeAll(
   AggregateStoreLive,
   EventBusLive,
   DeviceRegistryLive,
+  GeoServiceLive,
   SessionManagerLive,
 )
 

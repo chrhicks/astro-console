@@ -98,6 +98,7 @@ export interface DeviceProjection {
   mountClosed?: boolean
   connectedAt?: string
   location?: { lat: number; lon: number }
+  locationSource?: 'device' | 'geoip'
   deviceTime?: DeviceTimeProjection
   deviceTimeLooksStale?: boolean
   viewMode?: string

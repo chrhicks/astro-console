@@ -63,6 +63,7 @@ export function selectSessionBarModel(state: ProjectionState) {
     tracking: status?.device.tracking,
     mountClosed: status?.device.mountClosed,
     location: status?.device.location,
+    locationSource: status?.device.locationSource,
     deviceTimeLooksStale: status?.device.deviceTimeLooksStale,
     warnings: status?.device.warnings,
   }

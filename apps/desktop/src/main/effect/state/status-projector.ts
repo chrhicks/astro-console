@@ -2,6 +2,7 @@ import { Effect, Context, Layer } from 'effect'
 import { SessionAggregate } from './aggregate'
 import {
   DesktopStatus,
+  DeviceProjection,
   LiveSessionHealthState,
   TargetSummary,
   WorkspaceAction,
@@ -12,6 +13,7 @@ import {
 } from '../../../shared/api-v2'
 import type { DeviceCapabilities } from '../device/device-plugin'
 import { AggregateStore } from './aggregate-store'
+import { GeoService } from '../geo/geo-service'
 import { SessionManager } from '../session/session-manager'
 
 export interface StatusProjector {
@@ -25,11 +27,16 @@ function project(
   aggregate: SessionAggregate,
   capabilities: DeviceCapabilities | null,
   health: LiveSessionHealthState | null,
+  effectiveLocation: { lat: number; lon: number } | null,
+  locationSource: 'device' | 'geoip' | undefined,
 ): DesktopStatus {
+  const device: DeviceProjection = effectiveLocation
+    ? { ...aggregate.device, location: effectiveLocation, locationSource }
+    : aggregate.device
   return {
     session: { ...aggregate.session, health: health ?? undefined },
     capture: aggregate.capture,
-    device: aggregate.device,
+    device,
     library: aggregate.library,
     pointing: aggregate.pointing,
     preview: aggregate.preview,
@@ -165,15 +172,26 @@ export const StatusProjectorLive = Layer.effect(
   Effect.gen(function* () {
     const store = yield* AggregateStore
     const sessions = yield* SessionManager
+    const geo = yield* GeoService
 
     return {
       snapshot: Effect.gen(function* () {
         const aggregate = yield* store.get
         const session = yield* sessions.getCurrent
+        const deviceLocation = aggregate.device.location ?? null
+        const geoLocation = deviceLocation ? null : yield* geo.lookup
+        const effectiveLocation = deviceLocation ?? geoLocation
+        const locationSource: 'device' | 'geoip' | undefined = deviceLocation
+          ? 'device'
+          : geoLocation
+            ? 'geoip'
+            : undefined
         return project(
           aggregate,
           session?.capabilities ?? null,
           session?.health ?? null,
+          effectiveLocation,
+          locationSource,
         )
       }),
     }
