@@ -34,7 +34,12 @@ function project(
     ? { ...aggregate.device, location: effectiveLocation, locationSource }
     : aggregate.device
   return {
-    session: { ...aggregate.session, health: health ?? undefined },
+    session: {
+      ...aggregate.session,
+      host: device.host,
+      productModel: device.productModel,
+      health: health ?? undefined,
+    },
     capture: aggregate.capture,
     device,
     library: aggregate.library,
@@ -188,7 +193,7 @@ export const StatusProjectorLive = Layer.effect(
             : undefined
         return project(
           aggregate,
-          session?.capabilities ?? null,
+          session?.rig.capabilities ?? null,
           session?.health ?? null,
           effectiveLocation,
           locationSource,

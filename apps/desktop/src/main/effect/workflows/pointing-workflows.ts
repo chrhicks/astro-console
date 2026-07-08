@@ -7,7 +7,6 @@ import type {
 import { computeSolarSystemCoordinates } from '../../../shared/visibility-engine'
 import { CatalogStore } from '../catalog/catalog-store'
 import { EventBus } from '../event/event-bus'
-import { fakeSeestarRuntime } from '../device/fake-seestar-runtime'
 import { SessionManager } from '../session/session-manager'
 import { AggregateStore } from '../state/aggregate-store'
 
@@ -97,24 +96,36 @@ export const runPointToTarget = (targetId: string) =>
 
     yield* setStep('Resolving coordinates')
 
+    const observerLocation = session.rig.observerLocation
+
     const coordinates = yield* resolvePointingCoordinates(
       target,
-      session.device.location,
+      observerLocation,
     ).pipe(
       Effect.catchAll((error) => failStep('Resolving coordinates', error)),
     )
 
+    const pointing = session.rig.pointing
+    if (!pointing) {
+      return yield* failStep(
+        'Preparing device for slew',
+        new Error('Connected rig does not support pointing'),
+      )
+    }
+
     // Proven Seestar pre-slew sequence: sync device time and location, then
     // stop any active view so the mount is in a clean state before slewing.
+    // The rig pointing workflow owns all readiness steps including opening
+    // the arm if the mount is parked/closed.
     yield* setStep('Preparing device for slew')
 
     yield* Effect.gen(function* () {
-      if (!session.device.location) {
+      if (!observerLocation) {
         return yield* Effect.fail(
           new Error('Need observer location before pointing'),
         )
       }
-      yield* session.prepareForPointing(session.device.location)
+      yield* pointing.prepare(observerLocation)
     }).pipe(
       Effect.catchAll((error) => guardSession('Preparing device for slew', error)),
     )
@@ -123,34 +134,11 @@ export const runPointToTarget = (targetId: string) =>
       return
     }
 
-    const preSlewRefresh = yield* session.refresh.pipe(
-      Effect.catchAll((error) => guardSession('Preparing device for slew', error)),
-    )
-
-    if ((yield* sessions.getCurrent) !== session) {
-      return
-    }
-
-    // Verified live-device sequence: open the arm first if the mount is
-    // parked/closed, then use the target-aware view path to slew, then stop
-    // the temporary view so the device stays pointed without an active view.
-    if (preSlewRefresh.device.mountClosed) {
-      yield* setStep('Opening arm')
-
-      yield* session.openArm().pipe(
-        Effect.catchAll((error) => guardSession('Opening arm', error)),
-      )
-
-      if ((yield* sessions.getCurrent) !== session) {
-        return
-      }
-    }
-
     yield* setStep('Slewing to target')
 
     yield* bus.publish('pointing.started', { targetId })
 
-    yield* session
+    yield* pointing
       .pointToCoordinates({
         mode: target.viewMode,
         targetName: summary.name,
@@ -166,8 +154,10 @@ export const runPointToTarget = (targetId: string) =>
       return
     }
 
-    const afterPoint = session.pluginKind === 'fake-seestar'
-      ? fakeSeestarRuntime.getAfterPointState()
+    // Prefer a rig-provided post-point override (e.g. fake device's
+    // scenario-driven projection); fall back to a refresh round-trip.
+    const afterPoint = pointing.afterPoint
+      ? yield* pointing.afterPoint
       : null
 
     if (afterPoint) {
@@ -181,7 +171,7 @@ export const runPointToTarget = (targetId: string) =>
         library: afterPoint.library,
       }))
     } else {
-      const refreshed = yield* session.refresh
+      const refreshed = yield* session.rig.refresh
       if ((yield* sessions.getCurrent) !== session) {
         return
       }

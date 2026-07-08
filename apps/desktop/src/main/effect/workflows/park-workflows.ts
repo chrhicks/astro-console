@@ -36,7 +36,13 @@ export const runPark = Effect.gen(function* () {
   const current = yield* store.get
 
   if (current.capture.phase === 'capturing' || current.capture.phase === 'starting') {
-    yield* session.stopCapture().pipe(
+    const capture = session.rig.capture
+    if (!capture) {
+      return yield* Effect.fail(
+        new Error('Connected rig does not support capture'),
+      )
+    }
+    yield* capture.stop().pipe(
       Effect.catchAll((error) =>
         Effect.gen(function* () {
           if ((yield* sessions.getCurrent) !== session) {
@@ -61,7 +67,13 @@ export const runPark = Effect.gen(function* () {
   }
 
   if (current.preview.phase === 'active' || current.preview.phase === 'starting') {
-    yield* session.stopPreview().pipe(
+    const preview = session.rig.preview
+    if (!preview) {
+      return yield* Effect.fail(
+        new Error('Connected rig does not support preview'),
+      )
+    }
+    yield* preview.stop().pipe(
       Effect.catchAll((error) =>
         Effect.gen(function* () {
           if ((yield* sessions.getCurrent) !== session) {
@@ -90,7 +102,14 @@ export const runPark = Effect.gen(function* () {
     if ((yield* sessions.getCurrent) !== session) return
   }
 
-  yield* session.parkArm().pipe(
+  const mount = session.rig.mount
+  if (!mount) {
+    return yield* Effect.fail(
+      new Error('Connected rig does not support mount park'),
+    )
+  }
+
+  yield* mount.park().pipe(
     Effect.catchAll((error) =>
       Effect.gen(function* () {
         if ((yield* sessions.getCurrent) !== session) {
@@ -112,7 +131,7 @@ export const runPark = Effect.gen(function* () {
 
   if ((yield* sessions.getCurrent) !== session) return
 
-  const refreshed = yield* session.refresh
+  const refreshed = yield* session.rig.refresh
 
   if ((yield* sessions.getCurrent) !== session) return
 

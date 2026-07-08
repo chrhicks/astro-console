@@ -10,7 +10,12 @@ import type {
   PreviewProjection,
   SeestarViewMode,
 } from '../../../shared/api-v2'
+import type { ConnectedRig, DeviceCapabilities, RigSessionRefresh } from '../rig/rig-model'
 import { EventBus } from '../event/event-bus'
+
+// Re-exported for compatibility. The canonical definition lives in the rig
+// model; plugin adapters and workflows should migrate to RigSessionRefresh.
+export type DeviceSessionRefresh = RigSessionRefresh
 
 export interface ConnectedDeviceSession {
   sessionId: string
@@ -24,18 +29,7 @@ export interface ConnectedDeviceSession {
   preview: PreviewProjection
   capture: CaptureProjection
   library: LibraryProjection
-}
-
-// Volatile device/preview/capture fields that change after preview/capture
-// commands. Workflows merge `device` into the existing aggregate device
-// projection; `preview` and `capture` replace the aggregate outright.
-export interface DeviceSessionRefresh {
-  device: Pick<
-    DeviceProjection,
-    'viewMode' | 'viewStage' | 'viewState' | 'tracking' | 'mountClosed'
-  >
-  preview: PreviewProjection
-  capture: CaptureProjection
+  rig: ConnectedRig
 }
 
 export interface PointToCoordinatesInput {
@@ -50,12 +44,19 @@ export interface PrepareForPointingInput {
   lon: number
 }
 
-// Authoritative background-liveness state for a live session. The keepalive
-// loop updates this; the plugin's command wrappers read it to fail fast on a
-// failed session, and the status projector surfaces it to state consumers.
-export interface LiveDeviceSession extends ConnectedDeviceSession {
+// Slim public session surface used by SessionManager and app workflows.
+// App-level code only needs metadata, projections, health, disconnect, and
+// the rig surface. Seestar-shaped command methods live on PluginSession
+// below and are only used inside plugin adapters.
+export interface DeviceSession extends ConnectedDeviceSession {
   health: LiveSessionHealthState
   disconnect: Effect.Effect<void>
+}
+
+// Plugin-internal session carrier: extends the slim public session with the
+// old Seestar-shaped command methods that plugin adapters still use to
+// compose rig workflow implementations. Not referenced by app workflows.
+export interface PluginSession extends DeviceSession {
   prepareForPointing: (
     input: PrepareForPointingInput,
   ) => Effect.Effect<void, unknown>
@@ -71,20 +72,20 @@ export interface LiveDeviceSession extends ConnectedDeviceSession {
   refresh: Effect.Effect<DeviceSessionRefresh, unknown>
 }
 
+// Deprecated alias for PluginSession. Kept for compatibility; new code
+// should use DeviceSession (public) or PluginSession (plugin-internal).
+export type LiveDeviceSession = PluginSession
+
+// Re-exported for compatibility. The canonical definition lives in the rig
+// model; app surfaces should migrate to rig.capabilities.
+export type { DeviceCapabilities }
+
 export interface DevicePlugin {
   readonly kind: DevicePluginKind
   readonly discover: Effect.Effect<DesktopDiscoveredDeviceV2[], unknown>
   readonly connect: (
     input: ConnectRequestV2,
-  ) => Effect.Effect<LiveDeviceSession, unknown, EventBus>
+  ) => Effect.Effect<DeviceSession, unknown, EventBus>
 }
 
 export const DevicePlugin = Context.GenericTag<DevicePlugin>('DevicePlugin')
-
-export interface DeviceCapabilities {
-  readonly supportsStacking: boolean      // Seestar: true, Alpaca mount: false
-  readonly supportsLivePreview: boolean   // Seestar: true, Alpaca mount: false
-  readonly supportsFilterWheel: boolean    // Seestar S30: true (3-position), others: varies
-  readonly supportsAutofocus: boolean      // Seestar: true, Alpaca mount: depends
-  readonly supportsStorageAccess: boolean   // Seestar: true, Alpaca mount: false
-}

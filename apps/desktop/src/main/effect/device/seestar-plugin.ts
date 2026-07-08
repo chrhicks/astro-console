@@ -18,11 +18,13 @@ import type {
 } from '../../../shared/api-v2'
 import type {
   DevicePlugin,
+  DeviceSession,
   DeviceSessionRefresh,
   LiveDeviceSession,
   PointToCoordinatesInput,
   PrepareForPointingInput,
 } from './device-plugin'
+import type { ConnectedRig } from '../rig/rig-model'
 import { EventBus } from '../event/event-bus.js'
 
 const SEESTAR_CAPABILITIES = {
@@ -164,6 +166,41 @@ export function createSeestarPlugin(): DevicePlugin {
         // Last view mode used by pointing; startCapture restarts a view with
         // this mode so stacking begins without re-slewing to the target.
         let lastViewMode: SeestarViewMode = 'star'
+
+        // Connect-time warnings. Refresh filters out the "parked/closed"
+        // warning from this set once the mount is no longer closed, so the
+        // projection does not keep showing a stale parked warning after the
+        // arm opens.
+        let initialWarnings: string[] = []
+
+        const delay = (ms: number) =>
+          new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+        // Reads the mount sub-object from getDeviceState for convergence
+        // checks. Returns close and move_type so callers can decide whether
+        // the mount has reached the expected state.
+        const readMountState = async (): Promise<{
+          close: boolean | undefined
+          moveType: string | undefined
+        }> => {
+          const state = await device.getDeviceState(['mount'])
+          const mount =
+            state &&
+            typeof state.mount === 'object' &&
+            state.mount !== null
+              ? (state.mount as Record<string, unknown>)
+              : undefined
+          return {
+            close:
+              mount && typeof mount.close === 'boolean'
+                ? mount.close
+                : undefined,
+            moveType:
+              mount && typeof mount.move_type === 'string'
+                ? mount.move_type
+                : undefined,
+          }
+        }
 
         let keepaliveHandle: ReturnType<typeof setTimeout> | undefined
         let keepaliveStopped = false
@@ -345,7 +382,9 @@ export function createSeestarPlugin(): DevicePlugin {
 
           scheduleKeepalive()
 
-          return {
+          initialWarnings = summary.warnings
+
+          const session = {
             sessionId,
             pluginKind: 'seestar',
             deviceId: target.deviceId,
@@ -376,7 +415,7 @@ export function createSeestarPlugin(): DevicePlugin {
                     device.getDeviceState(),
                     device.getViewState(),
                   ])
-                  if (mapSeestarRefresh(deviceState, viewState).preview.active) {
+                  if (mapSeestarRefresh(deviceState, viewState, initialWarnings).preview.active) {
                     const stopOk = await device.stopView(undefined, {
                       waitForCompletion: true,
                       timeoutMs: 30000,
@@ -395,14 +434,37 @@ export function createSeestarPlugin(): DevicePlugin {
             openArm: () =>
               guardHealth(Effect.tryPromise({
                 try: async () => {
-                  const ok = await device.moveToHorizon({
-                    waitForCompletion: true,
-                    timeoutMs: 60000,
-                    pollIntervalMs: 500,
-                  })
-                  if (!ok) {
-                    throw new Error('Device rejected move-to-horizon request')
+                  // moveToHorizon already waits for mount convergence
+                  // internally, but can return false or throw on a
+                  // timeout-ish push event. Re-command toward the open
+                  // state and treat success as reaching mount.close ===
+                  // false with move_type === 'none', not merely a true
+                  // return value.
+                  for (let attempt = 1; attempt <= 3; attempt += 1) {
+                    let ok = false
+                    try {
+                      ok = await device.moveToHorizon({
+                        waitForCompletion: true,
+                        timeoutMs: 60000,
+                        pollIntervalMs: 500,
+                      })
+                    } catch {
+                      ok = false
+                    }
+                    if (ok) {
+                      const { close, moveType } = await readMountState()
+                      if (close === false && moveType === 'none') return
+                    }
+                    if (attempt < 3) {
+                      await delay(2000)
+                    }
                   }
+                  // Final convergence check after the last attempt.
+                  const { close, moveType } = await readMountState()
+                  if (close === false && moveType === 'none') return
+                  throw new Error(
+                    `Mount did not converge to open state (close=${close}, move_type=${moveType})`,
+                  )
                 },
                 catch: (error) =>
                   new Error(
@@ -412,12 +474,32 @@ export function createSeestarPlugin(): DevicePlugin {
             parkArm: () =>
               guardHealth(Effect.tryPromise({
                 try: async () => {
-                  const ok = await device.park({
-                    waitForCompletion: true,
-                    timeoutMs: 60000,
-                    pollIntervalMs: 500,
-                  })
-                  if (!ok) {
+                  // park() can return false or throw on a timeout-ish push
+                  // event even when the mount actually ended up closed.
+                  // Re-command toward the closed state and treat success as
+                  // reaching mount.close === true, not merely a true return
+                  // value. Mirrors the SDK's private parkWithRetries pattern.
+                  for (let attempt = 1; attempt <= 3; attempt += 1) {
+                    let ok = false
+                    try {
+                      ok = await device.park({
+                        waitForCompletion: true,
+                        timeoutMs: 60000,
+                        pollIntervalMs: 500,
+                      })
+                    } catch {
+                      ok = false
+                    }
+                    if (ok) return
+                    const { close } = await readMountState()
+                    if (close === true) return
+                    if (attempt < 3) {
+                      await delay(2000)
+                    }
+                  }
+                  // Final convergence check after the last attempt.
+                  const { close } = await readMountState()
+                  if (close !== true) {
                     throw new Error('Device rejected park request')
                   }
                 },
@@ -464,7 +546,12 @@ export function createSeestarPlugin(): DevicePlugin {
             startPreview: () =>
               guardHealth(Effect.tryPromise({
                 try: async () => {
-                  const ok = await device.startView('scenery', undefined, {
+                  // Use the last target-appropriate view mode (set by
+                  // pointToCoordinates) so the preview->capture handoff can
+                  // stack. Hardcoding 'scenery' broke stacking after a DSO
+                  // point because startCapture expects a stackable star-mode
+                  // view to already be active.
+                  const ok = await device.startView(lastViewMode, undefined, {
                     waitForCompletion: true,
                     timeoutMs: 30000,
                     pollIntervalMs: 500,
@@ -498,15 +585,34 @@ export function createSeestarPlugin(): DevicePlugin {
             startCapture: () =>
               guardHealth(Effect.tryPromise({
                 try: async () => {
-                  // Stacking requires an active view. After pointing the view
-                  // is stopped, so restart it with the last target's view mode
-                  // before stacking. No target_ra_dec is sent, so the mount
-                  // stays at its current position instead of re-slewing.
+                  // Stacking requires an active view in a stackable mode
+                  // (star/moon/sun/planet). After pointing the view is
+                  // stopped; after preview it may be in the right mode or
+                  // may have been left in a non-stackable state. Normalize:
+                  // if no view is active, or the active view is in the wrong
+                  // mode, (re)start it with the last target mode before
+                  // stacking. No target_ra_dec is sent, so the mount stays
+                  // at its current position instead of re-slewing.
                   const [deviceState, viewState] = await Promise.all([
                     device.getDeviceState(),
                     device.getViewState(),
                   ])
-                  if (!mapSeestarRefresh(deviceState, viewState).preview.active) {
+                  const refresh = mapSeestarRefresh(deviceState, viewState, initialWarnings)
+                  const needsViewRestart =
+                    !refresh.preview.active ||
+                    (refresh.device.viewMode !== undefined &&
+                      refresh.device.viewMode !== lastViewMode)
+                  if (needsViewRestart) {
+                    if (refresh.preview.active) {
+                      const stopOk = await device.stopView(undefined, {
+                        waitForCompletion: true,
+                        timeoutMs: 30000,
+                        pollIntervalMs: 500,
+                      })
+                      if (!stopOk) {
+                        throw new Error('Device rejected stop-view request before stacking')
+                      }
+                    }
                     const viewOk = await device.startView(lastViewMode, undefined, {
                       waitForCompletion: true,
                       timeoutMs: 30000,
@@ -553,7 +659,7 @@ export function createSeestarPlugin(): DevicePlugin {
                   device.getDeviceState(),
                   device.getViewState(),
                 ])
-                return mapSeestarRefresh(deviceState, viewState)
+                return mapSeestarRefresh(deviceState, viewState, initialWarnings)
               },
               catch: (error) =>
                 new Error(
@@ -587,7 +693,70 @@ export function createSeestarPlugin(): DevicePlugin {
             preview: { phase: 'none', source: 'none', active: false },
             capture: { phase: 'idle' },
             library: { scope: 'current_target', assets: [], polling: false },
-          } satisfies LiveDeviceSession
+          } satisfies Omit<LiveDeviceSession, 'rig'>
+
+          // Seestar's slew/imaging are view-based orchestration, not direct
+          // component commands, so generic camera/focuser/filterWheel/storage
+          // are not exposed on the rig. Parking is a real mount capability,
+          // so mount is populated with park only; direct slew/stop stay
+          // omitted (they surface via the pointing workflow instead). A
+          // future Alpaca rig would populate the generic component slots
+          // and mount.slewToCoordinates/stopMotion directly.
+          const rig: ConnectedRig = {
+            identity: {
+              rigId: target.deviceId,
+              pluginKind: 'seestar',
+              displayName: target.displayName,
+              host,
+            },
+            connection: { disconnect: session.disconnect },
+            observerLocation: summary.location,
+            capabilities: SEESTAR_CAPABILITIES,
+            connect: {
+              device: session.device,
+              preview: session.preview,
+              capture: session.capture,
+              library: session.library,
+            },
+            refresh: session.refresh,
+            mount: {
+              park: () => session.parkArm(),
+            },
+            pointing: {
+              // prepare owns all readiness steps before slewing: sync time
+              // and location, stop any active view, and open the arm if the
+              // mount is parked/closed. The app-level pointing workflow no
+              // longer calls session.openArm() directly.
+              prepare: (input) =>
+                session.prepareForPointing(input).pipe(
+                  Effect.zipRight(session.refresh),
+                  Effect.flatMap((refreshed) =>
+                    refreshed.device.mountClosed
+                      ? session.openArm()
+                      : Effect.void,
+                  ),
+                ),
+              // Boundary cast: the rig model keeps mode generic (string) while
+              // the Seestar session requires its narrower SeestarViewMode union.
+              pointToCoordinates: (input) =>
+                session.pointToCoordinates({
+                  mode: input.mode as SeestarViewMode,
+                  targetName: input.targetName,
+                  raHours: input.raHours,
+                  decDeg: input.decDeg,
+                }),
+            },
+            preview: {
+              start: () => session.startPreview(),
+              stop: () => session.stopPreview(),
+            },
+            capture: {
+              start: () => session.startCapture(),
+              stop: () => session.stopCapture(),
+            },
+          }
+
+          return { ...session, rig } satisfies DeviceSession
         }).pipe(
           Effect.catchAll((error) =>
             Effect.sync(() => {
@@ -608,6 +777,7 @@ function toErrorMessage(error: unknown): string {
 function mapSeestarRefresh(
   deviceState: DeviceState | null,
   viewState: ViewStateResult | null,
+  initialWarnings: string[],
 ): DeviceSessionRefresh {
   const mount =
     deviceState &&
@@ -628,8 +798,15 @@ function mapSeestarRefresh(
   const viewActive =
     Boolean(viewMode) && viewMode !== 'none' && viewStateName !== 'cancel'
   const stacking = viewStage === 'Stack' && viewStateName !== 'cancel'
+  // Drop the connect-time "parked/closed" warning once the mount is no
+  // longer closed. Other connect-time warnings (stale clock, low battery,
+  // etc.) are preserved; only the mount-state warning is volatile.
+  const warnings =
+    mountClosed === false
+      ? initialWarnings.filter((w) => w !== 'Mount is currently parked/closed')
+      : initialWarnings
   return {
-    device: { viewMode, viewStage, viewState: viewStateName, tracking, mountClosed },
+    device: { viewMode, viewStage, viewState: viewStateName, tracking, mountClosed, warnings },
     preview: viewActive
       ? { phase: 'active', source: 'rtsp', active: true }
       : { phase: 'none', source: 'none', active: false },

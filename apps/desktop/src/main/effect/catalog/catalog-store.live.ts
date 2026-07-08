@@ -34,10 +34,10 @@ export const CatalogStoreLive = Layer.effect(
       browse: (query) =>
         Effect.gen(function* () {
           const session = yield* sessions.getCurrent
-          const location = session?.device.location ?? null
+          const location = session?.rig.observerLocation ?? null
           const search = query.search?.trim() ?? ''
           const hasSearch = search.length > 0
-          const capabilities = session?.capabilities ?? null
+          const capabilities = session?.rig.capabilities ?? null
           const deepSkyTargets = filterDeepSkyTargets(
             hasSearch
               ? searchCatalog(deepSkyIndex, DEEP_SKY_TARGETS, search)
@@ -86,7 +86,7 @@ export const CatalogStoreLive = Layer.effect(
       getSummaryById: (targetId) =>
         Effect.gen(function* () {
           const session = yield* sessions.getCurrent
-          const capabilities = session?.capabilities ?? null
+          const capabilities = session?.rig.capabilities ?? null
           const target = deepSkyById.get(targetId) ?? solarById.get(targetId)
           if (!target) return null
           return toTargetSummary(target, capabilities, undefined)

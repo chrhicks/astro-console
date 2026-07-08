@@ -100,17 +100,15 @@ export const runConnect = (input: ConnectRequestV2) =>
             session: {
               ...current.session,
               phase: 'connected',
-              host: connected.host,
-              productModel: connected.productModel,
               discovering: false,
               lastError: undefined,
             },
             pointing: { phase: 'idle', target: null },
             currentTarget: null,
-            device: connected.device,
-            preview: connected.preview,
-            capture: connected.capture,
-            library: connected.library,
+            device: connected.rig.connect.device,
+            preview: connected.rig.connect.preview,
+            capture: connected.rig.connect.capture,
+            library: connected.rig.connect.library,
           }))
 
           yield* bus.publish(
@@ -121,7 +119,7 @@ export const runConnect = (input: ConnectRequestV2) =>
             },
             {
               sessionId: connected.sessionId,
-              host: connected.host,
+              host: connected.rig.identity.host,
             },
           )
         }),
@@ -177,7 +175,7 @@ export const runDisconnect = Effect.gen(function* () {
   yield* bus.publish(
     'session.disconnect.started',
     {},
-    current ? { sessionId: current.sessionId, host: current.host } : undefined,
+    current ? { sessionId: current.sessionId, host: current.rig.identity.host } : undefined,
   )
 
   return yield* Effect.gen(function* () {
@@ -192,8 +190,6 @@ export const runDisconnect = Effect.gen(function* () {
         ...aggregate.session,
         phase: 'disconnected',
         discovering: false,
-        host: undefined,
-        productModel: undefined,
         lastError: undefined,
       },
       pointing: { phase: 'idle', target: null },
@@ -208,7 +204,7 @@ export const runDisconnect = Effect.gen(function* () {
       'session.disconnect.succeeded',
       {},
       current
-        ? { sessionId: current.sessionId, host: current.host }
+        ? { sessionId: current.sessionId, host: current.rig.identity.host }
         : undefined,
     )
   }).pipe(
@@ -238,7 +234,7 @@ export const runDisconnect = Effect.gen(function* () {
           'session.disconnect.failed',
           { error: message },
           current
-            ? { sessionId: current.sessionId, host: current.host }
+            ? { sessionId: current.sessionId, host: current.rig.identity.host }
             : undefined,
         )
 

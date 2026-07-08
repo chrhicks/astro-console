@@ -18,6 +18,13 @@ export const runStartCapture = Effect.gen(function* () {
     return
   }
 
+  const capture = session.rig.capture
+  if (!capture) {
+    return yield* Effect.fail(
+      new Error('Connected rig does not support capture'),
+    )
+  }
+
   yield* store.update((current) => ({
     ...current,
     capture: { phase: 'starting' },
@@ -25,7 +32,7 @@ export const runStartCapture = Effect.gen(function* () {
 
   yield* bus.publish('capture.started', {})
 
-  yield* session.startCapture().pipe(
+  yield* capture.start().pipe(
     Effect.catchAll((error) =>
       Effect.gen(function* () {
         // Session replaced or cleared mid-capture; the new state owns the aggregate.
@@ -48,7 +55,7 @@ export const runStartCapture = Effect.gen(function* () {
     return
   }
 
-  const refreshed = yield* session.refresh
+  const refreshed = yield* session.rig.refresh
 
   // Session replaced or cleared mid-refresh; the new state owns the aggregate.
   if ((yield* sessions.getCurrent) !== session) {
@@ -80,7 +87,14 @@ export const runStopCapture = Effect.gen(function* () {
     return
   }
 
-  yield* session.stopCapture().pipe(
+  const capture = session.rig.capture
+  if (!capture) {
+    return yield* Effect.fail(
+      new Error('Connected rig does not support capture'),
+    )
+  }
+
+  yield* capture.stop().pipe(
     Effect.catchAll((error) =>
       Effect.gen(function* () {
         if ((yield* sessions.getCurrent) !== session) {
@@ -101,7 +115,7 @@ export const runStopCapture = Effect.gen(function* () {
     return
   }
 
-  const refreshed = yield* session.refresh
+  const refreshed = yield* session.rig.refresh
 
   if ((yield* sessions.getCurrent) !== session) {
     return

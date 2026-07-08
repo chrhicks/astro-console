@@ -23,6 +23,13 @@ export const runStartPreview = Effect.gen(function* () {
     return
   }
 
+  const preview = session.rig.preview
+  if (!preview) {
+    return yield* Effect.fail(
+      new Error('Connected rig does not support preview'),
+    )
+  }
+
   yield* store.update((current) => ({
     ...current,
     preview: { phase: 'starting', source: 'none', active: false },
@@ -30,7 +37,7 @@ export const runStartPreview = Effect.gen(function* () {
 
   yield* bus.publish('preview.started', {})
 
-  yield* session.startPreview().pipe(
+  yield* preview.start().pipe(
     Effect.catchAll((error) =>
       Effect.gen(function* () {
         // Session replaced or cleared mid-preview; the new state owns the aggregate.
@@ -58,7 +65,7 @@ export const runStartPreview = Effect.gen(function* () {
     return
   }
 
-  const refreshed = yield* session.refresh
+  const refreshed = yield* session.rig.refresh
 
   // Session replaced or cleared mid-refresh; the new state owns the aggregate.
   if ((yield* sessions.getCurrent) !== session) {
@@ -90,7 +97,14 @@ export const runStopPreview = Effect.gen(function* () {
     return
   }
 
-  yield* session.stopPreview().pipe(
+  const preview = session.rig.preview
+  if (!preview) {
+    return yield* Effect.fail(
+      new Error('Connected rig does not support preview'),
+    )
+  }
+
+  yield* preview.stop().pipe(
     Effect.catchAll((error) =>
       Effect.gen(function* () {
         if ((yield* sessions.getCurrent) !== session) {
@@ -116,7 +130,7 @@ export const runStopPreview = Effect.gen(function* () {
     return
   }
 
-  const refreshed = yield* session.refresh
+  const refreshed = yield* session.rig.refresh
 
   if ((yield* sessions.getCurrent) !== session) {
     return

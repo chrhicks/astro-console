@@ -1,9 +1,9 @@
 import { Effect, Context } from 'effect'
-import type { LiveDeviceSession } from '../device/device-plugin'
+import type { DeviceSession } from '../device/device-plugin'
 
 export interface SessionManager {
-  readonly getCurrent: Effect.Effect<LiveDeviceSession | null>
-  readonly setCurrent: (session: LiveDeviceSession) => Effect.Effect<void>
+  readonly getCurrent: Effect.Effect<DeviceSession | null>
+  readonly setCurrent: (session: DeviceSession) => Effect.Effect<void>
   readonly clearCurrent: Effect.Effect<void>
 }
 

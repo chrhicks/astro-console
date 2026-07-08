@@ -2,13 +2,16 @@ import { Effect } from 'effect'
 import type {
   DesktopDiscoveredDeviceV2,
   ConnectRequestV2,
+  SeestarViewMode,
 } from '../../../shared/api-v2'
 import type {
   DevicePlugin,
+  DeviceSession,
   LiveDeviceSession,
   PointToCoordinatesInput,
   PrepareForPointingInput,
 } from './device-plugin'
+import type { ConnectedRig } from '../rig/rig-model'
 import {
   fakeSeestarRuntime,
   type FakeScenarioAfterPoint,
@@ -57,7 +60,7 @@ export function createFakeSeestarPlugin(): DevicePlugin {
         let previewActive = false
         let captureActive = false
         let parked = false
-        return {
+        const session = {
           sessionId: crypto.randomUUID(),
           pluginKind: 'fake-seestar',
           deviceId,
@@ -129,7 +132,65 @@ export function createFakeSeestarPlugin(): DevicePlugin {
           preview: connected.preview,
           capture: connected.capture,
           library: connected.library,
-        } satisfies LiveDeviceSession
+        } satisfies Omit<LiveDeviceSession, 'rig'>
+
+        const rig: ConnectedRig = {
+          identity: {
+            rigId: deviceId,
+            pluginKind: 'fake-seestar',
+            displayName: outcome.device.displayName ?? 'Seestar (fake)',
+            host: outcome.device.host,
+          },
+          connection: { disconnect: session.disconnect },
+          observerLocation: outcome.device.location,
+          capabilities: FAKE_CAPABILITIES,
+          connect: {
+            device: outcome.device,
+            preview: connected.preview,
+            capture: connected.capture,
+            library: connected.library,
+          },
+          refresh: session.refresh,
+          mount: {
+            park: () => session.parkArm(),
+          },
+          pointing: {
+            // prepare owns all readiness steps before slewing: sync time
+            // and location, stop any active view, and open the arm if the
+            // mount is parked/closed. The app-level pointing workflow no
+            // longer calls session.openArm() directly.
+            prepare: (input) =>
+              session.prepareForPointing(input).pipe(
+                Effect.zipRight(session.refresh),
+                Effect.flatMap((refreshed) =>
+                  refreshed.device.mountClosed
+                    ? session.openArm()
+                    : Effect.void,
+                ),
+              ),
+            pointToCoordinates: (input) =>
+              session.pointToCoordinates({
+                mode: input.mode as SeestarViewMode,
+                targetName: input.targetName,
+                raHours: input.raHours,
+                decDeg: input.decDeg,
+              }),
+            // The fake device surfaces deterministic post-point projection
+            // state from the active scenario so the workflow does not need
+            // to check pluginKind or reach into the fake runtime directly.
+            afterPoint: Effect.sync(() => fakeSeestarRuntime.getAfterPointState()),
+          },
+          preview: {
+            start: () => session.startPreview(),
+            stop: () => session.stopPreview(),
+          },
+          capture: {
+            start: () => session.startCapture(),
+            stop: () => session.stopCapture(),
+          },
+        }
+
+        return { ...session, rig } satisfies DeviceSession
       }),
   }
 }

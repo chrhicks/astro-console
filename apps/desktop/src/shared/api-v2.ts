@@ -168,7 +168,7 @@ export interface DesktopStatus {
   lastError?: string
 }
 
-export type DevicePluginKind = 'fake-seestar' | 'seestar'
+export type DevicePluginKind = 'fake-seestar' | 'seestar' | 'alpaca-rig'
 
 export interface DesktopDiscoveredDeviceV2 {
   pluginKind: DevicePluginKind

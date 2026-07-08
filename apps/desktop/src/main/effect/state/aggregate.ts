@@ -9,10 +9,10 @@ import {
 } from '../../../shared/api-v2'
 
 export interface SessionAggregate {
+  // host/productModel are derived from the device projection in the status
+  // projector; the aggregate does not duplicate rig/device identity metadata.
   session: {
     phase: 'disconnected' | 'connecting' | 'connected' | 'disconnecting'
-    host?: string
-    productModel?: string
     discovering: boolean
     lastError?: string
   }
