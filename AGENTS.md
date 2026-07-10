@@ -59,6 +59,8 @@ If `glm-coder` is unavailable or blocked, proceed directly only when necessary a
 
 Run `npm run dev:inspect` from `apps/desktop` to start the same dev stack as `npm run dev` with Electron's remote debugging port exposed on `9222`. The script sets `ELECTRON_INSPECT_PORT=9222`, which the main process forwards to Chromium via `app.commandLine.appendSwitch('remote-debugging-port', ...)` before `app.whenReady()`. The port is opt-in; `npm run dev` does not expose it.
 
+Both `dev` and `dev:inspect` launch Electron through `scripts/dev-electron.ts`, which waits for `dist/main`, the SDK dist, and the Vite dev server before starting Electron, then restarts Electron automatically whenever the built main-process or SDK dist changes. Renderer-only changes still rely on Vite HMR. Prefer `dev:inspect` for validation so UI checks always run against the latest main-process build instead of stale cached modules.
+
 Use `agent-browser` against the running Electron renderer like this:
 
 - `curl http://127.0.0.1:9222/json/list` — get the renderer target and copy its `webSocketDebuggerUrl`
