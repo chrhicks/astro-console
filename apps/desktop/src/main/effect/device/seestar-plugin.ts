@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { Effect, Ref, Schema } from 'effect'
+import { Effect, Exit, Ref, Schema } from 'effect'
 import {
   resolveSeestarPemPath,
   SeestarDevice,
@@ -127,167 +127,31 @@ export function createSeestarPlugin(): DevicePlugin {
           logger: createConsoleLogger('debug'),
         })
 
-        yield* bus.publish('session.connect.step.started', {
-          step: 'device.connect',
-          host,
-          deviceId: input.deviceId,
-        })
+        // Resource-safety flag: set to true only when the session is
+        // successfully returned. The release finalizer checks this flag; on
+        // success it is a no-op (ownership transferred to the session's
+        // disconnect). On failure/interruption it runs terminal cleanup.
+        let sessionOwned = false
 
-        yield* Effect.tryPromise({
-          try: () => device.connect(),
-          catch: (error) =>
-            new Error(
-              `device.connect failed for ${host}: ${toErrorMessage(error)}`,
-            ),
-        }).pipe(
-          Effect.catchAll((error) =>
-            bus
-              .publish('session.connect.step.failed', {
-                step: 'device.connect',
-                host,
-                deviceId: input.deviceId,
-                error: toErrorMessage(error),
-              })
-              .pipe(Effect.zipRight(Effect.fail(error))),
-          ),
-        )
-
-        yield* bus.publish('session.connect.step.succeeded', {
-          step: 'device.connect',
-          host,
-          deviceId: target.deviceId,
-        })
-
-        const sessionId = crypto.randomUUID()
-
-        const health: LiveSessionHealthState = {
-          state: 'healthy',
-          lastCheckedAt: new Date().toISOString(),
-        }
-
-        // Last view mode used by pointing; startCapture restarts a view with
-        // this mode so stacking begins without re-slewing to the target.
-        let lastViewMode: SeestarViewMode = 'star'
-
-        // Connect-time warnings. Refresh filters out the "parked/closed"
-        // warning from this set once the mount is no longer closed, so the
-        // projection does not keep showing a stale parked warning after the
-        // arm opens.
-        let initialWarnings: string[] = []
-
-        const delay = (ms: number) =>
-          new Promise<void>((resolve) => setTimeout(resolve, ms))
-
-        // Reads the mount sub-object from getDeviceState for convergence
-        // checks. Returns close and move_type so callers can decide whether
-        // the mount has reached the expected state.
-        const readMountState = async (): Promise<{
-          close: boolean | undefined
-          moveType: string | undefined
-        }> => {
-          const state = await device.getDeviceState(['mount'])
-          const mount = state ? decodeMountState(state.mount) : undefined
-          return {
-            close: mount?.close,
-            moveType: mount?.move_type,
-          }
-        }
-
+        // Keepalive and listener state — shared between the use phase and the
+        // release finalizer. Declared before acquireUseRelease so both scopes
+        // can reference them.
         let keepaliveHandle: ReturnType<typeof setTimeout> | undefined
         let keepaliveStopped = false
+        let keepaliveInFlight: Promise<void> | undefined
 
-        const stopKeepalive = () => {
+        const stopKeepalive = async (): Promise<void> => {
           keepaliveStopped = true
           if (keepaliveHandle !== undefined) {
             clearTimeout(keepaliveHandle)
             keepaliveHandle = undefined
           }
-        }
-
-        const scheduleKeepalive = () => {
-          if (keepaliveStopped) return
-          keepaliveHandle = setTimeout(() => {
-            void runKeepalive()
-          }, 3000)
-        }
-
-        const runKeepalive = async () => {
-          keepaliveHandle = undefined
-          try {
-            try {
-              await device.testConnection()
-              health.state = 'healthy'
-              health.lastCheckedAt = new Date().toISOString()
-              health.lastError = undefined
-              return
-            } catch {
-              if (keepaliveStopped) return
-            }
-
-            health.state = 'stale'
-            health.lastCheckedAt = new Date().toISOString()
-
-            Effect.runFork(
-              bus.publish(
-                'session.keepalive.stale',
-                { deviceId: target.deviceId, host },
-                { sessionId, host },
-              ),
-            )
-            try {
-              health.state = 'recovering'
-              const recovered = await device.connectAndAuth()
-              if (recovered) {
-                health.state = 'healthy'
-                health.lastCheckedAt = new Date().toISOString()
-                health.lastError = undefined
-                Effect.runFork(
-                  bus.publish(
-                    'session.keepalive.recovered',
-                    { deviceId: target.deviceId, host },
-                    { sessionId, host },
-                  ),
-                )
-              } else {
-                health.state = 'failed'
-                health.lastError = 'Authentication failed after reconnect'
-                Effect.runFork(
-                  bus.publish(
-                    'session.keepalive.failed',
-                    {
-                      deviceId: target.deviceId,
-                      host,
-                      error: 'Authentication failed after reconnect',
-                    },
-                    { sessionId, host },
-                  ),
-                )
-              }
-            } catch (error) {
-              health.state = 'failed'
-              health.lastError = toErrorMessage(error)
-              Effect.runFork(
-                bus.publish(
-                  'session.keepalive.failed',
-                  {
-                    deviceId: target.deviceId,
-                    host,
-                    error: toErrorMessage(error),
-                  },
-                  { sessionId, host },
-                ),
-              )
-            }
-          } finally {
-            scheduleKeepalive()
+          device.disconnect()
+          if (keepaliveInFlight) {
+            await keepaliveInFlight.catch(() => {})
           }
         }
 
-        // Native stacking can fail after startStack has already succeeded
-        // (e.g. over-exposure or autofocus-related errors). The SDK's wait
-        // only covers the start window; later Stack push failures would go
-        // unsurfaced without this listener. The plugin publishes an app event
-        // and a boot-time monitor turns it into capture.failed state.
         let unsubscribeStackEvents: (() => void) | undefined
 
         const stopStackEventListener = () => {
@@ -297,120 +161,276 @@ export function createSeestarPlugin(): DevicePlugin {
           }
         }
 
-        // Foreground commands consult the keepalive-maintained health state
-        // before issuing device commands. A failed session fails fast with a
-        // useful error; healthy/stale/recovering sessions proceed normally.
-        const guardHealth = <A, E>(
-          run: Effect.Effect<A, E>,
-        ): Effect.Effect<A, E | Error> =>
-          Effect.gen(function* () {
-            if (health.state === 'failed') {
-              return yield* Effect.fail(
-                new Error(
-                  `Session is failed: ${health.lastError ?? 'unknown error'}`,
+        // Terminal cleanup used by both the release finalizer (on failure) and
+        // the session's disconnect (on success). Idempotent: safe to call
+        // multiple times because stopKeepalive sets keepaliveStopped and
+        // stopStackEventListener clears its reference.
+        const terminalCleanup = Effect.promise(async () => {
+          await stopKeepalive()
+          stopStackEventListener()
+        })
+
+        return yield* Effect.acquireUseRelease(
+          // Acquire: non-failing. Just enters the supervised scope so the
+          // release finalizer is registered before any network work begins.
+          Effect.void,
+          // Use: device.connect, authenticate, preflight, keepalive/listener
+          // setup, session construction. On success, sets sessionOwned = true
+          // so the release is a no-op.
+          () =>
+            Effect.gen(function* () {
+              yield* bus.publish('session.connect.step.started', {
+                step: 'device.connect',
+                host,
+                deviceId: input.deviceId,
+              })
+
+              yield* Effect.tryPromise({
+                try: () => device.connect(),
+                catch: (error) =>
+                  new Error(
+                    `device.connect failed for ${host}: ${toErrorMessage(error)}`,
+                  ),
+              }).pipe(
+                Effect.catchAll((error) =>
+                  bus
+                    .publish('session.connect.step.failed', {
+                      step: 'device.connect',
+                      host,
+                      deviceId: input.deviceId,
+                      error: toErrorMessage(error),
+                    })
+                    .pipe(Effect.zipRight(Effect.fail(error))),
                 ),
               )
-            }
-            return yield* run
-          })
 
-        return yield* Effect.gen(function* () {
-          yield* bus.publish('session.authenticate.step.started', {
-            step: 'device.authenticate',
-            host,
-            deviceId: input.deviceId,
-          })
+              yield* bus.publish('session.connect.step.succeeded', {
+                step: 'device.connect',
+                host,
+                deviceId: target.deviceId,
+              })
 
-          const authenticated = yield* Effect.tryPromise({
-            try: () => device.authenticate(),
-            catch: (error) =>
-              new Error(
-                `device.authenticate failed for ${host}: ${toErrorMessage(error)}`,
-              ),
-          }).pipe(
-            Effect.catchAll((error) =>
-              bus
-                .publish('session.authenticate.step.failed', {
-                  step: 'device.authenticate',
-                  host,
-                  deviceId: input.deviceId,
-                  error: toErrorMessage(error),
+              const sessionId = crypto.randomUUID()
+
+              const health: LiveSessionHealthState = {
+                state: 'healthy',
+                lastCheckedAt: new Date().toISOString(),
+              }
+
+              let lastViewMode: SeestarViewMode = 'star'
+              let initialWarnings: string[] = []
+
+              const delay = (ms: number) =>
+                new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+              const readMountState = async (): Promise<{
+                close: boolean | undefined
+                moveType: string | undefined
+              }> => {
+                const state = await device.getDeviceState(['mount'])
+                const mount = state ? decodeMountState(state.mount) : undefined
+                return {
+                  close: mount?.close,
+                  moveType: mount?.move_type,
+                }
+              }
+
+              const scheduleKeepalive = () => {
+                if (keepaliveStopped) return
+                keepaliveHandle = setTimeout(() => {
+                  void runKeepalive()
+                }, 3000)
+              }
+
+              const runKeepalive = async () => {
+                keepaliveHandle = undefined
+                if (keepaliveStopped) return
+                keepaliveInFlight = (async () => {
+                  try {
+                    try {
+                      await device.testConnection()
+                      if (keepaliveStopped) return
+                      health.state = 'healthy'
+                      health.lastCheckedAt = new Date().toISOString()
+                      health.lastError = undefined
+                      return
+                    } catch {
+                      if (keepaliveStopped) return
+                    }
+
+                    health.state = 'stale'
+                    health.lastCheckedAt = new Date().toISOString()
+
+                    Effect.runFork(
+                      bus.publish(
+                        'session.keepalive.stale',
+                        { deviceId: target.deviceId, host },
+                        { sessionId, host },
+                      ),
+                    )
+                    try {
+                      health.state = 'recovering'
+                      const recovered = await device.connectAndAuth()
+                      if (keepaliveStopped) return
+                      if (recovered) {
+                        health.state = 'healthy'
+                        health.lastCheckedAt = new Date().toISOString()
+                        health.lastError = undefined
+                        Effect.runFork(
+                          bus.publish(
+                            'session.keepalive.recovered',
+                            { deviceId: target.deviceId, host },
+                            { sessionId, host },
+                          ),
+                        )
+                      } else {
+                        health.state = 'failed'
+                        health.lastError = 'Authentication failed after reconnect'
+                        Effect.runFork(
+                          bus.publish(
+                            'session.keepalive.failed',
+                            {
+                              deviceId: target.deviceId,
+                              host,
+                              error: 'Authentication failed after reconnect',
+                            },
+                            { sessionId, host },
+                          ),
+                        )
+                      }
+                    } catch (error) {
+                      if (keepaliveStopped) return
+                      health.state = 'failed'
+                      health.lastError = toErrorMessage(error)
+                      Effect.runFork(
+                        bus.publish(
+                          'session.keepalive.failed',
+                          {
+                            deviceId: target.deviceId,
+                            host,
+                            error: toErrorMessage(error),
+                          },
+                          { sessionId, host },
+                        ),
+                      )
+                    }
+                  } finally {
+                    if (!keepaliveStopped) {
+                      scheduleKeepalive()
+                    }
+                  }
+                })()
+                await keepaliveInFlight
+              }
+
+              const guardHealth = <A, E>(
+                run: Effect.Effect<A, E>,
+              ): Effect.Effect<A, E | Error> =>
+                Effect.gen(function* () {
+                  if (health.state === 'failed') {
+                    return yield* Effect.fail(
+                      new Error(
+                        `Session is failed: ${health.lastError ?? 'unknown error'}`,
+                      ),
+                    )
+                  }
+                  return yield* run
                 })
-                .pipe(Effect.zipRight(Effect.fail(error))),
-            ),
-          )
 
-          yield* bus.publish('session.authenticate.step.succeeded', {
-            step: 'device.authenticate',
-            host,
-            deviceId: target.deviceId,
-          })
+              yield* bus.publish('session.authenticate.step.started', {
+                step: 'device.authenticate',
+                host,
+                deviceId: input.deviceId,
+              })
 
-          if (!authenticated) {
-            return yield* Effect.fail(
-              new Error(
-                'Authentication failed. Verify the PEM key and device firmware.',
-              ),
-            )
-          }
-
-          yield* bus.publish('session.preflightCheck.step.started', {
-            step: 'device.preflightCheck',
-            host,
-            deviceId: input.deviceId,
-          })
-
-          const summary = yield* Effect.tryPromise({
-            try: () => device.preflightCheck(),
-            catch: (error) =>
-              new Error(
-                `device.preflightCheck failed for ${host}: ${toErrorMessage(error)}`,
-              ),
-          }).pipe(
-            Effect.catchAll((error) =>
-              bus
-                .publish('session.preflightCheck.step.failed', {
-                  step: 'device.preflightCheck',
-                  host,
-                  deviceId: input.deviceId,
-                  error: toErrorMessage(error),
-                })
-                .pipe(Effect.zipRight(Effect.fail(error))),
-            ),
-          )
-
-          yield* bus.publish('session.preflightCheck.step.succeeded', {
-            step: 'device.preflightCheck',
-            host,
-            deviceId: target.deviceId,
-          })
-
-          scheduleKeepalive()
-
-          unsubscribeStackEvents = device.rawClient.subscribeToPushEvents(
-            (event) => {
-              const failure = stackFailureFromEvent(event)
-              if (failure === undefined) return
-              Effect.runFork(
-                bus.publish(
-                  'seestar.capture.stack.failed',
-                  { error: failure, deviceId: target.deviceId },
-                  { sessionId, host },
+              const authenticated = yield* Effect.tryPromise({
+                try: () => device.authenticate(),
+                catch: (error) =>
+                  new Error(
+                    `device.authenticate failed for ${host}: ${toErrorMessage(error)}`,
+                  ),
+              }).pipe(
+                Effect.catchAll((error) =>
+                  bus
+                    .publish('session.authenticate.step.failed', {
+                      step: 'device.authenticate',
+                      host,
+                      deviceId: input.deviceId,
+                      error: toErrorMessage(error),
+                    })
+                    .pipe(Effect.zipRight(Effect.fail(error))),
                 ),
               )
-            },
-          )
 
-          initialWarnings = summary.warnings
+              yield* bus.publish('session.authenticate.step.succeeded', {
+                step: 'device.authenticate',
+                host,
+                deviceId: target.deviceId,
+              })
 
-          const disconnect = Effect.sync(() => {
-            stopKeepalive()
-            stopStackEventListener()
-            device.disconnect()
-          })
+              if (!authenticated) {
+                return yield* Effect.fail(
+                  new Error(
+                    'Authentication failed. Verify the PEM key and device firmware.',
+                  ),
+                )
+              }
 
-          const prepareForPointing = (input: PrepareForPointingInput) =>
-            guardHealth(Effect.tryPromise({
+              yield* bus.publish('session.preflightCheck.step.started', {
+                step: 'device.preflightCheck',
+                host,
+                deviceId: input.deviceId,
+              })
+
+              const summary = yield* Effect.tryPromise({
+                try: () => device.preflightCheck(),
+                catch: (error) =>
+                  new Error(
+                    `device.preflightCheck failed for ${host}: ${toErrorMessage(error)}`,
+                  ),
+              }).pipe(
+                Effect.catchAll((error) =>
+                  bus
+                    .publish('session.preflightCheck.step.failed', {
+                      step: 'device.preflightCheck',
+                      host,
+                      deviceId: input.deviceId,
+                      error: toErrorMessage(error),
+                    })
+                    .pipe(Effect.zipRight(Effect.fail(error))),
+                ),
+              )
+
+              yield* bus.publish('session.preflightCheck.step.succeeded', {
+                step: 'device.preflightCheck',
+                host,
+                deviceId: target.deviceId,
+              })
+
+              scheduleKeepalive()
+
+              unsubscribeStackEvents = device.rawClient.subscribeToPushEvents(
+                (event) => {
+                  const failure = stackFailureFromEvent(event)
+                  if (failure === undefined) return
+                  Effect.runFork(
+                    bus.publish(
+                      'seestar.capture.stack.failed',
+                      { error: failure, deviceId: target.deviceId },
+                      { sessionId, host },
+                    ),
+                  )
+                },
+              )
+
+              initialWarnings = summary.warnings
+
+              // The session's disconnect owns cleanup on success. The connect
+              // bracket's release is a no-op once sessionOwned is set.
+              const disconnect = terminalCleanup
+
+              const prepareForPointing = (input: PrepareForPointingInput, signal?: AbortSignal) =>
+                guardHealth(Effect.tryPromise({
               try: async () => {
                 const timeOk = await device.setTime()
                 if (!timeOk) {
@@ -432,6 +452,7 @@ export function createSeestarPlugin(): DevicePlugin {
                     waitForCompletion: true,
                     timeoutMs: 30000,
                     pollIntervalMs: 500,
+                    signal,
                   })
                   if (!stopOk) {
                     throw new Error('Device rejected stop-view request')
@@ -444,7 +465,7 @@ export function createSeestarPlugin(): DevicePlugin {
                 ),
             }))
 
-          const openArm = () =>
+          const openArm = (signal?: AbortSignal) =>
             guardHealth(Effect.tryPromise({
               try: async () => {
                 // moveToHorizon already waits for mount convergence
@@ -460,6 +481,7 @@ export function createSeestarPlugin(): DevicePlugin {
                       waitForCompletion: true,
                       timeoutMs: 60000,
                       pollIntervalMs: 500,
+                      signal,
                     })
                   } catch {
                     ok = false
@@ -485,7 +507,7 @@ export function createSeestarPlugin(): DevicePlugin {
                 ),
             }))
 
-          const parkArm = () =>
+          const parkArm = (signal?: AbortSignal) =>
             guardHealth(Effect.tryPromise({
               try: async () => {
                 // park() can return false or throw on a timeout-ish push
@@ -500,6 +522,7 @@ export function createSeestarPlugin(): DevicePlugin {
                       waitForCompletion: true,
                       timeoutMs: 60000,
                       pollIntervalMs: 500,
+                      signal,
                     })
                   } catch {
                     ok = false
@@ -523,7 +546,7 @@ export function createSeestarPlugin(): DevicePlugin {
                 ),
             }))
 
-          const pointToCoordinates = (input: PointToCoordinatesInput) =>
+          const pointToCoordinates = (input: PointToCoordinatesInput, signal?: AbortSignal) =>
             guardHealth(Effect.tryPromise({
               try: async () => {
                 // Verified live-device sequence: start a target-aware star
@@ -537,7 +560,10 @@ export function createSeestarPlugin(): DevicePlugin {
                     targetName: input.targetName,
                     targetRaDec: [input.raHours, input.decDeg],
                   },
-                  DEFAULT_GOTO_WAIT,
+                  {
+                    ...DEFAULT_GOTO_WAIT,
+                    signal,
+                  },
                 )
                 if (!viewOk) {
                   throw new Error(
@@ -548,6 +574,7 @@ export function createSeestarPlugin(): DevicePlugin {
                   waitForCompletion: true,
                   timeoutMs: 30000,
                   pollIntervalMs: 500,
+                  signal,
                 })
                 if (!stopOk) {
                   throw new Error('Device rejected stop-view request')
@@ -559,7 +586,7 @@ export function createSeestarPlugin(): DevicePlugin {
                 ),
             }))
 
-          const startPreview = () =>
+          const startPreview = (signal?: AbortSignal) =>
             guardHealth(Effect.tryPromise({
               try: async () => {
                 // Use the last target-appropriate view mode (set by
@@ -571,6 +598,7 @@ export function createSeestarPlugin(): DevicePlugin {
                   waitForCompletion: true,
                   timeoutMs: 30000,
                   pollIntervalMs: 500,
+                  signal,
                 })
                 if (!ok) {
                   throw new Error('Device rejected start-view request')
@@ -582,13 +610,14 @@ export function createSeestarPlugin(): DevicePlugin {
                 ),
             }))
 
-          const stopPreview = () =>
+          const stopPreview = (signal?: AbortSignal) =>
             guardHealth(Effect.tryPromise({
               try: async () => {
                 const ok = await device.stopView(undefined, {
                   waitForCompletion: true,
                   timeoutMs: 30000,
                   pollIntervalMs: 500,
+                  signal,
                 })
                 if (!ok) {
                   throw new Error('Device rejected stop-view request')
@@ -600,7 +629,7 @@ export function createSeestarPlugin(): DevicePlugin {
                 ),
             }))
 
-          const startCapture = () =>
+          const startCapture = (signal?: AbortSignal) =>
             guardHealth(Effect.tryPromise({
               try: async () => {
                 // Stacking requires an active view in a stackable mode
@@ -626,6 +655,7 @@ export function createSeestarPlugin(): DevicePlugin {
                       waitForCompletion: true,
                       timeoutMs: 30000,
                       pollIntervalMs: 500,
+                      signal,
                     })
                     if (!stopOk) {
                       throw new Error('Device rejected stop-view request before stacking')
@@ -635,6 +665,7 @@ export function createSeestarPlugin(): DevicePlugin {
                     waitForCompletion: true,
                     timeoutMs: 30000,
                     pollIntervalMs: 500,
+                    signal,
                   })
                   if (!viewOk) {
                     throw new Error('Device rejected start-view request before stacking')
@@ -644,6 +675,7 @@ export function createSeestarPlugin(): DevicePlugin {
                   waitForCompletion: true,
                   timeoutMs: 30000,
                   pollIntervalMs: 500,
+                  signal,
                 })
                 if (!ok) {
                   throw new Error('Device rejected start-stack request')
@@ -655,13 +687,14 @@ export function createSeestarPlugin(): DevicePlugin {
                 ),
             }))
 
-          const stopCapture = () =>
+          const stopCapture = (signal?: AbortSignal) =>
             guardHealth(Effect.tryPromise({
               try: async () => {
                 const ok = await device.stopStack({
                   waitForCompletion: true,
                   timeoutMs: 30000,
                   pollIntervalMs: 500,
+                  signal,
                 })
                 if (!ok) {
                   throw new Error('Device rejected stop-stack request')
@@ -739,37 +772,40 @@ export function createSeestarPlugin(): DevicePlugin {
             },
             refresh,
             mount: {
-              park: () => parkArm(),
+              park: (context) => parkArm(context?.signal),
             },
             pointing: {
               // prepare owns all readiness steps before slewing: sync time
               // and location, stop any active view, and open the arm if the
               // mount is parked/closed. The app-level pointing workflow no
               // longer calls openArm() directly.
-              prepare: (input) =>
-                prepareForPointing(input).pipe(
+              prepare: (input, context) =>
+                prepareForPointing(input, context?.signal).pipe(
                   Effect.zipRight(refresh),
                   Effect.flatMap((refreshed) =>
                     refreshed.device.mountClosed
-                      ? openArm()
+                      ? openArm(context?.signal)
                       : Effect.void,
                   ),
                 ),
-              pointToCoordinates: (input) =>
-                pointToCoordinates({
-                  mode: toSeestarViewMode(input.targetType, input.targetName),
-                  targetName: input.targetName,
-                  raHours: input.raHours,
-                  decDeg: input.decDeg,
-                }),
+              pointToCoordinates: (input, context) =>
+                pointToCoordinates(
+                  {
+                    mode: toSeestarViewMode(input.targetType, input.targetName),
+                    targetName: input.targetName,
+                    raHours: input.raHours,
+                    decDeg: input.decDeg,
+                  },
+                  context?.signal,
+                ),
             },
             preview: {
-              start: () => startPreview(),
-              stop: () => stopPreview(),
+              start: (context) => startPreview(context?.signal),
+              stop: (context) => stopPreview(context?.signal),
             },
             capture: {
-              start: () => startCapture(),
-              stop: () => stopCapture(),
+              start: (context) => startCapture(context?.signal),
+              stop: (context) => stopCapture(context?.signal),
             },
           }
 
@@ -782,16 +818,20 @@ export function createSeestarPlugin(): DevicePlugin {
             rig,
           }
 
+          // Ownership transfers to the session's disconnect. The release
+          // finalizer will see sessionOwned === true and skip cleanup.
+          sessionOwned = true
           return session
-        }).pipe(
-          Effect.catchAll((error) =>
-            Effect.sync(() => {
-              stopKeepalive()
-              stopStackEventListener()
-              device.disconnect()
-            }).pipe(Effect.zipRight(Effect.fail(error))),
-          ),
-        )
+        }),
+        // Release: on failure/interruption, run terminal cleanup. On success
+        // (sessionOwned === true), ownership has transferred to the session's
+        // disconnect and the release is a no-op. The release is
+        // uninterruptible by Effect's acquireUseRelease semantics.
+        (_acquired, exit) => {
+          if (sessionOwned && Exit.isSuccess(exit)) return Effect.void
+          return terminalCleanup
+        },
+      )
       }),
   }
 }

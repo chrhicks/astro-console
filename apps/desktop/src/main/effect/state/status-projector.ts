@@ -39,6 +39,7 @@ function project(
   effectiveLocation: { lat: number; lon: number } | null,
   locationSource: 'device' | 'geoip' | undefined,
   rigSupport: RigSupport | null,
+  sessionActive: boolean,
 ): DesktopStatus {
   const device: DeviceProjection = effectiveLocation
     ? { ...aggregate.device, location: effectiveLocation, locationSource }
@@ -48,19 +49,25 @@ function project(
     canPark: rigSupport?.canPark,
     canPoint: rigSupport?.canPoint,
   }
+  // When the aggregate's session identity does not match the current session,
+  // override the phase to disconnected so the renderer never sees a stale
+  // connected state for a session that has been replaced or closed. The
+  // internal sessionId is deliberately omitted from the renderer projection.
+  const phase = sessionActive ? aggregate.session.phase : 'disconnected'
   return {
     session: {
-      ...aggregate.session,
+      phase,
       host: projectedDevice.host,
       productModel: projectedDevice.productModel,
-      health: health ?? undefined,
+      discovering: aggregate.session.discovering,
+      health: sessionActive ? health ?? undefined : undefined,
     },
     capture: aggregate.capture,
     device: projectedDevice,
     library: aggregate.library,
     pointing: aggregate.pointing,
     preview: aggregate.preview,
-    workspace: projectWorkspace(aggregate, capabilities, rigSupport),
+    workspace: projectWorkspace(aggregate, capabilities, rigSupport, sessionActive),
     camera: aggregate.camera ?? undefined,
     currentTarget: aggregate.currentTarget,
     lastUpdatedAt: aggregate.lastUpdatedAt,
@@ -72,9 +79,10 @@ function projectWorkspace(
   aggregate: SessionAggregate,
   capabilities: DeviceCapabilities | null,
   rigSupport: RigSupport | null,
+  sessionActive: boolean,
 ): WorkspaceProjection {
   const projectedCapabilities = projectCapabilities(capabilities, rigSupport)
-  const state = projectState(aggregate, projectedCapabilities)
+  const state = projectState(aggregate, projectedCapabilities, sessionActive)
   return {
     state,
     stateLabel: stateLabel(
@@ -117,8 +125,9 @@ function projectCapabilities(
 function projectState(
   aggregate: SessionAggregate,
   capabilities: WorkspaceCapabilities,
+  sessionActive: boolean,
 ): WorkspaceState {
-  if (aggregate.session.phase !== 'connected') return 'disconnected'
+  if (!sessionActive || aggregate.session.phase !== 'connected') return 'disconnected'
   if (aggregate.capture.phase === 'capturing' || aggregate.capture.phase === 'starting') {
     return 'capturing'
   }
@@ -233,6 +242,12 @@ export const StatusProjectorLive = Layer.effect(
       snapshot: Effect.gen(function* () {
         const aggregate = yield* store.get
         const session = yield* sessions.getCurrent
+        // Correlate the aggregate's session identity with the current session
+        // so the projector never reports connected for a stale or absent
+        // session. The sessionId is set by the connect workflow when a session
+        // is installed and cleared by the disconnect workflow.
+        const sessionActive =
+          session !== null && aggregate.session.sessionId === session.sessionId
         const deviceLocation = aggregate.device.location ?? null
         const geoLocation = deviceLocation ? null : yield* geo.lookup
         const effectiveLocation = deviceLocation ?? geoLocation
@@ -243,21 +258,22 @@ export const StatusProjectorLive = Layer.effect(
             : undefined
         return project(
           aggregate,
-          session?.rig.capabilities ?? null,
-          session?.health ?? null,
+          sessionActive ? session?.rig.capabilities ?? null : null,
+          sessionActive ? session?.health ?? null : null,
           effectiveLocation,
           locationSource,
-          session
+          sessionActive
             ? {
-                canPark: session.rig.mount !== undefined,
-                canPoint: session.rig.pointing !== undefined,
-                capture: session.rig.capture
+                canPark: session!.rig.mount !== undefined,
+                canPoint: session!.rig.pointing !== undefined,
+                capture: session!.rig.capture
                   ? 'native'
-                  : session.rig.camera
+                  : session!.rig.camera
                     ? 'external'
                     : 'unsupported',
               }
             : null,
+          sessionActive,
         )
       }),
     }

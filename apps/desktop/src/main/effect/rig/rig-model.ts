@@ -51,6 +51,14 @@ export interface RigCoordinates {
   readonly decDeg: number
 }
 
+// Optional operation context passed to Rig surfaces so adapters can observe
+// cancellation. The signal is aborted when a recovery operation preempts
+// the current ordinary operation (stop/park/disconnect). Adapters that
+// support cancellation should pass the signal to vendor SDK waits.
+export interface RigOperationContext {
+  readonly signal?: AbortSignal
+}
+
 // Generic mount operations. `park` is the baseline capability (Seestar
 // exposes only park); direct coordinate slew and motion stop are
 // Alpaca-style capabilities that a rig may omit when pointing is handled
@@ -58,9 +66,12 @@ export interface RigCoordinates {
 export interface RigMount {
   readonly slewToCoordinates?: (
     input: RigCoordinates,
+    context?: RigOperationContext,
   ) => Effect.Effect<void, unknown>
-  readonly park: () => Effect.Effect<void, unknown>
-  readonly stopMotion?: () => Effect.Effect<void, unknown>
+  readonly park: (context?: RigOperationContext) => Effect.Effect<void, unknown>
+  readonly stopMotion?: (
+    context?: RigOperationContext,
+  ) => Effect.Effect<void, unknown>
 }
 
 export interface RigCameraExposureInput {
@@ -122,10 +133,17 @@ export interface RigFrameResult {
 export interface RigCamera {
   readonly startExposure: (
     input: RigCameraExposureInput,
+    context?: RigOperationContext,
   ) => Effect.Effect<void, unknown>
-  readonly stopExposure: () => Effect.Effect<void, unknown>
-  readonly getExposureState: () => Effect.Effect<RigCameraExposureState, unknown>
-  readonly getLatestFrame: () => Effect.Effect<RigFrameResult, unknown>
+  readonly stopExposure: (
+    context?: RigOperationContext,
+  ) => Effect.Effect<void, unknown>
+  readonly getExposureState: (
+    context?: RigOperationContext,
+  ) => Effect.Effect<RigCameraExposureState, unknown>
+  readonly getLatestFrame: (
+    context?: RigOperationContext,
+  ) => Effect.Effect<RigFrameResult, unknown>
 }
 
 export interface RigFocuser {
@@ -169,21 +187,23 @@ export interface RigPointingResult {
 export interface RigPointingWorkflow {
   readonly prepare: (
     input: RigPointingPrepareInput,
+    context?: RigOperationContext,
   ) => Effect.Effect<void, unknown>
   readonly pointToCoordinates: (
     input: RigPointingInput,
+    context?: RigOperationContext,
   ) => Effect.Effect<void, unknown>
   readonly afterPoint?: Effect.Effect<RigPointingResult | null, unknown>
 }
 
 export interface RigPreviewWorkflow {
-  readonly start: () => Effect.Effect<void, unknown>
-  readonly stop: () => Effect.Effect<void, unknown>
+  readonly start: (context?: RigOperationContext) => Effect.Effect<void, unknown>
+  readonly stop: (context?: RigOperationContext) => Effect.Effect<void, unknown>
 }
 
 export interface RigCaptureWorkflow {
-  readonly start: () => Effect.Effect<void, unknown>
-  readonly stop: () => Effect.Effect<void, unknown>
+  readonly start: (context?: RigOperationContext) => Effect.Effect<void, unknown>
+  readonly stop: (context?: RigOperationContext) => Effect.Effect<void, unknown>
 }
 
 // Connect-time projection bundle: the initial public state surfaced right

@@ -180,7 +180,10 @@ export class SeestarClient {
 
   disconnect(): void {
     if (this.socket) {
-      this.socket.destroy()
+      // Destroy with an error so any pending connect() promise rejects
+      // instead of hanging. Without this, a disconnect() while connect()
+      // is in progress leaves the connect promise pending forever.
+      this.socket.destroy(new Error('Client disconnected'))
       this.socket = null
     }
     this.connected = false

@@ -1,16 +1,19 @@
-import { Effect } from 'effect'
+import { Effect, Exit } from 'effect'
 import { EventBus } from '../event/event-bus'
 import { SessionManager } from '../session/session-manager'
+import { OperationCoordinator } from '../session/operation-coordinator'
 import { AggregateStore } from '../state/aggregate-store'
+import type { RigOperationContext } from '../rig/rig-model'
 
 export const runStartPreview = Effect.gen(function* () {
   const store = yield* AggregateStore
   const bus = yield* EventBus
   const sessions = yield* SessionManager
+  const coordinator = yield* OperationCoordinator
 
   const session = yield* sessions.getCurrent
   if (!session) {
-    yield* store.update((current) => ({
+    yield* store.updateIfSession(null, (current) => ({
       ...current,
       preview: {
         phase: 'error',
@@ -23,73 +26,85 @@ export const runStartPreview = Effect.gen(function* () {
     return
   }
 
-  const preview = session.rig.preview
-  if (!preview) {
-    return yield* Effect.fail(
-      new Error('Connected rig does not support preview'),
-    )
-  }
+  const lease = yield* coordinator.acquire(session, 'preview-start')
+  if (!lease) return
 
-  yield* store.update((current) => ({
-    ...current,
-    preview: { phase: 'starting', source: 'none', active: false },
-  }))
-
-  yield* bus.publish('preview.started', {})
-
-  yield* preview.start().pipe(
-    Effect.catchAll((error) =>
+  yield* Effect.acquireUseRelease(
+    Effect.void,
+    () =>
       Effect.gen(function* () {
-        // Session replaced or cleared mid-preview; the new state owns the aggregate.
-        if ((yield* sessions.getCurrent) !== session) {
-          return yield* Effect.fail(error)
+        const preview = session.rig.preview
+        if (!preview) {
+          return yield* Effect.fail(
+            new Error('Connected rig does not support preview'),
+          )
         }
-        const message = toErrorMessage(error)
-        yield* store.update((current) => ({
+
+        const committed = yield* coordinator.commitIfLease(lease, (current) => ({
           ...current,
-          preview: {
-            phase: 'error',
-            source: 'none',
-            active: false,
-            lastError: message,
-          },
+          preview: { phase: 'starting', source: 'none', active: false },
         }))
-        yield* bus.publish('preview.failed', { error: message })
-        return yield* Effect.fail(error)
+        if (!committed) return
+
+        yield* bus.publish('preview.started', {})
+
+        const ctx: RigOperationContext = { signal: lease.signal }
+
+        yield* preview.start(ctx).pipe(
+          Effect.catchAll((error) =>
+            Effect.gen(function* () {
+              if (lease.signal.aborted) return
+              const message = toErrorMessage(error)
+              const updated = yield* coordinator.commitIfLease(lease, (current) => ({
+                ...current,
+                preview: {
+                  phase: 'error',
+                  source: 'none',
+                  active: false,
+                  lastError: message,
+                },
+              }))
+              if (updated) {
+                yield* bus.publish('preview.failed', { error: message })
+              }
+              return yield* Effect.fail(error)
+            }),
+          ),
+        )
+
+        if (lease.signal.aborted) return
+
+        const refreshed = yield* session.rig.refresh
+
+        if (lease.signal.aborted) return
+
+        const updated = yield* coordinator.commitIfLease(lease, (current) => ({
+          ...current,
+          device: { ...current.device, ...refreshed.device },
+          preview: refreshed.preview,
+          capture: refreshed.capture,
+        }))
+        if (!updated) return
+
+        yield* bus.publish('preview.succeeded', {})
       }),
+    () => coordinator.release(lease),
+  ).pipe(
+    Effect.catchAll((error) =>
+      lease.signal.aborted ? Effect.void : Effect.fail(error),
     ),
   )
-
-  // Session replaced or cleared mid-preview; don't mark active.
-  if ((yield* sessions.getCurrent) !== session) {
-    return
-  }
-
-  const refreshed = yield* session.rig.refresh
-
-  // Session replaced or cleared mid-refresh; the new state owns the aggregate.
-  if ((yield* sessions.getCurrent) !== session) {
-    return
-  }
-
-  yield* store.update((current) => ({
-    ...current,
-    device: { ...current.device, ...refreshed.device },
-    preview: refreshed.preview,
-    capture: refreshed.capture,
-  }))
-
-  yield* bus.publish('preview.succeeded', {})
 })
 
 export const runStopPreview = Effect.gen(function* () {
   const store = yield* AggregateStore
   const bus = yield* EventBus
   const sessions = yield* SessionManager
+  const coordinator = yield* OperationCoordinator
 
   const session = yield* sessions.getCurrent
   if (!session) {
-    yield* store.update((current) => ({
+    yield* store.updateIfSession(null, (current) => ({
       ...current,
       preview: { phase: 'none', source: 'none', active: false },
     }))
@@ -97,53 +112,67 @@ export const runStopPreview = Effect.gen(function* () {
     return
   }
 
-  const preview = session.rig.preview
-  if (!preview) {
-    return yield* Effect.fail(
-      new Error('Connected rig does not support preview'),
-    )
-  }
+  // Recovery: preempt any current ordinary operation and acquire
+  // immediately. stop-preview supersedes pending/active preview start.
+  const lease = yield* coordinator.acquireRecovery(session, 'stop-preview')
+  if (!lease) return
 
-  yield* preview.stop().pipe(
-    Effect.catchAll((error) =>
+  yield* Effect.acquireUseRelease(
+    Effect.void,
+    () =>
       Effect.gen(function* () {
-        if ((yield* sessions.getCurrent) !== session) {
-          return yield* Effect.fail(error)
+        const preview = session.rig.preview
+        if (!preview) {
+          return yield* Effect.fail(
+            new Error('Connected rig does not support preview'),
+          )
         }
-        const message = toErrorMessage(error)
-        yield* store.update((current) => ({
+
+        const ctx: RigOperationContext = { signal: lease.signal }
+
+        yield* preview.stop(ctx).pipe(
+          Effect.catchAll((error) =>
+            Effect.gen(function* () {
+              const message = toErrorMessage(error)
+              const updated = yield* coordinator.commitIfLease(lease, (current) => ({
+                ...current,
+                preview: {
+                  phase: 'error',
+                  source: 'none',
+                  active: false,
+                  lastError: message,
+                },
+              }))
+              if (updated) {
+                yield* bus.publish('preview.failed', { error: message })
+              }
+              return yield* Effect.fail(error)
+            }),
+          ),
+        )
+
+        if (lease.signal.aborted) return
+
+        const refreshed = yield* session.rig.refresh
+
+        if (lease.signal.aborted) return
+
+        const updated = yield* coordinator.commitIfLease(lease, (current) => ({
           ...current,
-          preview: {
-            phase: 'error',
-            source: 'none',
-            active: false,
-            lastError: message,
-          },
+          device: { ...current.device, ...refreshed.device },
+          preview: refreshed.preview,
+          capture: refreshed.capture,
         }))
-        yield* bus.publish('preview.failed', { error: message })
-        return yield* Effect.fail(error)
+        if (!updated) return
+
+        yield* bus.publish('preview.stopped', {})
       }),
+    () => coordinator.release(lease),
+  ).pipe(
+    Effect.catchAll((error) =>
+      lease.signal.aborted ? Effect.void : Effect.fail(error),
     ),
   )
-
-  if ((yield* sessions.getCurrent) !== session) {
-    return
-  }
-
-  const refreshed = yield* session.rig.refresh
-
-  if ((yield* sessions.getCurrent) !== session) {
-    return
-  }
-
-  yield* store.update((current) => ({
-    ...current,
-    device: { ...current.device, ...refreshed.device },
-    preview: refreshed.preview,
-    capture: refreshed.capture,
-  }))
-
-  yield* bus.publish('preview.stopped', {})
 })
 
 function toErrorMessage(error: unknown): string {

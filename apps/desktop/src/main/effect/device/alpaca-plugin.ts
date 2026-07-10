@@ -1,6 +1,6 @@
 import * as dgram from 'node:dgram'
 import { networkInterfaces } from 'node:os'
-import { Effect, Ref, Schema } from 'effect'
+import { Effect, Exit, Ref, Schema } from 'effect'
 import type {
   ConnectRequestV2,
   DesktopDiscoveredDeviceV2,
@@ -17,7 +17,9 @@ import type {
   RigFilterWheel,
   RigFramePixelFormat,
   RigFrameResult,
+  RigOperationContext,
   RigPointingInput,
+  RigPointingPrepareInput,
   RigSessionRefresh,
 } from '../rig/rig-model'
 import { EventBus } from '../event/event-bus.js'
@@ -179,178 +181,259 @@ export function createAlpacaPlugin(): DevicePlugin {
           deviceId: input.deviceId,
         })
 
-        const state = yield* Effect.tryPromise({
-          try: () => connectAndReadState(client, base),
-          catch: (error) =>
-            new Error(
-              `Alpaca connect failed for ${host}: ${toErrorMessage(error)}`,
-            ),
-        })
-
-        // Connect generic component devices present on the host so their
-        // command surfaces can issue calls immediately after connect.
-        yield* Effect.tryPromise({
-          try: () =>
-            Promise.all(
-              [cameraBase, focuserBase, filterWheelBase]
-                .filter((b): b is string => b !== undefined)
-                .map((b) => ensureDeviceConnected(client, b)),
-            ),
-          catch: (error) =>
-            new Error(
-              `Alpaca component connect failed for ${host}: ${toErrorMessage(error)}`,
-            ),
-        })
-
-        yield* bus.publish('session.connect.step.succeeded', {
-          step: 'device.connect',
-          host,
-          deviceId: target.deviceId,
-        })
-
-        const sessionId = crypto.randomUUID()
-        const connectedAt = new Date().toISOString()
-        const capabilities = {
-          supportsStacking: false,
-          supportsLivePreview: false,
-          supportsFilterWheel: filterWheelBase !== undefined,
-          supportsAutofocus: focuserBase !== undefined,
-          supportsStorageAccess: false,
-        }
-        const warnings: string[] = []
-
-        const location =
-          state.siteLatitude !== undefined && state.siteLongitude !== undefined
-            ? { lat: state.siteLatitude, lon: state.siteLongitude }
-            : undefined
-
-        const device: DeviceProjection = {
-          pluginKind: 'alpaca-rig',
-          deviceId: target.deviceId,
-          displayName: state.name ?? target.displayName,
-          host,
-          productModel: target.productModel,
-          serialNumber: target.telescopeUniqueId ?? target.serialNumber,
-          firmwareVersion: state.driverVersion,
-          tracking: state.tracking,
-          mountClosed: state.atPark,
-          connectedAt,
-          location,
-          locationSource: 'device',
-          warnings,
-        }
-
-        const health: LiveSessionHealthState = {
-          state: 'healthy',
-          lastCheckedAt: connectedAt,
-        }
-
-        const disconnect = Effect.promise(() =>
-          Promise.all(
-            [base, cameraBase, focuserBase, filterWheelBase]
-              .filter((b): b is string => b !== undefined)
-              .map((b) =>
-                client.put(`${b}/connected`, { Connected: false }).catch(() => {}),
-              ),
-          ).then(() => {}),
+        // All bases that need cleanup on failure: the telescope plus every
+        // component base. Registered before any network connect so a
+        // timeout-after-physical-success is still cleaned up.
+        const allBases = [base, cameraBase, focuserBase, filterWheelBase].filter(
+          (b): b is string => b !== undefined,
         )
+        const componentBases = allBases.filter((b) => b !== base)
 
-        const refresh = Effect.tryPromise({
-          try: async (): Promise<RigSessionRefresh> => {
-            const [atPark, tracking] = await Promise.all([
-              client.get(`${base}/atpark`, Schema.Boolean),
-              client.get(`${base}/tracking`, Schema.Boolean),
-            ])
-            return {
-              device: { tracking, mountClosed: atPark, warnings },
-              preview: { phase: 'none', source: 'none', active: false },
-              capture: { phase: 'idle', mode: cameraBase ? 'external' : undefined },
-            }
-          },
-          catch: (error) =>
-            new Error(
-              `Alpaca refresh failed for ${host}: ${toErrorMessage(error)}`,
-            ),
-        })
+        // Use acquireUseRelease so the rollback finalizer is uninterruptible.
+        // The acquire is a non-failing no-op (just enters the supervised
+        // scope). The use phase performs telescope connectAndReadState,
+        // component connects, and session construction. The release
+        // disconnects all bases on failure/interruption; on success, ownership
+        // transfers to the session's disconnect and the release is a no-op.
+        const session = yield* Effect.acquireUseRelease(
+          // Acquire: non-failing, just enters the supervised scope
+          Effect.void,
+          // Use: telescope connect + component connects + session construction
+          () =>
+            Effect.gen(function* () {
+              const state = yield* Effect.tryPromise({
+                try: (signal) => connectAndReadState(client, base, signal),
+                catch: (error) =>
+                  new Error(
+                    `Alpaca connect failed for ${host}: ${toErrorMessage(error)}`,
+                  ),
+              })
 
-        const mount = buildMount(client, base, state)
-        const slewToCoordinates = buildSlewToCoordinates(client, base, state)
-        const camera = cameraBase ? buildCamera(client, cameraBase) : undefined
-        const focuser = focuserBase ? buildFocuser(client, focuserBase) : undefined
-        const filterWheel = filterWheelBase
-          ? buildFilterWheel(client, filterWheelBase)
-          : undefined
+              yield* Effect.tryPromise({
+                try: async (signal) => {
+                  for (const b of componentBases) {
+                    await ensureDeviceConnected(client, b, signal)
+                  }
+                },
+                catch: (error) =>
+                  new Error(
+                    `Alpaca component connect failed for ${host}: ${toErrorMessage(error)}`,
+                  ),
+              })
 
-        const pointing = slewToCoordinates
-          ? {
-              prepare: () =>
-                Effect.tryPromise({
-                  try: async () => {
-                    // Minimal readiness: unpark if parked so the mount can slew.
-                    const atPark = await client.get(
-                      `${base}/atpark`,
-                      Schema.Boolean,
-                    )
-                    if (atPark && state.canUnpark) {
-                      await client.put(`${base}/unpark`, {})
-                    }
+              yield* bus.publish('session.connect.step.succeeded', {
+                step: 'device.connect',
+                host,
+                deviceId: target.deviceId,
+              })
+
+              const sessionId = crypto.randomUUID()
+              const connectedAt = new Date().toISOString()
+              const capabilities = {
+                supportsStacking: false,
+                supportsLivePreview: false,
+                supportsFilterWheel: filterWheelBase !== undefined,
+                supportsAutofocus: focuserBase !== undefined,
+                supportsStorageAccess: false,
+              }
+              const warnings: string[] = []
+
+              const location =
+                state.siteLatitude !== undefined &&
+                state.siteLongitude !== undefined
+                  ? { lat: state.siteLatitude, lon: state.siteLongitude }
+                  : undefined
+
+              const device: DeviceProjection = {
+                pluginKind: 'alpaca-rig',
+                deviceId: target.deviceId,
+                displayName: state.name ?? target.displayName,
+                host,
+                productModel: target.productModel,
+                serialNumber: target.telescopeUniqueId ?? target.serialNumber,
+                firmwareVersion: state.driverVersion,
+                tracking: state.tracking,
+                mountClosed: state.atPark,
+                connectedAt,
+                location,
+                locationSource: 'device',
+                warnings,
+              }
+
+              const health: LiveSessionHealthState = {
+                state: 'healthy',
+                lastCheckedAt: connectedAt,
+              }
+
+              // Aggregate cleanup: disconnect each component and collect
+              // failures instead of swallowing all errors. The session
+              // lifecycle (SessionManager clear) still runs even if disconnect
+              // throws, so ownership remains safe.
+              const disconnect = Effect.promise(async () => {
+                const errors: string[] = []
+                for (const b of allBases) {
+                  try {
+                    await client.put(`${b}/connected`, { Connected: false })
+                  } catch (error) {
+                    errors.push(toErrorMessage(error))
+                  }
+                }
+                if (errors.length > 0) {
+                  throw new Error(
+                    `Alpaca disconnect failed for ${host}: ${errors.join('; ')}`,
+                  )
+                }
+              })
+
+              const refresh = Effect.tryPromise({
+                try: async (): Promise<RigSessionRefresh> => {
+                  const [atPark, tracking] = await Promise.all([
+                    client.get(`${base}/atpark`, Schema.Boolean),
+                    client.get(`${base}/tracking`, Schema.Boolean),
+                  ])
+                  return {
+                    device: { tracking, mountClosed: atPark, warnings },
+                    preview: {
+                      phase: 'none',
+                      source: 'none',
+                      active: false,
+                    },
+                    capture: {
+                      phase: 'idle',
+                      mode: cameraBase ? 'external' : undefined,
+                    },
+                  }
+                },
+                catch: (error) =>
+                  new Error(
+                    `Alpaca refresh failed for ${host}: ${toErrorMessage(error)}`,
+                  ),
+              })
+
+              const mount = buildMount(client, base, state)
+              const slewToCoordinates = buildSlewToCoordinates(
+                client,
+                base,
+                state,
+              )
+              const camera = cameraBase
+                ? buildCamera(client, cameraBase)
+                : undefined
+              const focuser = focuserBase
+                ? buildFocuser(client, focuserBase)
+                : undefined
+              const filterWheel = filterWheelBase
+                ? buildFilterWheel(client, filterWheelBase)
+                : undefined
+
+              const pointing = slewToCoordinates
+                ? {
+                    prepare: (_input: RigPointingPrepareInput, context?: RigOperationContext) =>
+                      Effect.tryPromise({
+                        try: async () => {
+                          // Minimal readiness: unpark if parked so the mount can slew.
+                          const atPark = await client.get(
+                            `${base}/atpark`,
+                            Schema.Boolean,
+                            context?.signal,
+                          )
+                          if (atPark && state.canUnpark) {
+                            await client.put(`${base}/unpark`, {}, COMMAND_TIMEOUT_MS, context?.signal)
+                          }
+                        },
+                        catch: (error) =>
+                          new Error(
+                            `Alpaca prepare failed for ${host}: ${toErrorMessage(error)}`,
+                          ),
+                      }),
+                    // Ignore the vendor-specific mode string; Alpaca slew is RA/Dec only.
+                    pointToCoordinates: (input: RigPointingInput, context?: RigOperationContext) =>
+                      slewToCoordinates({
+                        raHours: input.raHours,
+                        decDeg: input.decDeg,
+                      }, context),
+                  }
+                : undefined
+
+              const rig: ConnectedRig = {
+                identity: {
+                  rigId: target.deviceId,
+                  pluginKind: 'alpaca-rig',
+                  displayName: device.displayName ?? target.displayName,
+                  host,
+                  port: target.port,
+                },
+                connection: { disconnect },
+                observerLocation: location,
+                capabilities,
+                connect: {
+                  device,
+                  preview: { phase: 'none', source: 'none', active: false },
+                  capture: {
+                    phase: 'idle',
+                    mode: cameraBase ? 'external' : undefined,
                   },
-                  catch: (error) =>
-                    new Error(
-                      `Alpaca prepare failed for ${host}: ${toErrorMessage(error)}`,
-                    ),
-                }),
-              // Ignore the vendor-specific mode string; Alpaca slew is RA/Dec only.
-              pointToCoordinates: (input: RigPointingInput) =>
-                slewToCoordinates({
-                  raHours: input.raHours,
-                  decDeg: input.decDeg,
-                }),
-            }
-          : undefined
+                  library: {
+                    scope: 'current_target',
+                    assets: [],
+                    polling: false,
+                  },
+                },
+                refresh,
+                mount,
+                pointing,
+                camera,
+                focuser,
+                filterWheel,
+              }
 
-        const rig: ConnectedRig = {
-          identity: {
-            rigId: target.deviceId,
-            pluginKind: 'alpaca-rig',
-            displayName: device.displayName ?? target.displayName,
-            host,
-            port: target.port,
-          },
-          connection: { disconnect },
-          observerLocation: location,
-          capabilities,
-          connect: {
-            device,
-            preview: { phase: 'none', source: 'none', active: false },
-            capture: { phase: 'idle', mode: cameraBase ? 'external' : undefined },
-            library: {
-              scope: 'current_target',
-              assets: [],
-              polling: false,
-            },
-          },
-          refresh,
-          mount,
-          pointing,
-          camera,
-          focuser,
-          filterWheel,
-        }
+              // Alpaca composes the rig directly from Alpaca client calls,
+              // so it does not need the plugin-internal compatibility fields
+              // on the session. The connect-time projections and
+              // capabilities live on the rig; the public session carries only
+              // identifying metadata, health, disconnect, and the rig.
+              const session: DeviceSession = {
+                sessionId,
+                pluginKind: 'alpaca-rig',
+                deviceId: target.deviceId,
+                rig,
+                health,
+                disconnect,
+              }
 
-        // Alpaca composes the rig directly from Alpaca client calls, so it
-        // does not need the plugin-internal compatibility fields on the
-        // session. The connect-time projections and capabilities live on the
-        // rig; the public session carries only identifying metadata, health,
-        // disconnect, and the rig.
-        const session: DeviceSession = {
-          sessionId,
-          pluginKind: 'alpaca-rig',
-          deviceId: target.deviceId,
-          rig,
-          health,
-          disconnect,
-        }
+              return session
+            }),
+          // Release: on failure, disconnect all bases. On success, ownership
+          // has transferred to the session's disconnect — no rollback. The
+          // release must not fail (its error type is never) so it catches
+          // cleanup errors internally and logs them rather than swallowing
+          // them silently. The primary error from the use phase is preserved
+          // by Effect's acquireUseRelease semantics.
+          (_acquired, exit) => {
+            if (Exit.isSuccess(exit)) return Effect.void
+            return Effect.promise(async () => {
+              const errors: string[] = []
+              for (const b of allBases) {
+                try {
+                  await client.put(`${b}/connected`, { Connected: false })
+                } catch (error) {
+                  errors.push(toErrorMessage(error))
+                }
+              }
+              // Log cleanup errors so they are not swallowed silently.
+              // The primary error from the use phase is preserved by
+              // acquireUseRelease; we cannot augment it from the release.
+              if (errors.length > 0) {
+                // eslint-disable-next-line no-console
+                console.error(
+                  `Alpaca cleanup failed for ${host}: ${errors.join('; ')}`,
+                )
+              }
+            }).pipe(
+              Effect.catchAll(() => Effect.void),
+            )
+          },
+        )
 
         return session
       }),
@@ -366,9 +449,15 @@ class AlpacaClient {
     this.baseUrl = `http://${host}:${port}`
   }
 
-  async get<T>(path: string, value: Schema.Schema<T>): Promise<T> {
+  async get<T>(
+    path: string,
+    value: Schema.Schema<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
-      signal: AbortSignal.timeout(COMMAND_TIMEOUT_MS),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(COMMAND_TIMEOUT_MS)])
+        : AbortSignal.timeout(COMMAND_TIMEOUT_MS),
     })
     if (!res.ok) {
       throw new Error(`Alpaca GET ${path} failed: HTTP ${res.status}`)
@@ -386,6 +475,7 @@ class AlpacaClient {
     path: string,
     body: Record<string, string | number | boolean>,
     timeoutMs: number = COMMAND_TIMEOUT_MS,
+    signal?: AbortSignal,
   ): Promise<void> {
     const form = new URLSearchParams()
     form.set('ClientID', String(ALPACA_CLIENT_ID))
@@ -396,7 +486,9 @@ class AlpacaClient {
       method: 'PUT',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: form.toString(),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+        : AbortSignal.timeout(timeoutMs),
     })
     if (!res.ok) {
       throw new Error(`Alpaca PUT ${path} failed: HTTP ${res.status}`)
@@ -417,10 +509,12 @@ class AlpacaClient {
   // ReadableStream reader with a running byte count so a chunked response or a
   // missing Content-Length cannot materialize an unbounded buffer before the
   // cap is enforced.
-  async getImageBytes(path: string): Promise<Uint8Array> {
+  async getImageBytes(path: string, signal?: AbortSignal): Promise<Uint8Array> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       headers: { Accept: 'application/imagebytes' },
-      signal: AbortSignal.timeout(IMAGE_FETCH_TIMEOUT_MS),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(IMAGE_FETCH_TIMEOUT_MS)])
+        : AbortSignal.timeout(IMAGE_FETCH_TIMEOUT_MS),
     })
     if (!res.ok) {
       throw new Error(`Alpaca GET ${path} failed: HTTP ${res.status}`)
@@ -467,18 +561,20 @@ class AlpacaClient {
 async function ensureDeviceConnected(
   client: AlpacaClient,
   base: string,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const connected = await client.get(`${base}/connected`, Schema.Boolean)
+  const connected = await client.get(`${base}/connected`, Schema.Boolean, signal)
   if (!connected) {
-    await client.put(`${base}/connected`, { Connected: true })
+    await client.put(`${base}/connected`, { Connected: true }, COMMAND_TIMEOUT_MS, signal)
   }
 }
 
 async function connectAndReadState(
   client: AlpacaClient,
   base: string,
+  signal?: AbortSignal,
 ): Promise<TelescopeState> {
-  await ensureDeviceConnected(client, base)
+  await ensureDeviceConnected(client, base, signal)
   const [
     atPark,
     canPark,
@@ -491,16 +587,16 @@ async function connectAndReadState(
     driverVersion,
     name,
   ] = await Promise.all([
-    client.get(`${base}/atpark`, Schema.Boolean).catch(() => undefined),
-    client.get(`${base}/canpark`, Schema.Boolean).catch(() => false),
-    client.get(`${base}/canunpark`, Schema.Boolean).catch(() => false),
-    client.get(`${base}/tracking`, Schema.Boolean).catch(() => undefined),
-    client.get(`${base}/sitelatitude`, Schema.Number).catch(() => undefined),
-    client.get(`${base}/sitelongitude`, Schema.Number).catch(() => undefined),
-    client.get(`${base}/canslew`, Schema.Boolean).catch(() => false),
-    client.get(`${base}/canslewasync`, Schema.Boolean).catch(() => false),
-    client.get(`${base}/driverversion`, Schema.String).catch(() => undefined),
-    client.get(`${base}/name`, Schema.String).catch(() => undefined),
+    client.get(`${base}/atpark`, Schema.Boolean, signal).catch(() => undefined),
+    client.get(`${base}/canpark`, Schema.Boolean, signal).catch(() => false),
+    client.get(`${base}/canunpark`, Schema.Boolean, signal).catch(() => false),
+    client.get(`${base}/tracking`, Schema.Boolean, signal).catch(() => undefined),
+    client.get(`${base}/sitelatitude`, Schema.Number, signal).catch(() => undefined),
+    client.get(`${base}/sitelongitude`, Schema.Number, signal).catch(() => undefined),
+    client.get(`${base}/canslew`, Schema.Boolean, signal).catch(() => false),
+    client.get(`${base}/canslewasync`, Schema.Boolean, signal).catch(() => false),
+    client.get(`${base}/driverversion`, Schema.String, signal).catch(() => undefined),
+    client.get(`${base}/name`, Schema.String, signal).catch(() => undefined),
   ])
   return {
     atPark,
@@ -526,15 +622,16 @@ function buildMount(
   if (!state.canPark) return undefined
   const canSlewAtAll = state.canSlew || state.canSlewAsync
   return {
-    park: () =>
+    park: (context) =>
       Effect.tryPromise({
         try: async () => {
-          await client.put(`${base}/park`, {})
+          await client.put(`${base}/park`, {}, COMMAND_TIMEOUT_MS, context?.signal)
           await pollUntil(
-            () => client.get(`${base}/atpark`, Schema.Boolean),
+            () => client.get(`${base}/atpark`, Schema.Boolean, context?.signal),
             true,
             SLEW_TIMEOUT_MS,
             SLEW_POLL_INTERVAL_MS,
+            context?.signal,
           )
         },
         catch: (error) =>
@@ -544,9 +641,9 @@ function buildMount(
       ? buildSlewToCoordinates(client, base, state)
       : undefined,
     stopMotion: canSlewAtAll
-      ? () =>
+      ? (context) =>
           Effect.tryPromise({
-            try: () => client.put(`${base}/abortslew`, {}),
+            try: () => client.put(`${base}/abortslew`, {}, COMMAND_TIMEOUT_MS, context?.signal),
             catch: (error) =>
               new Error(`Alpaca stop failed: ${toErrorMessage(error)}`),
           })
@@ -558,27 +655,32 @@ function buildSlewToCoordinates(
   client: AlpacaClient,
   base: string,
   state: TelescopeState,
-): ((input: RigCoordinates) => Effect.Effect<void, unknown>) | undefined {
+): ((input: RigCoordinates, context?: RigOperationContext) => Effect.Effect<void, unknown>) | undefined {
   if (!state.canSlew && !state.canSlewAsync) return undefined
-  return (input: RigCoordinates) =>
+  return (input: RigCoordinates, context?: RigOperationContext) =>
     Effect.tryPromise({
       try: async () => {
         if (state.canSlewAsync) {
-          await client.put(`${base}/slewtocoordinatesasync`, {
-            RightAscension: input.raHours,
-            Declination: input.decDeg,
-          })
+          await client.put(
+            `${base}/slewtocoordinatesasync`,
+            { RightAscension: input.raHours, Declination: input.decDeg },
+            COMMAND_TIMEOUT_MS,
+            context?.signal,
+          )
           await pollUntil(
-            () => client.get(`${base}/slewing`, Schema.Boolean),
+            () => client.get(`${base}/slewing`, Schema.Boolean, context?.signal),
             false,
             SLEW_TIMEOUT_MS,
             SLEW_POLL_INTERVAL_MS,
+            context?.signal,
           )
         } else {
-          await client.put(`${base}/slewtocoordinates`, {
-            RightAscension: input.raHours,
-            Declination: input.decDeg,
-          })
+          await client.put(
+            `${base}/slewtocoordinates`,
+            { RightAscension: input.raHours, Declination: input.decDeg },
+            COMMAND_TIMEOUT_MS,
+            context?.signal,
+          )
         }
       },
       catch: (error) =>
@@ -588,7 +690,7 @@ function buildSlewToCoordinates(
 
 function buildCamera(client: AlpacaClient, base: string): RigCamera {
   return {
-    startExposure: (input) =>
+    startExposure: (input, context) =>
       Effect.tryPromise({
         try: () =>
           client.put(
@@ -597,29 +699,30 @@ function buildCamera(client: AlpacaClient, base: string): RigCamera {
             // Some drivers block startexposure until the exposure completes;
             // allow the full duration plus a command-ack margin.
             input.durationSec * 1000 + COMMAND_TIMEOUT_MS,
+            context?.signal,
           ),
         catch: (error) =>
           new Error(
             `Alpaca camera startExposure failed: ${toErrorMessage(error)}`,
           ),
       }),
-    stopExposure: () =>
+    stopExposure: (context) =>
       Effect.tryPromise({
-        try: () => client.put(`${base}/stopexposure`, {}),
+        try: () => client.put(`${base}/stopexposure`, {}, COMMAND_TIMEOUT_MS, context?.signal),
         catch: (error) =>
           new Error(
             `Alpaca camera stopExposure failed: ${toErrorMessage(error)}`,
           ),
       }),
-    getExposureState: () =>
+    getExposureState: (context) =>
       Effect.tryPromise({
         try: async (): Promise<RigCameraExposureState> => {
           const [state, imageReady, lastExposureDurationSec] =
             await Promise.all([
-              client.get(`${base}/camerastate`, Schema.Number),
-              client.get(`${base}/imageready`, Schema.Boolean),
+              client.get(`${base}/camerastate`, Schema.Number, context?.signal),
+              client.get(`${base}/imageready`, Schema.Boolean, context?.signal),
               client
-                .get(`${base}/lastexposureduration`, Schema.Number)
+                .get(`${base}/lastexposureduration`, Schema.Number, context?.signal)
                 .catch(() => undefined),
             ])
           return mapAlpacaCameraState(state, imageReady, lastExposureDurationSec)
@@ -629,10 +732,10 @@ function buildCamera(client: AlpacaClient, base: string): RigCamera {
             `Alpaca camera getExposureState failed: ${toErrorMessage(error)}`,
           ),
       }),
-    getLatestFrame: () =>
+    getLatestFrame: (context) =>
       Effect.tryPromise({
         try: async (): Promise<RigFrameResult> => {
-          const data = await client.getImageBytes(`${base}/imagearray`)
+          const data = await client.getImageBytes(`${base}/imagearray`, context?.signal)
           return parseAlpacaImageBytes(data)
         },
         catch: (error) =>
@@ -826,9 +929,11 @@ async function pollUntil(
   expected: boolean,
   timeoutMs: number,
   intervalMs: number,
+  signal?: AbortSignal,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
+    if (signal?.aborted) throw new Error('Operation aborted')
     if ((await read()) === expected) return
     await new Promise((resolve) => setTimeout(resolve, intervalMs))
   }

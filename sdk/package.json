@@ -17,11 +17,13 @@
     "map:horizon": "node dist/cli/map-horizon.js",
     "extract:album": "node dist/cli/extract-album.js",
     "watch:stack": "node dist/cli/stack-watch.js",
-    "fetch:latest-subframe": "node dist/cli/fetch-latest-subframe.js"
+    "fetch:latest-subframe": "node dist/cli/fetch-latest-subframe.js",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "prettier": "^3.6.2",
+    "tsx": "^4.20.3",
     "typescript": "^5.6.0"
   },
   "dependencies": {
