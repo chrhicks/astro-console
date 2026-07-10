@@ -50,18 +50,17 @@ function FilmstripThumb({
   const [error, setError] = useState<string | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = useState(true)
-  const savedPath = asset.savedFilePath
-  const previewPath = asset.previewFilePath
+  const assetId = asset.id
 
   useEffect(() => {
-    if (!previewPath) {
+    if (!asset.hasPreview) {
       setPreviewLoading(false)
       return
     }
     let cancelled = false
     setPreviewLoading(true)
     electronApi
-      .getSavedAssetPreview(previewPath)
+      .getSavedAssetPreview(assetId)
       .then((url) => {
         if (cancelled) return
         setPreview(url)
@@ -73,15 +72,15 @@ function FilmstripThumb({
     return () => {
       cancelled = true
     }
-  }, [previewPath])
+  }, [asset.hasPreview, assetId])
 
   function run(action: 'open' | 'reveal') {
-    if (!savedPath) return
+    if (!asset.saved) return
     setError(null)
     const promise =
       action === 'open'
-        ? electronApi.openSavedAsset(savedPath)
-        : electronApi.revealSavedAsset(savedPath)
+        ? electronApi.openSavedAsset(assetId)
+        : electronApi.revealSavedAsset(assetId)
     promise.catch((err) =>
       setError(err instanceof Error ? err.message : 'action failed'),
     )
@@ -97,7 +96,7 @@ function FilmstripThumb({
             {previewLoading ? '...' : 'no preview'}
           </div>
         )}
-        {savedPath && (
+        {asset.saved && (
           <div className="thumb-actions">
             <button
               type="button"

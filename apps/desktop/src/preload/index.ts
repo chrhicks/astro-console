@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import { Schema } from 'effect'
 import type {
   CatalogPage,
   CatalogQuery,
@@ -13,82 +14,74 @@ import type {
   SetExposureDurationRequest,
   TargetDetails,
 } from '../shared/api-v2'
+import {
+  DesktopDiscoveredDeviceSchema,
+  DesktopLogEntrySchema,
+  DesktopStatusSchema,
+  CatalogPageSchema,
+  FakeRuntimeSnapshotSchema,
+  TargetDetailsSchema,
+} from '../shared/ipc-schema'
 
 export const apiV2: SeestarDesktopApiV2 = {
-  discover: () =>
-    ipcRenderer.invoke('seestar:v2:discover') as Promise<
-      DesktopDiscoveredDeviceV2[]
-    >,
-  getStatus: () =>
-    ipcRenderer.invoke('seestar:v2:get-status') as Promise<DesktopStatusV2>,
+  discover: () => invoke('seestar:v2:discover', Schema.Array(DesktopDiscoveredDeviceSchema)),
+  getStatus: () => invoke('seestar:v2:get-status', DesktopStatusSchema),
   connect: (input: ConnectRequestV2) =>
-    ipcRenderer.invoke('seestar:v2:connect', input) as Promise<DesktopStatusV2>,
+    invoke('seestar:v2:connect', DesktopStatusSchema, input),
   disconnect: () =>
-    ipcRenderer.invoke('seestar:v2:disconnect') as Promise<DesktopStatusV2>,
+    invoke('seestar:v2:disconnect', DesktopStatusSchema),
   getLogs: () =>
-    ipcRenderer.invoke('seestar:v2:get-logs') as Promise<DesktopLogEntryV2[]>,
+    invoke('seestar:v2:get-logs', Schema.Array(DesktopLogEntrySchema)),
   browseTargets: (query?: CatalogQuery) =>
-    ipcRenderer.invoke('seestar:v2:browse-targets', query) as Promise<
-      CatalogPage
-    >,
+    invoke('seestar:v2:browse-targets', CatalogPageSchema, query),
   getTargetById: (targetId: string) =>
-    ipcRenderer.invoke('seestar:v2:get-target-by-id', targetId) as Promise<
-      TargetDetails | null
-    >,
+    invoke(
+      'seestar:v2:get-target-by-id',
+      Schema.NullOr(TargetDetailsSchema),
+      targetId,
+    ),
   pointToTarget: (input: PointToTargetRequest) =>
-    ipcRenderer.invoke(
-      'seestar:v2:point-to-target',
-      input,
-    ) as Promise<DesktopStatusV2>,
+    invoke('seestar:v2:point-to-target', DesktopStatusSchema, input),
   startPreview: () =>
-    ipcRenderer.invoke('seestar:v2:start-preview') as Promise<DesktopStatusV2>,
+    invoke('seestar:v2:start-preview', DesktopStatusSchema),
   stopPreview: () =>
-    ipcRenderer.invoke('seestar:v2:stop-preview') as Promise<DesktopStatusV2>,
+    invoke('seestar:v2:stop-preview', DesktopStatusSchema),
   startCapture: () =>
-    ipcRenderer.invoke('seestar:v2:start-capture') as Promise<DesktopStatusV2>,
+    invoke('seestar:v2:start-capture', DesktopStatusSchema),
   stopCapture: () =>
-    ipcRenderer.invoke('seestar:v2:stop-capture') as Promise<DesktopStatusV2>,
+    invoke('seestar:v2:stop-capture', DesktopStatusSchema),
   parkMount: () =>
-    ipcRenderer.invoke('seestar:v2:park') as Promise<DesktopStatusV2>,
+    invoke('seestar:v2:park', DesktopStatusSchema),
   setExposureDuration: (input: SetExposureDurationRequest) =>
-    ipcRenderer.invoke(
-      'seestar:v2:set-exposure-duration',
-      input,
-    ) as Promise<DesktopStatusV2>,
-  openSavedAsset: (filePath: string) =>
-    ipcRenderer.invoke(
-      'seestar:v2:open-saved-asset',
-      filePath,
-    ) as Promise<void>,
-  revealSavedAsset: (filePath: string) =>
-    ipcRenderer.invoke(
-      'seestar:v2:reveal-saved-asset',
-      filePath,
-    ) as Promise<void>,
-  getSavedAssetPreview: (filePath: string) =>
-    ipcRenderer.invoke(
+    invoke('seestar:v2:set-exposure-duration', DesktopStatusSchema, input),
+  openSavedAsset: (assetId: string) =>
+    invoke('seestar:v2:open-saved-asset', Schema.Undefined, assetId),
+  revealSavedAsset: (assetId: string) =>
+    invoke('seestar:v2:reveal-saved-asset', Schema.Undefined, assetId),
+  getSavedAssetPreview: (assetId: string) =>
+    invoke(
       'seestar:v2:get-saved-asset-preview',
-      filePath,
-    ) as Promise<string | null>,
+      Schema.NullOr(Schema.String),
+      assetId,
+    ),
 
-  onLog: (listener) => subscribe('seestar:v2:log', listener),
-  onStatus: (listener) => subscribe('seestar:v2:status', listener),
+  onLog: (listener) => subscribe('seestar:v2:log', DesktopLogEntrySchema, listener),
+  onStatus: (listener) => subscribe('seestar:v2:status', DesktopStatusSchema, listener),
 }
 
 // Dev-only control surface for the fake Seestar scenario runtime. Not used by
 // product UI; exposed for manual testing and agent-browser scenario loops.
 export const seestarDevFake: SeestarDevFakeApi = {
   listScenarios: () =>
-    ipcRenderer.invoke('seestar:dev:fake:list-scenarios') as Promise<
-      FakeRuntimeSnapshot
-    >,
+    invoke('seestar:dev:fake:list-scenarios', FakeRuntimeSnapshotSchema),
   loadScenario: (scenarioId: string) =>
-    ipcRenderer.invoke(
+    invoke(
       'seestar:dev:fake:load-scenario',
+      FakeRuntimeSnapshotSchema,
       scenarioId,
-    ) as Promise<FakeRuntimeSnapshot>,
+    ),
   reset: () =>
-    ipcRenderer.invoke('seestar:dev:fake:reset') as Promise<FakeRuntimeSnapshot>,
+    invoke('seestar:dev:fake:reset', FakeRuntimeSnapshotSchema),
 }
 
 const exposeDevFakeApi = Boolean(
@@ -100,12 +93,18 @@ if (exposeDevFakeApi) {
   contextBridge.exposeInMainWorld('seestarDevFake', seestarDevFake)
 }
 
-function subscribe<T>(
+async function invoke<A, I>(channel: string, schema: Schema.Schema<A, I>, ...args: unknown[]): Promise<A> {
+  return Schema.decodeUnknownPromise(schema)(await ipcRenderer.invoke(channel, ...args))
+}
+
+function subscribe<A, I>(
   channel: string,
-  listener: (payload: T) => void,
+  schema: Schema.Schema<A, I>,
+  listener: (payload: A) => void,
 ): () => void {
-  const wrapped = (_event: Electron.IpcRendererEvent, payload: T) => {
-    listener(payload)
+  const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+    const decoded = Schema.decodeUnknownEither(schema)(payload)
+    if (decoded._tag === 'Right') listener(decoded.right)
   }
   ipcRenderer.on(channel, wrapped)
   return () => {

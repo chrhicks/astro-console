@@ -1,5 +1,6 @@
 import { app, BrowserWindow } from 'electron'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import {
   attachIpcV2LogListener,
   attachIpcV2StatusListener,
@@ -30,26 +31,48 @@ function createMainWindow(): BrowserWindow {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   })
 
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  const rendererFile = path.join(__dirname, '../renderer/index.html')
+  const allowedNavigationUrl = rendererDevUrl
+    ? new URL(rendererDevUrl).href
+    : pathToFileURL(rendererFile).href
+  window.webContents.on('will-navigate', (event, url) => {
+    if (url !== allowedNavigationUrl) event.preventDefault()
+  })
+
+  const devOrigin = rendererDevUrl ? new URL(rendererDevUrl).origin : null
+  const devSocketOrigin = devOrigin?.replace(/^http/, 'ws')
+  const csp = devOrigin
+    ? `default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ${devOrigin} ${devSocketOrigin}; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`
+    : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+  window.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [csp],
+      },
+    })
+  })
+
+  registerIpcV2Handlers(window.webContents)
+  if (!app.isPackaged) registerIpcV2DevHandlers(window.webContents)
   attachIpcV2StatusListener(window.webContents)
   attachIpcV2LogListener(window.webContents)
 
   if (rendererDevUrl) {
     void window.loadURL(rendererDevUrl)
   } else {
-    void window.loadFile(path.join(__dirname, '../renderer/index.html'))
+    void window.loadFile(rendererFile)
   }
 
   return window
 }
 
 app.whenReady().then(() => {
-  registerIpcV2Handlers()
-  if (!app.isPackaged) {
-    registerIpcV2DevHandlers()
-  }
   createMainWindow()
 
   app.on('activate', () => {

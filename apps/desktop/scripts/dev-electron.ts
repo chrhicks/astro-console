@@ -9,8 +9,10 @@ import { fileURLToPath } from 'node:url'
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const appDir = path.join(scriptDir, '..')
 const mainEntry = path.join(appDir, 'dist/main/index.js')
+const preloadEntry = path.join(appDir, 'dist/preload/index.js')
 const sdkEntry = path.resolve(appDir, '../../sdk/dist/index.js')
 const mainDistDir = path.join(appDir, 'dist/main')
+const preloadDistDir = path.join(appDir, 'dist/preload')
 const sdkDistDir = path.resolve(appDir, '../../sdk/dist')
 
 const rendererDevUrl =
@@ -64,6 +66,7 @@ async function waitForReady(): Promise<void> {
   console.log('[dev-electron] waiting for build artifacts and vite dev server')
   await Promise.all([
     waitForFile(mainEntry),
+    waitForFile(preloadEntry),
     waitForFile(sdkEntry),
     waitForTcp(hostname, Number(port)),
   ])
@@ -134,8 +137,9 @@ function watchDist(): void {
     }, restartDebounceMs)
   }
   watch(mainDistDir, { recursive: true }, schedule)
+  watch(preloadDistDir, { recursive: true }, schedule)
   watch(sdkDistDir, { recursive: true }, schedule)
-  console.log('[dev-electron] watching main and sdk dist for changes')
+  console.log('[dev-electron] watching main, preload, and sdk dist for changes')
 }
 
 function shutdown(): void {

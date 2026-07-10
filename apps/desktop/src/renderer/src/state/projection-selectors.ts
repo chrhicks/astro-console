@@ -92,7 +92,7 @@ export function selectWorkAreaModel(state: ProjectionState) {
   // Newest library asset that has a saved preview JPG. Assets are newest-first,
   // so this is the most recent external capture preview for the main work area.
   const latestPreviewAsset = status?.library.assets.find(
-    (a) => a.previewFilePath,
+    (a) => a.hasPreview,
   )
   return {
     pointing: status?.pointing ?? IDLE_POINTING,
@@ -101,7 +101,7 @@ export function selectWorkAreaModel(state: ProjectionState) {
     preview: status?.preview ?? NO_PREVIEW,
     capture: status?.capture ?? NO_CAPTURE,
     device: status?.device ?? {},
-    latestPreviewPath: latestPreviewAsset?.previewFilePath ?? null,
+    latestPreviewPath: latestPreviewAsset?.id ?? null,
   }
 }
 

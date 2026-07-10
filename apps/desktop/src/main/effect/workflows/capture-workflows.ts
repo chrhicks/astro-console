@@ -3,7 +3,11 @@ import { EventBus } from '../event/event-bus'
 import { SessionManager } from '../session/session-manager'
 import { OperationCoordinator, type OperationLease } from '../session/operation-coordinator'
 import { AggregateStore } from '../state/aggregate-store'
-import { FrameStorage, type SavedFrame } from '../storage/frame-storage'
+import {
+  FrameStorage,
+  type SavedFrame,
+} from '../storage/frame-storage'
+import { registerManagedAsset } from '../storage/asset-registry'
 import type { DeviceSession } from '../device/device-plugin'
 import type { RigCamera, RigFrameResult, RigOperationContext } from '../rig/rig-model'
 import type { LibraryAsset } from '../../../shared/api-v2'
@@ -663,13 +667,13 @@ function createExternalLibraryAsset(
   const capturedAt = frame.metadata?.capturedAt ?? new Date().toISOString()
   const timePart = capturedAt.slice(11, 19).replace(/:/g, '')
   return {
-    id: `ext-${capturedAt}-${Math.random().toString(36).slice(2, 8)}`,
+    id: registerManagedAsset(saved.absolutePath),
     name: `exposure_${durationSec}s_${timePart}`,
     capturedAt,
     kind: 'exposure',
-    savedFilePath: saved.absolutePath,
+    saved: true,
     savedFileSize: saved.fileSize,
-    previewFilePath: saved.previewFilePath,
+    hasPreview: saved.previewFilePath != null,
     previewFileSize: saved.previewFileSize,
     frameWidth: frame.width || undefined,
     frameHeight: frame.height || undefined,

@@ -6,6 +6,7 @@ import type {
   SeestarPushEvent,
   WaitOptions,
 } from './types.js'
+import { decodeSeestarPushEvent } from './events.js'
 import type { Logger } from './logging.js'
 import { createNoopLogger, emitLog } from './logging.js'
 
@@ -417,11 +418,9 @@ export class SeestarClient {
       this.receiveBuffer = this.receiveBuffer.slice(idx + 2)
       if (!line.trim()) continue
       try {
-        const parsed = JSON.parse(line)
-        if (typeof parsed !== 'object' || parsed === null) continue
-        const record = parsed as Record<string, unknown>
-        if (typeof record.Event === 'string') {
-          const pushEvent = record as SeestarPushEvent
+        const parsed: unknown = JSON.parse(line)
+        const pushEvent = decodeSeestarPushEvent(parsed)
+        if (pushEvent) {
           emitLog(this.logger, {
             level: 'debug',
             event: 'rpc.push.received',
@@ -462,6 +461,8 @@ export class SeestarClient {
           continue
         }
 
+        if (typeof parsed !== 'object' || parsed === null) continue
+        const record = parsed as Record<string, unknown>
         const response = decodeResponse(record)
         if (!response) continue
         const inflight = this.inflightRequests.get(response.id)

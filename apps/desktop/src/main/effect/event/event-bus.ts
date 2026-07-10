@@ -5,13 +5,13 @@ export interface AppEvent<A = unknown> {
   ts: string
   sessionId?: string
   host?: string
-  name: string
+  name: AppEventName
   payload: A
 }
 
 export interface EventBus {
   readonly publish: <A>(
-    name: string,
+    name: AppEventName,
     payload: A,
     options?: { sessionId?: string; host?: string },
   ) => Effect.Effect<AppEvent<A>>
@@ -20,6 +20,52 @@ export interface EventBus {
   ) => Effect.Effect<() => void>
   readonly subscribe: () => Stream.Stream<AppEvent>
 }
+
+export type AppEventName =
+  | 'camera.settings.updated'
+  | 'capture.device-state.updated'
+  | 'capture.failed'
+  | 'capture.frame.persist.failed'
+  | 'capture.frame.retrieval.failed'
+  | 'capture.partial'
+  | 'capture.started'
+  | 'capture.state.updated'
+  | 'capture.stopped'
+  | 'capture.succeeded'
+  | 'park.failed'
+  | 'park.started'
+  | 'park.succeeded'
+  | 'pointing.failed'
+  | 'pointing.started'
+  | 'pointing.succeeded'
+  | 'preview.failed'
+  | 'preview.started'
+  | 'preview.stopped'
+  | 'preview.succeeded'
+  | 'session.authenticate.step.started'
+  | 'session.authenticate.step.succeeded'
+  | 'session.authenticate.step.failed'
+  | 'session.connect.failed'
+  | 'session.connect.started'
+  | 'session.connect.succeeded'
+  | 'session.connect.step.failed'
+  | 'session.connect.step.started'
+  | 'session.connect.step.succeeded'
+  | 'session.discover.completed'
+  | 'session.discover.failed'
+  | 'session.discover.started'
+  | 'session.disconnect.failed'
+  | 'session.disconnect.started'
+  | 'session.disconnect.succeeded'
+  | 'session.fake.scenario.changed'
+  | 'session.preflightCheck.step.started'
+  | 'session.preflightCheck.step.succeeded'
+  | 'session.preflightCheck.step.failed'
+  | 'session.keepalive.failed'
+  | 'session.keepalive.recovered'
+  | 'session.keepalive.stale'
+  | 'seestar.capture.stack.failed'
+  | 'status.snapshot.emitted'
 
 export const EventBus = Context.GenericTag<EventBus>('EventBus')
 

@@ -17,6 +17,7 @@ import {
   type Logger,
 } from './logging.js'
 import { listShareDirectory } from './smb.js'
+import { toSeestarLifecycleEvent } from './events.js'
 import type {
   ActionWaitOptions,
   AlbumsResult,
@@ -31,6 +32,8 @@ import type {
   ManualMoveOptions,
   PreflightSummary,
   SeestarPushEvent,
+  SeestarLifecycleEvent,
+  SeestarSnapshot,
   SeestarViewMode,
   StartupSequenceOptions,
   StartupSequenceReport,
@@ -217,6 +220,23 @@ export class SeestarDevice {
   async getViewState(): Promise<ViewStateResult | null> {
     const resp = await this.client.sendSync('get_view_state', '')
     return parseViewState(resp)
+  }
+
+  async getSnapshot(): Promise<SeestarSnapshot> {
+    const [deviceState, viewState] = await Promise.all([
+      this.getDeviceState(),
+      this.getViewState(),
+    ])
+    return { deviceState, viewState }
+  }
+
+  subscribeToLifecycleEvents(
+    listener: (event: SeestarLifecycleEvent) => void,
+  ): () => void {
+    return this.rawClient.subscribeToPushEvents((event) => {
+      const lifecycleEvent = toSeestarLifecycleEvent(event)
+      if (lifecycleEvent) listener(lifecycleEvent)
+    })
   }
 
   async getSetting(): Promise<unknown> {
@@ -1406,7 +1426,10 @@ export class SeestarDevice {
       const signal = wait.signal
         ? AbortSignal.any([controller.signal, wait.signal])
         : controller.signal
-      const completion = this.waitForWheelPosition(position, { ...wait, signal })
+      const completion = this.waitForWheelPosition(position, {
+        ...wait,
+        signal,
+      })
       try {
         const resp = await this.client.sendSync('set_wheel_position', position)
         const ok = resp.code === 0
@@ -2026,11 +2049,17 @@ export class SeestarDevice {
 
       const readEventNumber = (
         event: SeestarPushEvent | undefined,
-        ...keys: string[]
+        ...keys: Array<
+          | 'percent'
+          | 'lapse_ms'
+          | 'lapseMs'
+          | 'elapsed_ms'
+          | 'elapsedMs'
+        >
       ): number | undefined => {
         if (!event) return undefined
         for (const key of keys) {
-          const value = asNumber((event as Record<string, unknown>)[key])
+          const value = event[key]
           if (typeof value === 'number') return value
         }
         return undefined

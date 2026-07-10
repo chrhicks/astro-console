@@ -5,12 +5,8 @@ import {
   SeestarDevice,
   discoverSeestars,
   createConsoleLogger,
-} from '../../../../../../sdk/dist/index.js'
-import type {
-  DeviceState,
-  ViewStateResult,
-  SeestarPushEvent,
-} from '../../../../../../sdk/dist/index.js'
+} from 'seestar-sdk'
+import type { DeviceState, ViewStateResult } from 'seestar-sdk'
 import type {
   ConnectRequestV2,
   DesktopDiscoveredDeviceV2,
@@ -277,7 +273,8 @@ export function createSeestarPlugin(): DevicePlugin {
                         )
                       } else {
                         health.state = 'failed'
-                        health.lastError = 'Authentication failed after reconnect'
+                        health.lastError =
+                          'Authentication failed after reconnect'
                         Effect.runFork(
                           bus.publish(
                             'session.keepalive.failed',
@@ -401,14 +398,13 @@ export function createSeestarPlugin(): DevicePlugin {
 
               scheduleKeepalive()
 
-              unsubscribeStackEvents = device.rawClient.subscribeToPushEvents(
+              unsubscribeStackEvents = device.subscribeToLifecycleEvents(
                 (event) => {
-                  const failure = stackFailureFromEvent(event)
-                  if (failure === undefined) return
+                  if (event.type !== 'capture.failed') return
                   Effect.runFork(
                     bus.publish(
                       'seestar.capture.stack.failed',
-                      { error: failure, deviceId: target.deviceId },
+                      { error: event.error, deviceId: target.deviceId },
                       { sessionId, host },
                     ),
                   )
@@ -421,426 +417,484 @@ export function createSeestarPlugin(): DevicePlugin {
               // bracket's release is a no-op once sessionOwned is set.
               const disconnect = terminalCleanup
 
-              const prepareForPointing = (input: PrepareForPointingInput, signal?: AbortSignal) =>
-                guardHealth(Effect.tryPromise({
-              try: async () => {
-                const timeOk = await device.setTime()
-                if (!timeOk) {
-                  throw new Error('Device rejected set-time request')
-                }
-                const locationOk = await device.setUserLocation(
-                  input.lat,
-                  input.lon,
+              const prepareForPointing = (
+                input: PrepareForPointingInput,
+                signal?: AbortSignal,
+              ) =>
+                guardHealth(
+                  Effect.tryPromise({
+                    try: async () => {
+                      const timeOk = await device.setTime()
+                      if (!timeOk) {
+                        throw new Error('Device rejected set-time request')
+                      }
+                      const locationOk = await device.setUserLocation(
+                        input.lat,
+                        input.lon,
+                      )
+                      if (!locationOk) {
+                        throw new Error(
+                          'Device rejected set-user-location request',
+                        )
+                      }
+                      const { deviceState, viewState } =
+                        await device.getSnapshot()
+                      if (
+                        mapSeestarRefresh(
+                          deviceState,
+                          viewState,
+                          initialWarnings,
+                        ).preview.active
+                      ) {
+                        const stopOk = await device.stopView(undefined, {
+                          waitForCompletion: true,
+                          timeoutMs: 30000,
+                          pollIntervalMs: 500,
+                          signal,
+                        })
+                        if (!stopOk) {
+                          throw new Error('Device rejected stop-view request')
+                        }
+                      }
+                    },
+                    catch: (error) =>
+                      new Error(
+                        `device.prepareForPointing failed for ${host}: ${toErrorMessage(error)}`,
+                      ),
+                  }),
                 )
-                if (!locationOk) {
-                  throw new Error('Device rejected set-user-location request')
-                }
-                const [deviceState, viewState] = await Promise.all([
-                  device.getDeviceState(),
-                  device.getViewState(),
-                ])
-                if (mapSeestarRefresh(deviceState, viewState, initialWarnings).preview.active) {
-                  const stopOk = await device.stopView(undefined, {
-                    waitForCompletion: true,
-                    timeoutMs: 30000,
-                    pollIntervalMs: 500,
-                    signal,
-                  })
-                  if (!stopOk) {
-                    throw new Error('Device rejected stop-view request')
-                  }
-                }
-              },
-              catch: (error) =>
-                new Error(
-                  `device.prepareForPointing failed for ${host}: ${toErrorMessage(error)}`,
-                ),
-            }))
 
-          const openArm = (signal?: AbortSignal) =>
-            guardHealth(Effect.tryPromise({
-              try: async () => {
-                // moveToHorizon already waits for mount convergence
-                // internally, but can return false or throw on a
-                // timeout-ish push event. Re-command toward the open
-                // state and treat success as reaching mount.close ===
-                // false with move_type === 'none', not merely a true
-                // return value.
-                for (let attempt = 1; attempt <= 3; attempt += 1) {
-                  let ok = false
-                  try {
-                    ok = await device.moveToHorizon({
-                      waitForCompletion: true,
-                      timeoutMs: 60000,
-                      pollIntervalMs: 500,
-                      signal,
-                    })
-                  } catch {
-                    ok = false
-                  }
-                  if (ok) {
-                    const { close, moveType } = await readMountState()
-                    if (close === false && moveType === 'none') return
-                  }
-                  if (attempt < 3) {
-                    await delay(2000)
-                  }
-                }
-                // Final convergence check after the last attempt.
-                const { close, moveType } = await readMountState()
-                if (close === false && moveType === 'none') return
-                throw new Error(
-                  `Mount did not converge to open state (close=${close}, move_type=${moveType})`,
+              const openArm = (signal?: AbortSignal) =>
+                guardHealth(
+                  Effect.tryPromise({
+                    try: async () => {
+                      // moveToHorizon already waits for mount convergence
+                      // internally, but can return false or throw on a
+                      // timeout-ish push event. Re-command toward the open
+                      // state and treat success as reaching mount.close ===
+                      // false with move_type === 'none', not merely a true
+                      // return value.
+                      for (let attempt = 1; attempt <= 3; attempt += 1) {
+                        let ok = false
+                        try {
+                          ok = await device.moveToHorizon({
+                            waitForCompletion: true,
+                            timeoutMs: 60000,
+                            pollIntervalMs: 500,
+                            signal,
+                          })
+                        } catch {
+                          ok = false
+                        }
+                        if (ok) {
+                          const { close, moveType } = await readMountState()
+                          if (close === false && moveType === 'none') return
+                        }
+                        if (attempt < 3) {
+                          await delay(2000)
+                        }
+                      }
+                      // Final convergence check after the last attempt.
+                      const { close, moveType } = await readMountState()
+                      if (close === false && moveType === 'none') return
+                      throw new Error(
+                        `Mount did not converge to open state (close=${close}, move_type=${moveType})`,
+                      )
+                    },
+                    catch: (error) =>
+                      new Error(
+                        `device.moveToHorizon failed for ${host}: ${toErrorMessage(error)}`,
+                      ),
+                  }),
                 )
-              },
-              catch: (error) =>
-                new Error(
-                  `device.moveToHorizon failed for ${host}: ${toErrorMessage(error)}`,
-                ),
-            }))
 
-          const parkArm = (signal?: AbortSignal) =>
-            guardHealth(Effect.tryPromise({
-              try: async () => {
-                // park() can return false or throw on a timeout-ish push
-                // event even when the mount actually ended up closed.
-                // Re-command toward the closed state and treat success as
-                // reaching mount.close === true, not merely a true return
-                // value. Mirrors the SDK's private parkWithRetries pattern.
-                for (let attempt = 1; attempt <= 3; attempt += 1) {
-                  let ok = false
-                  try {
-                    ok = await device.park({
-                      waitForCompletion: true,
-                      timeoutMs: 60000,
-                      pollIntervalMs: 500,
-                      signal,
-                    })
-                  } catch {
-                    ok = false
-                  }
-                  if (ok) return
-                  const { close } = await readMountState()
-                  if (close === true) return
-                  if (attempt < 3) {
-                    await delay(2000)
-                  }
-                }
-                // Final convergence check after the last attempt.
-                const { close } = await readMountState()
-                if (close !== true) {
-                  throw new Error('Device rejected park request')
-                }
-              },
-              catch: (error) =>
-                new Error(
-                  `device.park failed for ${host}: ${toErrorMessage(error)}`,
-                ),
-            }))
-
-          const pointToCoordinates = (input: PointToCoordinatesInput, signal?: AbortSignal) =>
-            guardHealth(Effect.tryPromise({
-              try: async () => {
-                // Verified live-device sequence: start a target-aware star
-                // view (which slews to target_ra_dec), then stop the view so
-                // the device stays pointed without an active view session.
-                // Raw scope_goto is not sufficient from a parked/closed mount.
-                lastViewMode = input.mode
-                const viewOk = await device.startViewDetailed(
-                  {
-                    mode: input.mode,
-                    targetName: input.targetName,
-                    targetRaDec: [input.raHours, input.decDeg],
-                  },
-                  {
-                    ...DEFAULT_GOTO_WAIT,
-                    signal,
-                  },
+              const parkArm = (signal?: AbortSignal) =>
+                guardHealth(
+                  Effect.tryPromise({
+                    try: async () => {
+                      // park() can return false or throw on a timeout-ish push
+                      // event even when the mount actually ended up closed.
+                      // Re-command toward the closed state and treat success as
+                      // reaching mount.close === true, not merely a true return
+                      // value. Mirrors the SDK's private parkWithRetries pattern.
+                      for (let attempt = 1; attempt <= 3; attempt += 1) {
+                        let ok = false
+                        try {
+                          ok = await device.park({
+                            waitForCompletion: true,
+                            timeoutMs: 60000,
+                            pollIntervalMs: 500,
+                            signal,
+                          })
+                        } catch {
+                          ok = false
+                        }
+                        if (ok) return
+                        const { close } = await readMountState()
+                        if (close === true) return
+                        if (attempt < 3) {
+                          await delay(2000)
+                        }
+                      }
+                      // Final convergence check after the last attempt.
+                      const { close } = await readMountState()
+                      if (close !== true) {
+                        throw new Error('Device rejected park request')
+                      }
+                    },
+                    catch: (error) =>
+                      new Error(
+                        `device.park failed for ${host}: ${toErrorMessage(error)}`,
+                      ),
+                  }),
                 )
-                if (!viewOk) {
-                  throw new Error(
-                    `Device rejected start-view request for ${input.targetName ?? 'target'}`,
-                  )
-                }
-                const stopOk = await device.stopView(undefined, {
-                  waitForCompletion: true,
-                  timeoutMs: 30000,
-                  pollIntervalMs: 500,
-                  signal,
-                })
-                if (!stopOk) {
-                  throw new Error('Device rejected stop-view request')
-                }
-              },
-              catch: (error) =>
-                new Error(
-                  `device.pointToCoordinates failed for ${host}: ${toErrorMessage(error)}`,
-                ),
-            }))
 
-          const startPreview = (signal?: AbortSignal) =>
-            guardHealth(Effect.tryPromise({
-              try: async () => {
-                // Use the last target-appropriate view mode (set by
-                // pointToCoordinates) so the preview->capture handoff can
-                // stack. Hardcoding 'scenery' broke stacking after a DSO
-                // point because startCapture expects a stackable star-mode
-                // view to already be active.
-                const ok = await device.startView(lastViewMode, undefined, {
-                  waitForCompletion: true,
-                  timeoutMs: 30000,
-                  pollIntervalMs: 500,
-                  signal,
-                })
-                if (!ok) {
-                  throw new Error('Device rejected start-view request')
-                }
-              },
-              catch: (error) =>
-                new Error(
-                  `device.startView failed for ${host}: ${toErrorMessage(error)}`,
-                ),
-            }))
+              const pointToCoordinates = (
+                input: PointToCoordinatesInput,
+                signal?: AbortSignal,
+              ) =>
+                guardHealth(
+                  Effect.tryPromise({
+                    try: async () => {
+                      // Verified live-device sequence: start a target-aware star
+                      // view (which slews to target_ra_dec), then stop the view so
+                      // the device stays pointed without an active view session.
+                      // Raw scope_goto is not sufficient from a parked/closed mount.
+                      lastViewMode = input.mode
+                      const viewOk = await device.startViewDetailed(
+                        {
+                          mode: input.mode,
+                          targetName: input.targetName,
+                          targetRaDec: [input.raHours, input.decDeg],
+                        },
+                        {
+                          ...DEFAULT_GOTO_WAIT,
+                          signal,
+                        },
+                      )
+                      if (!viewOk) {
+                        throw new Error(
+                          `Device rejected start-view request for ${input.targetName ?? 'target'}`,
+                        )
+                      }
+                      const stopOk = await device.stopView(undefined, {
+                        waitForCompletion: true,
+                        timeoutMs: 30000,
+                        pollIntervalMs: 500,
+                        signal,
+                      })
+                      if (!stopOk) {
+                        throw new Error('Device rejected stop-view request')
+                      }
+                    },
+                    catch: (error) =>
+                      new Error(
+                        `device.pointToCoordinates failed for ${host}: ${toErrorMessage(error)}`,
+                      ),
+                  }),
+                )
 
-          const stopPreview = (signal?: AbortSignal) =>
-            guardHealth(Effect.tryPromise({
-              try: async () => {
-                const ok = await device.stopView(undefined, {
-                  waitForCompletion: true,
-                  timeoutMs: 30000,
-                  pollIntervalMs: 500,
-                  signal,
-                })
-                if (!ok) {
-                  throw new Error('Device rejected stop-view request')
-                }
-              },
-              catch: (error) =>
-                new Error(
-                  `device.stopView failed for ${host}: ${toErrorMessage(error)}`,
-                ),
-            }))
+              const startPreview = (signal?: AbortSignal) =>
+                guardHealth(
+                  Effect.tryPromise({
+                    try: async () => {
+                      // Use the last target-appropriate view mode (set by
+                      // pointToCoordinates) so the preview->capture handoff can
+                      // stack. Hardcoding 'scenery' broke stacking after a DSO
+                      // point because startCapture expects a stackable star-mode
+                      // view to already be active.
+                      const ok = await device.startView(
+                        lastViewMode,
+                        undefined,
+                        {
+                          waitForCompletion: true,
+                          timeoutMs: 30000,
+                          pollIntervalMs: 500,
+                          signal,
+                        },
+                      )
+                      if (!ok) {
+                        throw new Error('Device rejected start-view request')
+                      }
+                    },
+                    catch: (error) =>
+                      new Error(
+                        `device.startView failed for ${host}: ${toErrorMessage(error)}`,
+                      ),
+                  }),
+                )
 
-          const startCapture = (signal?: AbortSignal) =>
-            guardHealth(Effect.tryPromise({
-              try: async () => {
-                // Stacking requires an active view in a stackable mode
-                // (star/moon/sun/planet). After pointing the view is
-                // stopped; after preview it may be in the right mode or
-                // may have been left in a non-stackable state. Normalize:
-                // if no view is active, or the active view is in the wrong
-                // mode, (re)start it with the last target mode before
-                // stacking. No target_ra_dec is sent, so the mount stays
-                // at its current position instead of re-slewing.
-                const [deviceState, viewState] = await Promise.all([
-                  device.getDeviceState(),
-                  device.getViewState(),
-                ])
-                const refreshState = mapSeestarRefresh(deviceState, viewState, initialWarnings)
-                const needsViewRestart =
-                  !refreshState.preview.active ||
-                  (refreshState.viewMode !== undefined &&
-                    refreshState.viewMode !== lastViewMode)
-                if (needsViewRestart) {
-                  if (refreshState.preview.active) {
-                    const stopOk = await device.stopView(undefined, {
-                      waitForCompletion: true,
-                      timeoutMs: 30000,
-                      pollIntervalMs: 500,
-                      signal,
-                    })
-                    if (!stopOk) {
-                      throw new Error('Device rejected stop-view request before stacking')
-                    }
-                  }
-                  const viewOk = await device.startView(lastViewMode, undefined, {
-                    waitForCompletion: true,
-                    timeoutMs: 30000,
-                    pollIntervalMs: 500,
-                    signal,
-                  })
-                  if (!viewOk) {
-                    throw new Error('Device rejected start-view request before stacking')
-                  }
-                }
-                const ok = await device.startStack(true, {
-                  waitForCompletion: true,
-                  timeoutMs: 30000,
-                  pollIntervalMs: 500,
-                  signal,
-                })
-                if (!ok) {
-                  throw new Error('Device rejected start-stack request')
-                }
-              },
-              catch: (error) =>
-                new Error(
-                  `device.startStack failed for ${host}: ${toErrorMessage(error)}`,
-                ),
-            }))
+              const stopPreview = (signal?: AbortSignal) =>
+                guardHealth(
+                  Effect.tryPromise({
+                    try: async () => {
+                      const ok = await device.stopView(undefined, {
+                        waitForCompletion: true,
+                        timeoutMs: 30000,
+                        pollIntervalMs: 500,
+                        signal,
+                      })
+                      if (!ok) {
+                        throw new Error('Device rejected stop-view request')
+                      }
+                    },
+                    catch: (error) =>
+                      new Error(
+                        `device.stopView failed for ${host}: ${toErrorMessage(error)}`,
+                      ),
+                  }),
+                )
 
-          const stopCapture = (signal?: AbortSignal) =>
-            guardHealth(Effect.tryPromise({
-              try: async () => {
-                const ok = await device.stopStack({
-                  waitForCompletion: true,
-                  timeoutMs: 30000,
-                  pollIntervalMs: 500,
-                  signal,
-                })
-                if (!ok) {
-                  throw new Error('Device rejected stop-stack request')
-                }
-              },
-              catch: (error) =>
-                new Error(
-                  `device.stopStack failed for ${host}: ${toErrorMessage(error)}`,
-                ),
-            }))
+              const startCapture = (signal?: AbortSignal) =>
+                guardHealth(
+                  Effect.tryPromise({
+                    try: async () => {
+                      // Stacking requires an active view in a stackable mode
+                      // (star/moon/sun/planet). After pointing the view is
+                      // stopped; after preview it may be in the right mode or
+                      // may have been left in a non-stackable state. Normalize:
+                      // if no view is active, or the active view is in the wrong
+                      // mode, (re)start it with the last target mode before
+                      // stacking. No target_ra_dec is sent, so the mount stays
+                      // at its current position instead of re-slewing.
+                      const { deviceState, viewState } =
+                        await device.getSnapshot()
+                      const refreshState = mapSeestarRefresh(
+                        deviceState,
+                        viewState,
+                        initialWarnings,
+                      )
+                      const needsViewRestart =
+                        !refreshState.preview.active ||
+                        (refreshState.viewMode !== undefined &&
+                          refreshState.viewMode !== lastViewMode)
+                      if (needsViewRestart) {
+                        if (refreshState.preview.active) {
+                          const stopOk = await device.stopView(undefined, {
+                            waitForCompletion: true,
+                            timeoutMs: 30000,
+                            pollIntervalMs: 500,
+                            signal,
+                          })
+                          if (!stopOk) {
+                            throw new Error(
+                              'Device rejected stop-view request before stacking',
+                            )
+                          }
+                        }
+                        const viewOk = await device.startView(
+                          lastViewMode,
+                          undefined,
+                          {
+                            waitForCompletion: true,
+                            timeoutMs: 30000,
+                            pollIntervalMs: 500,
+                            signal,
+                          },
+                        )
+                        if (!viewOk) {
+                          throw new Error(
+                            'Device rejected start-view request before stacking',
+                          )
+                        }
+                      }
+                      const ok = await device.startStack(true, {
+                        waitForCompletion: true,
+                        timeoutMs: 30000,
+                        pollIntervalMs: 500,
+                        signal,
+                      })
+                      if (!ok) {
+                        throw new Error('Device rejected start-stack request')
+                      }
+                    },
+                    catch: (error) =>
+                      new Error(
+                        `device.startStack failed for ${host}: ${toErrorMessage(error)}`,
+                      ),
+                  }),
+                )
 
-          const refresh = guardHealth(Effect.tryPromise({
-            try: async () => {
-              const [deviceState, viewState] = await Promise.all([
-                device.getDeviceState(),
-                device.getViewState(),
-              ])
-              return mapSeestarRefresh(deviceState, viewState, initialWarnings)
-            },
-            catch: (error) =>
-              new Error(
-                `device.refresh failed for ${host}: ${toErrorMessage(error)}`,
-              ),
-          }))
+              const stopCapture = (signal?: AbortSignal) =>
+                guardHealth(
+                  Effect.tryPromise({
+                    try: async () => {
+                      const ok = await device.stopStack({
+                        waitForCompletion: true,
+                        timeoutMs: 30000,
+                        pollIntervalMs: 500,
+                        signal,
+                      })
+                      if (!ok) {
+                        throw new Error('Device rejected stop-stack request')
+                      }
+                    },
+                    catch: (error) =>
+                      new Error(
+                        `device.stopStack failed for ${host}: ${toErrorMessage(error)}`,
+                      ),
+                  }),
+                )
 
-          const deviceProjection: DeviceProjection = {
-            pluginKind: 'seestar',
-            deviceId: target.deviceId,
-            displayName: target.displayName,
-            host,
-            productModel: summary.productModel ?? target.productModel,
-            serialNumber: summary.serialNumber ?? target.serialNumber,
-            firmwareVersion: summary.firmwareVersion,
-            batteryPercent: summary.batteryPercent,
-            deviceTempC: summary.deviceTempC,
-            batteryTempC: summary.batteryTempC,
-            tracking: summary.tracking,
-            mountClosed: summary.mountClosed,
-            connectedAt: new Date().toISOString(),
-            location: summary.location,
-            deviceTime: summary.deviceTime,
-            deviceTimeLooksStale: summary.deviceTimeLooksStale,
-            activity: deriveSeestarActivity(
-              summary.viewMode,
-              summary.viewStage,
-              summary.viewState,
-            ),
-            storageFreeMb: summary.storageFreeMb,
-            storageTotalMb: summary.storageTotalMb,
-            warnings: summary.warnings,
-          }
-
-          // Seestar's slew/imaging are view-based orchestration, not direct
-          // component commands, so generic camera/focuser/filterWheel/storage
-          // are not exposed on the rig. Parking is a real mount capability,
-          // so mount is populated with park only; direct slew/stop stay
-          // omitted (they surface via the pointing workflow instead). A
-          // future Alpaca rig would populate the generic component slots
-          // and mount.slewToCoordinates/stopMotion directly.
-          const rig: ConnectedRig = {
-            identity: {
-              rigId: target.deviceId,
-              pluginKind: 'seestar',
-              displayName: target.displayName,
-              host,
-            },
-            observerLocation: summary.location,
-            connect: {
-              device: deviceProjection,
-              preview: { phase: 'none', source: 'none', active: false },
-              capture: { phase: 'idle' },
-              library: { scope: 'current_target', assets: [], polling: false },
-            },
-            refresh,
-            mount: {
-              park: (context) => parkArm(context?.signal),
-            },
-            pointing: {
-              // prepare owns all readiness steps before slewing: sync time
-              // and location, stop any active view, and open the arm if the
-              // mount is parked/closed. The app-level pointing workflow no
-              // longer calls openArm() directly.
-              prepare: (input, context) =>
-                prepareForPointing(input, context?.signal).pipe(
-                  Effect.zipRight(refresh),
-                  Effect.flatMap((refreshed) =>
-                    refreshed.device.mountClosed
-                      ? openArm(context?.signal)
-                      : Effect.void,
-                  ),
-                ),
-              pointToCoordinates: (input, context) =>
-                pointToCoordinates(
-                  {
-                    mode: toSeestarViewMode(input.targetType, input.targetName),
-                    targetName: input.targetName,
-                    raHours: input.raHours,
-                    decDeg: input.decDeg,
-                  },
-                  context?.signal,
-                ),
-            },
-            preview: {
-              start: (context) => startPreview(context?.signal),
-              stop: (context) => stopPreview(context?.signal),
-            },
-            capture: {
-              start: (context) => startCapture(context?.signal),
-            },
-            captureStop: {
-              mode: 'native',
-              stop: (context) => stopCapture(context?.signal),
-            },
-            autofocus: {
-              run: (context) =>
-                guardHealth(Effect.tryPromise({
+              const refresh = guardHealth(
+                Effect.tryPromise({
                   try: async () => {
-                    const ok = await device.startAutoFocus({
-                      waitForCompletion: true,
-                      timeoutMs: 60000,
-                      pollIntervalMs: 500,
-                      signal: context?.signal,
-                    })
-                    if (!ok) throw new Error('Device rejected autofocus request')
+                    const { deviceState, viewState } =
+                      await device.getSnapshot()
+                    return mapSeestarRefresh(
+                      deviceState,
+                      viewState,
+                      initialWarnings,
+                    )
                   },
                   catch: (error) =>
-                    new Error(`device.autofocus failed for ${host}: ${toErrorMessage(error)}`),
-                })),
-            },
-          }
+                    new Error(
+                      `device.refresh failed for ${host}: ${toErrorMessage(error)}`,
+                    ),
+                }),
+              )
 
-          const session: DeviceSession = {
-            sessionId,
-            pluginKind: 'seestar',
-            deviceId: target.deviceId,
-            health,
-            disconnect,
-            rig,
-          }
+              const deviceProjection: DeviceProjection = {
+                pluginKind: 'seestar',
+                deviceId: target.deviceId,
+                displayName: target.displayName,
+                host,
+                productModel: summary.productModel ?? target.productModel,
+                serialNumber: summary.serialNumber ?? target.serialNumber,
+                firmwareVersion: summary.firmwareVersion,
+                batteryPercent: summary.batteryPercent,
+                deviceTempC: summary.deviceTempC,
+                batteryTempC: summary.batteryTempC,
+                tracking: summary.tracking,
+                mountClosed: summary.mountClosed,
+                connectedAt: new Date().toISOString(),
+                location: summary.location,
+                deviceTime: summary.deviceTime,
+                deviceTimeLooksStale: summary.deviceTimeLooksStale,
+                activity: deriveSeestarActivity(
+                  summary.viewMode,
+                  summary.viewStage,
+                  summary.viewState,
+                ),
+                storageFreeMb: summary.storageFreeMb,
+                storageTotalMb: summary.storageTotalMb,
+                warnings: summary.warnings,
+              }
 
-          // Ownership transfers to the session's disconnect. The release
-          // finalizer will see sessionOwned === true and skip cleanup.
-          sessionOwned = true
-          return session
-        }),
-        // Release: on failure/interruption, run terminal cleanup. On success
-        // (sessionOwned === true), ownership has transferred to the session's
-        // disconnect and the release is a no-op. The release is
-        // uninterruptible by Effect's acquireUseRelease semantics.
-        (_acquired, exit) => {
-          if (sessionOwned && Exit.isSuccess(exit)) return Effect.void
-          return terminalCleanup
-        },
-      )
+              // Seestar's slew/imaging are view-based orchestration, not direct
+              // component commands, so generic camera/focuser/filterWheel/storage
+              // are not exposed on the rig. Parking is a real mount capability,
+              // so mount is populated with park only; direct slew/stop stay
+              // omitted (they surface via the pointing workflow instead). A
+              // future Alpaca rig would populate the generic component slots
+              // and mount.slewToCoordinates/stopMotion directly.
+              const rig: ConnectedRig = {
+                identity: {
+                  rigId: target.deviceId,
+                  pluginKind: 'seestar',
+                  displayName: target.displayName,
+                  host,
+                },
+                observerLocation: summary.location,
+                connect: {
+                  device: deviceProjection,
+                  preview: { phase: 'none', source: 'none', active: false },
+                  capture: { phase: 'idle' },
+                  library: {
+                    scope: 'current_target',
+                    assets: [],
+                    polling: false,
+                  },
+                },
+                refresh,
+                mount: {
+                  park: (context) => parkArm(context?.signal),
+                },
+                pointing: {
+                  // prepare owns all readiness steps before slewing: sync time
+                  // and location, stop any active view, and open the arm if the
+                  // mount is parked/closed. The app-level pointing workflow no
+                  // longer calls openArm() directly.
+                  prepare: (input, context) =>
+                    prepareForPointing(input, context?.signal).pipe(
+                      Effect.zipRight(refresh),
+                      Effect.flatMap((refreshed) =>
+                        refreshed.device.mountClosed
+                          ? openArm(context?.signal)
+                          : Effect.void,
+                      ),
+                    ),
+                  pointToCoordinates: (input, context) =>
+                    pointToCoordinates(
+                      {
+                        mode: toSeestarViewMode(
+                          input.targetType,
+                          input.targetName,
+                        ),
+                        targetName: input.targetName,
+                        raHours: input.raHours,
+                        decDeg: input.decDeg,
+                      },
+                      context?.signal,
+                    ),
+                },
+                preview: {
+                  start: (context) => startPreview(context?.signal),
+                  stop: (context) => stopPreview(context?.signal),
+                },
+                capture: {
+                  start: (context) => startCapture(context?.signal),
+                },
+                captureStop: {
+                  mode: 'native',
+                  stop: (context) => stopCapture(context?.signal),
+                },
+                autofocus: {
+                  run: (context) =>
+                    guardHealth(
+                      Effect.tryPromise({
+                        try: async () => {
+                          const ok = await device.startAutoFocus({
+                            waitForCompletion: true,
+                            timeoutMs: 60000,
+                            pollIntervalMs: 500,
+                            signal: context?.signal,
+                          })
+                          if (!ok)
+                            throw new Error('Device rejected autofocus request')
+                        },
+                        catch: (error) =>
+                          new Error(
+                            `device.autofocus failed for ${host}: ${toErrorMessage(error)}`,
+                          ),
+                      }),
+                    ),
+                },
+              }
+
+              const session: DeviceSession = {
+                sessionId,
+                pluginKind: 'seestar',
+                deviceId: target.deviceId,
+                health,
+                disconnect,
+                rig,
+              }
+
+              // Ownership transfers to the session's disconnect. The release
+              // finalizer will see sessionOwned === true and skip cleanup.
+              sessionOwned = true
+              return session
+            }),
+          // Release: on failure/interruption, run terminal cleanup. On success
+          // (sessionOwned === true), ownership has transferred to the session's
+          // disconnect and the release is a no-op. The release is
+          // uninterruptible by Effect's acquireUseRelease semantics.
+          (_acquired, exit) => {
+            if (sessionOwned && Exit.isSuccess(exit)) return Effect.void
+            return terminalCleanup
+          },
+        )
       }),
   }
 }
@@ -923,20 +977,4 @@ function mapSeestarRefresh(
       : { phase: 'none', source: 'none', active: false },
     capture: stacking ? { phase: 'capturing' } : { phase: 'idle' },
   }
-}
-
-// Mirrors the SDK's failureFromPushEvent for Stack events: fail/cancel state
-// or any non-zero code is a failure. Used to surface native stacking failures
-// that arrive after startStack has already succeeded.
-function stackFailureFromEvent(event: SeestarPushEvent): string | undefined {
-  if (event.Event !== 'Stack') return undefined
-  const state =
-    typeof event.state === 'string' ? event.state.toLowerCase() : undefined
-  if (state === 'fail' || state === 'cancel') {
-    return event.error ?? `Stack reported ${state}`
-  }
-  if (typeof event.code === 'number' && event.code !== 0) {
-    return event.error ?? `Stack reported code ${event.code}`
-  }
-  return undefined
 }
