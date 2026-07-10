@@ -10,6 +10,12 @@ export interface GeoService {
   // yields no usable coordinates. Results are cached for the app session so
   // repeated status projections do not re-hit GeoJS.
   readonly lookup: Effect.Effect<GeoLocation | null>
+  readonly resolveObserverLocation: (
+    deviceLocation?: GeoLocation,
+  ) => Effect.Effect<{
+    readonly location: GeoLocation | null
+    readonly source: 'device' | 'geoip' | undefined
+  }>
 }
 
 export const GeoService = Context.GenericTag<GeoService>('GeoService')

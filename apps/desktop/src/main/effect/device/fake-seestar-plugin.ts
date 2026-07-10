@@ -16,14 +16,6 @@ import {
   type FakeScenarioAfterPoint,
 } from './fake-seestar-runtime'
 
-const FAKE_CAPABILITIES = {
-  supportsStacking: true,
-  supportsLivePreview: true,
-  supportsFilterWheel: true,
-  supportsAutofocus: true,
-  supportsStorageAccess: true,
-} as const
-
 const CONNECTED_IDLE: FakeScenarioAfterPoint = {
   preview: { phase: 'none', source: 'none', active: false },
   capture: { phase: 'idle' },
@@ -136,9 +128,7 @@ export function createFakeSeestarPlugin(): DevicePlugin {
             displayName: outcome.device.displayName ?? 'Seestar (fake)',
             host: outcome.device.host,
           },
-          connection: { disconnect },
           observerLocation: outcome.device.location,
-          capabilities: FAKE_CAPABILITIES,
           connect: {
             device: outcome.device,
             preview: connected.preview,
@@ -181,8 +171,8 @@ export function createFakeSeestarPlugin(): DevicePlugin {
           },
           capture: {
             start: () => startCapture(),
-            stop: () => stopCapture(),
           },
+          captureStop: { mode: 'native', stop: () => stopCapture() },
         }
 
         const session: DeviceSession = {

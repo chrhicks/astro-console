@@ -16,22 +16,6 @@ export interface RigIdentity {
   readonly port?: number
 }
 
-export interface RigConnection {
-  readonly disconnect: Effect.Effect<void>
-}
-
-// Rig-level capability flags surfaced at connect time for workspace and
-// catalog projection. The canonical definition lives here so the rig model
-// owns the public capability seam; device-plugin re-exports it for
-// compatibility.
-export interface DeviceCapabilities {
-  readonly supportsStacking: boolean
-  readonly supportsLivePreview: boolean
-  readonly supportsFilterWheel: boolean
-  readonly supportsAutofocus: boolean
-  readonly supportsStorageAccess: boolean
-}
-
 // Volatile device/preview/capture fields that change after rig commands.
 // Workflows merge `device` into the existing aggregate device projection;
 // `preview` and `capture` replace the aggregate outright. This is the
@@ -59,16 +43,15 @@ export interface RigOperationContext {
   readonly signal?: AbortSignal
 }
 
-// Generic mount operations. `park` is the baseline capability (Seestar
-// exposes only park); direct coordinate slew and motion stop are
-// Alpaca-style capabilities that a rig may omit when pointing is handled
-// via RigPointingWorkflow orchestration instead.
+// Generic mount operations are independently optional. A rig may expose a
+// direct slew without parking, or parking without direct slew when pointing
+// is handled by RigPointingWorkflow orchestration.
 export interface RigMount {
   readonly slewToCoordinates?: (
     input: RigCoordinates,
     context?: RigOperationContext,
   ) => Effect.Effect<void, unknown>
-  readonly park: (context?: RigOperationContext) => Effect.Effect<void, unknown>
+  readonly park?: (context?: RigOperationContext) => Effect.Effect<void, unknown>
   readonly stopMotion?: (
     context?: RigOperationContext,
   ) => Effect.Effect<void, unknown>
@@ -150,6 +133,10 @@ export interface RigFocuser {
   readonly moveTo: (position: number) => Effect.Effect<void, unknown>
 }
 
+export interface RigAutofocus {
+  readonly run: (context?: RigOperationContext) => Effect.Effect<void, unknown>
+}
+
 export interface RigFilterWheel {
   readonly setPosition: (position: number) => Effect.Effect<void, unknown>
 }
@@ -203,7 +190,13 @@ export interface RigPreviewWorkflow {
 
 export interface RigCaptureWorkflow {
   readonly start: (context?: RigOperationContext) => Effect.Effect<void, unknown>
+}
+
+// Recovery-facing capture stop shared by native stacking and generic camera
+// exposure. Start remains on the distinct native/external surfaces.
+export interface RigCaptureStop {
   readonly stop: (context?: RigOperationContext) => Effect.Effect<void, unknown>
+  readonly mode: 'native' | 'external'
 }
 
 // Connect-time projection bundle: the initial public state surfaced right
@@ -218,19 +211,36 @@ export interface RigConnectState {
   readonly library: LibraryProjection
 }
 
-export interface ConnectedRig {
+interface ConnectedRigBase {
   readonly identity: RigIdentity
-  readonly connection: RigConnection
   readonly observerLocation?: { lat: number; lon: number }
-  readonly capabilities: DeviceCapabilities
   readonly connect: RigConnectState
   readonly refresh: Effect.Effect<RigSessionRefresh, unknown>
   readonly mount?: RigMount
-  readonly camera?: RigCamera
   readonly focuser?: RigFocuser
+  readonly autofocus?: RigAutofocus
   readonly filterWheel?: RigFilterWheel
   readonly storage?: RigStorage
   readonly pointing?: RigPointingWorkflow
   readonly preview?: RigPreviewWorkflow
-  readonly capture?: RigCaptureWorkflow
 }
+
+// Capture start and stop are assembled as one discriminated capability so a
+// rig cannot expose a start surface without the matching canonical stop.
+export type ConnectedRig = ConnectedRigBase & (
+  | {
+      readonly capture: RigCaptureWorkflow
+      readonly camera?: undefined
+      readonly captureStop: RigCaptureStop & { readonly mode: 'native' }
+    }
+  | {
+      readonly capture?: undefined
+      readonly camera: RigCamera
+      readonly captureStop: RigCaptureStop & { readonly mode: 'external' }
+    }
+  | {
+      readonly capture?: undefined
+      readonly camera?: undefined
+      readonly captureStop?: undefined
+    }
+)

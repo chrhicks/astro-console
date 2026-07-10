@@ -14,15 +14,25 @@ export const GeoServiceLive = Layer.effect(
     // undefined = not yet looked up, null = looked up with no result.
     const cache = yield* Ref.make<GeoLocation | null | undefined>(undefined)
 
-    return {
-      lookup: Effect.gen(function* () {
+    const lookup = Effect.gen(function* () {
         const cached = yield* Ref.get(cache)
         if (cached !== undefined) return cached
 
         const result = yield* fetchGeoLocation()
         yield* Ref.set(cache, result)
         return result
-      }),
+      })
+    return {
+      lookup,
+      resolveObserverLocation: (deviceLocation) =>
+        deviceLocation
+          ? Effect.succeed({ location: deviceLocation, source: 'device' as const })
+          : lookup.pipe(
+              Effect.map((location) => ({
+                location,
+                source: location ? 'geoip' as const : undefined,
+              })),
+            ),
     } satisfies GeoService
   }),
 )

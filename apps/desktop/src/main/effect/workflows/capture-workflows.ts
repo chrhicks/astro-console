@@ -269,7 +269,7 @@ export const runStopCapture = Effect.gen(function* () {
     Effect.void,
     () =>
       Effect.gen(function* () {
-        const capture = session.rig.capture
+        const capture = session.rig.captureStop
         if (capture) {
           const ctx: RigOperationContext = { signal: lease.signal }
 
@@ -279,7 +279,11 @@ export const runStopCapture = Effect.gen(function* () {
                 const message = toErrorMessage(error)
                 const updated = yield* coordinator.commitIfLease(lease, (current) => ({
                   ...current,
-                  capture: { phase: 'failed', lastError: message },
+                  capture: {
+                    phase: 'failed',
+                    mode: capture.mode === 'external' ? 'external' : undefined,
+                    lastError: message,
+                  },
                 }))
                 if (updated) {
                   yield* bus.publish('capture.failed', { error: message })
@@ -307,40 +311,9 @@ export const runStopCapture = Effect.gen(function* () {
           return
         }
 
-        const camera = session.rig.camera
-        if (!camera) {
-          return yield* Effect.fail(
-            new Error('Connected rig does not support capture'),
-          )
-        }
-
-        const ctx: RigOperationContext = { signal: lease.signal }
-
-        yield* camera.stopExposure(ctx).pipe(
-          Effect.catchAll((error) =>
-            Effect.gen(function* () {
-              const message = toErrorMessage(error)
-              const updated = yield* coordinator.commitIfLease(lease, (current) => ({
-                ...current,
-                capture: { phase: 'failed', mode: 'external', lastError: message },
-              }))
-              if (updated) {
-                yield* bus.publish('capture.failed', { error: message })
-              }
-              return yield* Effect.fail(error)
-            }),
-          ),
+        return yield* Effect.fail(
+          new Error('Connected rig does not support capture'),
         )
-
-        if (lease.signal.aborted) return
-
-        const stopped = yield* coordinator.commitIfLease(lease, (current) => ({
-          ...current,
-          capture: { phase: 'idle', mode: 'external' },
-        }))
-        if (!stopped) return
-
-        yield* bus.publish('capture.stopped', {})
       }),
     () => coordinator.release(lease),
   ).pipe(

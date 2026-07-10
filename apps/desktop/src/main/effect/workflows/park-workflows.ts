@@ -61,31 +61,10 @@ export const runPark = Effect.gen(function* () {
             return { ...cur, capture: { ...cur.capture, phase: 'stopped' } }
           })
           if (stopClaimedResult && stopClaimedResult.capture.phase === 'stopped') {
-            const capture = session.rig.capture
-            const camera = session.rig.camera
+            const captureStop = session.rig.captureStop
             const ctx: RigOperationContext = { signal: lease.signal }
-            if (capture) {
-              yield* capture.stop(ctx).pipe(
-                Effect.catchAll((error) =>
-                  Effect.gen(function* () {
-                    const message = toErrorMessage(error)
-                    const updated = yield* coordinator.commitIfLease(lease, (cur) => ({
-                      ...cur,
-                      session: {
-                        ...cur.session,
-                        lastError: message,
-                      },
-                      capture: { phase: 'failed', lastError: message },
-                    }))
-                    if (updated) {
-                      yield* bus.publish('park.failed', { error: message, step: 'stop-capture' })
-                    }
-                    return yield* Effect.fail(error)
-                  }),
-                ),
-              )
-            } else if (camera) {
-              yield* camera.stopExposure(ctx).pipe(
+            if (captureStop) {
+              yield* captureStop.stop(ctx).pipe(
                 Effect.catchAll((error) =>
                   Effect.gen(function* () {
                     const message = toErrorMessage(error)
@@ -97,7 +76,7 @@ export const runPark = Effect.gen(function* () {
                       },
                       capture: {
                         phase: 'failed',
-                        mode: 'external',
+                        mode: captureStop.mode === 'external' ? 'external' : undefined,
                         lastError: message,
                       },
                     }))
@@ -155,7 +134,7 @@ export const runPark = Effect.gen(function* () {
         }
 
         const mount = session.rig.mount
-        if (!mount) {
+        if (!mount?.park) {
           return yield* Effect.fail(
             new Error('Connected rig does not support mount park'),
           )

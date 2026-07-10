@@ -14,10 +14,10 @@ import {
   WorkspaceState,
   WorkspaceSurface,
 } from '../../../shared/api-v2'
-import type { DeviceCapabilities } from '../device/device-plugin'
 import { AggregateStore } from './aggregate-store'
 import { GeoService } from '../geo/geo-service'
 import { SessionManager } from '../session/session-manager'
+import type { ConnectedRig } from '../rig/rig-model'
 
 export interface StatusProjector {
   readonly snapshot: Effect.Effect<DesktopStatus>
@@ -29,12 +29,27 @@ export const StatusProjector =
 interface RigSupport {
   canPark: boolean
   canPoint: boolean
+  preview: boolean
   capture: WorkspaceCapabilityTier
+  autofocus: boolean
+  filterWheel: boolean
+  storage: boolean
+}
+
+export function projectRigSupport(rig: ConnectedRig): RigSupport {
+  return {
+    canPark: rig.mount?.park !== undefined,
+    canPoint: rig.pointing !== undefined,
+    preview: rig.preview !== undefined,
+    capture: rig.capture ? 'native' : rig.camera ? 'external' : 'unsupported',
+    autofocus: rig.autofocus !== undefined,
+    filterWheel: rig.filterWheel !== undefined,
+    storage: rig.storage !== undefined,
+  }
 }
 
 function project(
   aggregate: SessionAggregate,
-  capabilities: DeviceCapabilities | null,
   health: LiveSessionHealthState | null,
   effectiveLocation: { lat: number; lon: number } | null,
   locationSource: 'device' | 'geoip' | undefined,
@@ -67,7 +82,7 @@ function project(
     library: aggregate.library,
     pointing: aggregate.pointing,
     preview: aggregate.preview,
-    workspace: projectWorkspace(aggregate, capabilities, rigSupport, sessionActive),
+    workspace: projectWorkspace(aggregate, rigSupport, sessionActive),
     camera: aggregate.camera ?? undefined,
     currentTarget: aggregate.currentTarget,
     lastUpdatedAt: aggregate.lastUpdatedAt,
@@ -77,11 +92,10 @@ function project(
 
 function projectWorkspace(
   aggregate: SessionAggregate,
-  capabilities: DeviceCapabilities | null,
   rigSupport: RigSupport | null,
   sessionActive: boolean,
 ): WorkspaceProjection {
-  const projectedCapabilities = projectCapabilities(capabilities, rigSupport)
+  const projectedCapabilities = projectCapabilities(rigSupport)
   const state = projectState(aggregate, projectedCapabilities, sessionActive)
   return {
     state,
@@ -92,15 +106,14 @@ function projectWorkspace(
     ),
     surface: projectSurface(aggregate.pointing.target ?? aggregate.currentTarget),
     capabilities: projectedCapabilities,
-    actions: projectActions(state, capabilities, rigSupport),
+    actions: projectActions(state, rigSupport),
   }
 }
 
 function projectCapabilities(
-  capabilities: DeviceCapabilities | null,
   rigSupport: RigSupport | null,
 ): WorkspaceCapabilities {
-  if (!capabilities) {
+  if (!rigSupport) {
     return {
       preview: 'unsupported',
       capture: 'unsupported',
@@ -110,15 +123,11 @@ function projectCapabilities(
     }
   }
   return {
-    preview: capabilities.supportsLivePreview ? 'native' : 'unsupported',
-    // Rig presence is the source of truth for the capture tier: native when
-    // the rig exposes RigCaptureWorkflow, external when it only exposes
-    // RigCamera, unsupported otherwise. Falls back to the legacy stacking
-    // flag only when rig support is unknown (no session).
-    capture: rigSupport?.capture ?? (capabilities.supportsStacking ? 'native' : 'unsupported'),
-    autofocus: capabilities.supportsAutofocus ? 'yes' : 'no',
-    filterWheel: capabilities.supportsFilterWheel ? 'yes' : 'no',
-    storage: capabilities.supportsStorageAccess ? 'yes' : 'no',
+    preview: rigSupport.preview ? 'native' : 'unsupported',
+    capture: rigSupport.capture,
+    autofocus: rigSupport.autofocus ? 'yes' : 'no',
+    filterWheel: rigSupport.filterWheel ? 'yes' : 'no',
+    storage: rigSupport.storage ? 'yes' : 'no',
   }
 }
 
@@ -193,7 +202,6 @@ function projectSurface(target: TargetSummary | null): WorkspaceSurface {
 
 function projectActions(
   state: WorkspaceState,
-  capabilities: DeviceCapabilities | null,
   rigSupport: RigSupport | null,
 ): WorkspaceAction[] {
   if (state === 'disconnected') {
@@ -217,7 +225,7 @@ function projectActions(
   }
   if (state === 'on_target' || state === 'primed') {
     const actions: WorkspaceAction[] = []
-    if (capabilities?.supportsLivePreview) {
+    if (rigSupport?.preview) {
       actions.push({ id: 'preview', label: 'Preview', enabled: true })
     }
     const captureTier = rigSupport?.capture
@@ -248,30 +256,16 @@ export const StatusProjectorLive = Layer.effect(
         // is installed and cleared by the disconnect workflow.
         const sessionActive =
           session !== null && aggregate.session.sessionId === session.sessionId
-        const deviceLocation = aggregate.device.location ?? null
-        const geoLocation = deviceLocation ? null : yield* geo.lookup
-        const effectiveLocation = deviceLocation ?? geoLocation
-        const locationSource: 'device' | 'geoip' | undefined = deviceLocation
-          ? 'device'
-          : geoLocation
-            ? 'geoip'
-            : undefined
+        const resolvedLocation = yield* geo.resolveObserverLocation(
+          sessionActive ? session?.rig.observerLocation : undefined,
+        )
         return project(
           aggregate,
-          sessionActive ? session?.rig.capabilities ?? null : null,
           sessionActive ? session?.health ?? null : null,
-          effectiveLocation,
-          locationSource,
+          resolvedLocation.location,
+          resolvedLocation.source,
           sessionActive
-            ? {
-                canPark: session!.rig.mount !== undefined,
-                canPoint: session!.rig.pointing !== undefined,
-                capture: session!.rig.capture
-                  ? 'native'
-                  : session!.rig.camera
-                    ? 'external'
-                    : 'unsupported',
-              }
+            ? projectRigSupport(session!.rig)
             : null,
           sessionActive,
         )

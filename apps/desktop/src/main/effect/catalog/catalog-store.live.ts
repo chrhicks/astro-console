@@ -18,8 +18,9 @@ import {
   type RankedVisibilityEntry,
   type VisibilityTarget,
 } from '../../../shared/visibility-engine'
-import type { DeviceCapabilities } from '../device/device-plugin'
+import type { ConnectedRig } from '../rig/rig-model'
 import { SessionManager } from '../session/session-manager'
+import { GeoService } from '../geo/geo-service'
 import { CatalogStore } from './catalog-store'
 
 const deepSkyIndex = buildSearchIndex(DEEP_SKY_TARGETS)
@@ -30,15 +31,18 @@ export const CatalogStoreLive = Layer.effect(
   CatalogStore,
   Effect.gen(function* () {
     const sessions = yield* SessionManager
+    const geo = yield* GeoService
 
     return {
       browse: (query) =>
         Effect.gen(function* () {
           const session = yield* sessions.getCurrent
-          const location = session?.rig.observerLocation ?? null
+          const { location } = yield* geo.resolveObserverLocation(
+            session?.rig.observerLocation,
+          )
           const search = query.search?.trim() ?? ''
           const hasSearch = search.length > 0
-          const capabilities = session?.rig.capabilities ?? null
+          const rig = session?.rig ?? null
           const canPoint = session?.rig.pointing !== undefined
           const deepSkyTargets = filterDeepSkyTargets(
             hasSearch
@@ -73,7 +77,7 @@ export const CatalogStoreLive = Layer.effect(
             .map((target) =>
               toTargetSummary(
                 target,
-                capabilities,
+                rig,
                 canPoint,
                 visibilityById.get(target.id),
               ),
@@ -97,11 +101,11 @@ export const CatalogStoreLive = Layer.effect(
       getSummaryById: (targetId) =>
         Effect.gen(function* () {
           const session = yield* sessions.getCurrent
-          const capabilities = session?.rig.capabilities ?? null
+          const rig = session?.rig ?? null
           const canPoint = session?.rig.pointing !== undefined
           const target = deepSkyById.get(targetId) ?? solarById.get(targetId)
           if (!target) return null
-          return toTargetSummary(target, capabilities, canPoint, undefined)
+          return toTargetSummary(target, rig, canPoint, undefined)
         }),
     } satisfies CatalogStore
   }),
@@ -217,13 +221,13 @@ function toVisibilityTarget(
 
 function toTargetSummary(
   target: DeepSkyTarget | SolarSystemTarget,
-  capabilities: DeviceCapabilities | null,
+  rig: ConnectedRig | null,
   canPoint: boolean,
   visibility: RankedVisibilityEntry | undefined,
 ): TargetSummary {
   const type = target.targetType
   const recommendedFilter =
-    capabilities && !capabilities.supportsFilterWheel
+    rig && !rig.filterWheel
       ? null
       : target.recommendedFilter
 
@@ -235,7 +239,7 @@ function toTargetSummary(
     visibilityLabel: visibility?.visibilityLabel,
     recommendedFilter,
     type,
-    availableActions: resolveAvailableActions(type, capabilities, canPoint),
+    availableActions: resolveAvailableActions(type, rig, canPoint),
   }
 }
 
@@ -265,26 +269,26 @@ function toTargetDetails(
   }
 }
 
-function resolveAvailableActions(
+export function resolveAvailableActions(
   targetType: TargetSummary['type'],
-  capabilities: DeviceCapabilities | null,
+  rig: ConnectedRig | null,
   canPoint: boolean,
 ): TargetAction[] {
-  if (!capabilities) {
+  if (!rig) {
     return []
   }
 
   const actions: TargetAction[] = canPoint ? ['slew'] : []
 
-  if (capabilities.supportsStacking && targetType !== 'sun') {
+  if (rig.capture && targetType !== 'sun') {
     actions.push('stack')
   }
 
-  if (capabilities.supportsLivePreview) {
+  if (rig.preview) {
     actions.push('preview')
   }
 
-  if (capabilities.supportsFilterWheel) {
+  if (rig.filterWheel) {
     actions.push('filter')
   }
 

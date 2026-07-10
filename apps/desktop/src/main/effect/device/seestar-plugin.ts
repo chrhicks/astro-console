@@ -29,14 +29,6 @@ import { toSeestarViewMode } from './device-plugin'
 import type { ConnectedRig } from '../rig/rig-model'
 import { EventBus } from '../event/event-bus.js'
 
-const SEESTAR_CAPABILITIES = {
-  supportsStacking: true,
-  supportsLivePreview: true,
-  supportsFilterWheel: true,
-  supportsAutofocus: true,
-  supportsStorageAccess: true,
-} as const
-
 const DEFAULT_GOTO_WAIT = {
   waitForCompletion: true,
   timeoutMs: 120000,
@@ -761,9 +753,7 @@ export function createSeestarPlugin(): DevicePlugin {
               displayName: target.displayName,
               host,
             },
-            connection: { disconnect },
             observerLocation: summary.location,
-            capabilities: SEESTAR_CAPABILITIES,
             connect: {
               device: deviceProjection,
               preview: { phase: 'none', source: 'none', active: false },
@@ -805,7 +795,26 @@ export function createSeestarPlugin(): DevicePlugin {
             },
             capture: {
               start: (context) => startCapture(context?.signal),
+            },
+            captureStop: {
+              mode: 'native',
               stop: (context) => stopCapture(context?.signal),
+            },
+            autofocus: {
+              run: (context) =>
+                guardHealth(Effect.tryPromise({
+                  try: async () => {
+                    const ok = await device.startAutoFocus({
+                      waitForCompletion: true,
+                      timeoutMs: 60000,
+                      pollIntervalMs: 500,
+                      signal: context?.signal,
+                    })
+                    if (!ok) throw new Error('Device rejected autofocus request')
+                  },
+                  catch: (error) =>
+                    new Error(`device.autofocus failed for ${host}: ${toErrorMessage(error)}`),
+                })),
             },
           }
 

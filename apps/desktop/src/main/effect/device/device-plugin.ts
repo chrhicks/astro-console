@@ -6,7 +6,7 @@ import type {
   LiveSessionHealthState,
   TargetType,
 } from '../../../shared/api-v2'
-import type { ConnectedRig, DeviceCapabilities, RigSessionRefresh } from '../rig/rig-model'
+import type { ConnectedRig, RigSessionRefresh } from '../rig/rig-model'
 import { EventBus } from '../event/event-bus'
 
 // Re-exported for compatibility. The canonical definition lives in the rig
@@ -57,10 +57,6 @@ export interface DeviceSession {
   disconnect: Effect.Effect<void>
   rig: ConnectedRig
 }
-
-// Re-exported for compatibility. The canonical definition lives in the rig
-// model; app surfaces should migrate to rig.capabilities.
-export type { DeviceCapabilities }
 
 export interface DevicePlugin {
   readonly kind: DevicePluginKind

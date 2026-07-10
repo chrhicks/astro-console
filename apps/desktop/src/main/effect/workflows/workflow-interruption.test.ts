@@ -32,14 +32,6 @@ function makeSession(id: string, disconnectFn?: Effect.Effect<void>): DeviceSess
         pluginKind: 'fake-seestar',
         displayName: 'Test',
       },
-      connection: { disconnect: disconnectFn ?? Effect.void },
-      capabilities: {
-        supportsStacking: true,
-        supportsLivePreview: false,
-        supportsFilterWheel: false,
-        supportsAutofocus: false,
-        supportsStorageAccess: false,
-      },
       connect: {
         device: {},
         preview: { phase: 'none', source: 'none', active: false },
@@ -53,8 +45,8 @@ function makeSession(id: string, disconnectFn?: Effect.Effect<void>): DeviceSess
       }),
       capture: {
         start: () => Effect.void,
-        stop: () => Effect.void,
       },
+      captureStop: { mode: 'native', stop: () => Effect.void },
     },
   }
 }

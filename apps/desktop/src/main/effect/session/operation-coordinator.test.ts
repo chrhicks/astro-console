@@ -31,14 +31,6 @@ function makeSession(id: string): DeviceSession {
         pluginKind: 'fake-seestar',
         displayName: 'Test',
       },
-      connection: { disconnect: Effect.void },
-      capabilities: {
-        supportsStacking: true,
-        supportsLivePreview: true,
-        supportsFilterWheel: false,
-        supportsAutofocus: false,
-        supportsStorageAccess: false,
-      },
       connect: {
         device: {},
         preview: { phase: 'none', source: 'none', active: false },

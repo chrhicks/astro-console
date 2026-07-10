@@ -11,6 +11,7 @@ import { SessionManager } from '../session/session-manager'
 import { OperationCoordinator, type OperationLease } from '../session/operation-coordinator'
 import { AggregateStore } from '../state/aggregate-store'
 import type { RigOperationContext } from '../rig/rig-model'
+import { GeoService } from '../geo/geo-service'
 
 export const runPointToTarget = (targetId: string) =>
   Effect.gen(function* () {
@@ -19,6 +20,7 @@ export const runPointToTarget = (targetId: string) =>
     const sessions = yield* SessionManager
     const coordinator = yield* OperationCoordinator
     const catalog = yield* CatalogStore
+    const geo = yield* GeoService
 
     const session = yield* sessions.getCurrent
     if (!session) {
@@ -104,11 +106,13 @@ export const runPointToTarget = (targetId: string) =>
 
           yield* setStep('Resolving coordinates')
 
-          const observerLocation = session.rig.observerLocation
+          const { location: observerLocation } = yield* geo.resolveObserverLocation(
+            session.rig.observerLocation,
+          )
 
           const coordinates = yield* resolvePointingCoordinates(
             target,
-            observerLocation,
+            observerLocation ?? undefined,
           ).pipe(
             Effect.catchAll((error) => failStep('Resolving coordinates', error)),
           )

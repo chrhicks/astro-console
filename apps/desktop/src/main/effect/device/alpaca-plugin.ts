@@ -229,13 +229,6 @@ export function createAlpacaPlugin(): DevicePlugin {
 
               const sessionId = crypto.randomUUID()
               const connectedAt = new Date().toISOString()
-              const capabilities = {
-                supportsStacking: false,
-                supportsLivePreview: false,
-                supportsFilterWheel: filterWheelBase !== undefined,
-                supportsAutofocus: focuserBase !== undefined,
-                supportsStorageAccess: false,
-              }
               const warnings: string[] = []
 
               const location =
@@ -325,6 +318,15 @@ export function createAlpacaPlugin(): DevicePlugin {
               const filterWheel = filterWheelBase
                 ? buildFilterWheel(client, filterWheelBase)
                 : undefined
+              const captureRig = camera
+                ? {
+                    camera,
+                    captureStop: {
+                      mode: 'external' as const,
+                      stop: camera.stopExposure,
+                    },
+                  }
+                : {}
 
               const pointing = slewToCoordinates
                 ? {
@@ -363,9 +365,7 @@ export function createAlpacaPlugin(): DevicePlugin {
                   host,
                   port: target.port,
                 },
-                connection: { disconnect },
                 observerLocation: location,
-                capabilities,
                 connect: {
                   device,
                   preview: { phase: 'none', source: 'none', active: false },
@@ -382,7 +382,7 @@ export function createAlpacaPlugin(): DevicePlugin {
                 refresh,
                 mount,
                 pointing,
-                camera,
+                ...captureRig,
                 focuser,
                 filterWheel,
               }
@@ -617,26 +617,26 @@ function buildMount(
   base: string,
   state: TelescopeState,
 ): ConnectedRig['mount'] | undefined {
-  // RigMount requires park; only expose the mount seam when the telescope
-  // can park. Slew and stop are added when the telescope supports them.
-  if (!state.canPark) return undefined
   const canSlewAtAll = state.canSlew || state.canSlewAsync
+  if (!state.canPark && !canSlewAtAll) return undefined
   return {
-    park: (context) =>
-      Effect.tryPromise({
-        try: async () => {
-          await client.put(`${base}/park`, {}, COMMAND_TIMEOUT_MS, context?.signal)
-          await pollUntil(
-            () => client.get(`${base}/atpark`, Schema.Boolean, context?.signal),
-            true,
-            SLEW_TIMEOUT_MS,
-            SLEW_POLL_INTERVAL_MS,
-            context?.signal,
-          )
-        },
-        catch: (error) =>
-          new Error(`Alpaca park failed: ${toErrorMessage(error)}`),
-      }),
+    park: state.canPark
+      ? (context) =>
+          Effect.tryPromise({
+            try: async () => {
+              await client.put(`${base}/park`, {}, COMMAND_TIMEOUT_MS, context?.signal)
+              await pollUntil(
+                () => client.get(`${base}/atpark`, Schema.Boolean, context?.signal),
+                true,
+                SLEW_TIMEOUT_MS,
+                SLEW_POLL_INTERVAL_MS,
+                context?.signal,
+              )
+            },
+            catch: (error) =>
+              new Error(`Alpaca park failed: ${toErrorMessage(error)}`),
+          })
+      : undefined,
     slewToCoordinates: canSlewAtAll
       ? buildSlewToCoordinates(client, base, state)
       : undefined,
