@@ -71,7 +71,7 @@ export interface TargetSummary {
   short: string // "M42" or "Jupiter"
   name: string // "Orion Nebula" or "Jupiter"
   visibility?: 'up' | 'later' | 'blocked'
-  visibilityLabel?: string // "Up now", "Later tonight", "Below horizon"
+  visibilityLabel?: string // "Up now", "Later tonight", "Not tonight"
   recommendedFilter: FilterPosition | null // null if device has no filter wheel
   type: TargetType
   availableActions: TargetAction[] // device-capability-dependent

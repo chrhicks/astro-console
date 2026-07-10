@@ -30,7 +30,7 @@ export const RECOMMENDATION_TO_VISIBILITY: Record<VisibilityRecommendation, Visi
 export const VISIBILITY_LABEL: Record<VisibilityState, string> = {
   up: 'Up now',
   later: 'Later tonight',
-  blocked: 'Below horizon',
+  blocked: 'Not tonight',
 }
 
 export interface VisibilityInput {
