@@ -140,7 +140,7 @@ export const runPointToTarget = (targetId: string) =>
 
     yield* pointing
       .pointToCoordinates({
-        mode: target.viewMode,
+        targetType: target.targetType,
         targetName: summary.name,
         raHours: coordinates.raHours,
         decDeg: coordinates.decDeg,

@@ -1,4 +1,5 @@
 import { Effect, Layer } from 'effect'
+import type { TargetDetails } from '../../../shared/api-v2'
 import { SOLAR_SYSTEM_TARGETS, DEEP_SKY_TARGETS } from '../../../shared/catalog/catalog-data'
 import {
   buildSearchIndex,
@@ -38,6 +39,7 @@ export const CatalogStoreLive = Layer.effect(
           const search = query.search?.trim() ?? ''
           const hasSearch = search.length > 0
           const capabilities = session?.rig.capabilities ?? null
+          const canPoint = session?.rig.pointing !== undefined
           const deepSkyTargets = filterDeepSkyTargets(
             hasSearch
               ? searchCatalog(deepSkyIndex, DEEP_SKY_TARGETS, search)
@@ -69,7 +71,12 @@ export const CatalogStoreLive = Layer.effect(
 
           const targets = orderedTargets
             .map((target) =>
-              toTargetSummary(target, capabilities, visibilityById.get(target.id)),
+              toTargetSummary(
+                target,
+                capabilities,
+                canPoint,
+                visibilityById.get(target.id),
+              ),
             )
             .filter((target) => !query.upNowOnly || target.visibility === 'up')
 
@@ -83,13 +90,18 @@ export const CatalogStoreLive = Layer.effect(
         Effect.succeed(
           deepSkyById.get(targetId) ?? solarById.get(targetId) ?? null,
         ),
+      getDetailsById: (targetId) =>
+        Effect.succeed(
+          toTargetDetails(deepSkyById.get(targetId) ?? solarById.get(targetId) ?? null),
+        ),
       getSummaryById: (targetId) =>
         Effect.gen(function* () {
           const session = yield* sessions.getCurrent
           const capabilities = session?.rig.capabilities ?? null
+          const canPoint = session?.rig.pointing !== undefined
           const target = deepSkyById.get(targetId) ?? solarById.get(targetId)
           if (!target) return null
-          return toTargetSummary(target, capabilities, undefined)
+          return toTargetSummary(target, capabilities, canPoint, undefined)
         }),
     } satisfies CatalogStore
   }),
@@ -99,7 +111,7 @@ function filterDeepSkyTargets(
   targets: DeepSkyTarget[],
   typeFilter: CatalogQuery['typeFilter'],
 ) {
-  if (!typeFilter || typeFilter === 'dso' || typeFilter === 'star') {
+  if (!typeFilter || typeFilter === 'dso') {
     return targets
   }
 
@@ -118,7 +130,7 @@ function filterSolarTargets(
     return []
   }
 
-  return targets.filter((target) => target.viewMode === typeFilter)
+  return targets.filter((target) => target.targetType === typeFilter)
 }
 
 function mergeBrowseTargets(
@@ -206,9 +218,10 @@ function toVisibilityTarget(
 function toTargetSummary(
   target: DeepSkyTarget | SolarSystemTarget,
   capabilities: DeviceCapabilities | null,
+  canPoint: boolean,
   visibility: RankedVisibilityEntry | undefined,
 ): TargetSummary {
-  const type = resolveTargetType(target)
+  const type = target.targetType
   const recommendedFilter =
     capabilities && !capabilities.supportsFilterWheel
       ? null
@@ -222,35 +235,46 @@ function toTargetSummary(
     visibilityLabel: visibility?.visibilityLabel,
     recommendedFilter,
     type,
-    availableActions: resolveAvailableActions(type, capabilities),
+    availableActions: resolveAvailableActions(type, capabilities, canPoint),
   }
 }
 
-function resolveTargetType(target: DeepSkyTarget | SolarSystemTarget) {
-  if (!('body' in target)) {
-    return 'dso' as const
+function toTargetDetails(
+  target: DeepSkyTarget | SolarSystemTarget | null,
+): TargetDetails | null {
+  if (!target) return null
+
+  if ('body' in target) {
+    return {
+      kind: 'solar-system',
+      designation: target.designation,
+      body: target.body,
+    }
   }
 
-  if (target.body === 'sun') {
-    return 'sun' as const
+  return {
+    kind: 'dso',
+    designation: target.designation,
+    objectType: target.objectType,
+    raHours: target.raHours,
+    decDeg: target.decDeg,
+    constellation: target.constellation,
+    visualMagnitude: target.visualMagnitude,
+    surfaceBrightness: target.surfaceBrightness,
+    majorAxisArcmin: target.majorAxisArcmin,
   }
-
-  if (target.body === 'moon') {
-    return 'moon' as const
-  }
-
-  return 'planet' as const
 }
 
 function resolveAvailableActions(
   targetType: TargetSummary['type'],
   capabilities: DeviceCapabilities | null,
+  canPoint: boolean,
 ): TargetAction[] {
   if (!capabilities) {
     return []
   }
 
-  const actions: TargetAction[] = ['slew']
+  const actions: TargetAction[] = canPoint ? ['slew'] : []
 
   if (capabilities.supportsStacking && targetType !== 'sun') {
     actions.push('stack')

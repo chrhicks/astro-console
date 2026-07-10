@@ -18,7 +18,7 @@ Local modifications made by this project:
 - filtered out `NonEx`, `Dup`, `*`, and `**` rows
 - normalized object identifiers and primary designations
 - parsed RA/Dec sexagesimal strings into decimal fields
-- derived `recommendedFilter` and `viewMode`
+- derived `recommendedFilter` and `targetType`
 - merged addendum targets into the generated `catalog-data.json`
 - validated and re-serialized the data into the local `DeepSkyTarget` schema
 

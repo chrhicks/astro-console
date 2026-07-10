@@ -17,8 +17,12 @@ export type OpenNgcObjectType =
   | 'Nova' // Nova / nova remnant
   | 'Other' // Other classification
 
-export type SeestarViewMode = 'star' | 'moon' | 'sun' | 'planet' | 'scenery'
 export type FilterPosition = 'clear' | 'ir' | 'lp'
+
+// Rig-neutral target classification shared by catalog targets, catalog
+// queries, and rig pointing intent. Seestar adapters map this to the
+// device-specific SeestarViewMode locally.
+export type TargetType = 'dso' | 'sun' | 'moon' | 'planet'
 
 export interface DeepSkyTarget {
   id: string // e.g. "ngc:1976" or "messier:m42"
@@ -27,7 +31,7 @@ export interface DeepSkyTarget {
   alternativeDesignations: string[] // ["NGC 1976", "Orion Nebula", ...] for search
   messierNumber?: string // "42" — separate for search priority and display
   objectType: OpenNgcObjectType // raw OpenNGC type
-  viewMode: SeestarViewMode // always 'star' for DSOs; determined at import
+  targetType: TargetType // always 'dso'; rig-neutral classification
   raHours: number // J2000 RA in hours
   decDeg: number // J2000 Dec in degrees
   visualMagnitude?: number // V-Mag (visual band)
@@ -55,7 +59,7 @@ export interface SolarSystemTarget {
   id: string // "sun", "moon", "planet:jupiter"
   designation: string // "Sun", "Moon", "Jupiter"
   body: SolarSystemBody // maps to astronomy-engine Body enum
-  viewMode: SeestarViewMode // 'sun' | 'moon' | 'planet'
+  targetType: TargetType // 'sun' | 'moon' | 'planet'; rig-neutral classification
   recommendedFilter: FilterPosition | null // Sun → 'ir', others → 'clear'
   source: 'solar-system'
 }
@@ -69,14 +73,14 @@ export interface TargetSummary {
   visibility?: 'up' | 'later' | 'blocked'
   visibilityLabel?: string // "Up now", "Later tonight", "Below horizon"
   recommendedFilter: FilterPosition | null // null if device has no filter wheel
-  type: 'dso' | 'planet' | 'moon' | 'sun'
+  type: TargetType
   availableActions: TargetAction[] // device-capability-dependent
 }
 
 export interface CatalogQuery {
   search?: string
   upNowOnly?: boolean
-  typeFilter?: SeestarViewMode | 'dso' // 'dso' = all deep sky, 'star' = DSOs, etc.
+  typeFilter?: TargetType // rig-neutral target classification
   offset?: number
   limit?: number
 }
