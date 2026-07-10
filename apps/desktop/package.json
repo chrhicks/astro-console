@@ -13,7 +13,7 @@
     "dev:sdk": "npm --prefix ../../sdk run dev",
     "dev:main": "tsc -p tsconfig.main.json --watch",
     "dev:renderer": "vite",
-    "dev:electron": "wait-on tcp:5173 file:dist/main/index.js file:../../sdk/dist/index.js && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron dist/main/index.js",
+    "dev:electron": "tsx scripts/dev-electron.ts",
     "dev": "npm run build:sdk && concurrently -k \"npm:dev:sdk\" \"npm:dev:main\" \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:inspect": "npm run build:sdk && cross-env ELECTRON_INSPECT_PORT=9222 concurrently -k \"npm:dev:sdk\" \"npm:dev:main\" \"npm:dev:renderer\" \"npm:dev:electron\"",
     "start": "npm run build && electron dist/main/index.js",
