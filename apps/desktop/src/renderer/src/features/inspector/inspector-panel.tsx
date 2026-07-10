@@ -1,9 +1,9 @@
 import type {
   CaptureProjection,
-  DeepSkyTarget,
+  DeviceProjection,
   PointingProjection,
   PreviewProjection,
-  SolarSystemTarget,
+  TargetDetails,
 } from '../../../../shared/api-v2'
 import { useProjectionStore } from '../../state/projection-store'
 import { selectInspectorModel } from '../../state/projection-selectors'
@@ -30,6 +30,14 @@ const CAPTURE_PHASE_LABELS: Record<CaptureProjection['phase'], string> = {
   failed: 'Failed',
 }
 
+const EXPOSURE_PHASE_LABELS: Record<CaptureProjection['phase'], string> = {
+  idle: 'Idle',
+  starting: 'Starting',
+  capturing: 'Exposing',
+  stopped: 'Stopped',
+  failed: 'Failed',
+}
+
 const PREVIEW_PHASE_LABELS: Record<PreviewProjection['phase'], string> = {
   none: 'None',
   starting: 'Starting',
@@ -37,9 +45,15 @@ const PREVIEW_PHASE_LABELS: Record<PreviewProjection['phase'], string> = {
   error: 'Error',
 }
 
+const ACTIVITY_LABELS: Record<NonNullable<DeviceProjection['activity']>, string> = {
+  idle: 'Idle',
+  previewing: 'Previewing',
+  capturing: 'Capturing',
+}
+
 export default function InspectorPanel() {
   const target = useSelectedTarget((state) => state.target)
-  const { isConnected, pointing, currentTarget, capture, preview, device } =
+  const { isConnected, pointing, currentTarget, capture, preview, device, workspace } =
     useProjectionStore(selectInspectorModel)
   const details = useTargetDetailsQuery(target?.id ?? null)
   const pointMutation = usePointToTargetMutation()
@@ -62,7 +76,19 @@ export default function InspectorPanel() {
   const isBelowHorizon = target.visibility === 'blocked'
   const isParked = device.mountClosed === true
   const isAtTarget = !isParked && currentTarget?.id === target.id
-  const canSlew = isConnected && !isSlewPending && !isBelowHorizon
+  const canSlew =
+    isConnected &&
+    device.canPoint !== false &&
+    !isSlewPending &&
+    !isBelowHorizon
+  const isExternalCapture = capture.mode === 'external'
+  const captureCapability = workspace.capabilities.capture
+  const hasNativeCapture = captureCapability === 'native'
+  const hasExternalCapture = captureCapability === 'external'
+  const hasFilterWheel = workspace.capabilities.filterWheel === 'yes'
+  const capturePhaseLabels = isExternalCapture
+    ? EXPOSURE_PHASE_LABELS
+    : CAPTURE_PHASE_LABELS
 
   return (
     <div>
@@ -116,7 +142,7 @@ export default function InspectorPanel() {
           ) : null}
           {device.mountClosed && !isSlewPending ? (
             <p className="inspector-pointing-error">
-              Mount is parked. Slew to a target to open the arm and resume.
+              Mount is parked. Slew or unpark before resuming.
             </p>
           ) : null}
           {pointing.phase === 'failed' && pointing.lastError ? (
@@ -137,17 +163,21 @@ export default function InspectorPanel() {
         </section>
 
         <details className="inspector-acc" open>
-          <summary>Capture</summary>
+          <summary>{isExternalCapture ? 'Exposure' : 'Capture'}</summary>
           <div className="acc-body">
             <div className="kv">
-              <span>Capture</span>
+              <span>{isExternalCapture ? 'Exposure' : 'Capture'}</span>
               <strong id="capturePhase">
-                {CAPTURE_PHASE_LABELS[capture.phase]}
+                {capturePhaseLabels[capture.phase]}
               </strong>
-              <span>Stacks</span>
-              <strong id="captureStacks">{capture.stacks ?? '—'}</strong>
-              <span>Frames</span>
-              <strong id="captureFrames">{capture.frames ?? '—'}</strong>
+              {hasNativeCapture ? (
+                <>
+                  <span>Stacks</span>
+                  <strong id="captureStacks">{capture.stacks ?? '—'}</strong>
+                  <span>Frames</span>
+                  <strong id="captureFrames">{capture.frames ?? '—'}</strong>
+                </>
+              ) : null}
               <span>Elapsed</span>
               <strong id="captureElapsed">
                 {formatElapsed(capture.elapsedSec)}
@@ -156,56 +186,70 @@ export default function InspectorPanel() {
             {capture.phase === 'failed' && capture.lastError ? (
               <p className="inspector-pointing-error">{capture.lastError}</p>
             ) : null}
-            <div className="control-block">
-              <div className="field-label">Mode</div>
-              <select id="captureMode" defaultValue="dso" disabled>
-                <option value="dso">Deep-sky stack</option>
-                <option value="planet">Planet stack</option>
-                <option value="moon">Moon stack</option>
-                <option value="sun">Sun stack</option>
-                <option value="video">Video</option>
-              </select>
-            </div>
-            <div className="control-block">
-              <div className="field-label">Filter (recommended)</div>
-              <select
-                id="filterSelect"
-                value={target.recommendedFilter ?? 'lp'}
-                disabled
-              >
-                <option value="lp">Light pollution (auto)</option>
-                <option value="clear">Clear</option>
-                <option value="ir">IR cut</option>
-              </select>
-            </div>
-            <div className="control-block">
-              <div className="field-label">Stop when</div>
-              <select id="stopRule" defaultValue="manual" disabled>
-                <option value="manual">I press Stop</option>
-                <option value="set">Target sets below horizon</option>
-              </select>
-            </div>
-            <div className="btn-row">
-              <button
-                type="button"
-                className="btn btn-sm primary"
-                id="btnStartStack"
-                disabled
-              >
-                Start stack
-              </button>
-              <button
-                type="button"
-                className="btn btn-sm"
-                id="btnStopStack"
-                disabled
-              >
-                Stop
-              </button>
-            </div>
-            <p className="help-line">
-              Capture runs from the work area action bar. These inspector settings are not yet wired.
-            </p>
+            {hasNativeCapture ? (
+              <div className="control-block">
+                <div className="field-label">Mode</div>
+                <select id="captureMode" defaultValue="dso" disabled>
+                  <option value="dso">Deep-sky stack</option>
+                  <option value="planet">Planet stack</option>
+                  <option value="moon">Moon stack</option>
+                  <option value="sun">Sun stack</option>
+                  <option value="video">Video</option>
+                </select>
+              </div>
+            ) : null}
+            {hasFilterWheel && target.recommendedFilter ? (
+              <div className="control-block">
+                <div className="field-label">Recommended filter</div>
+                <strong id="filterSelect">{formatFilterLabel(target.recommendedFilter)}</strong>
+              </div>
+            ) : (
+              <p className="help-line" id="filterSelect">
+                {hasFilterWheel
+                  ? 'No recommended filter for this target.'
+                  : 'No filter wheel on this rig.'}
+              </p>
+            )}
+            {hasNativeCapture ? (
+              <>
+                <div className="control-block">
+                  <div className="field-label">Stop when</div>
+                  <select id="stopRule" defaultValue="manual" disabled>
+                    <option value="manual">I press Stop</option>
+                    <option value="set">Target sets below horizon</option>
+                  </select>
+                </div>
+                <div className="btn-row">
+                  <button
+                    type="button"
+                    className="btn btn-sm primary"
+                    id="btnStartStack"
+                    disabled
+                  >
+                    Start stack
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    id="btnStopStack"
+                    disabled
+                  >
+                    Stop
+                  </button>
+                </div>
+                <p className="help-line">
+                  Capture runs from the work area action bar. These inspector settings are not yet wired.
+                </p>
+              </>
+            ) : hasExternalCapture ? (
+              <p className="help-line">
+                Exposure runs from the work area action bar. This rig does not expose Seestar stacking controls.
+              </p>
+            ) : (
+              <p className="help-line">
+                This rig does not expose capture controls.
+              </p>
+            )}
           </div>
         </details>
         <details className="inspector-acc">
@@ -221,9 +265,11 @@ export default function InspectorPanel() {
                 {device.mountClosed ? 'Parked' : 'Ready'}
               </strong>
               <span>Filter wheel</span>
-              <strong id="filterWheel">—</strong>
-              <span>View mode</span>
-              <strong id="viewMode">{device.viewMode ?? '—'}</strong>
+              <strong id="filterWheel">{hasFilterWheel ? 'Yes' : 'No'}</strong>
+              <span>Activity</span>
+              <strong id="deviceActivity">
+                {device.activity ? ACTIVITY_LABELS[device.activity] : '—'}
+              </strong>
               <span>Preview</span>
               <strong id="previewPhase">
                 {PREVIEW_PHASE_LABELS[preview.phase]}
@@ -243,18 +289,29 @@ function formatElapsed(seconds: number | undefined): string {
   return `${minutes}m ${remaining}s`
 }
 
+function formatFilterLabel(filter: 'clear' | 'ir' | 'lp') {
+  switch (filter) {
+    case 'clear':
+      return 'Clear'
+    case 'ir':
+      return 'IR cut'
+    case 'lp':
+      return 'Light pollution'
+  }
+}
+
 function TargetDetails({
   target,
 }: {
-  target: DeepSkyTarget | SolarSystemTarget
+  target: TargetDetails
 }) {
-  if ('body' in target) {
+  if (target.kind === 'solar-system') {
     return (
       <div className="kv inspector-target-details">
         <span>Body</span>
         <strong>{target.designation}</strong>
-        <span>View mode</span>
-        <strong>{target.viewMode}</strong>
+        <span>Class</span>
+        <strong>Solar system</strong>
       </div>
     )
   }

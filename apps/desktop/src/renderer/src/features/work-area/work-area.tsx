@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import type {
   CaptureProjection,
   PreviewProjection,
@@ -13,12 +14,13 @@ import {
   useStartCaptureMutation,
   useStopCaptureMutation,
 } from '../../mutations/use-workspace-mutations'
+import { electronApi } from '../../lib/electron-api'
 import './work-area.css'
 
 const PREVIEW_BADGE_LABELS: Record<PreviewProjection['phase'], string> = {
   none: 'No preview',
   starting: 'Starting preview…',
-  active: 'Live · RTSP',
+  active: 'Live',
   error: 'Preview error',
 }
 
@@ -30,10 +32,24 @@ const CAPTURE_PHASE_LABELS: Record<CaptureProjection['phase'], string> = {
   failed: 'Failed',
 }
 
+const EXPOSURE_PHASE_LABELS: Record<CaptureProjection['phase'], string> = {
+  idle: 'Idle',
+  starting: 'Starting',
+  capturing: 'Exposing',
+  stopped: 'Stopped',
+  failed: 'Failed',
+}
+
+const ACTIVITY_LABELS: Record<'idle' | 'previewing' | 'capturing', string> = {
+  idle: 'Idle',
+  previewing: 'Previewing',
+  capturing: 'Capturing',
+}
+
 const STATUS_MESSAGES: Record<WorkspaceState, string> = {
   disconnected: 'Connect a device to begin.',
   idle_no_target: 'Select a target to point the telescope.',
-  primed: 'Primed and ready.',
+  primed: 'Ready to preview or capture.',
   ready_to_slew: 'Slew failed. Retry to try again.',
   slewing: 'Slewing to target…',
   on_target: 'Ready to preview or capture.',
@@ -41,7 +57,7 @@ const STATUS_MESSAGES: Record<WorkspaceState, string> = {
   preview_active: 'Live preview active.',
   preview_error: 'Preview failed to start.',
   capturing: 'Stacking frames.',
-  parked: 'Mount is parked. Slew to a target to open the arm and resume.',
+  parked: 'Mount is parked. Slew or unpark before resuming.',
 }
 
 const OVERLAY_STATES: ReadonlySet<WorkspaceState> = new Set([
@@ -78,6 +94,7 @@ export default function WorkArea() {
     preview,
     capture,
     device,
+    latestPreviewPath,
   } = useProjectionStore(selectWorkAreaModel)
   const selectedTarget = useSelectedTarget((state) => state.target)
   const pointMutation = usePointToTargetMutation()
@@ -90,6 +107,29 @@ export default function WorkArea() {
   const isSlewing = workspace.state === 'slewing'
   const isCapturing =
     capture.phase === 'capturing' || capture.phase === 'starting'
+  const isExternalCapture = workspace.capabilities.capture === 'external'
+  const [latestPreviewUrl, setLatestPreviewUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!latestPreviewPath) {
+      setLatestPreviewUrl(null)
+      return
+    }
+    let cancelled = false
+    electronApi
+      .getSavedAssetPreview(latestPreviewPath)
+      .then((url) => {
+        if (!cancelled) setLatestPreviewUrl(url)
+      })
+      .catch(() => {
+        if (!cancelled) setLatestPreviewUrl(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [latestPreviewPath])
+  const capturePhaseLabels = isExternalCapture
+    ? EXPOSURE_PHASE_LABELS
+    : CAPTURE_PHASE_LABELS
   const displayTarget = isSlewing
     ? (pointing.target ?? currentTarget)
     : (selectedTarget ?? currentTarget)
@@ -97,19 +137,22 @@ export default function WorkArea() {
   const showOverlay = OVERLAY_STATES.has(workspace.state)
   const isConnected = workspace.state !== 'disconnected'
   const hasDeviceLocation = device.location != null
-  const hasActiveView =
-    device.viewMode != null &&
-    device.viewMode !== 'idle' &&
-    device.viewMode !== 'none'
-  const viewLabel = [device.viewMode, device.viewStage]
-    .filter((part): part is string => Boolean(part))
-    .join(' · ')
   const statusMessage =
     capture.phase === 'failed'
-      ? 'Capture failed. Retry or start preview.'
+      ? isExternalCapture
+        ? 'Exposure failed. Retry or start preview.'
+        : 'Capture failed. Retry or start preview.'
       : pointing.phase === 'failed' && pointing.lastError
         ? pointing.lastError
-        : STATUS_MESSAGES[workspace.state]
+        : isExternalCapture && workspace.state === 'capturing'
+          ? 'Exposure running.'
+          : isExternalCapture && (workspace.state === 'on_target' || workspace.state === 'primed')
+            ? 'Ready to preview or expose.'
+            : STATUS_MESSAGES[workspace.state]
+  const previewBadgeLabel =
+    isExternalCapture && latestPreviewUrl && preview.phase === 'none'
+      ? 'Latest frame'
+      : PREVIEW_BADGE_LABELS[preview.phase]
 
   return (
     <div className="work-area">
@@ -153,9 +196,9 @@ export default function WorkArea() {
 
       {isConnected ? (
         <div className="work-context-strip" id="workContextStrip">
-          {hasActiveView ? (
-            <span className="chip" title="Device view mode">
-              View {viewLabel}
+          {device.activity && device.activity !== 'idle' ? (
+            <span className="chip" title="Device activity">
+              {ACTIVITY_LABELS[device.activity]}
             </span>
           ) : null}
           {device.tracking != null ? (
@@ -166,7 +209,7 @@ export default function WorkArea() {
           {device.mountClosed ? (
             <span
               className="chip warn"
-              title="Mount is parked — slewing opens the arm automatically"
+              title="Mount is parked or at its park position"
             >
               Mount parked
             </span>
@@ -198,9 +241,16 @@ export default function WorkArea() {
         id="previewStage"
       >
         <div className="preview-canvas"></div>
+        {isExternalCapture && latestPreviewUrl ? (
+          <img
+            className="preview-latest"
+            src={latestPreviewUrl}
+            alt="Latest exposure"
+          />
+        ) : null}
         <div className="preview-scan"></div>
         <span className="preview-badge" id="previewBadge">
-          {PREVIEW_BADGE_LABELS[preview.phase]}
+          {previewBadgeLabel}
         </span>
         {showOverlay ? (
           <div className="preview-overlay show">
@@ -229,22 +279,26 @@ export default function WorkArea() {
       </div>
 
       <div className="metric-strip">
-        <span className="metric stacking">
-          Stacks <strong id="metricStacks">{capture.stacks ?? '—'}</strong>
-        </span>
+        {isExternalCapture ? null : (
+          <span className="metric stacking">
+            Stacks <strong id="metricStacks">{capture.stacks ?? '—'}</strong>
+          </span>
+        )}
         <span className="metric">
           Elapsed{' '}
           <strong id="metricElapsed">
             {formatElapsed(capture.elapsedSec)}
           </strong>
         </span>
+        {isExternalCapture ? null : (
+          <span className="metric">
+            Frames <strong id="metricFrames">{capture.frames ?? '—'}</strong>
+          </span>
+        )}
         <span className="metric">
-          Frames <strong id="metricFrames">{capture.frames ?? '—'}</strong>
-        </span>
-        <span className="metric">
-          Capture{' '}
+          {isExternalCapture ? 'Exposure' : 'Capture'}{' '}
           <strong id="metricCapture">
-            {CAPTURE_PHASE_LABELS[capture.phase]}
+            {capturePhaseLabels[capture.phase]}
           </strong>
         </span>
       </div>
@@ -331,7 +385,7 @@ export default function WorkArea() {
                     key={action.id}
                     className={`work-action-chip${action.enabled ? '' : ' disabled'}${isCapturePending ? ' pending' : ''}`}
                     disabled={!action.enabled || isCapturePending}
-                    aria-label="Start capture"
+                    aria-label={isExternalCapture ? 'Start exposure' : 'Start capture'}
                     onClick={() => startCaptureMutation.mutate()}
                   >
                     {action.label}
@@ -345,7 +399,7 @@ export default function WorkArea() {
                     key={action.id}
                     className={`work-action-chip${action.enabled ? '' : ' disabled'}${isCapturePending ? ' pending' : ''}`}
                     disabled={!action.enabled || isCapturePending}
-                    aria-label="Stop capture"
+                    aria-label={isExternalCapture ? 'Stop exposure' : 'Stop capture'}
                     onClick={() => stopCaptureMutation.mutate()}
                   >
                     {action.label}

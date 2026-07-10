@@ -1,9 +1,14 @@
 import { Effect } from 'effect'
-import type { ConnectRequestV2 } from '../../../shared/api-v2'
+import type {
+  ConnectRequestV2,
+  LibraryProjection,
+} from '../../../shared/api-v2'
 import { DeviceRegistry } from '../device/device-registry'
 import { EventBus } from '../event/event-bus'
 import { SessionManager } from '../session/session-manager'
 import { AggregateStore } from '../state/aggregate-store'
+import { readExternalLibraryFromDisk } from '../storage/external-library'
+import { DEFAULT_EXPOSURE_DURATION_SEC } from './capture-workflows'
 
 export const runDiscover = Effect.gen(function* () {
   const store = yield* AggregateStore
@@ -95,6 +100,13 @@ export const runConnect = (input: ConnectRequestV2) =>
         Effect.gen(function* () {
           yield* sessions.setCurrent(connected)
 
+          // External-camera rigs (Alpaca) start with an empty connect library.
+          // Rehydrate saved assets from disk so prior captures reappear without
+          // a new exposure. Native stacking rigs (Seestar) own their library.
+          const library = connected.rig.camera && !connected.rig.capture
+            ? yield* hydrateExternalLibrary(connected.rig.connect.library)
+            : connected.rig.connect.library
+
           yield* store.update((current) => ({
             ...current,
             session: {
@@ -108,7 +120,10 @@ export const runConnect = (input: ConnectRequestV2) =>
             device: connected.rig.connect.device,
             preview: connected.rig.connect.preview,
             capture: connected.rig.connect.capture,
-            library: connected.rig.connect.library,
+            library,
+            camera: connected.rig.camera
+              ? { exposureSec: DEFAULT_EXPOSURE_DURATION_SEC }
+              : null,
           }))
 
           yield* bus.publish(
@@ -142,6 +157,7 @@ export const runConnect = (input: ConnectRequestV2) =>
             preview: { phase: 'none', source: 'none', active: false },
             capture: { phase: 'idle' },
             library: { scope: 'current_target', assets: [], polling: false },
+            camera: null,
           }))
 
           yield* bus.publish('session.connect.failed', {
@@ -198,6 +214,7 @@ export const runDisconnect = Effect.gen(function* () {
       preview: { phase: 'none', source: 'none', active: false },
       capture: { phase: 'idle' },
       library: { scope: 'current_target', assets: [], polling: false },
+      camera: null,
     }))
 
     yield* bus.publish(
@@ -228,6 +245,7 @@ export const runDisconnect = Effect.gen(function* () {
           preview: { phase: 'none', source: 'none', active: false },
           capture: { phase: 'idle' },
           library: { scope: 'current_target', assets: [], polling: false },
+          camera: null,
         }))
 
         yield* bus.publish(
@@ -247,4 +265,16 @@ export const runDisconnect = Effect.gen(function* () {
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   return String(error)
+}
+
+// Rehydrates the aggregate library from saved external assets on disk. Falls
+// back to the connect-time library on any failure so connect never breaks on a
+// corrupt or unreadable library directory.
+function hydrateExternalLibrary(
+  base: LibraryProjection,
+): Effect.Effect<LibraryProjection> {
+  return Effect.tryPromise(() => readExternalLibraryFromDisk()).pipe(
+    Effect.map((assets) => ({ ...base, assets })),
+    Effect.catchAll(() => Effect.succeed(base)),
+  )
 }

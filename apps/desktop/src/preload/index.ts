@@ -3,7 +3,6 @@ import type {
   CatalogPage,
   CatalogQuery,
   ConnectRequestV2,
-  DeepSkyTarget,
   DesktopDiscoveredDeviceV2,
   DesktopLogEntryV2,
   DesktopStatus as DesktopStatusV2,
@@ -11,7 +10,8 @@ import type {
   PointToTargetRequest,
   SeestarDesktopApiV2,
   SeestarDevFakeApi,
-  SolarSystemTarget,
+  SetExposureDurationRequest,
+  TargetDetails,
 } from '../shared/api-v2'
 
 export const apiV2: SeestarDesktopApiV2 = {
@@ -33,7 +33,7 @@ export const apiV2: SeestarDesktopApiV2 = {
     >,
   getTargetById: (targetId: string) =>
     ipcRenderer.invoke('seestar:v2:get-target-by-id', targetId) as Promise<
-      DeepSkyTarget | SolarSystemTarget | null
+      TargetDetails | null
     >,
   pointToTarget: (input: PointToTargetRequest) =>
     ipcRenderer.invoke(
@@ -50,6 +50,26 @@ export const apiV2: SeestarDesktopApiV2 = {
     ipcRenderer.invoke('seestar:v2:stop-capture') as Promise<DesktopStatusV2>,
   parkMount: () =>
     ipcRenderer.invoke('seestar:v2:park') as Promise<DesktopStatusV2>,
+  setExposureDuration: (input: SetExposureDurationRequest) =>
+    ipcRenderer.invoke(
+      'seestar:v2:set-exposure-duration',
+      input,
+    ) as Promise<DesktopStatusV2>,
+  openSavedAsset: (filePath: string) =>
+    ipcRenderer.invoke(
+      'seestar:v2:open-saved-asset',
+      filePath,
+    ) as Promise<void>,
+  revealSavedAsset: (filePath: string) =>
+    ipcRenderer.invoke(
+      'seestar:v2:reveal-saved-asset',
+      filePath,
+    ) as Promise<void>,
+  getSavedAssetPreview: (filePath: string) =>
+    ipcRenderer.invoke(
+      'seestar:v2:get-saved-asset-preview',
+      filePath,
+    ) as Promise<string | null>,
 
   onLog: (listener) => subscribe('seestar:v2:log', listener),
   onStatus: (listener) => subscribe('seestar:v2:status', listener),

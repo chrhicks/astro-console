@@ -1,4 +1,6 @@
-import { WebContents, ipcMain } from 'electron'
+import { WebContents, ipcMain, shell } from 'electron'
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
 import { Effect } from 'effect'
 
 import { appRuntime } from '../runtime/app-runtime'
@@ -6,6 +8,7 @@ import type {
   CatalogQuery,
   ConnectRequestV2,
   PointToTargetRequest,
+  SetExposureDurationRequest,
 } from '../../../shared/api-v2'
 import {
   runConnect,
@@ -14,8 +17,13 @@ import {
 } from '../workflows/session-workflows'
 import { runPointToTarget } from '../workflows/pointing-workflows'
 import { runStartPreview, runStopPreview } from '../workflows/preview-workflows'
-import { runStartCapture, runStopCapture } from '../workflows/capture-workflows'
+import {
+  runSetExposureDuration,
+  runStartCapture,
+  runStopCapture,
+} from '../workflows/capture-workflows'
 import { runPark } from '../workflows/park-workflows'
+import { resolveExternalFramesRoot } from '../storage/frame-storage'
 import { CatalogStore } from '../catalog/catalog-store'
 import { LogSink } from '../log/log-sink'
 import { LogStream } from '../log/log-stream'
@@ -72,7 +80,7 @@ export function registerIpcV2Handlers() {
     appRuntime.runPromise(
       Effect.gen(function* () {
         const catalog = yield* CatalogStore
-        return yield* catalog.getById(targetId)
+        return yield* catalog.getDetailsById(targetId)
       }),
     ),
   )
@@ -116,6 +124,29 @@ export function registerIpcV2Handlers() {
       runPark.pipe(Effect.flatMap(() => getProjectedStatus())),
     ),
   )
+
+  ipcMain.handle(
+    'seestar:v2:set-exposure-duration',
+    (_event, input: SetExposureDurationRequest) =>
+      appRuntime.runPromise(
+        runSetExposureDuration(input.durationSec).pipe(
+          Effect.flatMap(() => getProjectedStatus()),
+        ),
+      ),
+  )
+
+  ipcMain.handle('seestar:v2:open-saved-asset', (_event, filePath: string) =>
+    openSavedAsset(filePath),
+  )
+
+  ipcMain.handle('seestar:v2:reveal-saved-asset', (_event, filePath: string) =>
+    revealSavedAsset(filePath),
+  )
+
+  ipcMain.handle(
+    'seestar:v2:get-saved-asset-preview',
+    (_event, filePath: string) => readSavedAssetPreview(filePath),
+  )
 }
 
 function getProjectedStatus() {
@@ -123,6 +154,43 @@ function getProjectedStatus() {
     const projector = yield* StatusProjector
     return yield* projector.snapshot
   })
+}
+
+// Renderer-supplied paths are echoed back from LibraryAsset.savedFilePath, which
+// the main process generated. Validate the resolved path stays under the
+// external-frames root before handing it to shell so a compromised renderer
+// cannot trigger openPath/showItemInFolder on arbitrary filesystem locations.
+function resolveSavedAssetPath(filePath: string): string {
+  const root = resolveExternalFramesRoot()
+  const resolved = path.resolve(filePath)
+  if (!resolved.startsWith(root + path.sep)) {
+    throw new Error('saved asset path is outside the library')
+  }
+  return resolved
+}
+
+async function openSavedAsset(filePath: string): Promise<void> {
+  const error = await shell.openPath(resolveSavedAssetPath(filePath))
+  if (error) throw new Error(error)
+}
+
+async function revealSavedAsset(filePath: string): Promise<void> {
+  shell.showItemInFolder(resolveSavedAssetPath(filePath))
+}
+
+// Reads a saved preview JPG as a data URL for the renderer. Returns null when
+// the path is outside the library or the file is unreadable (e.g. preview
+// generation failed for that frame) so the UI can show a no-preview fallback.
+async function readSavedAssetPreview(filePath: string): Promise<string | null> {
+  const root = resolveExternalFramesRoot()
+  const resolved = path.resolve(filePath)
+  if (!resolved.startsWith(root + path.sep)) return null
+  try {
+    const bytes = await fs.readFile(resolved)
+    return 'data:image/jpeg;base64,' + bytes.toString('base64')
+  } catch {
+    return null
+  }
 }
 
 export function attachIpcV2StatusListener(webContents: WebContents) {

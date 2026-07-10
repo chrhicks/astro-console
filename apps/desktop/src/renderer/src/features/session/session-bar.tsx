@@ -19,6 +19,7 @@ export function SessionBar() {
     batteryPercent,
     tracking,
     mountClosed,
+    canPark,
     pluginKind,
     location,
     locationSource,
@@ -29,6 +30,7 @@ export function SessionBar() {
   const isConnected = phase === 'connected'
   const isConnecting = phase === 'connecting'
   const isDisconnecting = phase === 'disconnecting'
+  const parkSupported = canPark !== false
 
   const [discoveredDevices, setDiscoveredDevices] = useState<
     DesktopDiscoveredDeviceV2[]
@@ -42,10 +44,11 @@ export function SessionBar() {
   const disconnectMutation = useDisconnectMutation()
   const parkMutation = useParkMountMutation()
 
-  const selectedDevice =
-    discoveredDevices.find((device) => device.deviceId === selectedDeviceId) ??
-    discoveredDevices.find((device) => device.deviceId === connectedDeviceId) ??
-    selectPreferredDevice(discoveredDevices)
+  const selectedDevice = selectPreferredDevice(
+    discoveredDevices,
+    selectedDeviceId,
+    connectedDeviceId,
+  )
   const isBusy =
     isConnecting ||
     isDisconnecting ||
@@ -168,8 +171,10 @@ export function SessionBar() {
           {warnings.length} warning{warnings.length > 1 ? 's' : ''}
         </span>
       ) : null}
-      {pluginKind?.startsWith('fake-') ? (
-        <span className="chip warn">Fake</span>
+      {pluginKind ? (
+        <span className={`chip${pluginKind.startsWith('fake-') ? ' warn' : ''}`}>
+          {describePluginKind(pluginKind)}
+        </span>
       ) : null}
       {lastError && !isConnected ? (
         <span
@@ -185,24 +190,52 @@ export function SessionBar() {
         type="button"
         className="btn btn-sm"
         id="btnPark"
-        disabled={!isConnected || mountClosed || parkMutation.isPending}
+        disabled={!isConnected || !parkSupported || mountClosed || parkMutation.isPending}
         onClick={() => parkMutation.mutate()}
       >
-        {parkMutation.isPending ? 'Parking...' : mountClosed ? 'Parked' : 'Park'}
+        {parkMutation.isPending
+          ? 'Parking...'
+          : !parkSupported
+            ? 'Park N/A'
+            : mountClosed
+              ? 'Parked'
+              : 'Park'}
       </button>
     </header>
   )
 }
 
 function formatDeviceOptionLabel(device: DesktopDiscoveredDeviceV2): string {
-  const source = device.pluginKind === 'fake-seestar' ? 'fake' : 'live'
-  return [device.displayName, device.host, device.serialNumber, source]
+  return [
+    device.displayName,
+    describePluginKind(device.pluginKind),
+    device.host,
+    device.serialNumber,
+  ]
     .filter(Boolean)
-    .join(' . ')
+    .join(' · ')
 }
 
 function selectPreferredDevice(
   devices: DesktopDiscoveredDeviceV2[],
+  selectedDeviceId: string | null,
+  connectedDeviceId: string | undefined,
 ): DesktopDiscoveredDeviceV2 | undefined {
-  return devices.find((device) => device.pluginKind === 'seestar') ?? devices[0]
+  return (
+    devices.find((device) => device.deviceId === connectedDeviceId) ??
+    devices.find((device) => device.deviceId === selectedDeviceId) ??
+    devices.find((device) => device.pluginKind !== 'fake-seestar') ??
+    devices[0]
+  )
+}
+
+function describePluginKind(pluginKind: DesktopDiscoveredDeviceV2['pluginKind']) {
+  switch (pluginKind) {
+    case 'alpaca-rig':
+      return 'Alpaca rig'
+    case 'fake-seestar':
+      return 'Simulator'
+    case 'seestar':
+      return 'Seestar'
+  }
 }

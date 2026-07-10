@@ -3,6 +3,7 @@ import { SessionBar } from '../features/session/session-bar'
 import TargetsPanel from '../features/targets/targets-panel'
 import WorkArea from '../features/work-area/work-area'
 import InspectorPanel from '../features/inspector/inspector-panel'
+import { CameraPanel } from '../features/camera/camera-panel'
 import LibraryFilmstrip from '../features/library/library-filmstrip'
 import { DevScenarioPanel } from '../features/dev/dev-scenario-panel'
 
@@ -23,6 +24,7 @@ export function AppShell() {
 
         <aside className="panel panel-right">
           <InspectorPanel />
+          <CameraPanel />
         </aside>
 
         <LibraryFilmstrip />

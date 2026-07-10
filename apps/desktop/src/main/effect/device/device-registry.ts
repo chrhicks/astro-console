@@ -4,6 +4,7 @@ import type {
   DesktopDiscoveredDeviceV2,
 } from '../../../shared/api-v2'
 import type { DevicePlugin } from './device-plugin'
+import { createAlpacaPlugin } from './alpaca-plugin'
 import { createFakeSeestarPlugin } from './fake-seestar-plugin'
 import { createSeestarPlugin } from './seestar-plugin'
 
@@ -18,10 +19,12 @@ export const DeviceRegistry =
 export const DeviceRegistryLive = Layer.sync(DeviceRegistry, () => {
   const fakeSeestar = createFakeSeestarPlugin()
   const seestar = createSeestarPlugin()
+  const alpaca = createAlpacaPlugin()
 
   const plugins = new Map<DevicePluginKind, DevicePlugin>([
     [fakeSeestar.kind, fakeSeestar],
     [seestar.kind, seestar],
+    [alpaca.kind, alpaca],
   ])
 
   return {

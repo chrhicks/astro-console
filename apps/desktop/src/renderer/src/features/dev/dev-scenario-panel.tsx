@@ -15,7 +15,7 @@ export function DevScenarioPanel() {
   )
   const devFake = window.seestarDevFake
   if (!devFake) return null
-  if (pluginKind === 'seestar') return null
+  if (pluginKind && pluginKind !== 'fake-seestar') return null
 
   return <DevScenarioPanelBody devFake={devFake} />
 }

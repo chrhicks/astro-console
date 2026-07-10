@@ -5,6 +5,7 @@ import type {
   DesktopStatus,
   PointToTargetRequest,
   SeestarDesktopApiV2,
+  SetExposureDurationRequest,
 } from '../../../shared/api-v2'
 
 function getApi(): SeestarDesktopApiV2 {
@@ -28,6 +29,12 @@ export const electronApi = {
   startCapture: () => getApi().startCapture(),
   stopCapture: () => getApi().stopCapture(),
   parkMount: () => getApi().parkMount(),
+  setExposureDuration: (input: SetExposureDurationRequest) =>
+    getApi().setExposureDuration(input),
+  openSavedAsset: (filePath: string) => getApi().openSavedAsset(filePath),
+  revealSavedAsset: (filePath: string) => getApi().revealSavedAsset(filePath),
+  getSavedAssetPreview: (filePath: string) =>
+    getApi().getSavedAssetPreview(filePath),
   onLog: (listener: (entry: DesktopLogEntryV2) => void) =>
     getApi().onLog(listener),
   onStatus: (listener: (status: DesktopStatus) => void) =>

@@ -62,6 +62,7 @@ export function selectSessionBarModel(state: ProjectionState) {
     batteryPercent: status?.device.batteryPercent,
     tracking: status?.device.tracking,
     mountClosed: status?.device.mountClosed,
+    canPark: status?.device.canPark,
     location: status?.device.location,
     locationSource: status?.device.locationSource,
     deviceTimeLooksStale: status?.device.deviceTimeLooksStale,
@@ -82,11 +83,17 @@ export function selectInspectorModel(state: ProjectionState) {
     capture: status?.capture ?? NO_CAPTURE,
     preview: status?.preview ?? NO_PREVIEW,
     device: status?.device ?? {},
+    workspace: status?.workspace ?? DEFAULT_WORKSPACE,
   }
 }
 
 export function selectWorkAreaModel(state: ProjectionState) {
   const status = state.status
+  // Newest library asset that has a saved preview JPG. Assets are newest-first,
+  // so this is the most recent external capture preview for the main work area.
+  const latestPreviewAsset = status?.library.assets.find(
+    (a) => a.previewFilePath,
+  )
   return {
     pointing: status?.pointing ?? IDLE_POINTING,
     currentTarget: status?.currentTarget ?? null,
@@ -94,6 +101,7 @@ export function selectWorkAreaModel(state: ProjectionState) {
     preview: status?.preview ?? NO_PREVIEW,
     capture: status?.capture ?? NO_CAPTURE,
     device: status?.device ?? {},
+    latestPreviewPath: latestPreviewAsset?.previewFilePath ?? null,
   }
 }
 
@@ -102,6 +110,7 @@ export function selectLibraryModel(state: ProjectionState) {
   return {
     library: status?.library ?? NO_LIBRARY,
     currentTarget: status?.currentTarget ?? null,
+    captureMode: status?.capture.mode ?? null,
   }
 }
 
@@ -112,5 +121,17 @@ export function selectBrowseContextKey(state: ProjectionState) {
     pluginKind: status?.device.pluginKind ?? null,
     deviceId: status?.device.deviceId ?? null,
     location: status?.device.location ?? null,
+  }
+}
+
+export function selectCameraPanelModel(state: ProjectionState) {
+  const status = state.status
+  const isConnected = status?.session.phase === 'connected'
+  const captureTier = status?.workspace.capabilities.capture ?? 'unsupported'
+  return {
+    isConnected,
+    available: isConnected && captureTier === 'external',
+    camera: status?.camera ?? null,
+    capture: status?.capture ?? NO_CAPTURE,
   }
 }

@@ -152,7 +152,7 @@ const SCENARIOS: readonly FakeScenario[] = [
           location: { lat: 37.7749, lon: -122.4194 },
           deviceTime: FRESH_DEVICE_TIME,
           deviceTimeLooksStale: false,
-          viewMode: 'idle',
+          activity: 'idle',
           warnings: [],
         }),
         warnings: [],
@@ -173,7 +173,7 @@ const SCENARIOS: readonly FakeScenario[] = [
           location: { lat: 37.7749, lon: -122.4194 },
           deviceTime: STALE_DEVICE_TIME,
           deviceTimeLooksStale: true,
-          viewMode: 'idle',
+          activity: 'idle',
           warnings: ['Device time looks stale (1970-01-01 00:00 UTC)'],
         }),
         warnings: ['Device time looks stale (1970-01-01 00:00 UTC)'],
@@ -193,7 +193,7 @@ const SCENARIOS: readonly FakeScenario[] = [
         device: baseDevice({
           deviceTime: FRESH_DEVICE_TIME,
           deviceTimeLooksStale: false,
-          viewMode: 'idle',
+          activity: 'idle',
           warnings: ['User location is not available in device state'],
         }),
         warnings: ['User location is not available in device state'],
@@ -228,7 +228,7 @@ const SCENARIOS: readonly FakeScenario[] = [
           location: { lat: 37.7749, lon: -122.4194 },
           deviceTime: FRESH_DEVICE_TIME,
           deviceTimeLooksStale: false,
-          viewMode: 'idle',
+          activity: 'idle',
           warnings: [],
         }),
         warnings: [],
@@ -244,8 +244,8 @@ const SCENARIOS: readonly FakeScenario[] = [
   },
   {
     id: 'busy-view',
-    label: 'Busy view mode',
-    description: 'Connects but the device is already in a star/stacking view mode.',
+    label: 'Busy capturing',
+    description: 'Connects but the device is already busy capturing.',
     discover: [discovered()],
     connect: {
       delayMs: 500,
@@ -255,12 +255,10 @@ const SCENARIOS: readonly FakeScenario[] = [
           location: { lat: 37.7749, lon: -122.4194 },
           deviceTime: FRESH_DEVICE_TIME,
           deviceTimeLooksStale: false,
-          viewMode: 'star',
-          viewStage: 'stacking',
-          viewState: 'working',
-          warnings: ['Device is already in star/stacking view mode'],
+          activity: 'capturing',
+          warnings: ['Device is already busy capturing'],
         }),
-        warnings: ['Device is already in star/stacking view mode'],
+        warnings: ['Device is already busy capturing'],
       },
     },
     point: { delayMs: 750, outcome: { kind: 'success' } },
@@ -269,7 +267,7 @@ const SCENARIOS: readonly FakeScenario[] = [
     id: 'preview-active',
     label: 'Preview active after slew',
     description:
-      'Connects idle; after a successful slew, RTSP preview goes active.',
+      'Connects idle; after a successful slew, live preview goes active.',
     discover: [discovered()],
     connect: {
       delayMs: 500,
@@ -279,7 +277,7 @@ const SCENARIOS: readonly FakeScenario[] = [
           location: { lat: 37.7749, lon: -122.4194 },
           deviceTime: FRESH_DEVICE_TIME,
           deviceTimeLooksStale: false,
-          viewMode: 'idle',
+          activity: 'idle',
           warnings: [],
         }),
         warnings: [],
@@ -287,8 +285,8 @@ const SCENARIOS: readonly FakeScenario[] = [
     },
     point: { delayMs: 750, outcome: { kind: 'success' } },
     afterPoint: {
-      device: baseDevice({ viewMode: 'scenery' }),
-      preview: { phase: 'active', source: 'rtsp', active: true },
+      device: baseDevice({ activity: 'previewing' }),
+      preview: { phase: 'active', source: 'native', active: true },
       capture: NO_CAPTURE,
       library: NO_LIBRARY,
     },
@@ -307,7 +305,7 @@ const SCENARIOS: readonly FakeScenario[] = [
           location: { lat: 37.7749, lon: -122.4194 },
           deviceTime: FRESH_DEVICE_TIME,
           deviceTimeLooksStale: false,
-          viewMode: 'idle',
+          activity: 'idle',
           warnings: [],
         }),
         warnings: [],
@@ -318,11 +316,11 @@ const SCENARIOS: readonly FakeScenario[] = [
       delayMs: 400,
       startOutcome: {
         kind: 'failure',
-        error: 'Fake preview error: RTSP handshake timed out.',
+        error: 'Fake preview error: preview handshake timed out.',
       },
     },
     afterPoint: {
-      device: baseDevice({ viewMode: 'scenery' }),
+      device: baseDevice({ activity: 'previewing' }),
       preview: NO_PREVIEW,
       capture: NO_CAPTURE,
       library: NO_LIBRARY,
@@ -342,7 +340,7 @@ const SCENARIOS: readonly FakeScenario[] = [
           location: { lat: 37.7749, lon: -122.4194 },
           deviceTime: FRESH_DEVICE_TIME,
           deviceTimeLooksStale: false,
-          viewMode: 'idle',
+          activity: 'idle',
           warnings: [],
         }),
         warnings: [],
@@ -351,12 +349,10 @@ const SCENARIOS: readonly FakeScenario[] = [
     point: { delayMs: 750, outcome: { kind: 'success' } },
     afterPoint: {
       device: baseDevice({
-        viewMode: 'star',
-        viewStage: 'stacking',
-        viewState: 'working',
+        activity: 'capturing',
         tracking: true,
       }),
-      preview: { phase: 'active', source: 'rtsp', active: true },
+      preview: { phase: 'active', source: 'native', active: true },
       capture: {
         phase: 'capturing',
         stacks: 42,
@@ -397,7 +393,7 @@ const SCENARIOS: readonly FakeScenario[] = [
           location: { lat: 37.7749, lon: -122.4194 },
           deviceTime: FRESH_DEVICE_TIME,
           deviceTimeLooksStale: false,
-          viewMode: 'idle',
+          activity: 'idle',
           warnings: [],
         }),
         warnings: [],
@@ -412,7 +408,7 @@ const SCENARIOS: readonly FakeScenario[] = [
       },
     },
     afterPoint: {
-      device: baseDevice({ viewMode: 'star' }),
+      device: baseDevice({ activity: 'idle' }),
       preview: NO_PREVIEW,
       capture: NO_CAPTURE,
       library: NO_LIBRARY,
@@ -506,9 +502,7 @@ export const fakeSeestarRuntime = {
     if (parked) {
       return {
         device: {
-          viewMode: 'idle',
-          viewStage: undefined,
-          viewState: undefined,
+          activity: 'idle',
           tracking: false,
           mountClosed: true,
         },
@@ -521,13 +515,11 @@ export const fakeSeestarRuntime = {
     if (captureActive) {
       return {
         device: {
-          viewMode: baseDevice?.viewMode ?? 'star',
-          viewStage: baseDevice?.viewStage ?? 'stacking',
-          viewState: baseDevice?.viewState ?? 'working',
+          activity: baseDevice?.activity ?? 'capturing',
           tracking: baseDevice?.tracking ?? true,
           mountClosed: false,
         },
-        preview: { phase: 'active', source: 'rtsp', active: true },
+        preview: { phase: 'active', source: 'native', active: true },
         capture:
           afterPoint?.capture && afterPoint.capture.phase === 'capturing'
             ? afterPoint.capture
@@ -537,21 +529,17 @@ export const fakeSeestarRuntime = {
     if (previewActive) {
       return {
         device: {
-          viewMode: baseDevice?.viewMode ?? 'scenery',
-          viewStage: undefined,
-          viewState: undefined,
+          activity: baseDevice?.activity ?? 'previewing',
           tracking: false,
           mountClosed: false,
         },
-        preview: { phase: 'active', source: 'rtsp', active: true },
+        preview: { phase: 'active', source: 'native', active: true },
         capture: { phase: 'idle' },
       }
     }
     return {
       device: {
-        viewMode: 'idle',
-        viewStage: undefined,
-        viewState: undefined,
+        activity: 'idle',
         tracking: false,
         mountClosed: false,
       },

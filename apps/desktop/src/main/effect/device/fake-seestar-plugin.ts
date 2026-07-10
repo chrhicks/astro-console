@@ -2,15 +2,14 @@ import { Effect } from 'effect'
 import type {
   DesktopDiscoveredDeviceV2,
   ConnectRequestV2,
-  SeestarViewMode,
 } from '../../../shared/api-v2'
 import type {
   DevicePlugin,
   DeviceSession,
-  LiveDeviceSession,
   PointToCoordinatesInput,
   PrepareForPointingInput,
 } from './device-plugin'
+import { toSeestarViewMode } from './device-plugin'
 import type { ConnectedRig } from '../rig/rig-model'
 import {
   fakeSeestarRuntime,
@@ -60,79 +59,75 @@ export function createFakeSeestarPlugin(): DevicePlugin {
         let previewActive = false
         let captureActive = false
         let parked = false
-        const session = {
-          sessionId: crypto.randomUUID(),
-          pluginKind: 'fake-seestar',
-          deviceId,
-          host: outcome.device.host,
-          productModel: outcome.device.productModel,
-          openedAt: new Date().toISOString(),
-          capabilities: FAKE_CAPABILITIES,
-          health: { state: 'healthy', lastCheckedAt: new Date().toISOString() },
-          disconnect: Effect.sleep('200 millis').pipe(Effect.asVoid),
-          prepareForPointing: (_input: PrepareForPointingInput) =>
-            Effect.gen(function* () {
-              yield* Effect.sleep('100 millis')
-              parked = false
-            }),
-          openArm: () =>
-            Effect.gen(function* () {
-              yield* Effect.sleep('300 millis')
-              parked = false
-            }),
-          parkArm: () =>
-            Effect.gen(function* () {
-              yield* Effect.sleep('300 millis')
-              previewActive = false
-              captureActive = false
-              parked = true
-            }),
-          pointToCoordinates: (_input: PointToCoordinatesInput) =>
-            Effect.gen(function* () {
-              const pointScenario = fakeSeestarRuntime.getActiveScenario()
-              yield* Effect.sleep(pointScenario.point.delayMs)
-              const pointOutcome = pointScenario.point.outcome
-              if (pointOutcome.kind === 'failure') {
-                return yield* Effect.fail(new Error(pointOutcome.error))
-              }
-            }),
-          startPreview: () =>
-            Effect.gen(function* () {
-              const preview = fakeSeestarRuntime.getPreviewStartOutcome()
-              yield* Effect.sleep(preview.delayMs)
-              if (preview.startOutcome.kind === 'failure') {
-                return yield* Effect.fail(new Error(preview.startOutcome.error))
-              }
-              previewActive = true
-            }),
-          stopPreview: () =>
-            Effect.gen(function* () {
-              yield* Effect.sleep('200 millis')
-              previewActive = false
-              captureActive = false
-            }),
-          startCapture: () =>
-            Effect.gen(function* () {
-              const capture = fakeSeestarRuntime.getCaptureStartOutcome()
-              yield* Effect.sleep(capture.delayMs)
-              if (capture.startOutcome.kind === 'failure') {
-                return yield* Effect.fail(new Error(capture.startOutcome.error))
-              }
-              captureActive = true
-            }),
-          stopCapture: () =>
-            Effect.gen(function* () {
-              yield* Effect.sleep('200 millis')
-              captureActive = false
-            }),
-          refresh: Effect.sync(() =>
-            fakeSeestarRuntime.refresh(previewActive, captureActive, parked),
-          ),
-          device: outcome.device,
-          preview: connected.preview,
-          capture: connected.capture,
-          library: connected.library,
-        } satisfies Omit<LiveDeviceSession, 'rig'>
+
+        const disconnect = Effect.sleep('200 millis').pipe(Effect.asVoid)
+
+        const prepareForPointing = (_input: PrepareForPointingInput) =>
+          Effect.gen(function* () {
+            yield* Effect.sleep('100 millis')
+            parked = false
+          })
+
+        const openArm = () =>
+          Effect.gen(function* () {
+            yield* Effect.sleep('300 millis')
+            parked = false
+          })
+
+        const parkArm = () =>
+          Effect.gen(function* () {
+            yield* Effect.sleep('300 millis')
+            previewActive = false
+            captureActive = false
+            parked = true
+          })
+
+        const pointToCoordinates = (_input: PointToCoordinatesInput) =>
+          Effect.gen(function* () {
+            const pointScenario = fakeSeestarRuntime.getActiveScenario()
+            yield* Effect.sleep(pointScenario.point.delayMs)
+            const pointOutcome = pointScenario.point.outcome
+            if (pointOutcome.kind === 'failure') {
+              return yield* Effect.fail(new Error(pointOutcome.error))
+            }
+          })
+
+        const startPreview = () =>
+          Effect.gen(function* () {
+            const preview = fakeSeestarRuntime.getPreviewStartOutcome()
+            yield* Effect.sleep(preview.delayMs)
+            if (preview.startOutcome.kind === 'failure') {
+              return yield* Effect.fail(new Error(preview.startOutcome.error))
+            }
+            previewActive = true
+          })
+
+        const stopPreview = () =>
+          Effect.gen(function* () {
+            yield* Effect.sleep('200 millis')
+            previewActive = false
+            captureActive = false
+          })
+
+        const startCapture = () =>
+          Effect.gen(function* () {
+            const capture = fakeSeestarRuntime.getCaptureStartOutcome()
+            yield* Effect.sleep(capture.delayMs)
+            if (capture.startOutcome.kind === 'failure') {
+              return yield* Effect.fail(new Error(capture.startOutcome.error))
+            }
+            captureActive = true
+          })
+
+        const stopCapture = () =>
+          Effect.gen(function* () {
+            yield* Effect.sleep('200 millis')
+            captureActive = false
+          })
+
+        const refresh = Effect.sync(() =>
+          fakeSeestarRuntime.refresh(previewActive, captureActive, parked),
+        )
 
         const rig: ConnectedRig = {
           identity: {
@@ -141,7 +136,7 @@ export function createFakeSeestarPlugin(): DevicePlugin {
             displayName: outcome.device.displayName ?? 'Seestar (fake)',
             host: outcome.device.host,
           },
-          connection: { disconnect: session.disconnect },
+          connection: { disconnect },
           observerLocation: outcome.device.location,
           capabilities: FAKE_CAPABILITIES,
           connect: {
@@ -150,27 +145,27 @@ export function createFakeSeestarPlugin(): DevicePlugin {
             capture: connected.capture,
             library: connected.library,
           },
-          refresh: session.refresh,
+          refresh,
           mount: {
-            park: () => session.parkArm(),
+            park: () => parkArm(),
           },
           pointing: {
             // prepare owns all readiness steps before slewing: sync time
             // and location, stop any active view, and open the arm if the
             // mount is parked/closed. The app-level pointing workflow no
-            // longer calls session.openArm() directly.
+            // longer calls openArm() directly.
             prepare: (input) =>
-              session.prepareForPointing(input).pipe(
-                Effect.zipRight(session.refresh),
+              prepareForPointing(input).pipe(
+                Effect.zipRight(refresh),
                 Effect.flatMap((refreshed) =>
                   refreshed.device.mountClosed
-                    ? session.openArm()
+                    ? openArm()
                     : Effect.void,
                 ),
               ),
             pointToCoordinates: (input) =>
-              session.pointToCoordinates({
-                mode: input.mode as SeestarViewMode,
+              pointToCoordinates({
+                mode: toSeestarViewMode(input.targetType, input.targetName),
                 targetName: input.targetName,
                 raHours: input.raHours,
                 decDeg: input.decDeg,
@@ -181,16 +176,25 @@ export function createFakeSeestarPlugin(): DevicePlugin {
             afterPoint: Effect.sync(() => fakeSeestarRuntime.getAfterPointState()),
           },
           preview: {
-            start: () => session.startPreview(),
-            stop: () => session.stopPreview(),
+            start: () => startPreview(),
+            stop: () => stopPreview(),
           },
           capture: {
-            start: () => session.startCapture(),
-            stop: () => session.stopCapture(),
+            start: () => startCapture(),
+            stop: () => stopCapture(),
           },
         }
 
-        return { ...session, rig } satisfies DeviceSession
+        const session: DeviceSession = {
+          sessionId: crypto.randomUUID(),
+          pluginKind: 'fake-seestar',
+          deviceId,
+          health: { state: 'healthy', lastCheckedAt: new Date().toISOString() },
+          disconnect,
+          rig,
+        }
+
+        return session
       }),
   }
 }

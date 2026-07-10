@@ -43,3 +43,11 @@ export function useParkMountMutation() {
     mutationFn: () => electronApi.parkMount(),
   })
 }
+
+export function useSetExposureDurationMutation() {
+  return useMutation({
+    mutationKey: ['camera', 'set-exposure-duration'],
+    mutationFn: (durationSec: number) =>
+      electronApi.setExposureDuration({ durationSec }),
+  })
+}
