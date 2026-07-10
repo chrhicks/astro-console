@@ -46,6 +46,23 @@ Source: `anomalyco/opencode` `v2` branch, distilled from `.references/opencode-v
 - In Effect generators, bind services to named variables before calling methods instead of nesting service yields.
 - In Drizzle schemas, prefer `snake_case` field names so column names do not need remapping strings.
 
+## Architecture Invariants
+
+Enforceable boundaries for this repo. For rationale and migration details see `docs/architecture-v4.md`. Before feature work, identify the owning layer: SDK/vendor protocol, adapter, workflow/runtime, projector, renderer, or storage.
+
+- Decode unknown input at every trust boundary. Decode IPC outputs and device events before the renderer consumes them.
+- Keep vendor protocol details below the Rig boundary, inside SDK/vendor protocol packages or thin adapters.
+- Callable Rig surfaces are the canonical capability source. Booleans only express semantics not structurally expressible there.
+- Keep generic camera exposure distinct from vendor-native capture.
+- Workflows orchestrate. Adapters translate and assemble. Projectors are pure UI normalization.
+- The renderer consumes typed projections and actions, never vendor or transport state.
+- Guard every async state commit with session identity/generation and operation identity.
+- Coordinate connect/disconnect lifecycle. Disconnect terminally cancels and rejects queued work.
+- Stop/park/disconnect recovery supersedes ordinary operations and must not wait behind them.
+- Correlate aggregate state and active session atomically. Aggregate state is the app-facing truth.
+- Treat storage/media as a subsystem: validated paths, bounded inputs, honest partial failure.
+- Keep event and action vocabularies as closed typed unions or maps.
+
 ## Testing And Verification
 
 - Verify from the narrowest relevant package or app directory, not from a monorepo root that intentionally blocks root tests.
