@@ -5,6 +5,7 @@ import type {
   DeviceProjection,
   LibraryProjection,
   PreviewProjection,
+  TargetType,
 } from '../../../shared/api-v2'
 
 export interface RigIdentity {
@@ -39,7 +40,7 @@ export interface DeviceCapabilities {
 export interface RigSessionRefresh {
   device: Pick<
     DeviceProjection,
-    'viewMode' | 'viewStage' | 'viewState' | 'tracking' | 'mountClosed' | 'warnings'
+    'activity' | 'tracking' | 'mountClosed' | 'warnings'
   >
   preview: PreviewProjection
   capture: CaptureProjection
@@ -66,6 +67,56 @@ export interface RigCameraExposureInput {
   readonly durationSec: number
 }
 
+// Device-reported exposure state. Mirrors the Alpaca camera state lifecycle
+// (idle → exposing → reading → ready) with an explicit error state. `imageReady`
+// is the canonical completion signal: when true, the exposure is finished and
+// the image is available for download (a future slice).
+export interface RigCameraExposureState {
+  readonly state: 'idle' | 'exposing' | 'reading' | 'ready' | 'error'
+  readonly imageReady: boolean
+  readonly lastExposureDurationSec?: number
+  readonly lastError?: string
+}
+
+// Transport used to retrieve a finished frame. Alpaca should prefer
+// `image-bytes` via GET imagearray + Accept: application/imagebytes.
+export type RigFrameTransfer = 'image-bytes' | 'json-array' | 'vendor-file'
+
+export type RigFramePixelFormat =
+  | 'mono8'
+  | 'mono16'
+  | 'rgb24'
+  | 'rgb48'
+  | 'bayer16'
+  | 'unknown'
+
+// Result of retrieving a finished frame after an exposure completes. The
+// `data` field carries the raw pixel payload; callers that only need
+// library metadata (asset count/name/timestamp) can ignore it. Kept off the
+// public DesktopStatus so frame bytes do not bloat the renderer projection.
+export interface RigFrameResult {
+  readonly transfer: RigFrameTransfer
+  readonly width: number
+  readonly height: number
+  readonly pixelFormat: RigFramePixelFormat
+  readonly data: Uint8Array
+  // Parsed ImageBytes descriptor when transfer is 'image-bytes'. Carries the
+  // ASCOM numeric element type code and array rank needed to write a faithful
+  // FITS file; absent when the header could not be interpreted, in which case
+  // the storage layer fails honestly instead of writing a misleading file.
+  readonly imageBytes?: {
+    readonly imageElementType: number
+    readonly transmissionElementType: number
+    readonly rank: number
+    readonly planes?: number
+  }
+  readonly metadata?: {
+    readonly exposureDurationSec?: number
+    readonly cameraName?: string
+    readonly capturedAt?: string
+  }
+}
+
 // Generic camera exposure operations. Seestar does not expose this because
 // its imaging is stacking-based orchestration surfaced via RigCaptureWorkflow.
 export interface RigCamera {
@@ -73,6 +124,8 @@ export interface RigCamera {
     input: RigCameraExposureInput,
   ) => Effect.Effect<void, unknown>
   readonly stopExposure: () => Effect.Effect<void, unknown>
+  readonly getExposureState: () => Effect.Effect<RigCameraExposureState, unknown>
+  readonly getLatestFrame: () => Effect.Effect<RigFrameResult, unknown>
 }
 
 export interface RigFocuser {
@@ -93,7 +146,7 @@ export interface RigPointingPrepareInput {
 }
 
 export interface RigPointingInput {
-  readonly mode: string
+  readonly targetType: TargetType
   readonly targetName?: string
   readonly raHours: number
   readonly decDeg: number

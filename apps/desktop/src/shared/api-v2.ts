@@ -1,8 +1,8 @@
 import type {
   CatalogPage,
   CatalogQuery,
-  DeepSkyTarget,
-  SolarSystemTarget,
+  OpenNgcObjectType,
+  SolarSystemBody,
   TargetSummary,
 } from './catalog/catalog-schema'
 
@@ -41,19 +41,52 @@ export interface PointingProjection {
 
 export type CapturePhase = 'idle' | 'starting' | 'capturing' | 'stopped' | 'failed'
 
+// Distinguishes native stacking orchestration (Seestar RigCaptureWorkflow)
+// from generic external camera exposure (RigCamera start/stop). Native rigs
+// leave this unset to preserve existing behavior; external rigs set 'external'
+// so the UI can use exposure-oriented copy instead of stacking copy.
+export type CaptureMode = 'native' | 'external'
+
+// Device-reported exposure state for the external camera path. Mirrors
+// RigCameraExposureState.state so the UI can show what the camera hardware
+// reports (e.g. 'reading' during sensor readout) rather than only the
+// workflow phase. Only present when the rig exposes RigCamera and the
+// polling loop is active or has completed.
+export type CaptureDeviceState = 'idle' | 'exposing' | 'reading' | 'ready' | 'error'
+
 export interface CaptureProjection {
   phase: CapturePhase
+  mode?: CaptureMode
+  deviceState?: CaptureDeviceState
   stacks?: number
   frames?: number
   elapsedSec?: number
+  // ISO 8601 timestamp marking when the current exposure/capture entered the
+  // 'capturing' phase. The external camera path sets this so the UI can derive
+  // elapsed time locally without faking device-reported progress. Native
+  // stacking leaves this unset because the device reports elapsedSec directly.
+  startedAt?: string
   lastError?: string
+}
+
+// User-configured generic camera settings for the external exposure path.
+// Distinct from CaptureProjection (volatile device-reported state) so rig
+// refresh does not wipe a configured exposure duration. Only present when the
+// connected rig exposes a generic RigCamera.
+export interface CameraSettings {
+  exposureSec: number
 }
 
 export type PreviewPhase = 'none' | 'starting' | 'active' | 'error'
 
+// Rig-neutral preview source: 'native' means the rig's own live preview
+// transport (e.g. Seestar RTSP), whatever it is. Kept transport-agnostic so
+// the projection does not leak a specific wire protocol.
+export type PreviewSource = 'none' | 'native'
+
 export interface PreviewProjection {
   phase: PreviewPhase
-  source: 'none' | 'rtsp'
+  source: PreviewSource
   active: boolean
   lastError?: string
 }
@@ -62,7 +95,24 @@ export interface LibraryAsset {
   id: string
   name: string
   capturedAt: string
-  kind: 'stack' | 'sub' | 'calibration'
+  kind: 'stack' | 'sub' | 'calibration' | 'exposure'
+  // Persisted frame location for external exposures. Present only when the
+  // frame bytes were saved to disk by the main-process FrameStorage service;
+  // absent for native stacking assets and when an external frame failed to
+  // persist. The pixel format/dimensions describe how to interpret the saved
+  // FITS payload for later post-processing.
+  savedFilePath?: string
+  savedFileSize?: number
+  // Sibling JPG preview path for external exposures. Present when the
+  // FrameStorage service generated a preview JPG alongside the FITS file;
+  // absent when preview generation failed (the FITS still exists) or for
+  // native stacking assets. The UI uses this for the main preview area and
+  // filmstrip thumbnails instead of on-demand FITS processing.
+  previewFilePath?: string
+  previewFileSize?: number
+  frameWidth?: number
+  frameHeight?: number
+  framePixelFormat?: string
 }
 
 export type LibraryScope = 'current_target' | 'all_targets'
@@ -89,6 +139,8 @@ export interface DeviceProjection {
   displayName?: string
   host?: string
   productModel?: string
+  canPark?: boolean
+  canPoint?: boolean
   serialNumber?: string
   firmwareVersion?: string
   batteryPercent?: number
@@ -101,9 +153,10 @@ export interface DeviceProjection {
   locationSource?: 'device' | 'geoip'
   deviceTime?: DeviceTimeProjection
   deviceTimeLooksStale?: boolean
-  viewMode?: string
-  viewStage?: string
-  viewState?: string
+  // Rig-neutral device activity signal. Adapters derive this from their
+  // own raw view/imaging state so the public projection does not leak a
+  // specific rig's view-mode vocabulary.
+  activity?: 'idle' | 'previewing' | 'capturing'
   storageFreeMb?: number
   storageTotalMb?: number
   warnings?: string[]
@@ -163,6 +216,7 @@ export interface DesktopStatus {
   device: DeviceProjection
   library: LibraryProjection
   workspace: WorkspaceProjection
+  camera?: CameraSettings
   currentTarget: TargetSummary | null
   lastUpdatedAt: string
   lastError?: string
@@ -178,6 +232,26 @@ export interface DesktopDiscoveredDeviceV2 {
   productModel?: string
   serialNumber?: string
 }
+
+export interface DeepSkyTargetDetails {
+  kind: 'dso'
+  designation: string
+  objectType: OpenNgcObjectType
+  raHours: number
+  decDeg: number
+  constellation: string
+  visualMagnitude?: number
+  surfaceBrightness?: number
+  majorAxisArcmin?: number
+}
+
+export interface SolarSystemTargetDetails {
+  kind: 'solar-system'
+  designation: string
+  body: SolarSystemBody
+}
+
+export type TargetDetails = DeepSkyTargetDetails | SolarSystemTargetDetails
 
 export interface ConnectRequestV2 {
   pluginKind: DevicePluginKind
@@ -200,6 +274,10 @@ export interface DesktopLogEntryV2 {
   data?: unknown
 }
 
+export interface SetExposureDurationRequest {
+  durationSec: number
+}
+
 export interface SeestarDesktopApiV2 {
   discover(): Promise<DesktopDiscoveredDeviceV2[]>
   connect(input: ConnectRequestV2): Promise<DesktopStatus>
@@ -207,15 +285,24 @@ export interface SeestarDesktopApiV2 {
   getStatus(): Promise<DesktopStatus>
   getLogs(): Promise<DesktopLogEntryV2[]>
   browseTargets(query?: CatalogQuery): Promise<CatalogPage>
-  getTargetById(targetId: string): Promise<
-    DeepSkyTarget | SolarSystemTarget | null
-  >
+  getTargetById(targetId: string): Promise<TargetDetails | null>
   pointToTarget(input: PointToTargetRequest): Promise<DesktopStatus>
   startPreview(): Promise<DesktopStatus>
   stopPreview(): Promise<DesktopStatus>
   startCapture(): Promise<DesktopStatus>
   stopCapture(): Promise<DesktopStatus>
   parkMount(): Promise<DesktopStatus>
+  setExposureDuration(
+    input: SetExposureDurationRequest,
+  ): Promise<DesktopStatus>
+  // Open a persisted external frame in the OS default handler. Only valid for
+  // assets with a savedFilePath; rejects if the path is outside the library.
+  openSavedAsset(filePath: string): Promise<void>
+  // Reveal a persisted external frame in the platform file manager.
+  revealSavedAsset(filePath: string): Promise<void>
+  // Read a saved external preview JPG as a data URL. Returns null when the
+  // path is outside the library or the preview file is missing.
+  getSavedAssetPreview(filePath: string): Promise<string | null>
   onLog(listener: (entry: DesktopLogEntryV2) => void): () => void
   onStatus(listener: (status: DesktopStatus) => void): () => void
 }

@@ -1,4 +1,5 @@
 import {
+  CameraSettings,
   CaptureProjection,
   DeviceProjection,
   LibraryProjection,
@@ -22,6 +23,10 @@ export interface SessionAggregate {
   device: DeviceProjection
   library: LibraryProjection
   workspace: WorkspaceProjection
+  // User-configured generic camera settings for the external exposure path.
+  // Null when the connected rig has no generic RigCamera. Kept separate from
+  // the volatile capture projection so rig refresh does not reset it.
+  camera: CameraSettings | null
   currentTarget: TargetSummary | null
   runner: { owner: 'idle' }
   diagnostics: {}
@@ -52,6 +57,7 @@ export function createInitialAggregate(): SessionAggregate {
     currentTarget: null,
     runner: { owner: 'idle' },
     diagnostics: {},
+    camera: null,
     lastUpdatedAt: new Date().toISOString(),
   }
 }
