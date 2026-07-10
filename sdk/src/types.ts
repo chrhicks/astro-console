@@ -79,6 +79,7 @@ export interface ManualMoveOptions {
 
 export interface ViewStateResult {
   View?: Record<string, unknown>
+  [key: string]: unknown
 }
 
 export interface SeestarPushEvent {

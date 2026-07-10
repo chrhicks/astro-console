@@ -139,14 +139,10 @@ export class SeestarAuth {
 }
 
 function extractChallenge(resp: JsonRpcResponse): string | null {
-  if (
-    typeof resp.result === 'object' &&
-    resp.result !== null &&
-    'str' in (resp.result as Record<string, unknown>)
-  ) {
-    return String((resp.result as Record<string, unknown>).str)
-  }
-  return null
+  if (typeof resp.result !== 'object' || resp.result === null) return null
+  const result = resp.result as Record<string, unknown>
+  if (typeof result.str !== 'string') return null
+  return result.str
 }
 
 function isOk(resp: JsonRpcResponse): boolean {

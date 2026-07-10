@@ -4,10 +4,11 @@ import { resolve } from 'node:path'
 export const SEESTAR_PEM_PATH_ENV_VAR = 'SEESTAR_PEM_PATH'
 export const LEGACY_SEESTAR_PEM_ENV_VAR = 'SEESTAR_PEM'
 
+const PEM_FILENAME = 'seestar_3.1.2_fw_7.32_interop.pem'
+const WORKSPACE_ROOT = resolve(__dirname, '../..')
 const DEFAULT_PEM_CANDIDATES = [
-  '../seestar_3.1.2_fw_7.32_interop.pem',
-  '../apps/desktop/seestar_3.1.2_fw_7.32_interop.pem',
-  './apps/desktop/seestar_3.1.2_fw_7.32_interop.pem',
+  resolve(WORKSPACE_ROOT, PEM_FILENAME),
+  resolve(WORKSPACE_ROOT, 'apps/desktop', PEM_FILENAME),
 ]
 
 export type ResolveSeestarPemPathOptions = {

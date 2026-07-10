@@ -7,6 +7,10 @@ const execFileAsync = promisify(execFile)
 const LS_LINE_RE =
   /^\s{2}(.*?)\s+([A-Z]+)\s+(\d+)\s+([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})$/
 
+// smbclient's `-c` string uses `;` as a command separator, so path segments
+// are restricted to safe filename characters to prevent command injection.
+const SAFE_SEGMENT_RE = /^[A-Za-z0-9 _.\-]+$/
+
 /**
  * List entries from the Seestar SMB share. This exposes the real files inside
  * `MyWorks/...`, unlike `get_albums`, which is only an album summary API.
@@ -33,7 +37,18 @@ export async function listShareDirectory(
 }
 
 function normalizeSmbPath(path: string): string {
-  return path.split('/').filter(Boolean).join('/')
+  const segments = path.split('/').filter(Boolean)
+  for (const segment of segments) {
+    if (segment === '..') {
+      throw new Error(`smb path must not contain '..' segments: ${path}`)
+    }
+    if (!SAFE_SEGMENT_RE.test(segment)) {
+      throw new Error(
+        `smb path segment has unsupported characters: ${JSON.stringify(segment)}`,
+      )
+    }
+  }
+  return segments.join('/')
 }
 
 function parseLsLine(line: string): ShareEntry | null {

@@ -32,6 +32,7 @@ export class SeestarClient {
   private receiveBuffer = ''
   private connected = false
   private pushListeners = new Set<PushEventListener>()
+  private closeListeners = new Set<() => void>()
   private logger: Logger
   private sessionId?: string
   private traceProtocol: boolean
@@ -142,6 +143,25 @@ export class SeestarClient {
         this.connected = false
         this.receiveBuffer = ''
         this.inflightRequests.clear()
+        // Preserve responseQueue: a response may arrive just before close, and
+        // sendSync checks the queue before treating the connection as lost.
+        for (const listener of this.closeListeners) {
+          try {
+            listener()
+          } catch (error) {
+            emitLog(this.logger, {
+              level: 'warn',
+              event: 'connection.close.listener_failed',
+              component: 'connection',
+              sessionId: this.sessionId,
+              host: this.host,
+              deviceModel: this.deviceModel,
+              deviceSn: this.deviceSn,
+              summary: 'Close listener threw an error',
+              error: error instanceof Error ? error.message : undefined,
+            })
+          }
+        }
         emitLog(this.logger, {
           level: 'info',
           event: 'connection.tcp.closed',
@@ -176,10 +196,19 @@ export class SeestarClient {
   send(method: string, params?: unknown): number {
     if (!this.socket) throw new Error('Not connected')
     const id = this.nextId++
+    this.writeRequest(this.socket, id, method, params)
+    return id
+  }
+
+  private writeRequest(
+    socket: net.Socket,
+    id: number,
+    method: string,
+    params?: unknown,
+  ): void {
     const msg: JsonRpcRequest = { id, method, params }
     const payload = JSON.stringify(msg) + '\r\n'
-    this.inflightRequests.set(id, { method, startedAt: Date.now() })
-    this.socket.write(payload)
+    socket.write(payload)
     emitLog(this.logger, {
       level: 'debug',
       event: 'rpc.request.sent',
@@ -195,7 +224,6 @@ export class SeestarClient {
         ? { paramsPreview: previewValue(params, method) }
         : undefined,
     })
-    return id
   }
 
   /** Send a message and block until the matching response arrives. */
@@ -204,7 +232,11 @@ export class SeestarClient {
     params?: unknown,
     timeout = this.timeoutMs,
   ): Promise<JsonRpcResponse> {
-    const id = this.send(method, params)
+    if (!this.socket) throw new Error('Not connected')
+    const id = this.nextId++
+    // Register as inflight before writing so a fast reply cannot be dropped.
+    this.inflightRequests.set(id, { method, startedAt: Date.now() })
+    this.writeRequest(this.socket, id, method, params)
     const start = Date.now()
     while (Date.now() - start < timeout) {
       if (this.responseQueue.has(id)) {
@@ -262,6 +294,14 @@ export class SeestarClient {
     }
   }
 
+  /** Subscribe to connection close events. Returns an unsubscribe function. */
+  onClose(listener: () => void): () => void {
+    this.closeListeners.add(listener)
+    return () => {
+      this.closeListeners.delete(listener)
+    }
+  }
+
   async waitForPushEvent(
     predicate: (event: SeestarPushEvent) => boolean,
     options: WaitOptions = {},
@@ -277,6 +317,7 @@ export class SeestarClient {
         if (timeoutHandle) clearTimeout(timeoutHandle)
         signal?.removeEventListener('abort', onAbort)
         unsubscribe()
+        unsubscribeClose()
       }
 
       const finish = (callback: () => void) => {
@@ -288,6 +329,12 @@ export class SeestarClient {
 
       const onAbort = () => {
         finish(() => reject(new Error('Push-event wait aborted')))
+      }
+
+      const onConnectionClose = () => {
+        finish(() =>
+          reject(new Error('Connection closed while waiting for pushed event')),
+        )
       }
 
       const unsubscribe = this.subscribeToPushEvents((event) => {
@@ -311,6 +358,8 @@ export class SeestarClient {
         finish(() => resolve(event))
       })
 
+      const unsubscribeClose = this.onClose(onConnectionClose)
+
       emitLog(this.logger, {
         level: 'debug',
         event: 'rpc.push.wait.started',
@@ -325,6 +374,13 @@ export class SeestarClient {
 
       if (signal?.aborted) {
         finish(() => reject(new Error('Push-event wait aborted')))
+        return
+      }
+
+      if (!this.connected) {
+        finish(() =>
+          reject(new Error('Connection closed while waiting for pushed event')),
+        )
         return
       }
 
@@ -358,9 +414,11 @@ export class SeestarClient {
       this.receiveBuffer = this.receiveBuffer.slice(idx + 2)
       if (!line.trim()) continue
       try {
-        const parsed = JSON.parse(line) as Record<string, unknown>
-        if (typeof parsed.Event === 'string') {
-          const pushEvent = parsed as SeestarPushEvent
+        const parsed = JSON.parse(line)
+        if (typeof parsed !== 'object' || parsed === null) continue
+        const record = parsed as Record<string, unknown>
+        if (typeof record.Event === 'string') {
+          const pushEvent = record as SeestarPushEvent
           emitLog(this.logger, {
             level: 'debug',
             event: 'rpc.push.received',
@@ -401,8 +459,8 @@ export class SeestarClient {
           continue
         }
 
-        if (typeof parsed.id !== 'number') continue
-        const response = parsed as unknown as JsonRpcResponse
+        const response = decodeResponse(record)
+        if (!response) continue
         const inflight = this.inflightRequests.get(response.id)
         this.inflightRequests.delete(response.id)
         emitLog(this.logger, {
@@ -424,7 +482,9 @@ export class SeestarClient {
               : undefined,
           },
         })
-        this.responseQueue.set(response.id, response)
+        if (inflight) {
+          this.responseQueue.set(response.id, response)
+        }
       } catch {
         emitLog(this.logger, {
           level: 'warn',
@@ -444,6 +504,22 @@ export class SeestarClient {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
+}
+
+function decodeResponse(
+  parsed: Record<string, unknown>,
+): JsonRpcResponse | undefined {
+  if (typeof parsed.id !== 'number') return undefined
+  if (typeof parsed.code !== 'number') return undefined
+  return {
+    jsonrpc: '2.0',
+    Timestamp: typeof parsed.Timestamp === 'string' ? parsed.Timestamp : '',
+    method: typeof parsed.method === 'string' ? parsed.method : '',
+    result: parsed.result,
+    error: typeof parsed.error === 'string' ? parsed.error : undefined,
+    code: parsed.code,
+    id: parsed.id,
+  }
 }
 
 function previewValue(value: unknown, method?: string): unknown {

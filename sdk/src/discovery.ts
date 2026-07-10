@@ -56,15 +56,15 @@ export async function discoverSeestars(
       phase: 'connect',
       sessionId: options.sessionId,
       summary: 'Started UDP scan for Seestar devices',
-        data: {
-          port: discoveryPort,
-          timeoutMs,
-          mdnsTimeoutMs,
-          broadcastAddress,
-          targetAddresses,
-          usedMdnsProbe: true,
-        },
-      })
+      data: {
+        port: discoveryPort,
+        timeoutMs,
+        mdnsTimeoutMs,
+        broadcastAddress,
+        targetAddresses,
+        usedMdnsProbe: true,
+      },
+    })
 
     const finish = () => {
       if (settled) return
@@ -107,12 +107,11 @@ export async function discoverSeestars(
 
     socket.on('message', (msg, rinfo) => {
       try {
-        const parsed = JSON.parse(msg.toString('utf8')) as Record<
-          string,
-          unknown
-        >
-        if (parsed.method !== 'scan_iscope') return
-        const result = parsed.result
+        const parsed = JSON.parse(msg.toString('utf8'))
+        if (typeof parsed !== 'object' || parsed === null) return
+        const record = parsed as Record<string, unknown>
+        if (record.method !== 'scan_iscope') return
+        const result = record.result
         if (typeof result !== 'object' || result === null) return
         devices.set(rinfo.address, {
           host: rinfo.address,
@@ -252,11 +251,7 @@ async function probeMdnsSeestar(options: {
       `mDNS lookup timed out for ${MDNS_SEESTAR_HOSTNAME}`,
     )
 
-    await withTimeout(
-      probeTcpPort(resolved.address, CONTROL_PORT),
-      options.timeoutMs,
-      `TCP probe timed out for ${resolved.address}:${CONTROL_PORT}`,
-    )
+    await probeTcpPort(resolved.address, CONTROL_PORT, options.timeoutMs)
 
     emitLog(options.logger, {
       level: 'info',
@@ -290,16 +285,26 @@ async function probeMdnsSeestar(options: {
   }
 }
 
-function probeTcpPort(host: string, port: number): Promise<void> {
+function probeTcpPort(
+  host: string,
+  port: number,
+  timeoutMs: number,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ host, port })
+    const timer = setTimeout(() => {
+      socket.destroy()
+      reject(new Error(`TCP probe timed out for ${host}:${port}`))
+    }, timeoutMs)
 
     socket.once('connect', () => {
+      clearTimeout(timer)
       socket.destroy()
       resolve()
     })
 
     socket.once('error', (error) => {
+      clearTimeout(timer)
       socket.destroy()
       reject(error)
     })

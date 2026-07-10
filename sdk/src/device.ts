@@ -31,6 +31,7 @@ import type {
   ManualMoveOptions,
   PreflightSummary,
   SeestarPushEvent,
+  SeestarViewMode,
   StartupSequenceOptions,
   StartupSequenceReport,
   StartupStepReport,
@@ -40,9 +41,18 @@ interface SequenceStepLoggers {
   steps: StartupStepReport[]
   report: (ok: boolean) => StartupSequenceReport
   stepStarted: (step: string, summary: string) => void
-  stepCompleted: (step: string, summary: string, changed?: boolean, data?: unknown) => void
+  stepCompleted: (
+    step: string,
+    summary: string,
+    changed?: boolean,
+    data?: unknown,
+  ) => void
   stepSkipped: (step: string, summary: string, data?: unknown) => void
-  fail: (name: string, summary: string, error?: unknown) => StartupSequenceReport
+  fail: (
+    name: string,
+    summary: string,
+    error?: unknown,
+  ) => StartupSequenceReport
 }
 
 /**
@@ -60,6 +70,11 @@ export class SeestarDevice {
   private deviceSn?: string
   private startupSequenceCount = 0
   private authenticated = false
+  private connectPromise?: Promise<void>
+  private authPromise?: Promise<boolean>
+  // Serializes state-changing commands and their waits on this instance so
+  // overlapping mutations cannot reach the hardware concurrently.
+  private mutationChain: Promise<void> = Promise.resolve()
 
   constructor(private config: ClientConfig) {
     this.host = config.host
@@ -89,23 +104,41 @@ export class SeestarDevice {
 
   async connect(): Promise<void> {
     if (this.isConnected()) return
-    this.authenticated = false
-    if (!this.host) {
-      this.host = await discoverSeestarHost({
-        timeoutMs: this.config.discoveryTimeoutMs,
-        logger: this.logger,
-        sessionId: this.sessionId,
-      })
-      this.configureClient(this.host)
+    if (this.connectPromise) return this.connectPromise
+    const promise = (async () => {
+      this.authenticated = false
+      if (!this.host) {
+        this.host = await discoverSeestarHost({
+          timeoutMs: this.config.discoveryTimeoutMs,
+          logger: this.logger,
+          sessionId: this.sessionId,
+        })
+        this.configureClient(this.host)
+      }
+      await this.client.connect()
+    })()
+    this.connectPromise = promise
+    try {
+      await promise
+    } finally {
+      if (this.connectPromise === promise) this.connectPromise = undefined
     }
-    await this.client.connect()
   }
 
   async authenticate(): Promise<boolean> {
     if (this.isConnected() && this.authenticated) return true
-    const authenticated = await this.auth.authenticate()
-    this.authenticated = authenticated
-    return authenticated
+    if (this.authPromise) return this.authPromise
+    const promise = (async () => {
+      const authenticated = await this.auth.authenticate()
+      this.authenticated = authenticated
+      return authenticated
+    })()
+    this.authPromise = promise
+    try {
+      return await promise
+    } finally {
+      if (this.authPromise === promise) this.authPromise = undefined
+    }
   }
 
   async connectAndAuth(): Promise<boolean> {
@@ -115,6 +148,8 @@ export class SeestarDevice {
 
   disconnect(): void {
     this.authenticated = false
+    this.connectPromise = undefined
+    this.authPromise = undefined
     this.client?.disconnect()
     this.log({
       level: 'info',
@@ -972,7 +1007,11 @@ export class SeestarDevice {
       )
       return undefined
     } catch (error) {
-      return loggers.fail('connect', 'Failed to connect and authenticate', error)
+      return loggers.fail(
+        'connect',
+        'Failed to connect and authenticate',
+        error,
+      )
     }
   }
 
@@ -1000,7 +1039,11 @@ export class SeestarDevice {
     } catch (error) {
       return {
         ok: false,
-        report: loggers.fail('preflight', 'Failed to collect device status', error),
+        report: loggers.fail(
+          'preflight',
+          'Failed to collect device status',
+          error,
+        ),
       }
     }
   }
@@ -1048,86 +1091,110 @@ export class SeestarDevice {
     dec: number,
     wait: ActionWaitOptions = {},
   ): Promise<boolean> {
-    await this.ensureAuthenticated()
-    const resp = await this.client.sendSync('scope_goto', [ra, dec])
-    const ok = resp.code === 0
-    if (ok && wait.waitForCompletion) {
-      await this.waitForGotoCompletion(ra, dec, wait)
-    }
-    return ok
+    assertFiniteRange(ra, 0, 24, 'ra')
+    assertFiniteRange(dec, -90, 90, 'dec')
+    return this.runMutation(async () => {
+      if (wait.signal?.aborted) {
+        throw new Error('goto aborted before start')
+      }
+      await this.ensureAuthenticated()
+      const resp = await this.client.sendSync('scope_goto', [ra, dec])
+      const ok = resp.code === 0
+      if (ok && wait.waitForCompletion) {
+        await this.waitForGotoCompletion(ra, dec, wait)
+      }
+      return ok
+    })
   }
 
   async moveToHorizon(wait: ActionWaitOptions = {}): Promise<boolean> {
-    await this.ensureAuthenticated()
-    const resp = await this.client.sendSync('scope_move_to_horizon', '')
-    const ok = resp.code === 0
-    if (ok) {
-      if (wait.waitForCompletion) {
-        await this.waitForMountClosed(
-          false,
-          'ScopeMoveToHorizon',
-          'move arm to horizon',
-          wait,
-        )
+    return this.runMutation(async () => {
+      if (wait.signal?.aborted) {
+        throw new Error('move to horizon aborted before start')
       }
-      this.log({
-        level: 'info',
-        event: 'observation.arm.opened',
-        component: 'observation',
-        phase: 'observe',
-        changed: true,
-        ok: true,
-        summary: 'Moved arm to horizon position',
-      })
-    }
-    return ok
+      await this.ensureAuthenticated()
+      const resp = await this.client.sendSync('scope_move_to_horizon', '')
+      const ok = resp.code === 0
+      if (ok) {
+        if (wait.waitForCompletion) {
+          await this.waitForMountClosed(
+            false,
+            'ScopeMoveToHorizon',
+            'move arm to horizon',
+            wait,
+          )
+        }
+        this.log({
+          level: 'info',
+          event: 'observation.arm.opened',
+          component: 'observation',
+          phase: 'observe',
+          changed: true,
+          ok: true,
+          summary: 'Moved arm to horizon position',
+        })
+      }
+      return ok
+    })
   }
 
   async park(wait: ActionWaitOptions = {}): Promise<boolean> {
-    await this.ensureAuthenticated()
-    const resp = await this.client.sendSync('scope_park', '')
-    const ok = resp.code === 0
-    if (ok) {
-      if (wait.waitForCompletion) {
-        await this.waitForMountClosed(true, 'ScopeHome', 'park arm', wait)
+    return this.runRecovery(async () => {
+      if (wait.signal?.aborted) {
+        throw new Error('park aborted before start')
       }
-      this.log({
-        level: 'info',
-        event: 'observation.arm.parked',
-        component: 'observation',
-        phase: 'shutdown',
-        changed: true,
-        ok: true,
-        summary: 'Parked arm',
-      })
-    }
-    return ok
+      await this.ensureAuthenticated()
+      const resp = await this.client.sendSync('scope_park', '')
+      const ok = resp.code === 0
+      if (ok) {
+        if (wait.waitForCompletion) {
+          await this.waitForMountClosed(true, 'ScopeHome', 'park arm', wait)
+        }
+        this.log({
+          level: 'info',
+          event: 'observation.arm.parked',
+          component: 'observation',
+          phase: 'shutdown',
+          changed: true,
+          ok: true,
+          summary: 'Parked arm',
+        })
+      }
+      return ok
+    })
   }
 
   async sync(ra: number, dec: number): Promise<boolean> {
-    await this.ensureAuthenticated()
-    const resp = await this.client.sendSync('scope_sync', [ra, dec])
-    return resp.code === 0
+    assertFiniteRange(ra, 0, 24, 'ra')
+    assertFiniteRange(dec, -90, 90, 'dec')
+    return this.runMutation(async () => {
+      await this.ensureAuthenticated()
+      const resp = await this.client.sendSync('scope_sync', [ra, dec])
+      return resp.code === 0
+    })
   }
 
   async manualMove(options: ManualMoveOptions): Promise<boolean> {
     validateManualMoveOptions(options)
-    const resp = await this.client.sendSync('scope_speed_move', {
-      speed: options.speed,
-      angle: options.directionDeg,
-      dur_sec: options.durationSec,
+    return this.runMutation(async () => {
+      await this.ensureAuthenticated()
+      const resp = await this.client.sendSync('scope_speed_move', {
+        speed: options.speed,
+        angle: options.directionDeg,
+        dur_sec: options.durationSec,
+      })
+      return resp.code === 0
     })
-    return resp.code === 0
   }
 
   async startView(
-    mode: string,
+    mode: SeestarViewMode,
     targetName?: string,
     wait: ActionWaitOptions = {},
   ): Promise<boolean> {
     return this.startViewDetailed(
       {
-        mode: mode as StartViewOptions['mode'],
+        mode,
         targetName,
       },
       wait,
@@ -1138,253 +1205,340 @@ export class SeestarDevice {
     options: StartViewOptions,
     wait: ActionWaitOptions = {},
   ): Promise<boolean> {
-    await this.ensureAuthenticated()
-    const params: Record<string, unknown> = { mode: options.mode }
-    if (options.targetName) params.target_name = options.targetName
-    if (options.targetRaDec) params.target_ra_dec = options.targetRaDec
-    if (typeof options.lpFilter === 'boolean')
-      params.lp_filter = options.lpFilter
-    const resp = await this.client.sendSync('iscope_start_view', params)
-    const ok = resp.code === 0
-    if (ok) {
-      if (wait.waitForCompletion) {
-        await this.waitForViewStarted(options, wait)
-        if (options.targetRaDec) {
-          await this.waitForGotoCompletion(
-            options.targetRaDec[0],
-            options.targetRaDec[1],
-            wait,
-          )
-        }
+    return this.runMutation(async () => {
+      if (wait.signal?.aborted) {
+        throw new Error('start view aborted before start')
       }
-      this.log({
-        level: 'info',
-        event: 'observation.view.started',
-        component: 'observation',
-        phase: 'observe',
-        changed: true,
-        ok: true,
-        summary: describeStartView(
-          options.mode,
-          options.targetName,
-          options.lpFilter ?? false,
-        ),
-        data: {
-          mode: options.mode,
-          targetName: options.targetName,
-          targetRaDec: options.targetRaDec,
-          lpFilter: options.lpFilter,
-        },
-      })
-    }
-    return ok
+      await this.ensureAuthenticated()
+      const params: Record<string, unknown> = { mode: options.mode }
+      if (options.targetName) params.target_name = options.targetName
+      if (options.targetRaDec) {
+        assertFiniteRange(options.targetRaDec[0], 0, 24, 'target_ra_dec[0]')
+        assertFiniteRange(options.targetRaDec[1], -90, 90, 'target_ra_dec[1]')
+        params.target_ra_dec = options.targetRaDec
+      }
+      if (typeof options.lpFilter === 'boolean')
+        params.lp_filter = options.lpFilter
+      const resp = await this.client.sendSync('iscope_start_view', params)
+      const ok = resp.code === 0
+      if (ok) {
+        if (wait.waitForCompletion) {
+          await this.waitForViewStarted(options, wait)
+          if (options.targetRaDec) {
+            await this.waitForGotoCompletion(
+              options.targetRaDec[0],
+              options.targetRaDec[1],
+              wait,
+            )
+          }
+        }
+        this.log({
+          level: 'info',
+          event: 'observation.view.started',
+          component: 'observation',
+          phase: 'observe',
+          changed: true,
+          ok: true,
+          summary: describeStartView(
+            options.mode,
+            options.targetName,
+            options.lpFilter ?? false,
+          ),
+          data: {
+            mode: options.mode,
+            targetName: options.targetName,
+            targetRaDec: options.targetRaDec,
+            lpFilter: options.lpFilter,
+          },
+        })
+      }
+      return ok
+    })
   }
 
   async stopView(
     stage?: string,
     wait: ActionWaitOptions = {},
   ): Promise<boolean> {
-    await this.ensureAuthenticated()
-    const params = stage ? { stage } : ''
-    const resp = await this.client.sendSync('iscope_stop_view', params)
-    const ok = resp.code === 0
-    if (ok) {
-      if (wait.waitForCompletion) {
-        await this.waitForViewStopped(wait)
+    return this.runRecovery(async () => {
+      if (wait.signal?.aborted) {
+        throw new Error('stop view aborted before start')
       }
-      this.log({
-        level: 'info',
-        event: 'observation.view.stopped',
-        component: 'observation',
-        phase: 'observe',
-        changed: true,
-        ok: true,
-        summary: wait.waitForCompletion
-          ? stage
-            ? `Stopped ${stage} view stage`
-            : 'Stopped active view'
-          : stage
-            ? `Requested stop of ${stage} view stage`
-            : 'Requested stop of active view',
-        data: {
-          stage,
-          waitForCompletion: wait.waitForCompletion ?? false,
-        },
-      })
-    }
-    return ok
+      await this.ensureAuthenticated()
+      const params = stage ? { stage } : ''
+      const resp = await this.client.sendSync('iscope_stop_view', params)
+      const ok = resp.code === 0
+      if (ok) {
+        if (wait.waitForCompletion) {
+          await this.waitForViewStopped(wait)
+        }
+        this.log({
+          level: 'info',
+          event: 'observation.view.stopped',
+          component: 'observation',
+          phase: 'observe',
+          changed: true,
+          ok: true,
+          summary: wait.waitForCompletion
+            ? stage
+              ? `Stopped ${stage} view stage`
+              : 'Stopped active view'
+            : stage
+              ? `Requested stop of ${stage} view stage`
+              : 'Requested stop of active view',
+          data: {
+            stage,
+            waitForCompletion: wait.waitForCompletion ?? false,
+          },
+        })
+      }
+      return ok
+    })
   }
 
   async startStack(
     restart = true,
     wait: ActionWaitOptions = {},
   ): Promise<boolean> {
-    const resp = await this.client.sendSync('iscope_start_stack', { restart })
-    const ok = resp.code === 0
-    if (ok) {
-      if (wait.waitForCompletion) {
-        await this.waitForStackStarted(wait)
+    return this.runMutation(async () => {
+      if (wait.signal?.aborted) {
+        throw new Error('start stack aborted before start')
       }
-      this.log({
-        level: 'info',
-        event: 'observation.stack.started',
-        component: 'observation',
-        phase: 'observe',
-        changed: true,
-        ok: true,
-        summary: `Started stacking (restart=${restart})`,
-        data: { restart },
-      })
-    }
-    return ok
+      await this.ensureAuthenticated()
+      const resp = await this.client.sendSync('iscope_start_stack', { restart })
+      const ok = resp.code === 0
+      if (ok) {
+        if (wait.waitForCompletion) {
+          await this.waitForStackStarted(wait)
+        }
+        this.log({
+          level: 'info',
+          event: 'observation.stack.started',
+          component: 'observation',
+          phase: 'observe',
+          changed: true,
+          ok: true,
+          summary: `Started stacking (restart=${restart})`,
+          data: { restart },
+        })
+      }
+      return ok
+    })
   }
 
   async stopStack(wait: ActionWaitOptions = {}): Promise<boolean> {
-    const resp = await this.client.sendSync('iscope_stop_view', {
-      stage: 'Stack',
-    })
-    const ok = resp.code === 0
-    if (ok) {
-      if (wait.waitForCompletion) {
-        await this.waitForStackStopped(wait)
+    return this.runRecovery(async () => {
+      if (wait.signal?.aborted) {
+        throw new Error('stop stack aborted before start')
       }
-      this.log({
-        level: 'info',
-        event: 'observation.stack.stopped',
-        component: 'observation',
-        phase: 'observe',
-        changed: true,
-        ok: true,
-        summary: wait.waitForCompletion
-          ? 'Stopped stacking'
-          : 'Requested stop of stacking',
-        data: {
-          waitForCompletion: wait.waitForCompletion ?? false,
-        },
+      await this.ensureAuthenticated()
+      const resp = await this.client.sendSync('iscope_stop_view', {
+        stage: 'Stack',
       })
-    }
-    return ok
+      const ok = resp.code === 0
+      if (ok) {
+        if (wait.waitForCompletion) {
+          await this.waitForStackStopped(wait)
+        }
+        this.log({
+          level: 'info',
+          event: 'observation.stack.stopped',
+          component: 'observation',
+          phase: 'observe',
+          changed: true,
+          ok: true,
+          summary: wait.waitForCompletion
+            ? 'Stopped stacking'
+            : 'Requested stop of stacking',
+          data: {
+            waitForCompletion: wait.waitForCompletion ?? false,
+          },
+        })
+      }
+      return ok
+    })
   }
 
   async setWheelPosition(
     position: number,
     wait: ActionWaitOptions = {},
   ): Promise<boolean> {
-    const resp = await this.client.sendSync('set_wheel_position', position)
-    const ok = resp.code === 0
-    if (ok && wait.waitForCompletion) {
-      await this.waitForWheelPosition(position, wait)
+    if (!Number.isInteger(position) || position < 0 || position > 2) {
+      throw new Error('filter wheel position must be an integer in [0, 2]')
     }
-    return ok
+    return this.runMutation(async () => {
+      if (wait.signal?.aborted) {
+        throw new Error('set filter wheel aborted before start')
+      }
+      await this.ensureAuthenticated()
+      if (!wait.waitForCompletion) {
+        const resp = await this.client.sendSync('set_wheel_position', position)
+        return resp.code === 0
+      }
+      // Subscribe before sending so a fast WheelMove completion is not missed.
+      const controller = new AbortController()
+      const signal = wait.signal
+        ? AbortSignal.any([controller.signal, wait.signal])
+        : controller.signal
+      const completion = this.waitForWheelPosition(position, { ...wait, signal })
+      try {
+        const resp = await this.client.sendSync('set_wheel_position', position)
+        const ok = resp.code === 0
+        if (!ok) return false
+        await completion
+        return true
+      } finally {
+        controller.abort()
+        await completion.catch(() => {})
+      }
+    })
   }
 
   async startAutoFocus(wait: ActionWaitOptions = {}): Promise<boolean> {
-    const startedAt = Date.now()
-    const resp = await this.client.sendSync('start_auto_focuse', '')
-    const ok = resp.code === 0
-    if (ok) {
-      this.log({
-        level: 'info',
-        event: 'observation.autofocus.started',
-        component: 'observation',
-        phase: 'observe',
-        changed: true,
-        ok: true,
-        summary: 'Started autofocus',
-      })
-      if (wait.waitForCompletion) {
-        await this.waitForAutofocusCompletion(wait)
+    return this.runMutation(async () => {
+      if (wait.signal?.aborted) {
+        throw new Error('autofocus aborted before start')
+      }
+      await this.ensureAuthenticated()
+      const controller = new AbortController()
+      const signal = wait.signal
+        ? AbortSignal.any([controller.signal, wait.signal])
+        : controller.signal
+      const completion = wait.waitForCompletion
+        ? this.waitForAutofocusCompletion({ ...wait, signal })
+        : undefined
+      try {
+        const startedAt = Date.now()
+        const resp = await this.client.sendSync('start_auto_focuse', '')
+        const ok = resp.code === 0
+        if (!ok) return ok
         this.log({
           level: 'info',
-          event: 'observation.autofocus.completed',
+          event: 'observation.autofocus.started',
           component: 'observation',
           phase: 'observe',
           changed: true,
           ok: true,
-          summary: 'Completed autofocus',
-          data: {
-            durationMs: Date.now() - startedAt,
-          },
+          summary: 'Started autofocus',
         })
+        if (completion) {
+          await completion
+          this.log({
+            level: 'info',
+            event: 'observation.autofocus.completed',
+            component: 'observation',
+            phase: 'observe',
+            changed: true,
+            ok: true,
+            summary: 'Completed autofocus',
+            data: {
+              durationMs: Date.now() - startedAt,
+            },
+          })
+        }
+        return ok
+      } finally {
+        controller.abort()
+        if (completion) await completion.catch(() => {})
       }
-    }
-    return ok
+    })
   }
 
   async setSetting(params: Record<string, unknown>): Promise<boolean> {
-    const resp = await this.client.sendSync('set_setting', params)
-    return resp.code === 0
+    return this.runMutation(async () => {
+      await this.ensureAuthenticated()
+      const resp = await this.client.sendSync('set_setting', params)
+      return resp.code === 0
+    })
   }
 
   async setUserLocation(lat: number, lon: number): Promise<boolean> {
-    const resp = await this.client.sendSync('set_user_location', {
-      lat,
-      lon,
-      force: true,
-    })
-    const ok = resp.code === 0
-    if (ok) {
-      this.log({
-        level: 'info',
-        event: 'observation.location.updated',
-        component: 'observation',
-        phase: 'startup',
-        changed: true,
-        ok: true,
-        summary: `Updated device location to ${lat}, ${lon}`,
-        data: { lat, lon },
+    assertFiniteRange(lat, -90, 90, 'lat')
+    assertFiniteRange(lon, -180, 180, 'lon')
+    return this.runMutation(async () => {
+      await this.ensureAuthenticated()
+      const resp = await this.client.sendSync('set_user_location', {
+        lat,
+        lon,
+        force: true,
       })
-    }
-    return ok
+      const ok = resp.code === 0
+      if (ok) {
+        this.log({
+          level: 'info',
+          event: 'observation.location.updated',
+          component: 'observation',
+          phase: 'startup',
+          changed: true,
+          ok: true,
+          summary: `Updated device location to ${lat}, ${lon}`,
+          data: { lat, lon },
+        })
+      }
+      return ok
+    })
   }
 
   async setTime(
     date = new Date(),
     timeZone = resolvedTimeZone(),
   ): Promise<boolean> {
-    const resp = await this.client.sendSync('pi_set_time', [
-      {
-        year: date.getFullYear(),
-        mon: date.getMonth() + 1,
-        day: date.getDate(),
-        hour: date.getHours(),
-        min: date.getMinutes(),
-        sec: date.getSeconds(),
-        time_zone: timeZone,
-      },
-    ])
-    const ok = resp.code === 0
-    if (ok) {
-      this.log({
-        level: 'info',
-        event: 'observation.time.synced',
-        component: 'observation',
-        phase: 'startup',
-        changed: true,
-        ok: true,
-        summary: 'Synced device time from host clock',
-        data: {
-          year: date.getFullYear(),
-          mon: date.getMonth() + 1,
-          day: date.getDate(),
-          hour: date.getHours(),
-          min: date.getMinutes(),
-          sec: date.getSeconds(),
-          timeZone,
-        },
-      })
+    if (Number.isNaN(date.getTime())) {
+      throw new Error('setTime date must be a valid Date')
     }
-    return ok
+    return this.runMutation(async () => {
+      await this.ensureAuthenticated()
+      const parts = toTimeZoneParts(date, timeZone)
+      const resp = await this.client.sendSync('pi_set_time', [
+        {
+          year: parts.year,
+          mon: parts.mon,
+          day: parts.day,
+          hour: parts.hour,
+          min: parts.min,
+          sec: parts.sec,
+          time_zone: timeZone,
+        },
+      ])
+      const ok = resp.code === 0
+      if (ok) {
+        this.log({
+          level: 'info',
+          event: 'observation.time.synced',
+          component: 'observation',
+          phase: 'startup',
+          changed: true,
+          ok: true,
+          summary: 'Synced device time from host clock',
+          data: {
+            year: parts.year,
+            mon: parts.mon,
+            day: parts.day,
+            hour: parts.hour,
+            min: parts.min,
+            sec: parts.sec,
+            timeZone,
+          },
+        })
+      }
+      return ok
+    })
   }
 
   async shutdown(): Promise<boolean> {
-    const resp = await this.client.sendSync('pi_shutdown', '')
-    return resp.code === 0
+    return this.runMutation(async () => {
+      await this.ensureAuthenticated()
+      const resp = await this.client.sendSync('pi_shutdown', '')
+      return resp.code === 0
+    })
   }
 
   async reboot(): Promise<boolean> {
-    const resp = await this.client.sendSync('pi_reboot', '')
-    return resp.code === 0
+    return this.runMutation(async () => {
+      await this.ensureAuthenticated()
+      const resp = await this.client.sendSync('pi_reboot', '')
+      return resp.code === 0
+    })
   }
 
   /** Expose the low-level client for advanced use. */
@@ -2106,6 +2260,31 @@ export class SeestarDevice {
     }
   }
 
+  // Run a mutating operation after any prior mutation on this instance has
+  // settled. The chain never breaks on rejection, so a failed command cannot
+  // stall the next one.
+  private runMutation<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.mutationChain.then(fn, fn)
+    this.mutationChain = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    return result
+  }
+
+  // Recovery commands (stop/park) bypass the chain head so they can reach the
+  // device even while a prior mutation is still waiting for completion, but
+  // they still extend the chain tail so a later mutation cannot overlap with
+  // a recovery that is still settling.
+  private runRecovery<T>(fn: () => Promise<T>): Promise<T> {
+    const result = fn()
+    this.mutationChain = Promise.all([this.mutationChain, result]).then(
+      () => undefined,
+      () => undefined,
+    )
+    return result
+  }
+
   private async collectPreflightSummary(): Promise<PreflightSummary> {
     const [
       deviceState,
@@ -2518,6 +2697,17 @@ function validateManualMoveOptions(options: ManualMoveOptions): void {
   }
 }
 
+function assertFiniteRange(
+  value: number,
+  min: number,
+  max: number,
+  name: string,
+): void {
+  if (!Number.isFinite(value) || value < min || value > max) {
+    throw new Error(`${name} must be a finite number in [${min}, ${max}]`)
+  }
+}
+
 function errorMessage(error: unknown): string | undefined {
   if (error instanceof Error) return error.message
   if (typeof error === 'string') return error
@@ -2526,6 +2716,42 @@ function errorMessage(error: unknown): string | undefined {
 
 function resolvedTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+}
+
+// Compute calendar components in the given timezone so they match the
+// `time_zone` field sent to the device. `getHours()` etc. would return
+// host-local components, which disagree with a non-host `timeZone`.
+function toTimeZoneParts(
+  date: Date,
+  timeZone: string,
+): {
+  year: number
+  mon: number
+  day: number
+  hour: number
+  min: number
+  sec: number
+} {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date)
+  const get = (type: string): number =>
+    Number(parts.find((p) => p.type === type)?.value ?? '0')
+  return {
+    year: get('year'),
+    mon: get('month'),
+    day: get('day'),
+    hour: get('hour') % 24,
+    min: get('minute'),
+    sec: get('second'),
+  }
 }
 
 function buildSessionId(): string {

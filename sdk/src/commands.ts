@@ -15,23 +15,25 @@ export function parseAlbums(resp: JsonRpcResponse): AlbumsResult | null {
   if (typeof resp.result !== 'object' || resp.result === null) return null
   const r = resp.result as Record<string, unknown>
   return {
-    path: String(r.path ?? ''),
+    path: typeof r.path === 'string' ? r.path : '',
     list: Array.isArray(r.list)
       ? r.list.map((entry: unknown) => {
-          const e = entry as Record<string, unknown>
+          const e = asRecord(entry)
           return {
-            groupName: e.group_name ? String(e.group_name) : undefined,
-            type: e.type ? String(e.type) : undefined,
-            name: e.name ? String(e.name) : undefined,
-            files: Array.isArray(e.files)
+            groupName:
+              typeof e?.group_name === 'string' ? e.group_name : undefined,
+            type: typeof e?.type === 'string' ? e.type : undefined,
+            name: typeof e?.name === 'string' ? e.name : undefined,
+            files: Array.isArray(e?.files)
               ? e.files.map((f: unknown) => {
-                  const file = f as Record<string, unknown>
+                  const file = asRecord(f)
                   return {
-                    name: String(file.name ?? ''),
-                    thn: String(file.thn ?? ''),
+                    name: typeof file?.name === 'string' ? file.name : '',
+                    thn: typeof file?.thn === 'string' ? file.thn : '',
                     count:
-                      typeof file.count === 'number' ? file.count : undefined,
-                    type: typeof file.type === 'number' ? file.type : undefined,
+                      typeof file?.count === 'number' ? file.count : undefined,
+                    type:
+                      typeof file?.type === 'number' ? file.type : undefined,
                   }
                 })
               : [],
@@ -66,7 +68,8 @@ export function parseDeviceState(resp: JsonRpcResponse): DeviceState | null {
 
 export function parseViewState(resp: JsonRpcResponse): ViewStateResult | null {
   if (typeof resp.result !== 'object' || resp.result === null) return null
-  return resp.result as ViewStateResult
+  const result = resp.result as Record<string, unknown>
+  return { ...result, View: asRecord(result.View) }
 }
 
 /**
@@ -86,4 +89,10 @@ export function buildImageUrl(
     ? thumbPath
     : thumbPath.replace('_thn.jpg', extension)
   return `http://${host}/${albumPath}/${fullPath}`
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null
+    ? (value as Record<string, unknown>)
+    : undefined
 }
