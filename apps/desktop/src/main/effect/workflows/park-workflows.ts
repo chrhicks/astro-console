@@ -36,34 +36,74 @@ export const runPark = Effect.gen(function* () {
   const current = yield* store.get
 
   if (current.capture.phase === 'capturing' || current.capture.phase === 'starting') {
-    const capture = session.rig.capture
-    if (!capture) {
-      return yield* Effect.fail(
-        new Error('Connected rig does not support capture'),
-      )
-    }
-    yield* capture.stop().pipe(
-      Effect.catchAll((error) =>
-        Effect.gen(function* () {
-          if ((yield* sessions.getCurrent) !== session) {
-            return yield* Effect.fail(error)
-          }
-          const message = toErrorMessage(error)
-          yield* store.update((cur) => ({
-            ...cur,
-            session: {
-              ...cur.session,
-              lastError: message,
-            },
-            capture: { phase: 'failed', lastError: message },
-          }))
-          yield* bus.publish('park.failed', { error: message, step: 'stop-capture' })
-          return yield* Effect.fail(error)
-        }),
-      ),
-    )
+    // Atomically move capture out of the active phase before calling stop so
+    // a pending runStartCapture cannot later commit 'capturing' or fork its
+    // poller. Stop/park recovery supersedes ordinary operations.
+    let stopClaimed = false
+    yield* store.update((cur) => {
+      if (cur.capture.phase !== 'capturing' && cur.capture.phase !== 'starting') {
+        return cur
+      }
+      stopClaimed = true
+      return { ...cur, capture: { ...cur.capture, phase: 'stopped' } }
+    })
+    if (stopClaimed) {
+      const capture = session.rig.capture
+      const camera = session.rig.camera
+      if (capture) {
+        yield* capture.stop().pipe(
+          Effect.catchAll((error) =>
+            Effect.gen(function* () {
+              if ((yield* sessions.getCurrent) !== session) {
+                return yield* Effect.fail(error)
+              }
+              const message = toErrorMessage(error)
+              yield* store.update((cur) => ({
+                ...cur,
+                session: {
+                  ...cur.session,
+                  lastError: message,
+                },
+                capture: { phase: 'failed', lastError: message },
+              }))
+              yield* bus.publish('park.failed', { error: message, step: 'stop-capture' })
+              return yield* Effect.fail(error)
+            }),
+          ),
+        )
+      } else if (camera) {
+        yield* camera.stopExposure().pipe(
+          Effect.catchAll((error) =>
+            Effect.gen(function* () {
+              if ((yield* sessions.getCurrent) !== session) {
+                return yield* Effect.fail(error)
+              }
+              const message = toErrorMessage(error)
+              yield* store.update((cur) => ({
+                ...cur,
+                session: {
+                  ...cur.session,
+                  lastError: message,
+                },
+                capture: {
+                  phase: 'failed',
+                  mode: 'external',
+                  lastError: message,
+                },
+              }))
+              yield* bus.publish('park.failed', { error: message, step: 'stop-capture' })
+              return yield* Effect.fail(error)
+            }),
+          ),
+        )
+      } else {
+        return yield* Effect.fail(
+          new Error('Connected rig does not support capture'),
+        )
+      }
 
-    if ((yield* sessions.getCurrent) !== session) return
+      if ((yield* sessions.getCurrent) !== session) return
+    }
   }
 
   if (current.preview.phase === 'active' || current.preview.phase === 'starting') {

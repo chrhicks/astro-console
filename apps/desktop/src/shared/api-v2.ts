@@ -39,7 +39,7 @@ export interface PointingProjection {
   lastError?: string
 }
 
-export type CapturePhase = 'idle' | 'starting' | 'capturing' | 'stopped' | 'failed'
+export type CapturePhase = 'idle' | 'starting' | 'capturing' | 'stopped' | 'failed' | 'partial'
 
 // Distinguishes native stacking orchestration (Seestar RigCaptureWorkflow)
 // from generic external camera exposure (RigCamera start/stop). Native rigs

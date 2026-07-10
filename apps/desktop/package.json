@@ -17,6 +17,7 @@
     "dev": "npm run build:sdk && concurrently -k \"npm:dev:sdk\" \"npm:dev:main\" \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:inspect": "npm run build:sdk && cross-env ELECTRON_INSPECT_PORT=9222 concurrently -k \"npm:dev:sdk\" \"npm:dev:main\" \"npm:dev:renderer\" \"npm:dev:electron\"",
     "start": "npm run build && electron dist/main/index.js",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "import:ngc": "tsx scripts/import-openngc.ts"
   },
   "dependencies": {

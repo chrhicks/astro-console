@@ -31,6 +31,7 @@ const CAPTURE_PHASE_LABELS: Record<CaptureProjection['phase'], string> = {
   capturing: 'Capturing',
   stopped: 'Stopped',
   failed: 'Failed',
+  partial: 'Partial',
 }
 
 const EXPOSURE_PHASE_LABELS: Record<CaptureProjection['phase'], string> = {
@@ -39,6 +40,7 @@ const EXPOSURE_PHASE_LABELS: Record<CaptureProjection['phase'], string> = {
   capturing: 'Exposing',
   stopped: 'Stopped',
   failed: 'Failed',
+  partial: 'Partial',
 }
 
 const ACTIVITY_LABELS: Record<'idle' | 'previewing' | 'capturing', string> = {
@@ -145,7 +147,11 @@ export default function WorkArea() {
       ? isExternalCapture
         ? 'Exposure failed. Retry or start preview.'
         : 'Capture failed. Retry or start preview.'
-      : pointing.phase === 'failed' && pointing.lastError
+      : capture.phase === 'partial'
+        ? isExternalCapture
+          ? 'Exposure completed but frame was not saved. Retry or start preview.'
+          : 'Capture completed but frame was not saved. Retry or start preview.'
+        : pointing.phase === 'failed' && pointing.lastError
         ? pointing.lastError
         : isExternalCapture && workspace.state === 'capturing'
           ? 'Exposure running.'
@@ -305,7 +311,8 @@ export default function WorkArea() {
         </span>
       </div>
 
-      {capture.phase === 'failed' && capture.lastError ? (
+      {(capture.phase === 'failed' || capture.phase === 'partial') &&
+      capture.lastError ? (
         <div className="work-error-strip" id="workCaptureError">
           {capture.lastError}
         </div>

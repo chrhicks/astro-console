@@ -109,6 +109,14 @@ export const runStartCapture = Effect.gen(function* () {
       return
     }
 
+    // A stop/park issued while capture.start() was awaiting moved capture out
+    // of 'starting'. Don't commit refreshed state; the stop path owns the
+    // aggregate now.
+    const afterNativeStart = yield* store.get
+    if (afterNativeStart.capture.phase !== 'starting') {
+      return
+    }
+
     const refreshed = yield* session.rig.refresh
 
     // Session replaced or cleared mid-refresh; the new state owns the aggregate.
@@ -116,12 +124,21 @@ export const runStartCapture = Effect.gen(function* () {
       return
     }
 
-    yield* store.update((current) => ({
-      ...current,
-      device: { ...current.device, ...refreshed.device },
-      preview: refreshed.preview,
-      capture: refreshed.capture,
-    }))
+    // Final commit is conditional on capture still being 'starting' so a
+    // stop/park that moved capture out of 'starting' while refresh was in
+    // flight cannot be resurrected by the refresh result.
+    let claimed = false
+    yield* store.update((current) => {
+      if (current.capture.phase !== 'starting') return current
+      claimed = true
+      return {
+        ...current,
+        device: { ...current.device, ...refreshed.device },
+        preview: refreshed.preview,
+        capture: refreshed.capture,
+      }
+    })
+    if (!claimed) return
 
     yield* bus.publish('capture.succeeded', {})
     return
@@ -177,26 +194,25 @@ export const runStartCapture = Effect.gen(function* () {
     return
   }
 
-  // A stop issued while startExposure was awaiting moved capture out of
-  // 'starting'. Don't flip back to 'capturing' or fork a poller; the stop
-  // path owns the state now.
-  const afterStart = yield* store.get
-  if (afterStart.capture.phase !== 'starting') {
-    return
-  }
-
-  // Skip rig.refresh here: the Alpaca refresh does not poll camera exposure
-  // state and would reset capture to idle immediately. Stamp startedAt so the
-  // UI can derive elapsed time locally without faking device-reported progress.
+  // Atomically claim the capturing transition: only the fiber that observes
+  // phase === 'starting' inside the update commits 'capturing' and sets
+  // capturingClaimed. A stop/park that moved capture out of 'starting' while
+  // startExposure was awaiting makes this a no-op, preventing resurrection.
   const startedAt = new Date().toISOString()
-  yield* store.update((current) => ({
-    ...current,
-    capture: {
-      phase: 'capturing',
-      mode: 'external',
-      startedAt,
-    },
-  }))
+  let capturingClaimed = false
+  yield* store.update((current) => {
+    if (current.capture.phase !== 'starting') return current
+    capturingClaimed = true
+    return {
+      ...current,
+      capture: {
+        phase: 'capturing',
+        mode: 'external',
+        startedAt,
+      },
+    }
+  })
+  if (!capturingClaimed) return
 
   yield* bus.publish('capture.state.updated', {
     phase: 'capturing',
@@ -410,16 +426,34 @@ function pollExternalExposure(
           yield* bus.publish('capture.frame.retrieval.failed', {
             error: message,
           })
-          yield* store.update((current) => ({
-            ...current,
-            capture: {
-              phase: 'idle',
-              mode: 'external',
-              deviceState: 'ready',
-              lastError: message,
-            },
-          }))
-          yield* bus.publish('capture.succeeded', {})
+          // Atomically claim the partial transition only if this poller still
+          // owns the current exposure (capturing + startedAt match). A stale
+          // poller or a newer exposure must not overwrite the aggregate.
+          let claimed = false
+          yield* store.update((current) => {
+            if (
+              current.capture.phase !== 'capturing' ||
+              current.capture.startedAt !== startedAt
+            ) {
+              return current
+            }
+            claimed = true
+            return {
+              ...current,
+              capture: {
+                phase: 'partial',
+                mode: 'external',
+                deviceState: 'ready',
+                lastError: message,
+              },
+            }
+          })
+          if (claimed) {
+            yield* bus.publish('capture.partial', {
+              error: message,
+              step: 'frame-retrieval',
+            })
+          }
           return
         }
 
@@ -451,16 +485,33 @@ function pollExternalExposure(
           yield* bus.publish('capture.frame.persist.failed', {
             error: message,
           })
-          yield* store.update((current) => ({
-            ...current,
-            capture: {
-              phase: 'idle',
-              mode: 'external',
-              deviceState: 'ready',
-              lastError: message,
-            },
-          }))
-          yield* bus.publish('capture.succeeded', {})
+          // Atomically claim the partial transition only if this poller still
+          // owns the current exposure (capturing + startedAt match).
+          let claimed = false
+          yield* store.update((current) => {
+            if (
+              current.capture.phase !== 'capturing' ||
+              current.capture.startedAt !== startedAt
+            ) {
+              return current
+            }
+            claimed = true
+            return {
+              ...current,
+              capture: {
+                phase: 'partial',
+                mode: 'external',
+                deviceState: 'ready',
+                lastError: message,
+              },
+            }
+          })
+          if (claimed) {
+            yield* bus.publish('capture.partial', {
+              error: message,
+              step: 'frame-persist',
+            })
+          }
           return
         }
 
@@ -469,19 +520,34 @@ function pollExternalExposure(
           durationSec,
           saveResult.right,
         )
-        yield* store.update((current) => ({
-          ...current,
-          capture: {
-            phase: 'idle',
-            mode: 'external',
-            deviceState: 'ready',
-          },
-          library: {
-            ...current.library,
-            assets: [asset, ...current.library.assets],
-          },
-        }))
-        yield* bus.publish('capture.succeeded', {})
+        // Atomically commit the idle transition + library asset only if this
+        // poller still owns the current exposure. A stale poller must not
+        // overwrite a newer capture state or prepend a stale asset.
+        let claimed = false
+        yield* store.update((current) => {
+          if (
+            current.capture.phase !== 'capturing' ||
+            current.capture.startedAt !== startedAt
+          ) {
+            return current
+          }
+          claimed = true
+          return {
+            ...current,
+            capture: {
+              phase: 'idle',
+              mode: 'external',
+              deviceState: 'ready',
+            },
+            library: {
+              ...current.library,
+              assets: [asset, ...current.library.assets],
+            },
+          }
+        })
+        if (claimed) {
+          yield* bus.publish('capture.succeeded', {})
+        }
         return
       }
 

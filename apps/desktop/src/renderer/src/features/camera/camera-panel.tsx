@@ -15,6 +15,7 @@ const EXPOSURE_PHASE_LABELS: Record<CaptureProjection['phase'], string> = {
   capturing: 'Exposing',
   stopped: 'Stopped',
   failed: 'Failed',
+  partial: 'Partial',
 }
 
 const DEVICE_STATE_LABELS: Record<CaptureDeviceState, string> = {
@@ -107,7 +108,8 @@ export function CameraPanel() {
           </div>
         </div>
 
-        {capture.phase === 'failed' && capture.lastError ? (
+        {(capture.phase === 'failed' || capture.phase === 'partial') &&
+        capture.lastError ? (
           <p className="camera-error" id="cameraExposureError">
             {capture.lastError}
           </p>

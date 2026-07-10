@@ -33,6 +33,13 @@ const SLEW_TIMEOUT_MS = 120000
 const ALPACA_CLIENT_ID = 1
 // Full-resolution frames can be tens of MB; allow a generous download window.
 const IMAGE_FETCH_TIMEOUT_MS = 60000
+// Upper bound on a single image download. Guards against a runaway Content-Length
+// or an unbounded chunked response materializing an unsafe buffer before the
+// ImageBytes header can be validated.
+const MAX_IMAGE_DOWNLOAD_BYTES = 256 * 1024 * 1024
+// Upper bound on a single frame's pixel payload, matching the FITS writer cap.
+// Geometry that would exceed this is treated as corrupt rather than trusted.
+const MAX_IMAGE_PIXEL_BYTES = 256 * 1024 * 1024
 
 // Standard Alpaca response envelope for GET responses. Value is typed
 // per-endpoint at the call site; ErrorNumber/ErrorMessage are always present
@@ -406,7 +413,10 @@ class AlpacaClient {
   // GET imagearray with Accept: application/imagebytes. Avoids imagearrayvariant,
   // which is the path associated with full-resolution out-of-memory failures on
   // some ASCOM Remote drivers. Returns the raw binary payload; the caller parses
-  // the ImageBytes header.
+  // the ImageBytes header. Bounds the response by streaming chunks through a
+  // ReadableStream reader with a running byte count so a chunked response or a
+  // missing Content-Length cannot materialize an unbounded buffer before the
+  // cap is enforced.
   async getImageBytes(path: string): Promise<Uint8Array> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       headers: { Accept: 'application/imagebytes' },
@@ -415,7 +425,42 @@ class AlpacaClient {
     if (!res.ok) {
       throw new Error(`Alpaca GET ${path} failed: HTTP ${res.status}`)
     }
-    return new Uint8Array(await res.arrayBuffer())
+    const contentLength = res.headers.get('content-length')
+    if (contentLength && Number(contentLength) > MAX_IMAGE_DOWNLOAD_BYTES) {
+      throw new Error(
+        `Alpaca GET ${path} exceeded max download size: ${contentLength} bytes`,
+      )
+    }
+    if (!res.body) {
+      throw new Error(`Alpaca GET ${path} returned no response body`)
+    }
+    const chunks: Uint8Array[] = []
+    let total = 0
+    const reader = res.body.getReader()
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (!value) continue
+        total += value.byteLength
+        if (total > MAX_IMAGE_DOWNLOAD_BYTES) {
+          await reader.cancel().catch(() => {})
+          throw new Error(
+            `Alpaca GET ${path} exceeded max download size: ${total} bytes`,
+          )
+        }
+        chunks.push(value)
+      }
+    } finally {
+      reader.releaseLock()
+    }
+    const out = new Uint8Array(total)
+    let offset = 0
+    for (const chunk of chunks) {
+      out.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+    return out
   }
 }
 
@@ -672,7 +717,20 @@ function parseAlpacaImageBytes(data: Uint8Array): RigFrameResult {
   if (bytesPerElement === 0) {
     return unknownImageBytesFrame(data, capturedAt)
   }
-  const pixelBytes = bytesPerElement * dimension1 * dimension2 * planes
+  const pixelElements = dimension1 * dimension2 * planes
+  if (!Number.isSafeInteger(pixelElements) || pixelElements <= 0) {
+    return unknownImageBytesFrame(data, capturedAt)
+  }
+  const pixelBytes = bytesPerElement * pixelElements
+  if (
+    !Number.isSafeInteger(pixelBytes) ||
+    pixelBytes > MAX_IMAGE_PIXEL_BYTES
+  ) {
+    return unknownImageBytesFrame(data, capturedAt)
+  }
+  if (!Number.isSafeInteger(dataStart + pixelBytes)) {
+    return unknownImageBytesFrame(data, capturedAt)
+  }
   if (dataStart + pixelBytes > data.length) {
     return unknownImageBytesFrame(data, capturedAt)
   }
