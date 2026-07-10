@@ -7,6 +7,7 @@ import type {
 import { useProjectionStore } from '../../state/projection-store'
 import { selectWorkAreaModel } from '../../state/projection-selectors'
 import { useSelectedTarget } from '../../state/selected-target-store'
+import { useElapsedSeconds } from '../../hooks/use-elapsed-seconds'
 import {
   usePointToTargetMutation,
   useStartPreviewMutation,
@@ -130,6 +131,8 @@ export default function WorkArea() {
   const capturePhaseLabels = isExternalCapture
     ? EXPOSURE_PHASE_LABELS
     : CAPTURE_PHASE_LABELS
+  const startedElapsed = useElapsedSeconds(capture)
+  const elapsedSec = startedElapsed ?? capture.elapsedSec
   const displayTarget = isSlewing
     ? (pointing.target ?? currentTarget)
     : (selectedTarget ?? currentTarget)
@@ -146,7 +149,8 @@ export default function WorkArea() {
         ? pointing.lastError
         : isExternalCapture && workspace.state === 'capturing'
           ? 'Exposure running.'
-          : isExternalCapture && (workspace.state === 'on_target' || workspace.state === 'primed')
+          : isExternalCapture &&
+              (workspace.state === 'on_target' || workspace.state === 'primed')
             ? 'Ready to preview or expose.'
             : STATUS_MESSAGES[workspace.state]
   const previewBadgeLabel =
@@ -286,9 +290,7 @@ export default function WorkArea() {
         )}
         <span className="metric">
           Elapsed{' '}
-          <strong id="metricElapsed">
-            {formatElapsed(capture.elapsedSec)}
-          </strong>
+          <strong id="metricElapsed">{formatElapsed(elapsedSec)}</strong>
         </span>
         {isExternalCapture ? null : (
           <span className="metric">
@@ -310,7 +312,11 @@ export default function WorkArea() {
       ) : null}
 
       <div className="work-info-strip">
-        <div className="work-capabilities" id="workCapabilities" aria-label="Device capabilities">
+        <div
+          className="work-capabilities"
+          id="workCapabilities"
+          aria-label="Device capabilities"
+        >
           <span className="work-cap-label">Device</span>
           {CAPABILITY_DEFS.map(({ key, label }) => {
             const value = workspace.capabilities[key]
@@ -385,7 +391,9 @@ export default function WorkArea() {
                     key={action.id}
                     className={`work-action-chip${action.enabled ? '' : ' disabled'}${isCapturePending ? ' pending' : ''}`}
                     disabled={!action.enabled || isCapturePending}
-                    aria-label={isExternalCapture ? 'Start exposure' : 'Start capture'}
+                    aria-label={
+                      isExternalCapture ? 'Start exposure' : 'Start capture'
+                    }
                     onClick={() => startCaptureMutation.mutate()}
                   >
                     {action.label}
@@ -399,7 +407,9 @@ export default function WorkArea() {
                     key={action.id}
                     className={`work-action-chip${action.enabled ? '' : ' disabled'}${isCapturePending ? ' pending' : ''}`}
                     disabled={!action.enabled || isCapturePending}
-                    aria-label={isExternalCapture ? 'Stop exposure' : 'Stop capture'}
+                    aria-label={
+                      isExternalCapture ? 'Stop exposure' : 'Stop capture'
+                    }
                     onClick={() => stopCaptureMutation.mutate()}
                   >
                     {action.label}
@@ -424,7 +434,8 @@ export default function WorkArea() {
 
 function formatElapsed(seconds: number | undefined): string {
   if (seconds == null) return '—'
-  const minutes = Math.floor(seconds / 60)
-  const remaining = seconds % 60
+  const total = Math.floor(seconds)
+  const minutes = Math.floor(total / 60)
+  const remaining = total % 60
   return `${minutes}m ${remaining}s`
 }

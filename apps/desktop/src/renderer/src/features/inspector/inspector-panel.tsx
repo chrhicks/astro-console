@@ -11,6 +11,7 @@ import {
   setSelectedTarget,
   useSelectedTarget,
 } from '../../state/selected-target-store'
+import { useElapsedSeconds } from '../../hooks/use-elapsed-seconds'
 import { useTargetDetailsQuery } from './use-target-details-query'
 import { usePointToTargetMutation } from '../../mutations/use-workspace-mutations'
 import './inspector-panel.css'
@@ -45,7 +46,10 @@ const PREVIEW_PHASE_LABELS: Record<PreviewProjection['phase'], string> = {
   error: 'Error',
 }
 
-const ACTIVITY_LABELS: Record<NonNullable<DeviceProjection['activity']>, string> = {
+const ACTIVITY_LABELS: Record<
+  NonNullable<DeviceProjection['activity']>,
+  string
+> = {
   idle: 'Idle',
   previewing: 'Previewing',
   capturing: 'Capturing',
@@ -53,8 +57,15 @@ const ACTIVITY_LABELS: Record<NonNullable<DeviceProjection['activity']>, string>
 
 export default function InspectorPanel() {
   const target = useSelectedTarget((state) => state.target)
-  const { isConnected, pointing, currentTarget, capture, preview, device, workspace } =
-    useProjectionStore(selectInspectorModel)
+  const {
+    isConnected,
+    pointing,
+    currentTarget,
+    capture,
+    preview,
+    device,
+    workspace,
+  } = useProjectionStore(selectInspectorModel)
   const details = useTargetDetailsQuery(target?.id ?? null)
   const pointMutation = usePointToTargetMutation()
 
@@ -82,6 +93,8 @@ export default function InspectorPanel() {
     !isSlewPending &&
     !isBelowHorizon
   const isExternalCapture = capture.mode === 'external'
+  const startedElapsed = useElapsedSeconds(capture)
+  const elapsedSec = startedElapsed ?? capture.elapsedSec
   const captureCapability = workspace.capabilities.capture
   const hasNativeCapture = captureCapability === 'native'
   const hasExternalCapture = captureCapability === 'external'
@@ -179,9 +192,7 @@ export default function InspectorPanel() {
                 </>
               ) : null}
               <span>Elapsed</span>
-              <strong id="captureElapsed">
-                {formatElapsed(capture.elapsedSec)}
-              </strong>
+              <strong id="captureElapsed">{formatElapsed(elapsedSec)}</strong>
             </div>
             {capture.phase === 'failed' && capture.lastError ? (
               <p className="inspector-pointing-error">{capture.lastError}</p>
@@ -201,7 +212,9 @@ export default function InspectorPanel() {
             {hasFilterWheel && target.recommendedFilter ? (
               <div className="control-block">
                 <div className="field-label">Recommended filter</div>
-                <strong id="filterSelect">{formatFilterLabel(target.recommendedFilter)}</strong>
+                <strong id="filterSelect">
+                  {formatFilterLabel(target.recommendedFilter)}
+                </strong>
               </div>
             ) : (
               <p className="help-line" id="filterSelect">
@@ -238,12 +251,14 @@ export default function InspectorPanel() {
                   </button>
                 </div>
                 <p className="help-line">
-                  Capture runs from the work area action bar. These inspector settings are not yet wired.
+                  Capture runs from the work area action bar. These inspector
+                  settings are not yet wired.
                 </p>
               </>
             ) : hasExternalCapture ? (
               <p className="help-line">
-                Exposure runs from the work area action bar. This rig does not expose Seestar stacking controls.
+                Exposure runs from the work area action bar. This rig does not
+                expose Seestar stacking controls.
               </p>
             ) : (
               <p className="help-line">
@@ -284,8 +299,9 @@ export default function InspectorPanel() {
 
 function formatElapsed(seconds: number | undefined): string {
   if (seconds == null) return '—'
-  const minutes = Math.floor(seconds / 60)
-  const remaining = seconds % 60
+  const total = Math.floor(seconds)
+  const minutes = Math.floor(total / 60)
+  const remaining = total % 60
   return `${minutes}m ${remaining}s`
 }
 
@@ -300,11 +316,7 @@ function formatFilterLabel(filter: 'clear' | 'ir' | 'lp') {
   }
 }
 
-function TargetDetails({
-  target,
-}: {
-  target: TargetDetails
-}) {
+function TargetDetails({ target }: { target: TargetDetails }) {
   if (target.kind === 'solar-system') {
     return (
       <div className="kv inspector-target-details">

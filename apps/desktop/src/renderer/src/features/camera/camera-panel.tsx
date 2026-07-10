@@ -5,6 +5,7 @@ import type {
 } from '../../../../shared/api-v2'
 import { useProjectionStore } from '../../state/projection-store'
 import { selectCameraPanelModel } from '../../state/projection-selectors'
+import { useElapsedSeconds } from '../../hooks/use-elapsed-seconds'
 import { useSetExposureDurationMutation } from '../../mutations/use-workspace-mutations'
 import './camera-panel.css'
 
@@ -124,30 +125,6 @@ export function CameraPanel() {
       </div>
     </div>
   )
-}
-
-// Re-renders once per second while an exposure is in progress so the elapsed
-// counter stays live. Returns null when no exposure is active.
-function useElapsedSeconds(capture: CaptureProjection): number | null {
-  const [elapsed, setElapsed] = useState<number | null>(null)
-
-  useEffect(() => {
-    if (!capture.startedAt || capture.phase !== 'capturing') {
-      setElapsed(null)
-      return
-    }
-    const startedAtMs = Date.parse(capture.startedAt)
-    if (Number.isNaN(startedAtMs)) {
-      setElapsed(null)
-      return
-    }
-    const tick = () => setElapsed(Math.max(0, (Date.now() - startedAtMs) / 1000))
-    tick()
-    const interval = setInterval(tick, 1000)
-    return () => clearInterval(interval)
-  }, [capture.startedAt, capture.phase])
-
-  return elapsed
 }
 
 function formatDuration(seconds: number): string {
