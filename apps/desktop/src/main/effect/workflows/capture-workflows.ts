@@ -11,6 +11,11 @@ import type { LibraryAsset } from '../../../shared/api-v2'
 // value exists yet. Not a stacking frame count.
 export const DEFAULT_EXPOSURE_DURATION_SEC = 1
 
+// Upper bound for a single external exposure. Matches the renderer's
+// camera-panel input max so the IPC schema and workflow validation share one
+// explicit bound and unreasonable values do not reach the device.
+export const MAX_EXPOSURE_DURATION_SEC = 3600
+
 export const runSetExposureDuration = (durationSec: number) =>
   Effect.gen(function* () {
     const store = yield* AggregateStore
@@ -24,9 +29,15 @@ export const runSetExposureDuration = (durationSec: number) =>
       )
     }
 
-    if (!Number.isFinite(durationSec) || durationSec <= 0) {
+    if (
+      !Number.isFinite(durationSec) ||
+      durationSec <= 0 ||
+      durationSec > MAX_EXPOSURE_DURATION_SEC
+    ) {
       return yield* Effect.fail(
-        new Error('Exposure duration must be a positive number of seconds'),
+        new Error(
+          `Exposure duration must be a positive number of seconds up to ${MAX_EXPOSURE_DURATION_SEC}`,
+        ),
       )
     }
 
@@ -43,6 +54,24 @@ export const runStartCapture = Effect.gen(function* () {
   const bus = yield* EventBus
   const sessions = yield* SessionManager
 
+  // Reentrancy guard: atomically claim 'starting' in a single store.update so
+  // two concurrent start-capture calls cannot both read 'idle' and both proceed
+  // to issue concurrent capture.start/startExposure. Ref.updateAndGet runs the
+  // function atomically; only the fiber that transitions from a non-active
+  // phase to 'starting' sets claimed and proceeds.
+  let claimed = false
+  yield* store.update((current) => {
+    if (
+      current.capture.phase === 'starting' ||
+      current.capture.phase === 'capturing'
+    ) {
+      return current
+    }
+    claimed = true
+    return { ...current, capture: { phase: 'starting' } }
+  })
+  if (!claimed) return
+
   const session = yield* sessions.getCurrent
   if (!session) {
     yield* store.update((current) => ({
@@ -55,11 +84,6 @@ export const runStartCapture = Effect.gen(function* () {
 
   const capture = session.rig.capture
   if (capture) {
-    yield* store.update((current) => ({
-      ...current,
-      capture: { phase: 'starting' },
-    }))
-
     yield* bus.publish('capture.started', {})
 
     yield* capture.start().pipe(
@@ -108,9 +132,17 @@ export const runStartCapture = Effect.gen(function* () {
   // exposure-oriented capture state without faking stack/frame progress.
   const camera = session.rig.camera
   if (!camera) {
-    return yield* Effect.fail(
-      new Error('Connected rig does not support capture'),
-    )
+    yield* store.update((current) => ({
+      ...current,
+      capture: {
+        phase: 'failed',
+        lastError: 'Connected rig does not support capture',
+      },
+    }))
+    yield* bus.publish('capture.failed', {
+      error: 'Connected rig does not support capture',
+    })
+    return
   }
 
   const durationSec = resolveExposureDuration(
@@ -142,6 +174,14 @@ export const runStartCapture = Effect.gen(function* () {
   )
 
   if ((yield* sessions.getCurrent) !== session) {
+    return
+  }
+
+  // A stop issued while startExposure was awaiting moved capture out of
+  // 'starting'. Don't flip back to 'capturing' or fork a poller; the stop
+  // path owns the state now.
+  const afterStart = yield* store.get
+  if (afterStart.capture.phase !== 'starting') {
     return
   }
 

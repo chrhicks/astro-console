@@ -129,8 +129,10 @@ function projectState(
   if (aggregate.pointing.phase === 'failed' && aggregate.pointing.target) {
     return 'ready_to_slew'
   }
-  if (aggregate.currentTarget) return 'on_target'
+  // Parked takes priority over a cached currentTarget: the mount is closed
+  // even if the target summary has not been cleared yet.
   if (aggregate.device.mountClosed) return 'parked'
+  if (aggregate.currentTarget) return 'on_target'
   // A connected rig that can preview or capture is actionable without a target;
   // do not force a Seestar-style slew before surfacing preview/capture.
   if (capabilities.preview !== 'unsupported' || capabilities.capture !== 'unsupported') {

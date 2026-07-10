@@ -75,8 +75,15 @@ export const runConnect = (input: ConnectRequestV2) =>
 
     const existing = yield* sessions.getCurrent
     if (existing) {
-      yield* existing.disconnect
-      yield* sessions.clearCurrent
+      // Swallow disconnect failures so a stale old session never blocks the
+      // new connect handoff. clearCurrent must always run; otherwise the
+      // session manager keeps a reference to a session the aggregate no
+      // longer reflects. Ensuring binds clearCurrent to the disconnect so
+      // it runs even on fiber interruption, not just on success/failure.
+      yield* existing.disconnect.pipe(
+        Effect.catchAll(() => Effect.void),
+        Effect.ensuring(sessions.clearCurrent),
+      )
     }
 
     yield* store.update((current) => ({

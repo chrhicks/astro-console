@@ -193,8 +193,18 @@ export interface WorkspaceSurface {
   label: string
 }
 
+export type WorkspaceActionId =
+  | 'connect'
+  | 'select-target'
+  | 'retry-slew'
+  | 'retry-preview'
+  | 'stop-preview'
+  | 'stop-capture'
+  | 'preview'
+  | 'capture'
+
 export interface WorkspaceAction {
-  id: string
+  id: WorkspaceActionId
   label: string
   enabled: boolean
   active?: boolean
