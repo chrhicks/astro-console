@@ -1,19 +1,6 @@
 ## Continuum
 
-We use the `continuum` to keep track of our tasks and to serve as our tool for saving memory.
-
-At the beginning of a session run these commands:
-
-- `continuum guide` -- explains usage and workflows and links to command specific guides
-- `continuum init`
-
-### Updating long term memory
-
-Use the `memory-manager` skill and keep your memory up to date for these conditions. You are expected to do this regularly and consistently, multiple times, during a session with the user.
-
-- Feature changes or update
-- Discoveries: new learnings or ideas that need to be recalled in the future
-- Troubleshooting: techniques or approaches that will avoid wasting time in the future to solve similar problems
+Start your session by reading your memory summary in `continuum`. Keep your memory updated throughout this session.
 
 ### Tooling
 
