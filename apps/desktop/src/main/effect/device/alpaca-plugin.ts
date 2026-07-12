@@ -502,6 +502,12 @@ function buildMount(
       ? (context) =>
           Effect.tryPromise({
             try: async () => {
+              const atPark = await client.get(
+                `${base}/atpark`,
+                Schema.Boolean,
+                context?.signal,
+              )
+              if (atPark) return
               await client.put(
                 `${base}/park`,
                 {},
