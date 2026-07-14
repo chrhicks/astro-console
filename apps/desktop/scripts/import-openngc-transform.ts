@@ -53,7 +53,7 @@ const OBJECT_TYPE_MAPPING: Record<
   Other: { targetType: 'dso', recommendedFilter: 'clear' },
 }
 
-const OpenNgcObjectTypeSchema = Schema.Literal(
+const OpenNgcObjectTypeSchema = Schema.Literals([
   'G',
   'GPair',
   'GTrpl',
@@ -71,7 +71,7 @@ const OpenNgcObjectTypeSchema = Schema.Literal(
   '*Ass',
   'Nova',
   'Other',
-)
+])
 
 export const DeepSkyTargetSchema = Schema.Struct({
   id: Schema.String,
@@ -89,7 +89,7 @@ export const DeepSkyTargetSchema = Schema.Struct({
   majorAxisArcmin: Schema.optional(Schema.Number),
   minorAxisArcmin: Schema.optional(Schema.Number),
   constellation: Schema.String,
-  recommendedFilter: Schema.Literal('clear', 'ir', 'lp'),
+  recommendedFilter: Schema.Literals(['clear', 'ir', 'lp']),
   source: Schema.Literal('openngc'),
 })
 

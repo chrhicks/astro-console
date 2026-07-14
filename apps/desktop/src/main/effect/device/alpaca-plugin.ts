@@ -64,14 +64,16 @@ interface AlpacaDiscoveredRig extends DesktopDiscoveredDeviceV2 {
 }
 
 export function createAlpacaPlugin(): DevicePlugin {
-  const discoveredRef = Ref.unsafeMake<Map<string, AlpacaDiscoveredRig>>(
+  const discoveredRef = Ref.makeUnsafe<Map<string, AlpacaDiscoveredRig>>(
     new Map(),
   )
 
   const discover = Effect.gen(function* () {
-    const configurations = yield* Effect.promise(() =>
-      discoverAlpacaRigs(DISCOVERY_TIMEOUT_MS),
-    )
+    const configurations = yield* Effect.tryPromise({
+      try: () => discoverAlpacaRigs(DISCOVERY_TIMEOUT_MS),
+      catch: (error) =>
+        new Error(`Alpaca discovery failed: ${toErrorMessage(error)}`),
+    })
     const rigs = configurations.map(toDiscoveredRig)
     yield* Ref.set(
       discoveredRef,
@@ -209,20 +211,28 @@ export function createAlpacaPlugin(): DevicePlugin {
               // failures instead of swallowing all errors. The session
               // lifecycle (SessionManager clear) still runs even if disconnect
               // throws, so ownership remains safe.
-              const disconnect = Effect.promise(async () => {
-                const errors: string[] = []
-                for (const b of allBases) {
-                  try {
-                    await client.put(`${b}/connected`, { Connected: false })
-                  } catch (error) {
-                    errors.push(toErrorMessage(error))
+              const disconnect = Effect.tryPromise({
+                try: async () => {
+                  const errors: string[] = []
+                  for (const b of allBases) {
+                    try {
+                      await client.put(`${b}/connected`, { Connected: false })
+                    } catch (error) {
+                      errors.push(toErrorMessage(error))
+                    }
                   }
-                }
-                if (errors.length > 0) {
-                  throw new Error(
-                    `Alpaca disconnect failed for ${host}: ${errors.join('; ')}`,
-                  )
-                }
+                  if (errors.length > 0) {
+                    throw new Error(
+                      `Alpaca disconnect failed for ${host}: ${errors.join('; ')}`,
+                    )
+                  }
+                },
+                catch: (error) =>
+                  error instanceof Error
+                    ? error
+                    : new Error(
+                        `Alpaca disconnect failed for ${host}: ${toErrorMessage(error)}`,
+                      ),
               })
 
               const refresh = Effect.tryPromise({
@@ -377,7 +387,7 @@ export function createAlpacaPlugin(): DevicePlugin {
                   `Alpaca cleanup failed for ${host}: ${errors.join('; ')}`,
                 )
               }
-            }).pipe(Effect.catchAll(() => Effect.void))
+            }).pipe(Effect.catch(() => Effect.void))
           },
         )
 

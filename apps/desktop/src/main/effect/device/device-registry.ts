@@ -14,7 +14,7 @@ export interface DeviceRegistry {
 }
 
 export const DeviceRegistry =
-  Context.GenericTag<DeviceRegistry>('DeviceRegistry')
+  Context.Service<DeviceRegistry>('DeviceRegistry')
 
 export const DeviceRegistryLive = Layer.sync(DeviceRegistry, () => {
   const fakeSeestar = createFakeSeestarPlugin()

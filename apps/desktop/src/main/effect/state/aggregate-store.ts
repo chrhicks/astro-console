@@ -26,7 +26,7 @@ export interface AggregateStore {
 }
 
 export const AggregateStore =
-  Context.GenericTag<AggregateStore>('AggregateStore')
+  Context.Service<AggregateStore>('AggregateStore')
 
 export const AggregateStoreLive = Layer.effect(
   AggregateStore,

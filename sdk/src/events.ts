@@ -1,7 +1,7 @@
-import { Schema } from 'effect'
+import { Result, Schema } from 'effect'
 import type { SeestarLifecycleEvent, SeestarPushEvent } from './types.js'
 
-const PushNumber = Schema.Union(Schema.Number, Schema.NumberFromString)
+const PushNumber = Schema.Union([Schema.Number, Schema.NumberFromString])
 
 const PushEventFields = Schema.Struct({
   Event: Schema.String,
@@ -26,11 +26,11 @@ const PushEventFields = Schema.Struct({
 export function decodeSeestarPushEvent(
   input: unknown,
 ): SeestarPushEvent | undefined {
-  const decoded = Schema.decodeUnknownEither(PushEventFields)(input)
-  if (decoded._tag === 'Left') return undefined
+  const decoded = Schema.decodeUnknownResult(PushEventFields)(input)
+  if (Result.isFailure(decoded)) return undefined
   return {
-    ...decoded.right,
-    route: decoded.right.route ? [...decoded.right.route] : undefined,
+    ...decoded.success,
+    route: decoded.success.route ? [...decoded.success.route] : undefined,
   }
 }
 

@@ -1,4 +1,4 @@
-import { Effect, Either, Exit } from 'effect'
+import { Effect, Exit, Result } from 'effect'
 import { EventBus } from '../event/event-bus'
 import { SessionManager } from '../session/session-manager'
 import { OperationCoordinator, type OperationLease } from '../session/operation-coordinator'
@@ -111,7 +111,7 @@ export const runStartCapture = Effect.gen(function* () {
           const ctx: RigOperationContext = { signal: lease.signal }
 
           yield* capture.start(ctx).pipe(
-            Effect.catchAll((error) =>
+            Effect.catch((error) =>
               Effect.gen(function* () {
                 if (lease.signal.aborted) return
                 const message = toErrorMessage(error)
@@ -182,7 +182,7 @@ export const runStartCapture = Effect.gen(function* () {
 
         const storage = yield* FrameStorage
         yield* storage.preflightExternalFrameStorage().pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.gen(function* () {
               if (lease.signal.aborted) return
               const message = `Storage preflight failed: ${toErrorMessage(error)}`
@@ -229,7 +229,7 @@ export const runStartCapture = Effect.gen(function* () {
         // if a new exposure replaces this one before the loop notices.
         leaseTransferred = true
         yield* pollExternalExposure(session, camera, durationSec, startedAt, lease).pipe(
-          Effect.forkDaemon,
+          Effect.forkDetach,
         )
       }),
     (_none, exit) => {
@@ -237,7 +237,7 @@ export const runStartCapture = Effect.gen(function* () {
       return coordinator.release(lease)
     },
   ).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       lease.signal.aborted ? Effect.void : Effect.fail(error),
     ),
   )
@@ -280,7 +280,7 @@ export const runStopCapture = Effect.gen(function* () {
                 : Effect.fail(new Error('Connected rig does not expose a generic camera'))
               : capture.stop(ctx)
           yield* stop.pipe(
-            Effect.catchAll((error) =>
+            Effect.catch((error) =>
               Effect.gen(function* () {
                 const message = toErrorMessage(error)
                 const updated = yield* coordinator.commitIfLease(lease, (current) => ({
@@ -329,7 +329,7 @@ export const runStopCapture = Effect.gen(function* () {
       }),
     () => coordinator.release(lease),
   ).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       lease.signal.aborted ? Effect.void : Effect.fail(error),
     ),
   )
@@ -372,12 +372,12 @@ function pollExternalExposure(
             ...aggregate,
             capture: { ...aggregate.capture, deviceState: state.state },
           })).pipe(Effect.asVoid),
-        }, { signal: lease.signal }).pipe(Effect.either)
+        }, { signal: lease.signal }).pipe(Effect.result)
         if (lease.signal.aborted || !(yield* sessions.ownsSession(session))) return
         const afterCapture = yield* store.get
         if (afterCapture.capture.phase !== 'capturing' || afterCapture.capture.startedAt !== startedAt) return
-        if (Either.isLeft(result)) {
-          const message = toErrorMessage(result.left)
+        if (Result.isFailure(result)) {
+          const message = toErrorMessage(result.failure)
           const failed = yield* coordinator.commitIfLease(lease, (aggregate) => ({
             ...aggregate,
             capture: { phase: 'failed', mode: 'external', lastError: message },
@@ -388,15 +388,15 @@ function pollExternalExposure(
         const completed = yield* coordinator.commitIfLease(lease, (aggregate) => ({
           ...aggregate,
           capture: {
-            phase: result.right.saved.previewError ? 'partial' : 'idle',
+            phase: result.success.saved.previewError ? 'partial' : 'idle',
             mode: 'external',
             deviceState: 'ready',
-            lastError: result.right.saved.previewError,
+            lastError: result.success.saved.previewError,
           },
-          library: { ...aggregate.library, assets: [result.right.asset, ...aggregate.library.assets] },
+          library: { ...aggregate.library, assets: [result.success.asset, ...aggregate.library.assets] },
         }))
         if (completed?.capture.phase === 'partial') {
-          yield* bus.publish('capture.partial', { error: result.right.saved.previewError, step: 'preview-persist' })
+          yield* bus.publish('capture.partial', { error: result.success.saved.previewError, step: 'preview-persist' })
           return
         }
         if (completed) yield* bus.publish('capture.succeeded', {})

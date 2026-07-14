@@ -9,7 +9,7 @@ const DeepSkyTargetSchema = Schema.Struct({
   commonName: Schema.optional(Schema.String),
   alternativeDesignations: Schema.mutable(Schema.Array(Schema.String)),
   messierNumber: Schema.optional(Schema.String),
-  objectType: Schema.Literal(
+  objectType: Schema.Literals([
     'G',
     'GPair',
     'GTrpl',
@@ -27,7 +27,7 @@ const DeepSkyTargetSchema = Schema.Struct({
     '*Ass',
     'Nova',
     'Other',
-  ),
+  ]),
   targetType: Schema.Literal('dso'),
   raHours: Schema.Number,
   decDeg: Schema.Number,
@@ -37,8 +37,8 @@ const DeepSkyTargetSchema = Schema.Struct({
   majorAxisArcmin: Schema.optional(Schema.Number),
   minorAxisArcmin: Schema.optional(Schema.Number),
   constellation: Schema.String,
-  recommendedFilter: Schema.Literal('clear', 'ir', 'lp'),
-  source: Schema.Literal('openngc', 'manual'),
+  recommendedFilter: Schema.Literals(['clear', 'ir', 'lp']),
+  source: Schema.Literals(['openngc', 'manual']),
 })
 
 export const DEEP_SKY_TARGETS: DeepSkyTarget[] = Schema.decodeUnknownSync(

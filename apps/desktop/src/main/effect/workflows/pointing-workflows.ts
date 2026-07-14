@@ -114,7 +114,7 @@ export const runPointToTarget = (targetId: string) =>
             target,
             observerLocation ?? undefined,
           ).pipe(
-            Effect.catchAll((error) => failStep('Resolving coordinates', error)),
+            Effect.catch((error) => failStep('Resolving coordinates', error)),
           )
 
           const pointing = session.rig.pointing
@@ -141,7 +141,7 @@ export const runPointToTarget = (targetId: string) =>
             }
             yield* pointing.prepare(observerLocation, ctx)
           }).pipe(
-            Effect.catchAll((error) => guardLease('Preparing device for slew', error)),
+            Effect.catch((error) => guardLease('Preparing device for slew', error)),
           )
 
           if (lease.signal.aborted) return
@@ -161,7 +161,7 @@ export const runPointToTarget = (targetId: string) =>
               ctx,
             )
             .pipe(
-              Effect.catchAll((error) => guardLease('Slewing to target', error)),
+              Effect.catch((error) => guardLease('Slewing to target', error)),
             )
 
           if (lease.signal.aborted) return
@@ -201,7 +201,7 @@ export const runPointToTarget = (targetId: string) =>
         }),
       () => coordinator.release(lease),
     ).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         lease.signal.aborted ? Effect.void : Effect.fail(error),
       ),
     )

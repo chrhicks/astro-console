@@ -10,7 +10,7 @@ export interface StatusStream {
   readonly publishSnapshot: Effect.Effect<void>
 }
 
-export const StatusStream = Context.GenericTag<StatusStream>('StatusStream')
+export const StatusStream = Context.Service<StatusStream>('StatusStream')
 
 export const StatusStreamLive = Layer.effect(
   StatusStream,
@@ -59,7 +59,7 @@ export const StatusStreamLive = Layer.effect(
             // This single status stream is currently owned by Electron-side
             // unsubscribe cleanup. If we add more pushed streams, switch to a
             // scoped subscription model owned per WebContents instead.
-            Effect.forkDaemon,
+            Effect.forkDetach,
           )
 
           return () => {

@@ -27,11 +27,11 @@ export class AlpacaClient {
     this.baseUrl = `http://${host}:${port}`
   }
 
-  async get<T>(
+  async get<S extends Schema.ConstraintDecoder<unknown>>(
     path: string,
-    value: Schema.Schema<T>,
+    value: S,
     signal?: AbortSignal,
-  ): Promise<T> {
+  ): Promise<S['Type']> {
     const res = await this.request(`${this.baseUrl}${path}`, {
       signal: combineSignal(signal, COMMAND_TIMEOUT_MS),
     })

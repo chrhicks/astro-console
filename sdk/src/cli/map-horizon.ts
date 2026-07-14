@@ -18,10 +18,11 @@ const DEFAULT_FRAME_TIMEOUT_MS = 10000
 const DEFAULT_LOG_LEVEL: LogLevel = 'info'
 const DEFAULT_FRAME_PORTS = [4554]
 
-const PositiveInt = Schema.Number.pipe(Schema.int(), Schema.positive())
+const PositiveInt = Schema.Number.pipe(
+  Schema.check(Schema.isInt(), Schema.isGreaterThan(0)),
+)
 const NonNegativeInt = Schema.Number.pipe(
-  Schema.int(),
-  Schema.greaterThanOrEqualTo(0),
+  Schema.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
 )
 const FiniteNumber = Schema.Number
 
@@ -36,22 +37,14 @@ const ScanConfigSchema = Schema.Struct({
 })
 
 const PositiveIntFromString = Schema.NumberFromString.pipe(
-  Schema.int(),
-  Schema.positive(),
+  Schema.check(Schema.isInt(), Schema.isGreaterThan(0)),
 )
 const NonNegativeIntFromString = Schema.NumberFromString.pipe(
-  Schema.int(),
-  Schema.greaterThanOrEqualTo(0),
+  Schema.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
 )
 const NumberFromString = Schema.NumberFromString
 
-const LogLevelSchema = Schema.Literal(
-  'trace',
-  'debug',
-  'info',
-  'warn',
-  'error',
-)
+const LogLevelSchema = Schema.Literals(['trace', 'debug', 'info', 'warn', 'error'])
 
 const CliOptionsSchema = Schema.Struct({
   help: Schema.optional(Schema.Boolean),
@@ -91,19 +84,19 @@ const TelemetrySampleSchema = Schema.Struct({
   framePath: Schema.optional(Schema.String),
   frameError: Schema.optional(Schema.String),
   frames: Schema.optional(
-    Schema.Record({
-      key: Schema.String,
-      value: Schema.Struct({
+    Schema.Record(
+      Schema.String,
+      Schema.Struct({
         port: PositiveInt,
         path: Schema.optional(Schema.String),
         error: Schema.optional(Schema.String),
       }),
-    }),
+    ),
   ),
   compassDirectionDeg: Schema.optional(FiniteNumber),
   balanceAngleDeg: Schema.optional(FiniteNumber),
   mountClosed: Schema.optional(Schema.Boolean),
-  raw: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+  raw: Schema.Record(Schema.String, Schema.Unknown),
 })
 
 const HorizonScanArtifactSchema = Schema.Struct({

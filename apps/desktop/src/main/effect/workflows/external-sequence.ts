@@ -1,4 +1,4 @@
-import { Effect, Either } from 'effect'
+import { Effect, Result } from 'effect'
 import { EventBus } from '../event/event-bus'
 import { SessionManager } from '../session/session-manager'
 import { OperationCoordinator, type OperationLease } from '../session/operation-coordinator'
@@ -59,7 +59,7 @@ export const runStartExternalSequence = Effect.gen(function* () {
     yield* coordinator.release(lease)
     return yield* Effect.fail(new Error('Connected rig does not support dark exposures'))
   }
-  yield* runSequencePhase(session, Object.freeze({ ...plan }), current.currentTarget, 'light', 1, lease).pipe(Effect.forkDaemon)
+  yield* runSequencePhase(session, Object.freeze({ ...plan }), current.currentTarget, 'light', 1, lease).pipe(Effect.forkDetach)
 })
 
 export const runContinueExternalSequence = Effect.gen(function* () {
@@ -78,7 +78,7 @@ export const runContinueExternalSequence = Effect.gen(function* () {
     yield* coordinator.release(lease)
     return yield* Effect.fail(new Error('Dark confirmation is not available'))
   }
-  yield* runSequencePhase(session, Object.freeze({ ...plan }), current.sequence.target, 'dark', 1, lease).pipe(Effect.forkDaemon)
+  yield* runSequencePhase(session, Object.freeze({ ...plan }), current.sequence.target, 'dark', 1, lease).pipe(Effect.forkDetach)
 })
 
 export const runFinishExternalSequence = Effect.gen(function* () {
@@ -136,17 +136,17 @@ function runSequencePhase(session: DeviceSession, plan: ExternalSequencePlan, ta
             ...current,
             capture: { ...current.capture, deviceState: state.state },
           })).pipe(Effect.asVoid),
-        }, { signal: lease.signal }).pipe(Effect.either)
+        }, { signal: lease.signal }).pipe(Effect.result)
         if (lease.signal.aborted) return
-        if (Either.isLeft(result)) {
+        if (Result.isFailure(result)) {
           yield* coordinator.commitIfLease(lease, (current) => ({
             ...current,
-            capture: { phase: 'idle', mode: 'external', lastError: toErrorMessage(result.left) },
-            sequence: { ...current.sequence, failed: current.sequence.failed + 1, lastError: `Frame ${index} ${frameKind} failed: ${toErrorMessage(result.left)}` },
+            capture: { phase: 'idle', mode: 'external', lastError: toErrorMessage(result.failure) },
+            sequence: { ...current.sequence, failed: current.sequence.failed + 1, lastError: `Frame ${index} ${frameKind} failed: ${toErrorMessage(result.failure)}` },
           }))
           continue
         }
-        const saved = result.right
+        const saved = result.success
         yield* coordinator.commitIfLease(lease, (current) => ({
           ...current,
           capture: { phase: saved.saved.previewError ? 'partial' : 'idle', mode: 'external', lastError: saved.saved.previewError },
@@ -163,7 +163,7 @@ function runSequencePhase(session: DeviceSession, plan: ExternalSequencePlan, ta
           : { ...current.sequence, phase: 'complete', frameKind: undefined, currentIndex: undefined },
       }))
       yield* bus.publish('capture.succeeded', {})
-    }).pipe(Effect.catchAll((error) => lease.signal.aborted ? Effect.void : failSequence(lease, error))), () => coordinator.release(lease))
+    }).pipe(Effect.catch((error) => lease.signal.aborted ? Effect.void : failSequence(lease, error))), () => coordinator.release(lease))
   })
 }
 

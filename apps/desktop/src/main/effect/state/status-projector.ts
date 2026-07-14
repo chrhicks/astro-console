@@ -25,7 +25,7 @@ export interface StatusProjector {
 }
 
 export const StatusProjector =
-  Context.GenericTag<StatusProjector>('StatusProjector')
+  Context.Service<StatusProjector>('StatusProjector')
 
 interface RigSupport {
   canPark: boolean

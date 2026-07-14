@@ -1,7 +1,7 @@
 import { WebContents, shell } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { Effect, Schema } from 'effect'
+import { Effect, Result, Schema } from 'effect'
 
 import { appRuntime } from '../runtime/app-runtime'
 import {
@@ -179,14 +179,14 @@ function withProjectedStatus<A, E, R>(workflow: Effect.Effect<A, E, R>) {
 // ipcMain.handle; these schemas decode them at the boundary so workflow code
 // never receives an unvalidated shape.
 const ConnectRequestSchema = Schema.Struct({
-  pluginKind: Schema.Literal('fake-seestar', 'seestar', 'alpaca-rig'),
+  pluginKind: Schema.Literals(['fake-seestar', 'seestar', 'alpaca-rig']),
   deviceId: Schema.String,
 })
 
 const CatalogQuerySchema = Schema.Struct({
   search: Schema.optional(Schema.String),
   upNowOnly: Schema.optional(Schema.Boolean),
-  typeFilter: Schema.optional(Schema.Literal('dso', 'sun', 'moon', 'planet')),
+  typeFilter: Schema.optional(Schema.Literals(['dso', 'sun', 'moon', 'planet'])),
   offset: Schema.optional(Schema.Number),
   limit: Schema.optional(Schema.Number),
 })
@@ -196,36 +196,45 @@ const PointToTargetRequestSchema = Schema.Struct({
 })
 
 const SetExposureDurationRequestSchema = Schema.Struct({
-  durationSec: Schema.Number.pipe(
-    Schema.greaterThan(0),
-    Schema.lessThanOrEqualTo(MAX_EXPOSURE_DURATION_SEC),
+  durationSec: Schema.Number.check(
+    Schema.isGreaterThan(0),
+    Schema.isLessThanOrEqualTo(MAX_EXPOSURE_DURATION_SEC),
   ),
 })
 
 const ExternalSequencePlanSchema = Schema.Struct({
-  lightCount: Schema.Number.pipe(Schema.int(), Schema.between(1, MAX_SEQUENCE_LIGHTS)),
-  durationSec: Schema.Number.pipe(Schema.greaterThan(0), Schema.lessThanOrEqualTo(MAX_EXPOSURE_DURATION_SEC)),
-  darkCount: Schema.Number.pipe(Schema.int(), Schema.between(0, MAX_SEQUENCE_DARKS)),
+  lightCount: Schema.Number.check(
+    Schema.isInt(),
+    Schema.isBetween({ minimum: 1, maximum: MAX_SEQUENCE_LIGHTS }),
+  ),
+  durationSec: Schema.Number.check(
+    Schema.isGreaterThan(0),
+    Schema.isLessThanOrEqualTo(MAX_EXPOSURE_DURATION_SEC),
+  ),
+  darkCount: Schema.Number.check(
+    Schema.isInt(),
+    Schema.isBetween({ minimum: 0, maximum: MAX_SEQUENCE_DARKS }),
+  ),
 })
 
-function decodeIpc<A, I>(
-  schema: Schema.Schema<A, I>,
+function decodeIpc<S extends Schema.ConstraintDecoder<unknown>>(
+  schema: S,
   input: unknown,
-): Effect.Effect<A, Error> {
-  const decoded = Schema.decodeUnknownEither(schema)(input)
-  if (decoded._tag === 'Left') {
-    return Effect.fail(new Error(`Invalid IPC input: ${decoded.left.message}`))
+): Effect.Effect<S['Type'], Error> {
+  const decoded = Schema.decodeUnknownResult(schema)(input)
+  if (Result.isFailure(decoded)) {
+    return Effect.fail(new Error(`Invalid IPC input: ${decoded.failure.message}`))
   }
-  return Effect.succeed(decoded.right)
+  return Effect.succeed(decoded.success)
 }
 
 // Decodes the opaque renderer-supplied asset ID at the IPC boundary.
 function requireAssetId(input: unknown): string {
-  const decoded = Schema.decodeUnknownEither(Schema.String)(input)
-  if (decoded._tag === 'Left') {
+  const decoded = Schema.decodeUnknownResult(Schema.String)(input)
+  if (Result.isFailure(decoded)) {
     throw new Error('Invalid saved asset id')
   }
-  return decoded.right
+  return decoded.success
 }
 
 // Asset IDs have authority only when present in the main-process registry.

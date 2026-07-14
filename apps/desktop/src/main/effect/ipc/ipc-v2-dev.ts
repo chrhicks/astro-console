@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect'
+import { Effect, Result, Schema } from 'effect'
 import type { WebContents } from 'electron'
 import { appRuntime } from '../runtime/app-runtime'
 import { fakeSeestarRuntime } from '../device/fake-seestar-runtime'
@@ -19,9 +19,9 @@ export function registerIpcV2DevHandlers(allowed: WebContents) {
   handle(
     'seestar:dev:fake:load-scenario',
     async (_event, scenarioId) => {
-      const decoded = Schema.decodeUnknownEither(Schema.String)(scenarioId)
-      if (decoded._tag === 'Left') throw new Error('Invalid scenario id')
-      const next = fakeSeestarRuntime.loadScenario(decoded.right)
+      const decoded = Schema.decodeUnknownResult(Schema.String)(scenarioId)
+      if (Result.isFailure(decoded)) throw new Error('Invalid scenario id')
+      const next = fakeSeestarRuntime.loadScenario(decoded.success)
       await refreshFakeProjection(next)
       return next
     },

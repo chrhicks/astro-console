@@ -15,13 +15,13 @@ export const GeoServiceLive = Layer.effect(
     const cache = yield* Ref.make<GeoLocation | null | undefined>(undefined)
 
     const lookup = Effect.gen(function* () {
-        const cached = yield* Ref.get(cache)
-        if (cached !== undefined) return cached
+      const cached = yield* Ref.get(cache)
+      if (cached !== undefined) return cached
 
-        const result = yield* fetchGeoLocation()
-        yield* Ref.set(cache, result)
-        return result
-      })
+      const result = yield* fetchGeoLocation()
+      yield* Ref.set(cache, result)
+      return result
+    })
     return {
       lookup,
       resolveObserverLocation: (deviceLocation) =>
@@ -42,7 +42,7 @@ function fetchGeoLocation(): Effect.Effect<GeoLocation | null> {
     const response = yield* Effect.tryPromise(() => fetch(GEOJS_URL))
     if (!response.ok) return null
     const body: unknown = yield* Effect.tryPromise(() => response.json())
-    const parsed = yield* Schema.decodeUnknown(GeoJsLocation)(body)
+    const parsed = yield* Schema.decodeUnknownEffect(GeoJsLocation)(body)
     return { lat: parsed.latitude, lon: parsed.longitude }
-  }).pipe(Effect.catchAll(() => Effect.succeed<GeoLocation | null>(null)))
+  }).pipe(Effect.catch(() => Effect.succeed<GeoLocation | null>(null)))
 }

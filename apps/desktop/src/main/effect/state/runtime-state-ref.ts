@@ -15,8 +15,8 @@ export interface RuntimeStateRef {
 }
 
 export const RuntimeStateRef =
-  Context.GenericTag<RuntimeStateRef>('RuntimeStateRef')
+  Context.Service<RuntimeStateRef>('RuntimeStateRef')
 
 export const RuntimeStateRefLive = Layer.sync(RuntimeStateRef, () => ({
-  ref: Ref.unsafeMake(createInitialRuntimeState()),
+  ref: Ref.makeUnsafe(createInitialRuntimeState()),
 }))

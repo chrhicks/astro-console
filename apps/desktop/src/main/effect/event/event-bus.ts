@@ -68,7 +68,7 @@ export type AppEventName =
   | 'sequence.configured'
   | 'status.snapshot.emitted'
 
-export const EventBus = Context.GenericTag<EventBus>('EventBus')
+export const EventBus = Context.Service<EventBus>('EventBus')
 
 export const EventBusLive = Layer.effect(
   EventBus,
@@ -95,7 +95,7 @@ export const EventBusLive = Layer.effect(
           yield* Effect.forEach(
             snapshot,
             (handler) =>
-              handler(event).pipe(Effect.catchAll(() => Effect.void)),
+              handler(event).pipe(Effect.catch(() => Effect.void)),
             { concurrency: 1, discard: true },
           )
 

@@ -73,7 +73,7 @@ export const runPark = Effect.gen(function* () {
                     : Effect.fail(new Error('Connected rig does not expose a generic camera'))
                   : captureStop.stop(ctx)
               yield* stop.pipe(
-                Effect.catchAll((error) =>
+                Effect.catch((error) =>
                   Effect.gen(function* () {
                     const message = toErrorMessage(error)
                     const updated = yield* coordinator.commitIfLease(lease, (cur) => ({
@@ -117,7 +117,7 @@ export const runPark = Effect.gen(function* () {
           }
           const ctx: RigOperationContext = { signal: lease.signal }
           yield* preview.stop(ctx).pipe(
-            Effect.catchAll((error) =>
+            Effect.catch((error) =>
               Effect.gen(function* () {
                 const message = toErrorMessage(error)
                 const updated = yield* coordinator.commitIfLease(lease, (cur) => ({
@@ -153,7 +153,7 @@ export const runPark = Effect.gen(function* () {
 
         const ctx: RigOperationContext = { signal: lease.signal }
         yield* mount.park(ctx).pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.gen(function* () {
               const message = toErrorMessage(error)
               const updated = yield* coordinator.commitIfLease(lease, (cur) => ({

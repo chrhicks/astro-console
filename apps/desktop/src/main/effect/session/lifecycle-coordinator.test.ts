@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { Effect, Layer, Deferred, Exit } from 'effect'
+import { Effect, Layer, Deferred, Exit, Fiber } from 'effect'
 import { SessionManager } from './session-manager'
 import { SessionManagerLive } from './session-manager.live'
 import { RuntimeStateRefLive } from '../state/runtime-state-ref'
@@ -307,7 +307,7 @@ describe('lifecycle coordinator concurrent fibers', () => {
         const bDone = yield* Deferred.make<void>()
 
         // Fiber A: beginConnect, then wait for B to finalize, then try install
-        const fiberA = yield* Effect.fork(
+        const fiberA = yield* Effect.forkChild(
           Effect.gen(function* () {
             const { intent: intentA } = yield* sessions.beginConnect
             yield* Deferred.succeed(aBegan, undefined)
@@ -327,7 +327,7 @@ describe('lifecycle coordinator concurrent fibers', () => {
         )
 
         // Fiber B: wait for A to begin, then beginConnect + install
-        const fiberB = yield* Effect.fork(
+        const fiberB = yield* Effect.forkChild(
           Effect.gen(function* () {
             yield* Deferred.await(aBegan)
             const { intent: intentB } = yield* sessions.beginConnect
@@ -345,8 +345,8 @@ describe('lifecycle coordinator concurrent fibers', () => {
           }),
         )
 
-        const exitA = yield* fiberA.await
-        const exitB = yield* fiberB.await
+        const exitA = yield* Fiber.await(fiberA)
+        const exitB = yield* Fiber.await(fiberB)
 
         assert.equal(Exit.isSuccess(exitA), true)
         assert.equal(Exit.isSuccess(exitB), true)
@@ -379,7 +379,7 @@ describe('lifecycle coordinator concurrent fibers', () => {
         const dBegan = yield* Deferred.make<void>()
 
         // Fiber D: beginDisconnect, signal, wait for C to finalize, try clear
-        const fiberD = yield* Effect.fork(
+        const fiberD = yield* Effect.forkChild(
           Effect.gen(function* () {
             const dIntent = yield* sessions.beginDisconnect
             yield* Deferred.succeed(dBegan, undefined)
@@ -394,7 +394,7 @@ describe('lifecycle coordinator concurrent fibers', () => {
         )
 
         // Fiber C: wait for D to begin, then beginConnect + install
-        const fiberC = yield* Effect.fork(
+        const fiberC = yield* Effect.forkChild(
           Effect.gen(function* () {
             yield* Deferred.await(dBegan)
             const { intent: c2 } = yield* sessions.beginConnect
@@ -407,8 +407,8 @@ describe('lifecycle coordinator concurrent fibers', () => {
           }),
         )
 
-        const exitD = yield* fiberD.await
-        const exitC = yield* fiberC.await
+        const exitD = yield* Fiber.await(fiberD)
+        const exitC = yield* Fiber.await(fiberC)
 
         assert.equal(Exit.isSuccess(exitD), true)
         assert.equal(Exit.isSuccess(exitC), true)

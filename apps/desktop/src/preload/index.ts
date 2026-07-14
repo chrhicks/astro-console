@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { Schema } from 'effect'
+import { Result, Schema } from 'effect'
 import type {
   CatalogPage,
   CatalogQuery,
@@ -98,7 +98,11 @@ if (exposeDevFakeApi) {
   contextBridge.exposeInMainWorld('seestarDevFake', seestarDevFake)
 }
 
-async function invoke<A, I>(channel: string, schema: Schema.Schema<A, I>, ...args: unknown[]): Promise<A> {
+async function invoke<S extends Schema.ConstraintDecoder<unknown>>(
+  channel: string,
+  schema: S,
+  ...args: unknown[]
+): Promise<S['Type']> {
   return Schema.decodeUnknownPromise(schema)(await ipcRenderer.invoke(channel, ...args))
 }
 
@@ -106,14 +110,14 @@ function invokeStatus(channel: string, ...args: unknown[]) {
   return invoke(channel, DesktopStatusSchema, ...args)
 }
 
-function subscribe<A, I>(
+function subscribe<S extends Schema.ConstraintDecoder<unknown>>(
   channel: string,
-  schema: Schema.Schema<A, I>,
-  listener: (payload: A) => void,
+  schema: S,
+  listener: (payload: S['Type']) => void,
 ): () => void {
   const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => {
-    const decoded = Schema.decodeUnknownEither(schema)(payload)
-    if (decoded._tag === 'Right') listener(decoded.right)
+    const decoded = Schema.decodeUnknownResult(schema)(payload)
+    if (Result.isSuccess(decoded)) listener(decoded.success)
   }
   ipcRenderer.on(channel, wrapped)
   return () => {

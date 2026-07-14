@@ -38,7 +38,7 @@ function toSeestarDeviceId(device: { host: string; serialNumber?: string }) {
 }
 
 export function createSeestarPlugin(): DevicePlugin {
-  const discoveredRef = Ref.unsafeMake<Map<string, DesktopDiscoveredDeviceV2>>(
+  const discoveredRef = Ref.makeUnsafe<Map<string, DesktopDiscoveredDeviceV2>>(
     new Map(),
   )
   const discover = Effect.gen(function* () {
@@ -180,7 +180,7 @@ export function createSeestarPlugin(): DevicePlugin {
                     `device.connect failed for ${host}: ${toErrorMessage(error)}`,
                   ),
               }).pipe(
-                Effect.catchAll((error) =>
+                Effect.catch((error) =>
                   bus
                     .publish('session.connect.step.failed', {
                       step: 'device.connect',
@@ -188,7 +188,7 @@ export function createSeestarPlugin(): DevicePlugin {
                       deviceId: input.deviceId,
                       error: toErrorMessage(error),
                     })
-                    .pipe(Effect.zipRight(Effect.fail(error))),
+                    .pipe(Effect.andThen(Effect.fail(error))),
                 ),
               )
 
@@ -339,7 +339,7 @@ export function createSeestarPlugin(): DevicePlugin {
                     `device.authenticate failed for ${host}: ${toErrorMessage(error)}`,
                   ),
               }).pipe(
-                Effect.catchAll((error) =>
+                Effect.catch((error) =>
                   bus
                     .publish('session.authenticate.step.failed', {
                       step: 'device.authenticate',
@@ -347,7 +347,7 @@ export function createSeestarPlugin(): DevicePlugin {
                       deviceId: input.deviceId,
                       error: toErrorMessage(error),
                     })
-                    .pipe(Effect.zipRight(Effect.fail(error))),
+                    .pipe(Effect.andThen(Effect.fail(error))),
                 ),
               )
 
@@ -378,7 +378,7 @@ export function createSeestarPlugin(): DevicePlugin {
                     `device.preflightCheck failed for ${host}: ${toErrorMessage(error)}`,
                   ),
               }).pipe(
-                Effect.catchAll((error) =>
+                Effect.catch((error) =>
                   bus
                     .publish('session.preflightCheck.step.failed', {
                       step: 'device.preflightCheck',
@@ -386,7 +386,7 @@ export function createSeestarPlugin(): DevicePlugin {
                       deviceId: input.deviceId,
                       error: toErrorMessage(error),
                     })
-                    .pipe(Effect.zipRight(Effect.fail(error))),
+                    .pipe(Effect.andThen(Effect.fail(error))),
                 ),
               )
 
@@ -817,7 +817,7 @@ export function createSeestarPlugin(): DevicePlugin {
                   // longer calls openArm() directly.
                   prepare: (input, context) =>
                     prepareForPointing(input, context?.signal).pipe(
-                      Effect.zipRight(refresh),
+                      Effect.andThen(refresh),
                       Effect.flatMap((refreshed) =>
                         refreshed.device.mountClosed
                           ? openArm(context?.signal)
@@ -935,9 +935,9 @@ const SeestarMountState = Schema.Struct({
 })
 
 function decodeMountState(value: unknown) {
-  const decoded = Schema.decodeUnknownEither(SeestarMountState)(value)
-  if (decoded._tag === 'Left') return undefined
-  return decoded.right
+  const decoded = Schema.decodeUnknownOption(SeestarMountState)(value)
+  if (decoded._tag === 'None') return undefined
+  return decoded.value
 }
 
 function mapSeestarRefresh(

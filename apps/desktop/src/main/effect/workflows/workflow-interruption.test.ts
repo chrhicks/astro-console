@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { Effect, Layer, Deferred, Either, Exit, Fiber, Context, Ref } from 'effect'
+import { Effect, Layer, Deferred, Result, Exit, Fiber, Context, Ref } from 'effect'
 import { SessionManager } from '../session/session-manager'
 import { SessionManagerLive } from '../session/session-manager.live'
 import {
@@ -172,7 +172,7 @@ function makeDelayedSequenceCoordinatorLayer(
       const store = yield* AggregateStore
       return {
         acquire: (session, kind) => Effect.gen(function* () {
-          Deferred.unsafeDone(entered, Effect.void)
+          Deferred.doneUnsafe(entered, Effect.void)
           yield* Deferred.await(resume)
           const controller = new AbortController()
           return {
@@ -198,7 +198,7 @@ function makeDelayedSequenceCoordinatorLayer(
             released.push(lease.kind)
             releaseCount++
             if (releasedEntered && releaseCount === releaseOccurrence)
-              Deferred.unsafeDone(releasedEntered, Effect.void)
+              Deferred.doneUnsafe(releasedEntered, Effect.void)
           }
         }),
         isCurrent: () => Effect.succeed(true),
@@ -222,7 +222,7 @@ function makeBlockingEventBusLayer(
           if (name === blockOn) {
             published++
             if (published === occurrence) {
-              if (entered) Deferred.unsafeDone(entered, Effect.void)
+              if (entered) Deferred.doneUnsafe(entered, Effect.void)
               yield* Deferred.await(latch)
             }
           }
@@ -247,7 +247,7 @@ function makeObservingEventBusLayer(
   return Layer.effect(EventBus, Effect.succeed({
     publish: <A>(name: string, payload: A, options?: { sessionId?: string; host?: string }) =>
       Effect.sync(() => {
-        if (name === observedName) Deferred.unsafeDone(observed, Effect.void)
+        if (name === observedName) Deferred.doneUnsafe(observed, Effect.void)
         return {
           eventId: 0,
           ts: new Date().toISOString(),
@@ -324,7 +324,7 @@ describe('workflow interruption safety', () => {
       const result = await Effect.runPromise(
         Effect.gen(function* () {
           yield* runConnect({ pluginKind: 'fake-seestar', deviceId: 'test:storage' })
-          yield* runStartCapture.pipe(Effect.either)
+          yield* runStartCapture.pipe(Effect.result)
           const store = yield* AggregateStore
           return yield* store.get
         }).pipe(Effect.provide(testLayer)),
@@ -337,7 +337,7 @@ describe('workflow interruption safety', () => {
   }
 
   it('keeps a saved FITS asset and reports preview persistence failure', async () => {
-    const partialPublished = Deferred.unsafeMake<void>(Symbol('partial-published'))
+    const partialPublished = Deferred.makeUnsafe<void>()
     const session = makeExternalSession('preview-failure', {
       getExposureState: () => Effect.succeed({ state: 'ready', imageReady: true }),
       getLatestFrame: () =>
@@ -391,8 +391,8 @@ describe('workflow interruption safety', () => {
     // All actions and assertions run within one Effect.provide so they
     // share the same RuntimeStateRef.
     let pluginCleanupCalled = false
-    const connectBlocked = Deferred.unsafeMake<void>(Symbol('test'))
-    const connectEntered = Deferred.unsafeMake<void>(Symbol('connect-entered'))
+    const connectBlocked = Deferred.makeUnsafe<void>()
+    const connectEntered = Deferred.makeUnsafe<void>()
 
     const fakeRegistry = makeFakeRegistry(
       Effect.acquireUseRelease(
@@ -403,7 +403,7 @@ describe('workflow interruption safety', () => {
               'blocked',
               Effect.sync(() => { pluginCleanupCalled = true }),
             )
-            Deferred.unsafeDone(connectEntered, Effect.void)
+            Deferred.doneUnsafe(connectEntered, Effect.void)
             yield* Deferred.await(connectBlocked)
             return session
           }),
@@ -419,12 +419,12 @@ describe('workflow interruption safety', () => {
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        const fiber = yield* Effect.fork(
+        const fiber = yield* Effect.forkChild(
           runConnect({ pluginKind: 'fake-seestar', deviceId: 'test:blocked' }),
         )
         yield* Deferred.await(connectEntered)
         yield* Fiber.interrupt(fiber)
-        yield* fiber.await
+        yield* Fiber.await(fiber)
 
         const store = yield* AggregateStore
         return yield* store.get
@@ -438,15 +438,15 @@ describe('workflow interruption safety', () => {
   it('interrupt during blocked disconnect => finalizer completes cleanup and terminal clear', async () => {
     let cleanupCompleted = 0
     let cleanupEntries = 0
-    const useCleanupEntered = Deferred.unsafeMake<void>(Symbol('use-cleanup'))
-    const finalizerCleanupEntered = Deferred.unsafeMake<void>(Symbol('finalizer-cleanup'))
-    const allowCleanup = Deferred.unsafeMake<void>(Symbol('allow-cleanup'))
+    const useCleanupEntered = Deferred.makeUnsafe<void>()
+    const finalizerCleanupEntered = Deferred.makeUnsafe<void>()
+    const allowCleanup = Deferred.makeUnsafe<void>()
 
     const session = makeSession(
       's1',
       Effect.gen(function* () {
         cleanupEntries++
-        Deferred.unsafeDone(
+        Deferred.doneUnsafe(
           cleanupEntries === 1 ? useCleanupEntered : finalizerCleanupEntered,
           Effect.void,
         )
@@ -461,17 +461,17 @@ describe('workflow interruption safety', () => {
       Effect.gen(function* () {
         yield* runConnect({ pluginKind: 'fake-seestar', deviceId: 'test:s1' })
 
-        const fiber = yield* Effect.fork(runDisconnect)
+        const fiber = yield* Effect.forkChild(runDisconnect, { startImmediately: true })
         yield* Deferred.await(useCleanupEntered)
 
         // Fiber.interrupt waits for finalizers, so issue it in a separate
         // fiber. The first cleanup await is interrupted; the uninterruptible
         // release finalizer must enter cleanup again before we unblock it.
-        const interruptFiber = yield* Effect.fork(Fiber.interrupt(fiber))
+        const interruptFiber = yield* Effect.forkChild(Fiber.interrupt(fiber), { startImmediately: true })
         yield* Deferred.await(finalizerCleanupEntered)
-        Deferred.unsafeDone(allowCleanup, Effect.void)
+        Deferred.doneUnsafe(allowCleanup, Effect.void)
         yield* Fiber.join(interruptFiber)
-        yield* fiber.await
+        yield* Fiber.await(fiber)
 
         const store = yield* AggregateStore
         return yield* store.get
@@ -493,8 +493,8 @@ describe('workflow interruption safety', () => {
     // All actions and assertions run within one Effect.provide so they
     // share the same RuntimeStateRef.
     let cleanupCalled = false
-    const succeededLatch = Deferred.unsafeMake<void>(Symbol('test'))
-    const succeededEntered = Deferred.unsafeMake<void>(Symbol('succeeded-entered'))
+    const succeededLatch = Deferred.makeUnsafe<void>()
+    const succeededEntered = Deferred.makeUnsafe<void>()
 
     const session = makeSession(
       's1',
@@ -513,12 +513,12 @@ describe('workflow interruption safety', () => {
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        const fiber = yield* Effect.fork(
+        const fiber = yield* Effect.forkChild(
           runConnect({ pluginKind: 'fake-seestar', deviceId: 'test:s1' }),
         )
         yield* Deferred.await(succeededEntered)
         yield* Fiber.interrupt(fiber)
-        yield* fiber.await
+        yield* Fiber.await(fiber)
 
         const store = yield* AggregateStore
         return yield* store.get
@@ -531,15 +531,15 @@ describe('workflow interruption safety', () => {
 
   it('concurrent duplicate capture starts => one device start call', async () => {
     let startCallCount = 0
-    const startLatch = Deferred.unsafeMake<void>(Symbol('test'))
-    const startEntered = Deferred.unsafeMake<void>(Symbol('start-entered'))
+    const startLatch = Deferred.makeUnsafe<void>()
+    const startEntered = Deferred.makeUnsafe<void>()
 
     const session = makeSession('s1')
     session.rig.capture = {
       start: () =>
         Effect.gen(function* () {
           startCallCount++
-          Deferred.unsafeDone(startEntered, Effect.void)
+          Deferred.doneUnsafe(startEntered, Effect.void)
           yield* Deferred.await(startLatch)
         }),
       stop: () => Effect.void,
@@ -551,14 +551,14 @@ describe('workflow interruption safety', () => {
       Effect.gen(function* () {
         yield* runConnect({ pluginKind: 'fake-seestar', deviceId: 'test:s1' })
 
-        const fiberA = yield* Effect.fork(runStartCapture)
-        const fiberB = yield* Effect.fork(runStartCapture)
+        const fiberA = yield* Effect.forkChild(runStartCapture, { startImmediately: true })
+        const fiberB = yield* Effect.forkChild(runStartCapture, { startImmediately: true })
 
         yield* Deferred.await(startEntered)
-        Deferred.unsafeDone(startLatch, Effect.void)
+        Deferred.doneUnsafe(startLatch, Effect.void)
 
-        yield* fiberA.await
-        yield* fiberB.await
+        yield* Fiber.await(fiberA)
+        yield* Fiber.await(fiberB)
 
         return startCallCount
       }).pipe(Effect.provide(testLayer)),
@@ -568,13 +568,13 @@ describe('workflow interruption safety', () => {
   })
 
   it('stop preemption makes an aborted capture start succeed quietly', async () => {
-    const startEntered = Deferred.unsafeMake<void>(Symbol('start-entered'))
+    const startEntered = Deferred.makeUnsafe<void>()
     const session = makeSession('s1')
     session.rig.capture = {
       start: (context) =>
         Effect.tryPromise({
           try: () => {
-            Deferred.unsafeDone(startEntered, Effect.void)
+            Deferred.doneUnsafe(startEntered, Effect.void)
             return new Promise<void>((_resolve, reject) => {
               context?.signal.addEventListener(
                 'abort',
@@ -592,10 +592,10 @@ describe('workflow interruption safety', () => {
     const exit = await Effect.runPromise(
       Effect.gen(function* () {
         yield* runConnect({ pluginKind: 'fake-seestar', deviceId: 'test:s1' })
-        const startFiber = yield* Effect.fork(runStartCapture)
+        const startFiber = yield* Effect.forkChild(runStartCapture, { startImmediately: true })
         yield* Deferred.await(startEntered)
         yield* runStopCapture
-        return yield* startFiber.await
+        return yield* Fiber.await(startFiber)
       }).pipe(Effect.provide(testLayer)),
     )
 
@@ -604,12 +604,12 @@ describe('workflow interruption safety', () => {
 
   it('external stop waits for the camera to become idle before projecting stopped', async () => {
     let stopCalls = 0
-    const stateEntered = Deferred.unsafeMake<void>(Symbol('state-entered'))
-    const allowIdle = Deferred.unsafeMake<void>(Symbol('allow-idle'))
+    const stateEntered = Deferred.makeUnsafe<void>()
+    const allowIdle = Deferred.makeUnsafe<void>()
     const session = makeExternalSession('s1', {
       getExposureState: () =>
         Effect.gen(function* () {
-          Deferred.unsafeDone(stateEntered, Effect.void)
+          Deferred.doneUnsafe(stateEntered, Effect.void)
           yield* Deferred.await(allowIdle)
           return { state: 'idle' as const, imageReady: false }
         }),
@@ -624,12 +624,12 @@ describe('workflow interruption safety', () => {
       Effect.gen(function* () {
         yield* runConnect({ pluginKind: 'fake-seestar', deviceId: 'test:s1' })
         yield* runStartCapture
-        const stopFiber = yield* Effect.fork(runStopCapture)
+        const stopFiber = yield* Effect.forkChild(runStopCapture, { startImmediately: true })
         yield* Deferred.await(stateEntered)
 
         const store = yield* AggregateStore
         const whileConfirming = yield* store.get
-        Deferred.unsafeDone(allowIdle, Effect.void)
+        Deferred.doneUnsafe(allowIdle, Effect.void)
         yield* Fiber.join(stopFiber)
         const stopped = yield* store.get
         return { whileConfirming, stopped }
@@ -643,12 +643,12 @@ describe('workflow interruption safety', () => {
 
   it('park waits for an active external exposure to stop before parking', async () => {
     let parkCalls = 0
-    const stateEntered = Deferred.unsafeMake<void>(Symbol('state-entered'))
-    const allowIdle = Deferred.unsafeMake<void>(Symbol('allow-idle'))
+    const stateEntered = Deferred.makeUnsafe<void>()
+    const allowIdle = Deferred.makeUnsafe<void>()
     const session = makeExternalSession('s1', {
       getExposureState: () =>
         Effect.gen(function* () {
-          Deferred.unsafeDone(stateEntered, Effect.void)
+          Deferred.doneUnsafe(stateEntered, Effect.void)
           yield* Deferred.await(allowIdle)
           return { state: 'idle' as const, imageReady: false }
         }),
@@ -668,10 +668,10 @@ describe('workflow interruption safety', () => {
       Effect.gen(function* () {
         yield* runConnect({ pluginKind: 'fake-seestar', deviceId: 'test:s1' })
         yield* runStartCapture
-        const parkFiber = yield* Effect.fork(runPark)
+        const parkFiber = yield* Effect.forkChild(runPark, { startImmediately: true })
         yield* Deferred.await(stateEntered)
         assert.equal(parkCalls, 0)
-        Deferred.unsafeDone(allowIdle, Effect.void)
+        Deferred.doneUnsafe(allowIdle, Effect.void)
         yield* Fiber.join(parkFiber)
       }).pipe(Effect.provide(testLayer)),
     )
@@ -694,7 +694,7 @@ describe('workflow interruption safety', () => {
           ...current,
           device: { ...current.device, mountClosed: true },
         }))
-        yield* runPark.pipe(Effect.either)
+        yield* runPark.pipe(Effect.result)
         return yield* store.get
       }).pipe(Effect.provide(testLayer)),
     )
@@ -761,15 +761,15 @@ describe('workflow interruption safety', () => {
             currentTarget: target,
             pointing: { phase: 'arrived', target },
           }))
-          const park = yield* runPark.pipe(Effect.either)
+          const park = yield* runPark.pipe(Effect.result)
           return { park, state: yield* store.get }
         }).pipe(Effect.provide(testLayer)),
       )
 
-      assert.equal(Either.isLeft(result.park), true)
-      if (Either.isLeft(result.park)) {
+      assert.equal(Result.isFailure(result.park), true)
+      if (Result.isFailure(result.park)) {
         assert.equal(
-          result.park.left.message,
+          result.park.failure.message,
           'Park command completed but mount closure was not confirmed',
         )
       }
@@ -803,15 +803,15 @@ describe('workflow interruption safety', () => {
   it('external poller attempts stop before reporting a terminal camera error', async () => {
     let stateReads = 0
     let stopCalls = 0
-    const terminalErrorEntered = Deferred.unsafeMake<void>(Symbol('terminal-error-entered'))
-    const failedLatch = Deferred.unsafeMake<void>(Symbol('capture-failed'))
-    const failedEntered = Deferred.unsafeMake<void>(Symbol('capture-failed-entered'))
+    const terminalErrorEntered = Deferred.makeUnsafe<void>()
+    const failedLatch = Deferred.makeUnsafe<void>()
+    const failedEntered = Deferred.makeUnsafe<void>()
     const session = makeExternalSession('s1', {
       getExposureState: () => Effect.gen(function* () {
           stateReads++
           if (stateReads > 3) return { state: 'idle' as const, imageReady: false }
           if (stateReads === 3) {
-            Deferred.unsafeDone(terminalErrorEntered, Effect.void)
+            Deferred.doneUnsafe(terminalErrorEntered, Effect.void)
             yield* Deferred.await(failedLatch)
           }
           return { state: 'error' as const, imageReady: false }
@@ -828,7 +828,7 @@ describe('workflow interruption safety', () => {
         const store = yield* AggregateStore
         const whilePolling = yield* store.get
         assert.equal(whilePolling.capture.phase, 'capturing')
-        Deferred.unsafeDone(failedLatch, Effect.void)
+        Deferred.doneUnsafe(failedLatch, Effect.void)
         yield* Deferred.await(failedEntered)
         return yield* store.get
       }).pipe(Effect.provide(testLayer)),
@@ -854,12 +854,12 @@ describe('workflow interruption safety', () => {
         { mode: 'external', stop: () => Effect.sync(() => { stopCalls++ }) },
         { durationSec: 1 },
         {},
-      ).pipe(Effect.either),
+      ).pipe(Effect.result),
     )
 
     assert.equal(stopCalls, 1)
-    assert.equal(Either.isLeft(result), true)
-    if (Either.isLeft(result)) assert.equal(result.left.message, 'Poll transport failed')
+    assert.equal(Result.isFailure(result), true)
+    if (Result.isFailure(result)) assert.equal(result.failure.message, 'Poll transport failed')
   })
 
   it('does not start an exposure after its context was aborted', async () => {
@@ -877,10 +877,10 @@ describe('workflow interruption safety', () => {
         { mode: 'external', stop: () => Effect.void },
         { durationSec: 1 },
         { signal: controller.signal },
-      ).pipe(Effect.either),
+      ).pipe(Effect.result),
     )
     assert.equal(starts, 0)
-    assert.equal(Either.isLeft(result), true)
+    assert.equal(Result.isFailure(result), true)
   })
 
   it('treats idle before ready as a stopped external exposure', async () => {
@@ -899,10 +899,10 @@ describe('workflow interruption safety', () => {
           onState: (state) => Effect.sync(() => { states.push(state.state) }),
         },
         {},
-      ).pipe(Effect.either),
+      ).pipe(Effect.result),
     )
-    assert.equal(Either.isLeft(result), true)
-    if (Either.isLeft(result)) assert.equal(result.left.message, 'External exposure was stopped')
+    assert.equal(Result.isFailure(result), true)
+    if (Result.isFailure(result)) assert.equal(result.failure.message, 'External exposure was stopped')
     assert.deepEqual(states, ['idle'])
   })
 
@@ -917,12 +917,12 @@ describe('workflow interruption safety', () => {
     let rejected = false
     const result = await Effect.runPromise(
       sequenceProgram(testLayer, function* () {
-        rejected = Either.isLeft(
+        rejected = Result.isFailure(
           yield* runConfigureExternalSequence({
             lightCount: 1,
             darkCount: 1,
             durationSec: 1,
-          }).pipe(Effect.either),
+          }).pipe(Effect.result),
         )
       }),
     )
@@ -942,21 +942,13 @@ describe('workflow interruption safety', () => {
         }),
       getLatestFrame: () => Effect.succeed(frame()),
     })
-    const lightCompleteLatch = Deferred.unsafeMake<void>(
-      Symbol('light-complete'),
-    )
-    const lightCompleteEntered = Deferred.unsafeMake<void>(
-      Symbol('light-complete-entered'),
-    )
-    const darkCompleteLatch = Deferred.unsafeMake<void>(Symbol('dark-complete'))
-    const darkCompleteEntered = Deferred.unsafeMake<void>(
-      Symbol('dark-complete-entered'),
-    )
-    const sequenceEntered = Deferred.unsafeMake<void>(
-      Symbol('sequence-entered'),
-    )
-    const resume = Deferred.unsafeMake<void>(Symbol('sequence-resume'))
-    const lightReleased = Deferred.unsafeMake<void>(Symbol('light-released'))
+    const lightCompleteLatch = Deferred.makeUnsafe<void>()
+    const lightCompleteEntered = Deferred.makeUnsafe<void>()
+    const darkCompleteLatch = Deferred.makeUnsafe<void>()
+    const darkCompleteEntered = Deferred.makeUnsafe<void>()
+    const sequenceEntered = Deferred.makeUnsafe<void>()
+    const resume = Deferred.makeUnsafe<void>()
+    const lightReleased = Deferred.makeUnsafe<void>()
     const released: Array<'sequence' | 'sequence-continue'> = []
     let captureSucceeded = 0
     const busLayer = Layer.effect(
@@ -979,7 +971,7 @@ describe('workflow interruption safety', () => {
                   captureSucceeded === 2
                     ? lightCompleteEntered
                     : darkCompleteEntered
-                Deferred.unsafeDone(entered, Effect.void)
+                Deferred.doneUnsafe(entered, Effect.void)
                 yield* Deferred.await(latch)
               }
             }
@@ -1019,16 +1011,16 @@ describe('workflow interruption safety', () => {
             failed: 0,
           },
         }))
-        Deferred.unsafeDone(resume, Effect.void)
+        Deferred.doneUnsafe(resume, Effect.void)
         yield* runStartExternalSequence
         yield* Deferred.await(lightCompleteEntered)
         assert.equal((yield* store.get).sequence.phase, 'awaiting-darks')
-        Deferred.unsafeDone(lightCompleteLatch, Effect.void)
+        Deferred.doneUnsafe(lightCompleteLatch, Effect.void)
         yield* Deferred.await(lightReleased)
         yield* runContinueExternalSequence
         yield* Deferred.await(darkCompleteEntered)
         assert.equal((yield* store.get).sequence.phase, 'complete')
-        Deferred.unsafeDone(darkCompleteLatch, Effect.void)
+        Deferred.doneUnsafe(darkCompleteLatch, Effect.void)
       }),
     )
     assert.deepEqual(lights, [true, false])
@@ -1050,10 +1042,8 @@ describe('workflow interruption safety', () => {
           ? Effect.fail(new Error('frame failed'))
           : Effect.succeed(frame()),
     })
-    const completeLatch = Deferred.unsafeMake<void>(Symbol('sequence-complete'))
-    const completeEntered = Deferred.unsafeMake<void>(
-      Symbol('sequence-complete-entered'),
-    )
+    const completeLatch = Deferred.makeUnsafe<void>()
+    const completeEntered = Deferred.makeUnsafe<void>()
     const testLayer = makeTestLayer(
       makeFakeRegistry(Effect.succeed(session)),
       makeBlockingEventBusLayer(
@@ -1075,7 +1065,7 @@ describe('workflow interruption safety', () => {
         yield* Deferred.await(completeEntered)
         const store = yield* AggregateStore
         assert.equal((yield* store.get).sequence.phase, 'complete')
-        Deferred.unsafeDone(completeLatch, Effect.void)
+        Deferred.doneUnsafe(completeLatch, Effect.void)
       }),
     )
     assert.equal(starts, 2)
@@ -1086,11 +1076,11 @@ describe('workflow interruption safety', () => {
   it('stop prevents the next sequence frame from starting', async () => {
     let starts = 0
     let states = 0
-    const entered = Deferred.unsafeMake<void>(Symbol('sequence-start'))
+    const entered = Deferred.makeUnsafe<void>()
     const session = makeExternalSession('sequence-stop', {
       getExposureState: () =>
         Effect.gen(function* () {
-          Deferred.unsafeDone(entered, Effect.void)
+          Deferred.doneUnsafe(entered, Effect.void)
           states++
           return {
             state: states === 1 ? ('exposing' as const) : ('idle' as const),
@@ -1128,13 +1118,11 @@ describe('workflow interruption safety', () => {
 
   for (const recovery of ['stop', 'park'] as const) {
     it(`${recovery} failure terminalizes an external sequence`, async () => {
-      const entered = Deferred.unsafeMake<void>(
-        Symbol(`sequence-${recovery}-failure`),
-      )
+      const entered = Deferred.makeUnsafe<void>()
       const session = makeExternalSession(`sequence-${recovery}-failure`, {
         getExposureState: () =>
           Effect.sync(() => {
-            Deferred.unsafeDone(entered, Effect.void)
+            Deferred.doneUnsafe(entered, Effect.void)
             return { state: 'exposing' as const, imageReady: false }
           }),
         stopExposure: () => Effect.fail(new Error(`${recovery} failed`)),
@@ -1154,8 +1142,8 @@ describe('workflow interruption safety', () => {
           })
           yield* runStartExternalSequence
           yield* Deferred.await(entered)
-          if (recovery === 'stop') yield* runStopCapture.pipe(Effect.either)
-          else yield* runPark.pipe(Effect.either)
+          if (recovery === 'stop') yield* runStopCapture.pipe(Effect.result)
+          else yield* runPark.pipe(Effect.result)
         }),
       )
       assert.equal(result.sequence.phase, 'failed')
@@ -1169,11 +1157,11 @@ describe('workflow interruption safety', () => {
   it('park stops a sequence before parking and prevents the next frame', async () => {
     const order: string[] = []
     let states = 0
-    const entered = Deferred.unsafeMake<void>(Symbol('sequence-park'))
+    const entered = Deferred.makeUnsafe<void>()
     const session = makeExternalSession('sequence-park', {
       getExposureState: () =>
         Effect.gen(function* () {
-          Deferred.unsafeDone(entered, Effect.void)
+          Deferred.doneUnsafe(entered, Effect.void)
           states++
           return {
             state: states === 1 ? ('exposing' as const) : ('idle' as const),
@@ -1234,12 +1222,8 @@ describe('workflow interruption safety', () => {
       preflightExternalFrameStorage: () => Effect.fail(new Error('full')),
       saveExternalFrame: () => Effect.succeed(saved()),
     })
-    const failedLatch = Deferred.unsafeMake<void>(
-      Symbol('sequence-preflight-failed'),
-    )
-    const failedEntered = Deferred.unsafeMake<void>(
-      Symbol('sequence-preflight-failed-entered'),
-    )
+    const failedLatch = Deferred.makeUnsafe<void>()
+    const failedEntered = Deferred.makeUnsafe<void>()
     const testLayer = makeTestLayer(
       makeFakeRegistry(Effect.succeed(session)),
       makeBlockingEventBusLayer('capture.failed', failedLatch, failedEntered),
@@ -1256,7 +1240,7 @@ describe('workflow interruption safety', () => {
         yield* Deferred.await(failedEntered)
         const store = yield* AggregateStore
         assert.equal((yield* store.get).sequence.phase, 'failed')
-        Deferred.unsafeDone(failedLatch, Effect.void)
+        Deferred.doneUnsafe(failedLatch, Effect.void)
       }),
     )
     assert.equal(starts, 0)
@@ -1273,10 +1257,8 @@ describe('workflow interruption safety', () => {
         }),
       getLatestFrame: () => Effect.succeed(frame()),
     })
-    const awaitingLatch = Deferred.unsafeMake<void>(Symbol('awaiting-darks'))
-    const awaitingEntered = Deferred.unsafeMake<void>(
-      Symbol('awaiting-darks-entered'),
-    )
+    const awaitingLatch = Deferred.makeUnsafe<void>()
+    const awaitingEntered = Deferred.makeUnsafe<void>()
     const testLayer = makeTestLayer(
       makeFakeRegistry(Effect.succeed(session)),
       makeBlockingEventBusLayer(
@@ -1298,9 +1280,9 @@ describe('workflow interruption safety', () => {
         yield* Deferred.await(awaitingEntered)
         const store = yield* AggregateStore
         assert.equal((yield* store.get).sequence.phase, 'awaiting-darks')
-        Deferred.unsafeDone(awaitingLatch, Effect.void)
+        Deferred.doneUnsafe(awaitingLatch, Effect.void)
         yield* runFinishExternalSequence
-        yield* runContinueExternalSequence.pipe(Effect.either)
+        yield* runContinueExternalSequence.pipe(Effect.result)
       }),
     )
     assert.equal(starts, 1)
@@ -1354,8 +1336,8 @@ describe('workflow interruption safety', () => {
 
   it('stop preempts a queued sequence start before it can start hardware', async () => {
     let starts = 0
-    const entered = Deferred.unsafeMake<void>(Symbol('sequence-start-entered'))
-    const resume = Deferred.unsafeMake<void>(Symbol('sequence-start-resume'))
+    const entered = Deferred.makeUnsafe<void>()
+    const resume = Deferred.makeUnsafe<void>()
     const released: Array<'sequence' | 'sequence-continue'> = []
     const session = makeExternalSession('sequence-queued-stop', {
       getExposureState: () =>
@@ -1384,7 +1366,7 @@ describe('workflow interruption safety', () => {
             failed: 0,
           },
         }))
-        const startFiber = yield* Effect.fork(runStartExternalSequence)
+        const startFiber = yield* Effect.forkChild(runStartExternalSequence, { startImmediately: true })
         yield* Deferred.await(entered)
         assert.equal((yield* store.get).sequence.phase, 'idle')
         yield* store.update((current) => ({
@@ -1398,8 +1380,8 @@ describe('workflow interruption safety', () => {
         assert.equal((yield* store.get).sequence.phase, 'lights')
         yield* runStopCapture
         assert.equal((yield* store.get).sequence.phase, 'stopped')
-        Deferred.unsafeDone(resume, Effect.void)
-        yield* startFiber.await
+        Deferred.doneUnsafe(resume, Effect.void)
+        yield* Fiber.await(startFiber)
       }),
     )
     assert.equal(starts, 0)
@@ -1408,10 +1390,8 @@ describe('workflow interruption safety', () => {
 
   it('finish preempts a queued dark continuation before it can start hardware', async () => {
     let starts = 0
-    const entered = Deferred.unsafeMake<void>(
-      Symbol('sequence-continue-entered'),
-    )
-    const resume = Deferred.unsafeMake<void>(Symbol('sequence-continue-resume'))
+    const entered = Deferred.makeUnsafe<void>()
+    const resume = Deferred.makeUnsafe<void>()
     const released: Array<'sequence' | 'sequence-continue'> = []
     const session = makeExternalSession('sequence-queued-finish', {
       getExposureState: () =>
@@ -1441,13 +1421,13 @@ describe('workflow interruption safety', () => {
             failed: 0,
           },
         }))
-        const continueFiber = yield* Effect.fork(runContinueExternalSequence)
+        const continueFiber = yield* Effect.forkChild(runContinueExternalSequence, { startImmediately: true })
         yield* Deferred.await(entered)
         assert.equal((yield* store.get).sequence.phase, 'awaiting-darks')
         yield* runFinishExternalSequence
         assert.equal((yield* store.get).sequence.phase, 'complete')
-        Deferred.unsafeDone(resume, Effect.void)
-        yield* continueFiber.await
+        Deferred.doneUnsafe(resume, Effect.void)
+        yield* Fiber.await(continueFiber)
       }),
     )
     assert.equal(starts, 0)
@@ -1458,12 +1438,8 @@ describe('workflow interruption safety', () => {
     for (const action of ['finish', 'stop', 'park'] as const) {
       it(`${action} terminalization between ${request} request and lease acquisition cannot start an exposure`, async () => {
         let starts = 0
-        const entered = Deferred.unsafeMake<void>(
-          Symbol(`sequence-${request}-${action}-entered`),
-        )
-        const resume = Deferred.unsafeMake<void>(
-          Symbol(`sequence-${request}-${action}-resume`),
-        )
+        const entered = Deferred.makeUnsafe<void>()
+        const resume = Deferred.makeUnsafe<void>()
         const released: Array<'sequence' | 'sequence-continue'> = []
         const session = makeExternalSession(`sequence-${request}-${action}`, {
           getExposureState: () =>
@@ -1510,7 +1486,7 @@ describe('workflow interruption safety', () => {
                       failed: 0,
                     },
             }))
-            const requestFiber = yield* Effect.fork(
+            const requestFiber = yield* Effect.forkChild(
               request === 'start'
                 ? runStartExternalSequence
                 : runContinueExternalSequence,
@@ -1531,8 +1507,8 @@ describe('workflow interruption safety', () => {
             if (action === 'finish') yield* runFinishExternalSequence
             if (action === 'stop') yield* runStopCapture
             if (action === 'park') yield* runPark
-            Deferred.unsafeDone(resume, Effect.void)
-            yield* requestFiber.await
+            Deferred.doneUnsafe(resume, Effect.void)
+            yield* Fiber.await(requestFiber)
             return yield* store.get
           }),
         )
@@ -1578,15 +1554,15 @@ describe('workflow interruption safety', () => {
           durationSec: 1,
         })
         yield* runStartCapture
-        configureRejected = Either.isLeft(
+        configureRejected = Result.isFailure(
           yield* runConfigureExternalSequence({
             lightCount: 2,
             darkCount: 0,
             durationSec: 1,
-          }).pipe(Effect.either),
+          }).pipe(Effect.result),
         )
-        startRejected = Either.isLeft(
-          yield* runStartExternalSequence.pipe(Effect.either),
+        startRejected = Result.isFailure(
+          yield* runStartExternalSequence.pipe(Effect.result),
         )
         yield* runStopCapture
       }),
@@ -1597,20 +1573,14 @@ describe('workflow interruption safety', () => {
 
   for (const phase of ['lights', 'awaiting-darks'] as const) {
     it(`resets a ${phase} sequence when reconnecting`, async () => {
-      const exposingEntered = Deferred.unsafeMake<void>(
-        Symbol(`sequence-${phase}-exposing`),
-      )
-      const awaitingLatch = Deferred.unsafeMake<void>(
-        Symbol(`sequence-${phase}-awaiting`),
-      )
-      const awaitingEntered = Deferred.unsafeMake<void>(
-        Symbol(`sequence-${phase}-awaiting-entered`),
-      )
+      const exposingEntered = Deferred.makeUnsafe<void>()
+      const awaitingLatch = Deferred.makeUnsafe<void>()
+      const awaitingEntered = Deferred.makeUnsafe<void>()
       const session = makeExternalSession(`sequence-reset-${phase}`, {
         getExposureState: () =>
           phase === 'lights'
             ? Effect.gen(function* () {
-                Deferred.unsafeDone(exposingEntered, Effect.void)
+                Deferred.doneUnsafe(exposingEntered, Effect.void)
                 return { state: 'exposing' as const, imageReady: false }
               })
             : Effect.succeed({ state: 'ready' as const, imageReady: true }),
@@ -1650,7 +1620,7 @@ describe('workflow interruption safety', () => {
           } else {
             yield* Deferred.await(awaitingEntered)
             assert.equal((yield* store.get).sequence.phase, 'awaiting-darks')
-            Deferred.unsafeDone(awaitingLatch, Effect.void)
+            Deferred.doneUnsafe(awaitingLatch, Effect.void)
           }
           yield* runDisconnect
           yield* runConnect({
@@ -1670,17 +1640,13 @@ describe('workflow interruption safety', () => {
 
   it('interrupt during displaced-session cleanup => cleanup completes and ownership clears', async () => {
     let displacedDisconnectCompleted = false
-    const displacedCleanupEntered = Deferred.unsafeMake<void>(
-      Symbol('cleanup-entered'),
-    )
-    const allowDisplacedCleanup = Deferred.unsafeMake<void>(
-      Symbol('allow-cleanup'),
-    )
+    const displacedCleanupEntered = Deferred.makeUnsafe<void>()
+    const allowDisplacedCleanup = Deferred.makeUnsafe<void>()
 
     const sessionA = makeSession(
       'sA',
       Effect.gen(function* () {
-        Deferred.unsafeDone(displacedCleanupEntered, Effect.void)
+        Deferred.doneUnsafe(displacedCleanupEntered, Effect.void)
         yield* Deferred.await(allowDisplacedCleanup)
         displacedDisconnectCompleted = true
       }),
@@ -1710,17 +1676,17 @@ describe('workflow interruption safety', () => {
           session: { ...current.session, phase: 'connected', sessionId: 'sA' },
         }))
 
-        const fiber = yield* Effect.fork(
+        const fiber = yield* Effect.forkChild(
           runConnect({ pluginKind: 'fake-seestar', deviceId: 'test:sB' }),
         )
 
         yield* Deferred.await(displacedCleanupEntered)
-        const interruptFiber = yield* Effect.fork(Fiber.interrupt(fiber))
+        const interruptFiber = yield* Effect.forkChild(Fiber.interrupt(fiber), { startImmediately: true })
         // The cleanup is uninterruptible, so it must finish before the
         // pending interruption can unwind the connect bracket.
-        Deferred.unsafeDone(allowDisplacedCleanup, Effect.void)
+        Deferred.doneUnsafe(allowDisplacedCleanup, Effect.void)
         yield* Fiber.join(interruptFiber)
-        yield* fiber.await
+        yield* Fiber.await(fiber)
 
         const store = yield* AggregateStore
         return yield* store.get

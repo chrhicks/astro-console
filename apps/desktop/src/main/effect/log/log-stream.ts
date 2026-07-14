@@ -9,7 +9,7 @@ export interface LogStream {
   ) => Effect.Effect<() => void>
 }
 
-export const LogStream = Context.GenericTag<LogStream>('LogStream')
+export const LogStream = Context.Service<LogStream>('LogStream')
 
 export const LogStreamLive = Layer.effect(
   LogStream,
@@ -37,7 +37,7 @@ export const LogStreamLive = Layer.effect(
 
           const fiber = yield* Stream.fromQueue(queue).pipe(
             Stream.runForEach((entry) => Effect.sync(() => onLog(entry))),
-            Effect.forkDaemon,
+            Effect.forkDetach,
           )
 
           return () => {

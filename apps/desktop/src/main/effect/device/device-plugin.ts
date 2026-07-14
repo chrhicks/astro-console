@@ -54,7 +54,7 @@ export interface DeviceSession {
   pluginKind: DevicePluginKind
   deviceId: string
   health: LiveSessionHealthState
-  disconnect: Effect.Effect<void>
+  disconnect: Effect.Effect<void, unknown>
   rig: ConnectedRig
 }
 
@@ -66,4 +66,4 @@ export interface DevicePlugin {
   ) => Effect.Effect<DeviceSession, unknown, EventBus>
 }
 
-export const DevicePlugin = Context.GenericTag<DevicePlugin>('DevicePlugin')
+export const DevicePlugin = Context.Service<DevicePlugin>('DevicePlugin')

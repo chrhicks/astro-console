@@ -45,9 +45,9 @@ const StackFailurePayload = Schema.Struct({
 })
 
 function readFailureMessage(payload: unknown): string {
-  const decoded = Schema.decodeUnknownEither(StackFailurePayload)(payload)
-  if (decoded._tag === 'Left') return 'Native stacking failed'
-  const error = decoded.right.error
+  const decoded = Schema.decodeUnknownOption(StackFailurePayload)(payload)
+  if (decoded._tag === 'None') return 'Native stacking failed'
+  const error = decoded.value.error
   return error !== undefined && error.length > 0
     ? error
     : 'Native stacking failed'

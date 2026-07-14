@@ -146,7 +146,7 @@ export function createFakeSeestarPlugin(): DevicePlugin {
             // longer calls openArm() directly.
             prepare: (input) =>
               prepareForPointing(input).pipe(
-                Effect.zipRight(refresh),
+                Effect.andThen(refresh),
                 Effect.flatMap((refreshed) =>
                   refreshed.device.mountClosed
                     ? openArm()

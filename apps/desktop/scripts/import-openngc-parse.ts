@@ -1,17 +1,27 @@
-import { Schema } from 'effect'
+import { Schema, SchemaTransformation } from 'effect'
 import { readFile } from 'node:fs/promises'
 import { parse } from 'csv-parse/sync'
 
 /** OpenNGC CSV cells use "" for missing values. */
-const CsvOptionalString = Schema.transform(Schema.String, Schema.UndefinedOr(Schema.String), {
-  decode: (value) => (value === '' ? undefined : value),
-  encode: (value) => value ?? '',
-})
+const CsvOptionalString = Schema.String.pipe(
+  Schema.decodeTo(
+    Schema.UndefinedOr(Schema.String),
+    SchemaTransformation.transform({
+      decode: (value) => (value === '' ? undefined : value),
+      encode: (value) => value ?? '',
+    }),
+  ),
+)
 
-const CsvOptionalNumber = Schema.transform(Schema.String, Schema.UndefinedOr(Schema.Number), {
-  decode: (value) => (value === '' ? undefined : Number(value)),
-  encode: (value) => (value === undefined ? '' : String(value)),
-})
+const CsvOptionalNumber = Schema.String.pipe(
+  Schema.decodeTo(
+    Schema.UndefinedOr(Schema.Number),
+    SchemaTransformation.transform({
+      decode: (value) => (value === '' ? undefined : Number(value)),
+      encode: (value) => (value === undefined ? '' : String(value)),
+    }),
+  ),
+)
 
 /** Raw row shape after csv-parse with `columns: true` and `delimiter: ";"`. */
 export const OpenNgcRowSchema = Schema.Struct({

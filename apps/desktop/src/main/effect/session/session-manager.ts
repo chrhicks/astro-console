@@ -72,4 +72,4 @@ export interface SessionManager {
 }
 
 export const SessionManager =
-  Context.GenericTag<SessionManager>('SessionManager')
+  Context.Service<SessionManager>('SessionManager')

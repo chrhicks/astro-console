@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { Context, Effect, Layer } from 'effect'
+import { Context, Effect, Layer, Result } from 'effect'
 
 import { generatePreviewJpeg } from './frame-preview'
 import { writeFits, type FrameDescriptor } from './fits-writer'
@@ -57,7 +57,7 @@ const KNOWN_EXTERNAL_FRAME_BYTES = 50 * 1024 * 1024
 const MINIMUM_EXTERNAL_FRAME_FREE_BYTES = 512 * 1024 * 1024
 
 export const FrameStorage =
-  Context.GenericTag<FrameStorage>('FrameStorage')
+  Context.Service<FrameStorage>('FrameStorage')
 
 // Root for externally retrieved frames, organized as <date>/<target>/lights/
 // under app-owned userData storage. Exported so the IPC layer can validate
@@ -165,17 +165,21 @@ export const FrameStorageLive = Layer.succeed(
           }
           await writeFileExclusive(previewPath, jpg)
           return { previewFilePath: previewPath, previewFileSize: jpg.byteLength }
-        }).pipe(Effect.either)
+        }).pipe(Effect.result)
         return {
           absolutePath: fits.absolutePath,
           fileSize: fits.fileSize,
-          previewFilePath: preview._tag === 'Right' ? preview.right?.previewFilePath : undefined,
-          previewFileSize: preview._tag === 'Right' ? preview.right?.previewFileSize : undefined,
+          previewFilePath: Result.isSuccess(preview)
+            ? preview.success.previewFilePath
+            : undefined,
+          previewFileSize: Result.isSuccess(preview)
+            ? preview.success.previewFileSize
+            : undefined,
           previewError:
-            preview._tag === 'Left'
-              ? preview.left instanceof Error
-                ? preview.left.message
-                : String(preview.left)
+            Result.isFailure(preview)
+              ? preview.failure instanceof Error
+                ? preview.failure.message
+                : String(preview.failure)
               : undefined,
         }
       }),

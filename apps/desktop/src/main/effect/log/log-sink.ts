@@ -8,7 +8,7 @@ export interface LogSink {
   readonly list: Effect.Effect<DesktopLogEntryV2[]>
 }
 
-export const LogSink = Context.GenericTag<LogSink>('LogSink')
+export const LogSink = Context.Service<LogSink>('LogSink')
 
 export const LogSinkLive = Layer.effect(
   LogSink,

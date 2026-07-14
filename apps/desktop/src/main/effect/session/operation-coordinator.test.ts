@@ -100,7 +100,7 @@ describe('OperationCoordinator production semantics', () => {
       const sessions = yield* SessionManager
       const first = yield* coordinator.acquire(session, 'point')
       assert.ok(first)
-      const secondFiber = yield* Effect.fork(coordinator.acquire(session, 'point'))
+      const secondFiber = yield* Effect.forkChild(coordinator.acquire(session, 'point'), { startImmediately: true })
       yield* Effect.sleep('30 millis')
       yield* coordinator.release(first)
       const second = yield* Fiber.join(secondFiber)

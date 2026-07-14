@@ -18,4 +18,4 @@ export interface GeoService {
   }>
 }
 
-export const GeoService = Context.GenericTag<GeoService>('GeoService')
+export const GeoService = Context.Service<GeoService>('GeoService')

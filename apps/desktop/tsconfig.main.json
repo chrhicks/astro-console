@@ -3,6 +3,10 @@
     "target": "ES2022",
     "module": "CommonJS",
     "moduleResolution": "Node",
+    "baseUrl": ".",
+    "paths": {
+      "effect": ["node_modules/effect/dist/index.d.ts"]
+    },
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,

@@ -51,7 +51,7 @@ export const runStartPreview = Effect.gen(function* () {
         const ctx: RigOperationContext = { signal: lease.signal }
 
         yield* preview.start(ctx).pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.gen(function* () {
               if (lease.signal.aborted) return
               const message = toErrorMessage(error)
@@ -90,7 +90,7 @@ export const runStartPreview = Effect.gen(function* () {
       }),
     () => coordinator.release(lease),
   ).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       lease.signal.aborted ? Effect.void : Effect.fail(error),
     ),
   )
@@ -131,7 +131,7 @@ export const runStopPreview = Effect.gen(function* () {
         const ctx: RigOperationContext = { signal: lease.signal }
 
         yield* preview.stop(ctx).pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.gen(function* () {
               const message = toErrorMessage(error)
               const updated = yield* coordinator.commitIfLease(lease, (current) => ({
@@ -169,7 +169,7 @@ export const runStopPreview = Effect.gen(function* () {
       }),
     () => coordinator.release(lease),
   ).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       lease.signal.aborted ? Effect.void : Effect.fail(error),
     ),
   )

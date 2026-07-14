@@ -44,7 +44,7 @@ export const runDiscover = Effect.gen(function* () {
         })
       }),
     ),
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       Effect.gen(function* () {
         const message = toErrorMessage(error)
 
@@ -134,7 +134,7 @@ export const runConnect = (input: ConnectRequestV2) =>
           // completes, supersededCleaned is set so the release skips it.
           if (superseded) {
             yield* superseded.disconnect.pipe(
-              Effect.catchAll(() => Effect.void),
+              Effect.catch(() => Effect.void),
               Effect.uninterruptible,
             )
             supersededCleaned = true
@@ -191,7 +191,7 @@ export const runConnect = (input: ConnectRequestV2) =>
           if (!committed) {
             // Superseded. Close the session; the newer intent owns the
             // aggregate.
-            yield* connected.disconnect.pipe(Effect.catchAll(() => Effect.void))
+            yield* connected.disconnect.pipe(Effect.catch(() => Effect.void))
             connectedSession = null
             return yield* Effect.fail(
               new Error('Connect superseded by a newer intent'),
@@ -235,22 +235,18 @@ export const runConnect = (input: ConnectRequestV2) =>
           // best-effort and idempotent.
           if (supersededSession && !supersededCleaned) {
             yield* supersededSession.disconnect.pipe(
-              Effect.catchAll(() => Effect.void),
+              Effect.catch(() => Effect.void),
             )
           }
 
-          const reason = Exit.isInterrupted(exit)
-            ? 'Connect interrupted'
-            : Exit.isFailure(exit)
-              ? toErrorMessage(Cause.squash(exit.cause))
-              : 'Connect failed'
+          const reason = exitFailureReason(exit, 'Connect')
 
           // Disconnect any session that was returned but not successfully
           // installed + published. If installed but publication failed, we
           // still need to disconnect because the workflow did not complete.
           if (connectedSession && !installed) {
             yield* connectedSession.disconnect.pipe(
-              Effect.catchAll(() => Effect.void),
+              Effect.catch(() => Effect.void),
             )
           } else if (connectedSession && installed && !Exit.isSuccess(exit)) {
             // Installed but the workflow failed/interrupted after install
@@ -260,7 +256,7 @@ export const runConnect = (input: ConnectRequestV2) =>
             const stillCurrent = yield* sessions.isCurrent(intent.generation)
             if (stillCurrent) {
               yield* connectedSession.disconnect.pipe(
-                Effect.catchAll(() => Effect.void),
+                Effect.catch(() => Effect.void),
               )
             }
           }
@@ -313,7 +309,7 @@ export const runDisconnect = Effect.gen(function* () {
         )
 
         if (current) {
-          yield* current.disconnect.pipe(Effect.catchAll(() => Effect.void))
+          yield* current.disconnect.pipe(Effect.catch(() => Effect.void))
         }
 
         // Atomically clear the session and project the final disconnected
@@ -342,16 +338,12 @@ export const runDisconnect = Effect.gen(function* () {
         if (Exit.isSuccess(exit)) return
 
         const current = intent.session
-        const reason = Exit.isInterrupted(exit)
-          ? 'Disconnect interrupted'
-          : Exit.isFailure(exit)
-            ? toErrorMessage(Cause.squash(exit.cause))
-            : 'Disconnect failed'
+        const reason = exitFailureReason(exit, 'Disconnect')
 
         // Always terminally disconnect the captured session, even if a
         // newer intent has superseded. The session is closed regardless.
         if (current) {
-          yield* current.disconnect.pipe(Effect.catchAll(() => Effect.void))
+          yield* current.disconnect.pipe(Effect.catch(() => Effect.void))
         }
 
         // Exact-generation clear to disconnected with error. Returns null
@@ -379,6 +371,12 @@ function toErrorMessage(error: unknown): string {
   return String(error)
 }
 
+function exitFailureReason(exit: Exit.Exit<unknown, unknown>, action: string): string {
+  if (!Exit.isFailure(exit)) return `${action} failed`
+  if (exit.cause.reasons.some(Cause.isInterruptReason)) return `${action} interrupted`
+  return toErrorMessage(Cause.squash(exit.cause))
+}
+
 // Rehydrates the aggregate library from saved external assets on disk. Falls
 // back to the connect-time library on any failure so connect never breaks on a
 // corrupt or unreadable library directory.
@@ -387,6 +385,6 @@ function hydrateExternalLibrary(
 ): Effect.Effect<LibraryProjection> {
   return Effect.tryPromise(() => readExternalLibraryFromDisk()).pipe(
     Effect.map((assets) => ({ ...base, assets })),
-    Effect.catchAll(() => Effect.succeed(base)),
+    Effect.catch(() => Effect.succeed(base)),
   )
 }

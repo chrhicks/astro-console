@@ -21,4 +21,4 @@ export interface CatalogStore {
   ) => Effect.Effect<TargetSummary | null>
 }
 
-export const CatalogStore = Context.GenericTag<CatalogStore>('CatalogStore')
+export const CatalogStore = Context.Service<CatalogStore>('CatalogStore')

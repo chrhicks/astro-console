@@ -6,20 +6,20 @@ export const TargetSummarySchema = Schema.Struct({
   id: Schema.String,
   short: Schema.String,
   name: Schema.String,
-  visibility: Schema.optional(Schema.Literal('up', 'later', 'blocked')),
+  visibility: Schema.optional(Schema.Literals(['up', 'later', 'blocked'])),
   visibilityLabel: OptionalString,
-  recommendedFilter: Schema.NullOr(Schema.Literal('clear', 'ir', 'lp')),
-  type: Schema.Literal('dso', 'sun', 'moon', 'planet'),
+  recommendedFilter: Schema.NullOr(Schema.Literals(['clear', 'ir', 'lp'])),
+  type: Schema.Literals(['dso', 'sun', 'moon', 'planet']),
   availableActions: Schema.Array(
-    Schema.Literal('slew', 'stack', 'preview', 'filter'),
+    Schema.Literals(['slew', 'stack', 'preview', 'filter']),
   ),
 })
 const LibraryAssetSchema = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   capturedAt: Schema.String,
-  kind: Schema.Literal('stack', 'sub', 'calibration', 'exposure'),
-  frameKind: Schema.optional(Schema.Literal('light', 'dark')),
+  kind: Schema.Literals(['stack', 'sub', 'calibration', 'exposure']),
+  frameKind: Schema.optional(Schema.Literals(['light', 'dark'])),
   saved: Schema.optional(Schema.Boolean),
   savedFileSize: OptionalNumber,
   hasPreview: Schema.optional(Schema.Boolean),
@@ -32,18 +32,18 @@ const LibraryAssetSchema = Schema.Struct({
 
 export const DesktopStatusSchema = Schema.Struct({
   session: Schema.Struct({
-    phase: Schema.Literal(
+    phase: Schema.Literals([
       'disconnected',
       'connecting',
       'connected',
       'disconnecting',
-    ),
+    ]),
     host: OptionalString,
     productModel: OptionalString,
     discovering: Schema.Boolean,
     health: Schema.optional(
       Schema.Struct({
-        state: Schema.Literal('healthy', 'stale', 'recovering', 'failed'),
+        state: Schema.Literals(['healthy', 'stale', 'recovering', 'failed']),
         lastCheckedAt: OptionalString,
         lastError: OptionalString,
       }),
@@ -58,7 +58,7 @@ export const DesktopStatusSchema = Schema.Struct({
     ),
   }),
   pointing: Schema.Struct({
-    phase: Schema.Literal('idle', 'slewing', 'arrived', 'failed'),
+    phase: Schema.Literals(['idle', 'slewing', 'arrived', 'failed']),
     target: Schema.NullOr(TargetSummarySchema),
     targetId: OptionalString,
     startedAt: OptionalString,
@@ -66,17 +66,17 @@ export const DesktopStatusSchema = Schema.Struct({
     lastError: OptionalString,
   }),
   capture: Schema.Struct({
-    phase: Schema.Literal(
+    phase: Schema.Literals([
       'idle',
       'starting',
       'capturing',
       'stopped',
       'failed',
       'partial',
-    ),
-    mode: Schema.optional(Schema.Literal('native', 'external')),
+    ]),
+    mode: Schema.optional(Schema.Literals(['native', 'external'])),
     deviceState: Schema.optional(
-      Schema.Literal('idle', 'exposing', 'reading', 'ready', 'error'),
+      Schema.Literals(['idle', 'exposing', 'reading', 'ready', 'error']),
     ),
     stacks: OptionalNumber,
     frames: OptionalNumber,
@@ -85,14 +85,14 @@ export const DesktopStatusSchema = Schema.Struct({
     lastError: OptionalString,
   }),
   preview: Schema.Struct({
-    phase: Schema.Literal('none', 'starting', 'active', 'error'),
-    source: Schema.Literal('none', 'native'),
+    phase: Schema.Literals(['none', 'starting', 'active', 'error']),
+    source: Schema.Literals(['none', 'native']),
     active: Schema.Boolean,
     lastError: OptionalString,
   }),
   device: Schema.Struct({
     pluginKind: Schema.optional(
-      Schema.Literal('fake-seestar', 'seestar', 'alpaca-rig'),
+      Schema.Literals(['fake-seestar', 'seestar', 'alpaca-rig']),
     ),
     deviceId: OptionalString,
     displayName: OptionalString,
@@ -109,7 +109,7 @@ export const DesktopStatusSchema = Schema.Struct({
     mountClosed: Schema.optional(Schema.Boolean),
     connectedAt: OptionalString,
     location: Schema.optional(Schema.Struct({ lat: Schema.Number, lon: Schema.Number })),
-    locationSource: Schema.optional(Schema.Literal('device', 'geoip')),
+    locationSource: Schema.optional(Schema.Literals(['device', 'geoip'])),
     deviceTime: Schema.optional(
       Schema.Struct({
         year: Schema.Number, mon: Schema.Number, day: Schema.Number,
@@ -118,41 +118,41 @@ export const DesktopStatusSchema = Schema.Struct({
       }),
     ),
     deviceTimeLooksStale: Schema.optional(Schema.Boolean),
-    activity: Schema.optional(Schema.Literal('idle', 'previewing', 'capturing')),
+    activity: Schema.optional(Schema.Literals(['idle', 'previewing', 'capturing'])),
     storageFreeMb: OptionalNumber,
     storageTotalMb: OptionalNumber,
     warnings: Schema.optional(Schema.Array(Schema.String)),
   }),
   library: Schema.Struct({
-    scope: Schema.Literal('current_target', 'all_targets'),
+    scope: Schema.Literals(['current_target', 'all_targets']),
     assets: Schema.Array(LibraryAssetSchema),
     polling: Schema.Boolean,
   }),
   workspace: Schema.Struct({
-    state: Schema.Literal(
+    state: Schema.Literals([
       'disconnected', 'idle_no_target', 'primed', 'ready_to_slew', 'slewing',
       'on_target', 'preview_starting', 'preview_active', 'preview_error',
       'capturing', 'parked',
-    ),
+    ]),
     stateLabel: Schema.String,
     surface: Schema.Struct({
-      kind: Schema.Literal('idle', 'scenery', 'solar', 'deepsky'),
+      kind: Schema.Literals(['idle', 'scenery', 'solar', 'deepsky']),
       label: Schema.String,
     }),
     capabilities: Schema.Struct({
-      preview: Schema.Literal('native', 'external', 'unsupported'),
-      capture: Schema.Literal('native', 'external', 'unsupported'),
-      darkExposure: Schema.Literal('yes', 'no'),
-      autofocus: Schema.Literal('yes', 'no'),
-      filterWheel: Schema.Literal('yes', 'no'),
-      storage: Schema.Literal('yes', 'no'),
+      preview: Schema.Literals(['native', 'external', 'unsupported']),
+      capture: Schema.Literals(['native', 'external', 'unsupported']),
+      darkExposure: Schema.Literals(['yes', 'no']),
+      autofocus: Schema.Literals(['yes', 'no']),
+      filterWheel: Schema.Literals(['yes', 'no']),
+      storage: Schema.Literals(['yes', 'no']),
     }),
     actions: Schema.Array(
       Schema.Struct({
-        id: Schema.Literal(
+        id: Schema.Literals([
           'connect', 'select-target', 'retry-slew', 'retry-preview',
           'stop-preview', 'stop-capture', 'preview', 'capture',
-        ),
+        ]),
         label: Schema.String,
         enabled: Schema.Boolean,
         active: Schema.optional(Schema.Boolean),
@@ -161,9 +161,9 @@ export const DesktopStatusSchema = Schema.Struct({
   }),
   camera: Schema.optional(Schema.Struct({ exposureSec: Schema.Number })),
   sequence: Schema.Struct({
-    phase: Schema.Literal('idle', 'lights', 'awaiting-darks', 'darks', 'complete', 'stopped', 'failed'),
+    phase: Schema.Literals(['idle', 'lights', 'awaiting-darks', 'darks', 'complete', 'stopped', 'failed']),
     plan: Schema.optional(Schema.Struct({ lightCount: Schema.Number, durationSec: Schema.Number, darkCount: Schema.Number })),
-    frameKind: Schema.optional(Schema.Literal('light', 'dark')),
+    frameKind: Schema.optional(Schema.Literals(['light', 'dark'])),
     currentIndex: OptionalNumber,
     completed: Schema.Number,
     failed: Schema.Number,
@@ -178,7 +178,7 @@ export const DesktopStatusSchema = Schema.Struct({
 
 export const DesktopLogEntrySchema = Schema.Struct({
   ts: Schema.String,
-  level: Schema.Literal('debug', 'info', 'warn', 'error'),
+  level: Schema.Literals(['debug', 'info', 'warn', 'error']),
   event: Schema.String,
   component: Schema.String,
   summary: OptionalString,
@@ -189,7 +189,7 @@ export const DesktopLogEntrySchema = Schema.Struct({
 })
 
 export const DesktopDiscoveredDeviceSchema = Schema.Struct({
-  pluginKind: Schema.Literal('fake-seestar', 'seestar', 'alpaca-rig'),
+  pluginKind: Schema.Literals(['fake-seestar', 'seestar', 'alpaca-rig']),
   deviceId: Schema.String,
   displayName: Schema.String,
   host: OptionalString,
@@ -205,11 +205,11 @@ export const CatalogPageSchema = Schema.Struct({
   visibilityAvailable: Schema.Boolean,
 })
 
-const OpenNgcObjectTypeSchema = Schema.Literal(
+const OpenNgcObjectTypeSchema = Schema.Literals([
   'G', 'GPair', 'GTrpl', 'GGroup', 'OCl', 'GCl', 'Cl+N', 'PN', 'HII',
   'Neb', 'EmN', 'RfN', 'DrkN', 'SNR', '*Ass', 'Nova', 'Other',
-)
-export const TargetDetailsSchema = Schema.Union(
+])
+export const TargetDetailsSchema = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal('dso'),
     designation: Schema.String,
@@ -224,12 +224,12 @@ export const TargetDetailsSchema = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal('solar-system'),
     designation: Schema.String,
-    body: Schema.Literal(
+    body: Schema.Literals([
       'sun', 'moon', 'mercury', 'venus', 'mars', 'jupiter', 'saturn',
       'uranus', 'neptune',
-    ),
+    ]),
   }),
-)
+])
 
 export const FakeRuntimeSnapshotSchema = Schema.Struct({
   scenarios: Schema.Array(
@@ -240,7 +240,7 @@ export const FakeRuntimeSnapshotSchema = Schema.Struct({
     }),
   ),
   activeScenarioId: Schema.String,
-  connectOutcome: Schema.Literal('success', 'failure'),
+  connectOutcome: Schema.Literals(['success', 'failure']),
   device: DesktopStatusSchema.fields.device,
   preview: DesktopStatusSchema.fields.preview,
   capture: DesktopStatusSchema.fields.capture,

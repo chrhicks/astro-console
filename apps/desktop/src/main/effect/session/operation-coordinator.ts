@@ -70,7 +70,7 @@ export interface OperationCoordinator {
 }
 
 export const OperationCoordinator =
-  Context.GenericTag<OperationCoordinator>('OperationCoordinator')
+  Context.Service<OperationCoordinator>('OperationCoordinator')
 
 // Poll interval for the ordinary acquire loop. Short enough to be
 // responsive to lease release, long enough to avoid busy-spinning.

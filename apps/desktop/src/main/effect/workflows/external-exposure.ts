@@ -77,7 +77,7 @@ export function captureExternalFrame(
       }
 
       return yield* Effect.fail(new Error('Exposure did not complete within expected time'))
-    }).pipe(Effect.tapError(() => stopAfterFailure(captureStop, camera, context)))
+    }).pipe(Effect.tapError((error) => stopAfterFailure(error, captureStop, camera, context)))
   })
 }
 
@@ -109,11 +109,15 @@ export function stopExternalExposure(
 }
 
 function stopAfterFailure(
+  error: unknown,
   captureStop: RigCaptureStop & { readonly mode: 'external' },
   camera: RigCamera,
   context: RigOperationContext,
 ) {
-  return stopExternalExposure(captureStop, camera, context).pipe(Effect.either, Effect.asVoid)
+  if (error instanceof Error && error.message === 'External exposure was stopped') {
+    return Effect.void
+  }
+  return stopExternalExposure(captureStop, camera, context).pipe(Effect.result, Effect.asVoid)
 }
 
 function createExternalLibraryAsset(
