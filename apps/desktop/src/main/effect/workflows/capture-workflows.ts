@@ -9,6 +9,7 @@ import {
 import { stopExternalExposure, captureExternalFrame } from './external-exposure'
 import type { DeviceSession } from '../device/device-plugin'
 import type { RigCamera, RigOperationContext } from '../rig/rig-model'
+import { isCaptureInFlight, isExternalSequenceRecoveryActive } from '../../../shared/lifecycle'
 
 // Default exposure duration for the generic camera path when no user-configured
 // value exists yet. Not a stacking frame count.
@@ -89,8 +90,7 @@ export const runStartCapture = Effect.gen(function* () {
         let claimed = false
         const claimedResult = yield* coordinator.commitIfLease(lease, (current) => {
           if (
-            current.capture.phase === 'starting' ||
-            current.capture.phase === 'capturing'
+            isCaptureInFlight(current.capture.phase)
           ) {
             return current
           }
@@ -290,7 +290,7 @@ export const runStopCapture = Effect.gen(function* () {
                     mode: capture.mode === 'external' ? 'external' : undefined,
                     lastError: message,
                   },
-                  sequence: current.sequence.phase === 'lights' || current.sequence.phase === 'darks' || current.sequence.phase === 'awaiting-darks'
+                  sequence: isExternalSequenceRecoveryActive(current.sequence.phase)
                     ? { ...current.sequence, phase: 'failed', frameKind: undefined, currentIndex: undefined, lastError: message }
                     : current.sequence,
                 }))
@@ -313,7 +313,7 @@ export const runStopCapture = Effect.gen(function* () {
             device: { ...current.device, ...refreshed.device },
             preview: refreshed.preview,
             capture: refreshed.capture,
-            sequence: current.sequence.phase === 'lights' || current.sequence.phase === 'darks' || current.sequence.phase === 'awaiting-darks'
+            sequence: isExternalSequenceRecoveryActive(current.sequence.phase)
               ? { ...current.sequence, phase: 'stopped', frameKind: undefined, currentIndex: undefined }
               : current.sequence,
           }))

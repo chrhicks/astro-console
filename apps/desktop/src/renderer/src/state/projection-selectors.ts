@@ -7,6 +7,8 @@ import type {
 } from '../../../shared/api-v2'
 import type { ProjectionState } from './projection-store'
 
+export type CapturePresentation = 'capture' | 'exposure'
+
 const IDLE_POINTING: PointingProjection = { phase: 'idle', target: null }
 
 const NO_PREVIEW: PreviewProjection = {
@@ -85,6 +87,7 @@ export function selectInspectorModel(state: ProjectionState) {
     preview: status?.preview ?? NO_PREVIEW,
     device: status?.device ?? {},
     workspace: status?.workspace ?? DEFAULT_WORKSPACE,
+    capturePresentation: selectCapturePresentation(status?.workspace),
   }
 }
 
@@ -98,6 +101,7 @@ export function selectWorkAreaModel(state: ProjectionState) {
     preview: status?.preview ?? NO_PREVIEW,
     capture: status?.capture ?? NO_CAPTURE,
     device: status?.device ?? {},
+    capturePresentation: selectCapturePresentation(status?.workspace),
     latestPreviewPath: latestAsset?.hasPreview ? latestAsset.id : null,
     latestPreviewUnavailable: latestAsset != null && !latestAsset.hasPreview,
   }
@@ -108,8 +112,14 @@ export function selectLibraryModel(state: ProjectionState) {
   return {
     library: status?.library ?? NO_LIBRARY,
     currentTarget: status?.currentTarget ?? null,
-    captureMode: status?.capture.mode ?? null,
+    capturePresentation: selectCapturePresentation(status?.workspace),
   }
+}
+
+export function selectCapturePresentation(
+  workspace: WorkspaceProjection | undefined,
+): CapturePresentation {
+  return workspace?.capabilities.capture === 'external' ? 'exposure' : 'capture'
 }
 
 export function selectBrowseContextKey(state: ProjectionState) {

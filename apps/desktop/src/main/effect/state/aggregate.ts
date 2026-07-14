@@ -7,7 +7,6 @@ import {
   PointingProjection,
   PreviewProjection,
   TargetSummary,
-  WorkspaceProjection,
 } from '../../../shared/api-v2'
 import type { DeviceSession } from '../device/device-plugin'
 
@@ -34,7 +33,6 @@ export interface SessionAggregate {
   preview: PreviewProjection
   device: DeviceProjection
   library: LibraryProjection
-  workspace: WorkspaceProjection
   // User-configured generic camera settings for the external exposure path.
   // Null when the connected rig has no generic RigCamera. Kept separate from
   // the volatile capture projection so rig refresh does not reset it.
@@ -95,20 +93,6 @@ export function createInitialAggregate(): SessionAggregate {
     preview: { phase: 'none', source: 'none', active: false },
     device: {},
     library: { scope: 'current_target', assets: [], polling: false },
-    workspace: {
-      state: 'disconnected',
-      stateLabel: 'Disconnected',
-      surface: { kind: 'idle', label: 'Idle' },
-      capabilities: {
-        preview: 'unsupported',
-        capture: 'unsupported',
-        darkExposure: 'no',
-        autofocus: 'no',
-        filterWheel: 'no',
-        storage: 'no',
-      },
-      actions: [],
-    },
     currentTarget: null,
     diagnostics: {},
     statusRevision: 0,

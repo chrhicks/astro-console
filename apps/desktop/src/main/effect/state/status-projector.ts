@@ -18,6 +18,7 @@ import { AggregateStore } from './aggregate-store'
 import { GeoService } from '../geo/geo-service'
 import { SessionManager } from '../session/session-manager'
 import type { ConnectedRig } from '../rig/rig-model'
+import { isCaptureInFlight } from '../../../shared/lifecycle'
 
 export interface StatusProjector {
   readonly snapshot: Effect.Effect<DesktopStatus>
@@ -143,7 +144,7 @@ function projectState(
   sessionActive: boolean,
 ): WorkspaceState {
   if (!sessionActive || aggregate.session.phase !== 'connected') return 'disconnected'
-  if (aggregate.capture.phase === 'capturing' || aggregate.capture.phase === 'starting') {
+  if (isCaptureInFlight(aggregate.capture.phase)) {
     return 'capturing'
   }
   if (aggregate.preview.phase === 'starting') return 'preview_starting'

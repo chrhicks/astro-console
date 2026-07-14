@@ -42,6 +42,17 @@ Source: `anomalyco/opencode` `v2` branch, distilled from `.references/opencode-v
 - Name business-priority condition chains as decision functions when their ordering affects behavior. Simple local presentation ternaries remain appropriate when they do not encode a shared rule.
 - Model lifecycles with explicit discriminated states when transition validity, cancellation, recovery, or terminal behavior matters; do not infer them from unrelated flags.
 
+## Stateful Changes And Review
+
+For a change that adds or alters state, phases, capabilities, or action eligibility, authors and reviewers must:
+
+- Name the canonical owner for each stateful or action decision, and make other layers consume that decision rather than recreate it.
+- Trace each equivalent phase, capability, and action-eligibility rule through the workflow/runtime, projector, and renderer; resolve mismatches at the canonical owner.
+- Centralize a predicate or selector only when it is shared or names a domain-significant rule. Keep simple local presentation expressions local.
+- Derive projections from authoritative inputs when those inputs are available. Store a projection only as an intentional cache, and document its authority, invalidation, and reason for storage.
+- Distinguish stable capabilities from transient activity: derive eligibility and presentation from a stable capability when that is the rule, not from an operation mode that happens to imply it now.
+- Do not apply blanket ternary bans or state-machine mandates. Use the smallest representation that makes the decision and its ownership clear.
+
 ## Repo-Specific Patterns From OpenCode V2
 
 - Do not hand-edit generated client output after API changes; regenerate it from the owning package.
@@ -147,6 +158,41 @@ function requireConfig(input: unknown) {
 ```
 
 Do not extract a helper that is only a renamed one-line expression.
+
+### Example: ordered business decision
+
+Do this when status precedence affects behavior:
+
+```ts
+function decideWorkStatus(work: Work) {
+  if (work.cancelledAt) return "cancelled"
+  if (work.failedAt) return "failed"
+  if (work.completedAt) return "completed"
+  return "active"
+}
+```
+
+Not this:
+
+```ts
+const status = work.cancelledAt ? "cancelled" : work.failedAt ? "failed" : work.completedAt ? "completed" : "active"
+```
+
+### Example: stable capability selector
+
+Do this when eligibility is determined by a stable capability:
+
+```ts
+function canConfigureDarks(camera: Camera) {
+  return Boolean(camera.startDarkExposure)
+}
+```
+
+Not this when `captureMode` only describes current activity:
+
+```ts
+const canConfigureDarks = captureMode !== "capturing"
+```
 
 ### Example: generated surfaces
 

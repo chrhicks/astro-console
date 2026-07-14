@@ -7,19 +7,25 @@ import { EventBusLive } from '../event/event-bus'
 import { createAlpacaPlugin, toDiscoveredRig } from './alpaca-plugin'
 
 const requests: { path: string; method: string }[] = []
-let atParkValues: boolean[] = []
-let atParkDefault = false
-let canUnpark = false
+let scenario: AlpacaScenario = { atParkValues: [] }
 let port = 0
-let slewingDefault = false
-let slewingValues: boolean[] = []
 const plugin = createAlpacaPlugin()
+
+interface AlpacaScenario {
+  atParkDefault?: boolean
+  atParkValues: boolean[]
+  canUnpark?: boolean
+  slewingDefault?: boolean
+  slewingValues?: boolean[]
+}
+
 const server = createServer((request, response) => {
   const path = new URL(request.url ?? '/', `http://${request.headers.host}`)
     .pathname
-  requests.push({ path, method: request.method ?? 'GET' })
+  const method = request.method ?? 'GET'
+  requests.push({ path, method })
 
-  if (path === '/management/v1/configureddevices') {
+  if (method === 'GET' && path === '/management/v1/configureddevices') {
     response.end(
       JSON.stringify({
         Value: [
@@ -36,29 +42,13 @@ const server = createServer((request, response) => {
     return
   }
 
-  if (request.method === 'PUT') {
-    response.end(JSON.stringify({ ErrorNumber: 0 }))
+  const scripted = getScriptedResponse(method, path)
+  if (!scripted) {
+    response.statusCode = 405
+    response.end(JSON.stringify({ ErrorNumber: 1, ErrorMessage: `Unexpected ${request.method} ${path}` }))
     return
   }
-
-  const value = path.endsWith('/atpark')
-    ? (atParkValues.shift() ?? atParkDefault)
-    : path.endsWith('/slewing')
-      ? (slewingValues.shift() ?? slewingDefault)
-      : path.endsWith('/connected') ||
-          path.endsWith('/canpark') ||
-          path.endsWith('/tracking')
-        ? true
-        : path.endsWith('/canunpark')
-          ? canUnpark
-          : path.endsWith('/canslew') || path.endsWith('/canslewasync')
-            ? true
-            : path.endsWith('/sitelatitude') || path.endsWith('/sitelongitude')
-              ? 0
-              : path.endsWith('/driverversion')
-                ? '1.0'
-                : 'Example Mount'
-  response.end(JSON.stringify({ Value: value, ErrorNumber: 0 }))
+  response.end(JSON.stringify(scripted))
 })
 const discoverySocket = dgram.createSocket('udp4')
 
@@ -68,7 +58,8 @@ before(async () => {
   assert.ok(address && typeof address !== 'string')
   port = address.port
 
-  discoverySocket.on('message', (_message, info) => {
+  discoverySocket.on('message', (message, info) => {
+    if (message.toString() !== 'alpacadiscovery1') return
     discoverySocket.send(
       Buffer.from(JSON.stringify({ AlpacaPort: port })),
       info.port,
@@ -85,20 +76,12 @@ after(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()))
 })
 
-async function connectMount(
-  values: boolean[],
-  options: {
-    atParkDefault?: boolean
-    canUnpark?: boolean
-    slewingDefault?: boolean
-    slewingValues?: boolean[]
-  } = {},
-) {
-  atParkValues = values
-  atParkDefault = options.atParkDefault ?? false
-  canUnpark = options.canUnpark ?? false
-  slewingDefault = options.slewingDefault ?? false
-  slewingValues = options.slewingValues ?? []
+async function connectMount(nextScenario: AlpacaScenario) {
+  scenario = {
+    ...nextScenario,
+    atParkValues: [...nextScenario.atParkValues],
+    slewingValues: [...(nextScenario.slewingValues ?? [])],
+  }
   const session = await Effect.runPromise(
     plugin
       .connect({
@@ -109,6 +92,44 @@ async function connectMount(
   )
   requests.length = 0
   return session
+}
+
+function getScriptedResponse(method: string, path: string) {
+  if (method === 'PUT' && [
+    '/api/v1/telescope/0/connected',
+    '/api/v1/telescope/0/park',
+    '/api/v1/telescope/0/unpark',
+    '/api/v1/telescope/0/slewtocoordinatesasync',
+  ].includes(path)) {
+    return { ErrorNumber: 0 }
+  }
+  if (method !== 'GET') return null
+  const value = getScriptedValue(path)
+  return value === undefined ? null : { Value: value, ErrorNumber: 0 }
+}
+
+function getScriptedValue(path: string): boolean | number | string | undefined {
+  switch (path) {
+    case '/api/v1/telescope/0/atpark':
+      return scenario.atParkValues.shift() ?? scenario.atParkDefault
+    case '/api/v1/telescope/0/slewing':
+      return scenario.slewingValues?.shift() ?? scenario.slewingDefault
+    case '/api/v1/telescope/0/connected':
+    case '/api/v1/telescope/0/canpark':
+    case '/api/v1/telescope/0/tracking':
+    case '/api/v1/telescope/0/canslew':
+    case '/api/v1/telescope/0/canslewasync':
+      return true
+    case '/api/v1/telescope/0/canunpark':
+      return scenario.canUnpark ?? false
+    case '/api/v1/telescope/0/sitelatitude':
+    case '/api/v1/telescope/0/sitelongitude':
+      return 0
+    case '/api/v1/telescope/0/driverversion':
+      return '1.0'
+    case '/api/v1/telescope/0/name':
+      return 'Example Mount'
+  }
 }
 
 test('maps vendor discovery facts to the desktop device identity', () => {
@@ -129,7 +150,7 @@ test('maps vendor discovery facts to the desktop device identity', () => {
 })
 
 test('park skips the command and polling when the mount is parked with stale slewing', async () => {
-  const session = await connectMount([true, true], { slewingDefault: true })
+  const session = await connectMount({ atParkValues: [true, true], slewingDefault: true })
   const mount = session.rig.mount
 
   assert.ok(mount?.park)
@@ -143,8 +164,11 @@ test('park skips the command and polling when the mount is parked with stale sle
 })
 
 test('pointing waits for a stable unparked state before it slews', async () => {
-  const session = await connectMount([true, true, false, false, false], {
+  const session = await connectMount({
+    atParkDefault: false,
+    atParkValues: [true, true, false, false, false],
     canUnpark: true,
+    slewingDefault: false,
     slewingValues: [true, true, false, false, false],
   })
   const pointing = session.rig.pointing
@@ -183,7 +207,7 @@ test('pointing waits for a stable unparked state before it slews', async () => {
 })
 
 test('pointing fails without a slew when the mount cannot unpark', async () => {
-  const session = await connectMount([true, true], { slewingDefault: true })
+  const session = await connectMount({ atParkValues: [true, true], slewingDefault: true })
   const pointing = session.rig.pointing
 
   assert.ok(pointing)
@@ -207,7 +231,8 @@ test('pointing fails without a slew when the mount cannot unpark', async () => {
 })
 
 test('pointing fails without a slew when slewing never settles', async () => {
-  const session = await connectMount([false], {
+  const session = await connectMount({
+    atParkValues: [],
     atParkDefault: false,
     slewingDefault: true,
   })
@@ -234,7 +259,7 @@ test('pointing fails without a slew when slewing never settles', async () => {
 })
 
 test('park commands an unparked mount then polls until it is parked', async () => {
-  const session = await connectMount([false, false, true])
+  const session = await connectMount({ atParkValues: [false, false, true] })
   const mount = session.rig.mount
 
   assert.ok(mount?.park)

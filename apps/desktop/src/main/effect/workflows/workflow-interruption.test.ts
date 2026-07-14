@@ -61,15 +61,27 @@ function makeSession(id: string, disconnectFn?: Effect.Effect<void>): DeviceSess
   }
 }
 
+interface ExternalSessionOptions {
+  getExposureState: RigCamera['getExposureState']
+  stopExposure?: () => Effect.Effect<void>
+  park?: () => Effect.Effect<void>
+  startExposure?: RigCamera['startExposure']
+  getLatestFrame?: RigCamera['getLatestFrame']
+  supportsDark?: boolean
+}
+
 function makeExternalSession(
   id: string,
-  getExposureState: RigCamera['getExposureState'],
-  stopExposure: () => Effect.Effect<void> = () => Effect.void,
-  park: () => Effect.Effect<void> = () => Effect.void,
-  startExposure: RigCamera['startExposure'] = () => Effect.void,
-  getLatestFrame: RigCamera['getLatestFrame'] = () => Effect.fail(new Error('No frame')),
-  supportsDark = true,
+  options: ExternalSessionOptions,
 ): DeviceSession {
+  const {
+    getExposureState,
+    stopExposure = () => Effect.void,
+    park = () => Effect.void,
+    startExposure = () => Effect.void,
+    getLatestFrame = () => Effect.fail(new Error('No frame')),
+    supportsDark = true,
+  } = options
   const camera: RigCamera = {
     startExposure,
     ...(supportsDark ? { startDarkExposure: (input, context) => startExposure({ ...input, light: false }, context) } : {}),
@@ -142,9 +154,7 @@ function makeTestLayer(
   busLayer: Layer.Layer<EventBus> = EventBusLive,
   storageLayer: Layer.Layer<FrameStorage> = frameStorageTestLayer,
   coordinatorLayer: Layer.Layer<OperationCoordinator> = coordinatorTestLayer,
-): Layer.Layer<
-  AggregateStore | SessionManager | OperationCoordinator | EventBus | DeviceRegistry | FrameStorage
-> {
+): Layer.Layer<AggregateStore | SessionManager | OperationCoordinator | EventBus | DeviceRegistry | FrameStorage> {
   return Layer.mergeAll(baseTestLayer, Layer.provide(coordinatorLayer, baseTestLayer), busLayer, registry, storageLayer)
 }
 
@@ -152,38 +162,46 @@ function makeDelayedSequenceCoordinatorLayer(
   entered: Deferred.Deferred<void>,
   resume: Deferred.Deferred<void>,
   released: Array<'sequence' | 'sequence-continue'>,
+  releasedEntered?: Deferred.Deferred<void>,
+  releaseOccurrence = 1,
 ): Layer.Layer<OperationCoordinator> {
+  let releaseCount = 0
   return Layer.effect(OperationCoordinator, Effect.gen(function* () {
-    const store = yield* AggregateStore
-    return {
-      acquire: (session, kind) => Effect.gen(function* () {
-        Deferred.unsafeDone(entered, Effect.void)
-        yield* Deferred.await(resume)
-        const controller = new AbortController()
-        return {
-          id: `${kind}-${session.sessionId}`,
-          sessionId: session.sessionId,
-          kind,
-          generation: 0,
-          signal: controller.signal,
-        }
-      }),
-      acquireRecovery: (session, kind) => Effect.sync(() => {
-        const controller = new AbortController()
-        return {
-          id: `${kind}-${session.sessionId}`,
-          sessionId: session.sessionId,
-          kind,
-          generation: 0,
-          signal: controller.signal,
-        }
-      }),
-      release: (lease) => Effect.sync(() => {
-        if (lease.kind === 'sequence' || lease.kind === 'sequence-continue') released.push(lease.kind)
-      }),
-      isCurrent: () => Effect.succeed(true),
-      commitIfLease: (_lease, f) => store.update(f),
-    } satisfies OperationCoordinator
+      const store = yield* AggregateStore
+      return {
+        acquire: (session, kind) => Effect.gen(function* () {
+          Deferred.unsafeDone(entered, Effect.void)
+          yield* Deferred.await(resume)
+          const controller = new AbortController()
+          return {
+            id: `${kind}-${session.sessionId}`,
+            sessionId: session.sessionId,
+            kind,
+            generation: 0,
+            signal: controller.signal,
+          }
+        }),
+        acquireRecovery: (session, kind) => Effect.sync(() => {
+          const controller = new AbortController()
+          return {
+            id: `${kind}-${session.sessionId}`,
+            sessionId: session.sessionId,
+            kind,
+            generation: 0,
+            signal: controller.signal,
+          }
+        }),
+        release: (lease) => Effect.sync(() => {
+          if (lease.kind === 'sequence' || lease.kind === 'sequence-continue') {
+            released.push(lease.kind)
+            releaseCount++
+            if (releasedEntered && releaseCount === releaseOccurrence)
+              Deferred.unsafeDone(releasedEntered, Effect.void)
+          }
+        }),
+        isCurrent: () => Effect.succeed(true),
+        commitIfLease: (_lease, f) => store.update(f),
+      } satisfies OperationCoordinator
   }))
 }
 
@@ -192,21 +210,28 @@ function makeDelayedSequenceCoordinatorLayer(
 function makeBlockingEventBusLayer(
   blockOn: string,
   latch: Deferred.Deferred<void>,
+  entered?: Deferred.Deferred<void>,
+  occurrence = 1,
 ): Layer.Layer<EventBus> {
+  let published = 0
   return Layer.effect(EventBus, Effect.succeed({
     publish: <A>(name: string, payload: A, options?: { sessionId?: string; host?: string }) =>
       Effect.gen(function* () {
-        if (name === blockOn) {
-          yield* Deferred.await(latch)
-        }
-        return {
-          eventId: 0,
-          ts: new Date().toISOString(),
-          sessionId: options?.sessionId,
-          host: options?.host,
-          name,
-          payload,
-        } as AppEvent<A>
+          if (name === blockOn) {
+            published++
+            if (published === occurrence) {
+              if (entered) Deferred.unsafeDone(entered, Effect.void)
+              yield* Deferred.await(latch)
+            }
+          }
+          return {
+            eventId: 0,
+            ts: new Date().toISOString(),
+            sessionId: options?.sessionId,
+            host: options?.host,
+            name,
+            payload,
+          } as AppEvent<A>
       }),
     listen: () => Effect.sync(() => () => {}),
     subscribe: () => Effect.succeed({} as never),
@@ -280,13 +305,10 @@ describe('workflow interruption safety', () => {
   ]) {
     it(`external storage preflight prevents camera start when ${reason.toLowerCase()}`, async () => {
       let startCalls = 0
-      const session = makeExternalSession(
-        'storage-preflight',
-        () => Effect.succeed({ state: 'exposing', imageReady: false }),
-        undefined,
-        undefined,
-        () => Effect.sync(() => { startCalls++ }),
-      )
+      const session = makeExternalSession('storage-preflight', {
+        getExposureState: () => Effect.succeed({ state: 'exposing', imageReady: false }),
+        startExposure: () => Effect.sync(() => { startCalls++ }),
+      })
       const storageLayer = Layer.succeed(FrameStorage, {
         preflightExternalFrameStorage: () => Effect.fail(new Error(reason)),
         saveExternalFrame: () => Effect.fail(new Error('Unexpected frame save')),
@@ -314,13 +336,9 @@ describe('workflow interruption safety', () => {
 
   it('keeps a saved FITS asset and reports preview persistence failure', async () => {
     const partialPublished = Deferred.unsafeMake<void>(Symbol('partial-published'))
-    const session = makeExternalSession(
-      'preview-failure',
-      () => Effect.succeed({ state: 'ready', imageReady: true }),
-      undefined,
-      undefined,
-      undefined,
-      () =>
+    const session = makeExternalSession('preview-failure', {
+      getExposureState: () => Effect.succeed({ state: 'ready', imageReady: true }),
+      getLatestFrame: () =>
         Effect.succeed({
           transfer: 'image-bytes',
           width: 1,
@@ -329,7 +347,7 @@ describe('workflow interruption safety', () => {
           data: new Uint8Array([0, 0]),
           imageBytes: { imageElementType: 3, transmissionElementType: 3, rank: 2 },
         }),
-    )
+    })
     const storageLayer = Layer.succeed(FrameStorage, {
       preflightExternalFrameStorage: () => Effect.void,
       saveExternalFrame: () =>
@@ -372,6 +390,7 @@ describe('workflow interruption safety', () => {
     // share the same RuntimeStateRef.
     let pluginCleanupCalled = false
     const connectBlocked = Deferred.unsafeMake<void>(Symbol('test'))
+    const connectEntered = Deferred.unsafeMake<void>(Symbol('connect-entered'))
 
     const fakeRegistry = makeFakeRegistry(
       Effect.acquireUseRelease(
@@ -382,6 +401,7 @@ describe('workflow interruption safety', () => {
               'blocked',
               Effect.sync(() => { pluginCleanupCalled = true }),
             )
+            Deferred.unsafeDone(connectEntered, Effect.void)
             yield* Deferred.await(connectBlocked)
             return session
           }),
@@ -400,7 +420,7 @@ describe('workflow interruption safety', () => {
         const fiber = yield* Effect.fork(
           runConnect({ pluginKind: 'fake-seestar', deviceId: 'test:blocked' }),
         )
-        yield* Effect.sleep('50 millis')
+        yield* Deferred.await(connectEntered)
         yield* Fiber.interrupt(fiber)
         yield* fiber.await
 
@@ -472,6 +492,7 @@ describe('workflow interruption safety', () => {
     // share the same RuntimeStateRef.
     let cleanupCalled = false
     const succeededLatch = Deferred.unsafeMake<void>(Symbol('test'))
+    const succeededEntered = Deferred.unsafeMake<void>(Symbol('succeeded-entered'))
 
     const session = makeSession(
       's1',
@@ -481,6 +502,7 @@ describe('workflow interruption safety', () => {
     const blockingBusLayer = makeBlockingEventBusLayer(
       'session.connect.succeeded',
       succeededLatch,
+      succeededEntered,
     )
     const testLayer = makeTestLayer(
       makeFakeRegistry(Effect.succeed(session)),
@@ -492,7 +514,7 @@ describe('workflow interruption safety', () => {
         const fiber = yield* Effect.fork(
           runConnect({ pluginKind: 'fake-seestar', deviceId: 'test:s1' }),
         )
-        yield* Effect.sleep('50 millis')
+        yield* Deferred.await(succeededEntered)
         yield* Fiber.interrupt(fiber)
         yield* fiber.await
 
@@ -508,12 +530,14 @@ describe('workflow interruption safety', () => {
   it('concurrent duplicate capture starts => one device start call', async () => {
     let startCallCount = 0
     const startLatch = Deferred.unsafeMake<void>(Symbol('test'))
+    const startEntered = Deferred.unsafeMake<void>(Symbol('start-entered'))
 
     const session = makeSession('s1')
     session.rig.capture = {
       start: () =>
         Effect.gen(function* () {
           startCallCount++
+          Deferred.unsafeDone(startEntered, Effect.void)
           yield* Deferred.await(startLatch)
         }),
       stop: () => Effect.void,
@@ -528,7 +552,7 @@ describe('workflow interruption safety', () => {
         const fiberA = yield* Effect.fork(runStartCapture)
         const fiberB = yield* Effect.fork(runStartCapture)
 
-        yield* Effect.sleep('50 millis')
+        yield* Deferred.await(startEntered)
         Deferred.unsafeDone(startLatch, Effect.void)
 
         yield* fiberA.await
@@ -580,16 +604,18 @@ describe('workflow interruption safety', () => {
     let stopCalls = 0
     const stateEntered = Deferred.unsafeMake<void>(Symbol('state-entered'))
     const allowIdle = Deferred.unsafeMake<void>(Symbol('allow-idle'))
-    const session = makeExternalSession(
-      's1',
-      () =>
+    const session = makeExternalSession('s1', {
+      getExposureState: () =>
         Effect.gen(function* () {
           Deferred.unsafeDone(stateEntered, Effect.void)
           yield* Deferred.await(allowIdle)
           return { state: 'idle' as const, imageReady: false }
         }),
-      () => Effect.sync(() => { stopCalls++ }),
-    )
+      stopExposure: () =>
+        Effect.sync(() => {
+          stopCalls++
+        }),
+    })
     const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)))
 
     const result = await Effect.runPromise(
@@ -617,17 +643,18 @@ describe('workflow interruption safety', () => {
     let parkCalls = 0
     const stateEntered = Deferred.unsafeMake<void>(Symbol('state-entered'))
     const allowIdle = Deferred.unsafeMake<void>(Symbol('allow-idle'))
-    const session = makeExternalSession(
-      's1',
-      () =>
+    const session = makeExternalSession('s1', {
+      getExposureState: () =>
         Effect.gen(function* () {
           Deferred.unsafeDone(stateEntered, Effect.void)
           yield* Deferred.await(allowIdle)
           return { state: 'idle' as const, imageReady: false }
         }),
-      undefined,
-      () => Effect.sync(() => { parkCalls++ }),
-    )
+      park: () =>
+        Effect.sync(() => {
+          parkCalls++
+        }),
+    })
     const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)))
 
     await Effect.runPromise(
@@ -646,12 +673,10 @@ describe('workflow interruption safety', () => {
   })
 
   it('failed park clears a previously parked mount projection', async () => {
-    const session = makeExternalSession(
-      's1',
-      () => Effect.succeed({ state: 'idle', imageReady: false }),
-      undefined,
-      () => Effect.fail(new Error('Park command failed')),
-    )
+    const session = makeExternalSession('s1', {
+      getExposureState: () => Effect.succeed({ state: 'idle', imageReady: false }),
+      park: () => Effect.fail(new Error('Park command failed')),
+    })
     const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)))
 
     const result = await Effect.runPromise(
@@ -674,24 +699,33 @@ describe('workflow interruption safety', () => {
   it('external poller attempts stop before reporting a terminal camera error', async () => {
     let stateReads = 0
     let stopCalls = 0
-    const session = makeExternalSession(
-      's1',
-      () =>
-        Effect.sync(() => {
+    const terminalErrorEntered = Deferred.unsafeMake<void>(Symbol('terminal-error-entered'))
+    const failedLatch = Deferred.unsafeMake<void>(Symbol('capture-failed'))
+    const failedEntered = Deferred.unsafeMake<void>(Symbol('capture-failed-entered'))
+    const session = makeExternalSession('s1', {
+      getExposureState: () => Effect.gen(function* () {
           stateReads++
           if (stateReads > 3) return { state: 'idle' as const, imageReady: false }
+          if (stateReads === 3) {
+            Deferred.unsafeDone(terminalErrorEntered, Effect.void)
+            yield* Deferred.await(failedLatch)
+          }
           return { state: 'error' as const, imageReady: false }
         }),
-      () => Effect.sync(() => { stopCalls++ }),
-    )
-    const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)))
+      stopExposure: () => Effect.sync(() => { stopCalls++ }),
+    })
+    const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)), makeBlockingEventBusLayer('capture.failed', failedLatch, failedEntered))
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         yield* runConnect({ pluginKind: 'fake-seestar', deviceId: 'test:s1' })
         yield* runStartCapture
-        yield* Effect.sleep('2 seconds')
+        yield* Deferred.await(terminalErrorEntered)
         const store = yield* AggregateStore
+        const whilePolling = yield* store.get
+        assert.equal(whilePolling.capture.phase, 'capturing')
+        Deferred.unsafeDone(failedLatch, Effect.void)
+        yield* Deferred.await(failedEntered)
         return yield* store.get
       }).pipe(Effect.provide(testLayer)),
     )
@@ -728,27 +762,41 @@ describe('workflow interruption safety', () => {
     let starts = 0
     const controller = new AbortController()
     controller.abort()
-    const result = await Effect.runPromise(captureExternalFrame({
-      startExposure: () => Effect.sync(() => { starts++ }),
-      stopExposure: () => Effect.void,
-      getExposureState: () => Effect.succeed({ state: 'idle', imageReady: false }),
-      getLatestFrame: () => Effect.fail(new Error('Unexpected frame retrieval')),
-    }, { mode: 'external', stop: () => Effect.void }, { durationSec: 1 }, { signal: controller.signal }).pipe(Effect.either))
+    const result = await Effect.runPromise(
+      captureExternalFrame(
+        {
+          startExposure: () => Effect.sync(() => { starts++ }),
+          stopExposure: () => Effect.void,
+          getExposureState: () => Effect.succeed({ state: 'idle', imageReady: false }),
+          getLatestFrame: () => Effect.fail(new Error('Unexpected frame retrieval')),
+        },
+        { mode: 'external', stop: () => Effect.void },
+        { durationSec: 1 },
+        { signal: controller.signal },
+      ).pipe(Effect.either),
+    )
     assert.equal(starts, 0)
     assert.equal(Either.isLeft(result), true)
   })
 
   it('treats idle before ready as a stopped external exposure', async () => {
     const states: string[] = []
-    const result = await Effect.runPromise(captureExternalFrame({
-      startExposure: () => Effect.void,
-      stopExposure: () => Effect.void,
-      getExposureState: () => Effect.succeed({ state: 'idle', imageReady: false }),
-      getLatestFrame: () => Effect.fail(new Error('Unexpected frame retrieval')),
-    }, { mode: 'external', stop: () => Effect.void }, {
-      durationSec: 1,
-      onState: (state) => Effect.sync(() => { states.push(state.state) }),
-    }, {}).pipe(Effect.either))
+    const result = await Effect.runPromise(
+      captureExternalFrame(
+        {
+          startExposure: () => Effect.void,
+          stopExposure: () => Effect.void,
+          getExposureState: () => Effect.succeed({ state: 'idle', imageReady: false }),
+          getLatestFrame: () => Effect.fail(new Error('Unexpected frame retrieval')),
+        },
+        { mode: 'external', stop: () => Effect.void },
+        {
+          durationSec: 1,
+          onState: (state) => Effect.sync(() => { states.push(state.state) }),
+        },
+        {},
+      ).pipe(Effect.either),
+    )
     assert.equal(Either.isLeft(result), true)
     if (Either.isLeft(result)) assert.equal(result.left.message, 'External exposure was stopped')
     assert.deepEqual(states, ['idle'])
@@ -756,12 +804,24 @@ describe('workflow interruption safety', () => {
 
   it('rejects a dark plan when the rig has no dark exposure command', async () => {
     let starts = 0
-    const session = makeExternalSession('sequence-no-dark', () => Effect.succeed({ state: 'ready', imageReady: true }), undefined, undefined, () => Effect.sync(() => { starts++ }), undefined, false)
+    const session = makeExternalSession('sequence-no-dark', {
+      getExposureState: () => Effect.succeed({ state: 'ready', imageReady: true }),
+      startExposure: () => Effect.sync(() => { starts++ }),
+      supportsDark: false,
+    })
     const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)), EventBusLive, sequenceStorage([]))
     let rejected = false
-    const result = await Effect.runPromise(sequenceProgram(testLayer, function* () {
-      rejected = Either.isLeft(yield* runConfigureExternalSequence({ lightCount: 1, darkCount: 1, durationSec: 1 }).pipe(Effect.either))
-    }))
+    const result = await Effect.runPromise(
+      sequenceProgram(testLayer, function* () {
+        rejected = Either.isLeft(
+          yield* runConfigureExternalSequence({
+            lightCount: 1,
+            darkCount: 1,
+            durationSec: 1,
+          }).pipe(Effect.either),
+        )
+      }),
+    )
     assert.equal(rejected, true)
     assert.equal(starts, 0)
   })
@@ -769,22 +829,104 @@ describe('workflow interruption safety', () => {
   it('runs one light, waits for cover confirmation, then runs one dark', async () => {
     const lights: boolean[] = []
     const savedKinds: Array<'light' | 'dark' | undefined> = []
-    const session = makeExternalSession(
-      'sequence-light-dark',
-      () => Effect.succeed({ state: 'ready', imageReady: true }),
-      undefined,
-      undefined,
-      (input) => Effect.sync(() => { lights.push(input.light ?? true) }),
-      () => Effect.succeed(frame()),
+    const session = makeExternalSession('sequence-light-dark', {
+      getExposureState: () =>
+        Effect.succeed({ state: 'ready', imageReady: true }),
+      startExposure: (input) =>
+        Effect.sync(() => {
+          lights.push(input.light ?? true)
+        }),
+      getLatestFrame: () => Effect.succeed(frame()),
+    })
+    const lightCompleteLatch = Deferred.unsafeMake<void>(
+      Symbol('light-complete'),
     )
-    const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)), EventBusLive, sequenceStorage(savedKinds))
-    const result = await Effect.runPromise(sequenceProgram(testLayer, function* () {
-      yield* runConfigureExternalSequence({ lightCount: 1, darkCount: 1, durationSec: 1 })
-      yield* runStartExternalSequence
-      yield* Effect.sleep('700 millis')
-      yield* runContinueExternalSequence
-      yield* Effect.sleep('700 millis')
-    }))
+    const lightCompleteEntered = Deferred.unsafeMake<void>(
+      Symbol('light-complete-entered'),
+    )
+    const darkCompleteLatch = Deferred.unsafeMake<void>(Symbol('dark-complete'))
+    const darkCompleteEntered = Deferred.unsafeMake<void>(
+      Symbol('dark-complete-entered'),
+    )
+    const sequenceEntered = Deferred.unsafeMake<void>(
+      Symbol('sequence-entered'),
+    )
+    const resume = Deferred.unsafeMake<void>(Symbol('sequence-resume'))
+    const lightReleased = Deferred.unsafeMake<void>(Symbol('light-released'))
+    const released: Array<'sequence' | 'sequence-continue'> = []
+    let captureSucceeded = 0
+    const busLayer = Layer.effect(
+      EventBus,
+      Effect.succeed({
+        publish: <A>(
+          name: string,
+          payload: A,
+          options?: { sessionId?: string; host?: string },
+        ) =>
+          Effect.gen(function* () {
+            if (name === 'capture.succeeded') {
+              captureSucceeded++
+              if (captureSucceeded === 2 || captureSucceeded === 4) {
+                const latch =
+                  captureSucceeded === 2
+                    ? lightCompleteLatch
+                    : darkCompleteLatch
+                const entered =
+                  captureSucceeded === 2
+                    ? lightCompleteEntered
+                    : darkCompleteEntered
+                Deferred.unsafeDone(entered, Effect.void)
+                yield* Deferred.await(latch)
+              }
+            }
+            return {
+              eventId: 0,
+              ts: new Date().toISOString(),
+              sessionId: options?.sessionId,
+              host: options?.host,
+              name,
+              payload,
+            } as AppEvent<A>
+          }),
+        listen: () => Effect.sync(() => () => {}),
+        subscribe: () => Effect.succeed({} as never),
+      } satisfies EventBus),
+    )
+    const testLayer = makeTestLayer(
+      makeFakeRegistry(Effect.succeed(session)),
+      busLayer,
+      sequenceStorage(savedKinds),
+      makeDelayedSequenceCoordinatorLayer(
+        sequenceEntered,
+        resume,
+        released,
+        lightReleased,
+      ),
+    )
+    const result = await Effect.runPromise(
+      sequenceProgram(testLayer, function* () {
+        const store = yield* AggregateStore
+        yield* store.update((current) => ({
+          ...current,
+          sequence: {
+            phase: 'idle',
+            plan: { lightCount: 1, darkCount: 1, durationSec: 1 },
+            completed: 0,
+            failed: 0,
+          },
+        }))
+        Deferred.unsafeDone(resume, Effect.void)
+        yield* runStartExternalSequence
+        yield* Deferred.await(lightCompleteEntered)
+        assert.equal((yield* store.get).sequence.phase, 'awaiting-darks')
+        Deferred.unsafeDone(lightCompleteLatch, Effect.void)
+        yield* Deferred.await(lightReleased)
+        yield* runContinueExternalSequence
+        yield* Deferred.await(darkCompleteEntered)
+        assert.equal((yield* store.get).sequence.phase, 'complete')
+        Deferred.unsafeDone(darkCompleteLatch, Effect.void)
+      }),
+    )
     assert.deepEqual(lights, [true, false])
     assert.deepEqual(savedKinds, ['light', 'dark'])
     assert.equal(result.sequence.phase, 'complete')
@@ -792,20 +934,46 @@ describe('workflow interruption safety', () => {
 
   it('records a failed light and continues with the next frame', async () => {
     let starts = 0
-    const session = makeExternalSession(
-      'sequence-skip',
-      () => Effect.succeed({ state: 'ready', imageReady: true }),
-      undefined,
-      undefined,
-      () => Effect.sync(() => { starts++ }),
-      () => starts === 1 ? Effect.fail(new Error('frame failed')) : Effect.succeed(frame()),
+    const session = makeExternalSession('sequence-skip', {
+      getExposureState: () =>
+        Effect.succeed({ state: 'ready', imageReady: true }),
+      startExposure: () =>
+        Effect.sync(() => {
+          starts++
+        }),
+      getLatestFrame: () =>
+        starts === 1
+          ? Effect.fail(new Error('frame failed'))
+          : Effect.succeed(frame()),
+    })
+    const completeLatch = Deferred.unsafeMake<void>(Symbol('sequence-complete'))
+    const completeEntered = Deferred.unsafeMake<void>(
+      Symbol('sequence-complete-entered'),
     )
-    const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)), EventBusLive, sequenceStorage([]))
-    const result = await Effect.runPromise(sequenceProgram(testLayer, function* () {
-      yield* runConfigureExternalSequence({ lightCount: 2, darkCount: 0, durationSec: 1 })
-      yield* runStartExternalSequence
-      yield* Effect.sleep('1300 millis')
-    }))
+    const testLayer = makeTestLayer(
+      makeFakeRegistry(Effect.succeed(session)),
+      makeBlockingEventBusLayer(
+        'capture.succeeded',
+        completeLatch,
+        completeEntered,
+        2,
+      ),
+      sequenceStorage([]),
+    )
+    const result = await Effect.runPromise(
+      sequenceProgram(testLayer, function* () {
+        yield* runConfigureExternalSequence({
+          lightCount: 2,
+          darkCount: 0,
+          durationSec: 1,
+        })
+        yield* runStartExternalSequence
+        yield* Deferred.await(completeEntered)
+        const store = yield* AggregateStore
+        assert.equal((yield* store.get).sequence.phase, 'complete')
+        Deferred.unsafeDone(completeLatch, Effect.void)
+      }),
+    )
     assert.equal(starts, 2)
     assert.equal(result.sequence.failed, 1)
     assert.equal(result.sequence.completed, 1)
@@ -815,45 +983,82 @@ describe('workflow interruption safety', () => {
     let starts = 0
     let states = 0
     const entered = Deferred.unsafeMake<void>(Symbol('sequence-start'))
-    const session = makeExternalSession('sequence-stop', () => Effect.gen(function* () {
-      Deferred.unsafeDone(entered, Effect.void)
-      states++
-      return { state: states === 1 ? 'exposing' as const : 'idle' as const, imageReady: false }
-    }), () => Effect.void, undefined, () => Effect.sync(() => { starts++ }))
-    const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)), EventBusLive, sequenceStorage([]))
-    const result = await Effect.runPromise(sequenceProgram(testLayer, function* () {
-      yield* runConfigureExternalSequence({ lightCount: 2, darkCount: 0, durationSec: 1 })
-      yield* runStartExternalSequence
-      yield* Deferred.await(entered)
-      yield* runStopCapture
-      yield* Effect.sleep('100 millis')
-    }))
+    const session = makeExternalSession('sequence-stop', {
+      getExposureState: () =>
+        Effect.gen(function* () {
+          Deferred.unsafeDone(entered, Effect.void)
+          states++
+          return {
+            state: states === 1 ? ('exposing' as const) : ('idle' as const),
+            imageReady: false,
+          }
+        }),
+      stopExposure: () => Effect.void,
+      startExposure: () =>
+        Effect.sync(() => {
+          starts++
+        }),
+    })
+    const testLayer = makeTestLayer(
+      makeFakeRegistry(Effect.succeed(session)),
+      EventBusLive,
+      sequenceStorage([]),
+    )
+    const result = await Effect.runPromise(
+      sequenceProgram(testLayer, function* () {
+        yield* runConfigureExternalSequence({
+          lightCount: 2,
+          darkCount: 0,
+          durationSec: 1,
+        })
+        yield* runStartExternalSequence
+        yield* Deferred.await(entered)
+        const store = yield* AggregateStore
+        assert.equal((yield* store.get).sequence.phase, 'lights')
+        yield* runStopCapture
+      }),
+    )
     assert.equal(starts, 1)
     assert.equal(result.sequence.phase, 'stopped')
   })
 
   for (const recovery of ['stop', 'park'] as const) {
     it(`${recovery} failure terminalizes an external sequence`, async () => {
-      const entered = Deferred.unsafeMake<void>(Symbol(`sequence-${recovery}-failure`))
-      const session = makeExternalSession(
-        `sequence-${recovery}-failure`,
-        () => Effect.sync(() => {
-          Deferred.unsafeDone(entered, Effect.void)
-          return { state: 'exposing' as const, imageReady: false }
-        }),
-        () => Effect.fail(new Error(`${recovery} failed`)),
-        recovery === 'park' ? () => Effect.void : undefined,
+      const entered = Deferred.unsafeMake<void>(
+        Symbol(`sequence-${recovery}-failure`),
       )
-      const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)), EventBusLive, sequenceStorage([]))
-      const result = await Effect.runPromise(sequenceProgram(testLayer, function* () {
-        yield* runConfigureExternalSequence({ lightCount: 1, darkCount: 0, durationSec: 1 })
-        yield* runStartExternalSequence
-        yield* Deferred.await(entered)
-        if (recovery === 'stop') yield* runStopCapture.pipe(Effect.either)
-        else yield* runPark.pipe(Effect.either)
-      }))
+      const session = makeExternalSession(`sequence-${recovery}-failure`, {
+        getExposureState: () =>
+          Effect.sync(() => {
+            Deferred.unsafeDone(entered, Effect.void)
+            return { state: 'exposing' as const, imageReady: false }
+          }),
+        stopExposure: () => Effect.fail(new Error(`${recovery} failed`)),
+        ...(recovery === 'park' ? { park: () => Effect.void } : {}),
+      })
+      const testLayer = makeTestLayer(
+        makeFakeRegistry(Effect.succeed(session)),
+        EventBusLive,
+        sequenceStorage([]),
+      )
+      const result = await Effect.runPromise(
+        sequenceProgram(testLayer, function* () {
+          yield* runConfigureExternalSequence({
+            lightCount: 1,
+            darkCount: 0,
+            durationSec: 1,
+          })
+          yield* runStartExternalSequence
+          yield* Deferred.await(entered)
+          if (recovery === 'stop') yield* runStopCapture.pipe(Effect.either)
+          else yield* runPark.pipe(Effect.either)
+        }),
+      )
       assert.equal(result.sequence.phase, 'failed')
-      assert.match(result.sequence.lastError ?? '', new RegExp(`${recovery} failed`))
+      assert.match(
+        result.sequence.lastError ?? '',
+        new RegExp(`${recovery} failed`),
+      )
     })
   }
 
@@ -861,59 +1066,252 @@ describe('workflow interruption safety', () => {
     const order: string[] = []
     let states = 0
     const entered = Deferred.unsafeMake<void>(Symbol('sequence-park'))
-    const session = makeExternalSession('sequence-park', () => Effect.gen(function* () {
-      Deferred.unsafeDone(entered, Effect.void)
-      states++
-      return { state: states === 1 ? 'exposing' as const : 'idle' as const, imageReady: false }
-    }), () => Effect.sync(() => { order.push('stop') }), () => Effect.sync(() => { order.push('park') }), () => Effect.sync(() => { order.push('start') }))
-    const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)), EventBusLive, sequenceStorage([]))
-    await Effect.runPromise(sequenceProgram(testLayer, function* () {
-      yield* runConfigureExternalSequence({ lightCount: 2, darkCount: 0, durationSec: 1 })
-      yield* runStartExternalSequence
-      yield* Deferred.await(entered)
-      yield* runPark
-      yield* Effect.sleep('100 millis')
-    }))
+    const session = makeExternalSession('sequence-park', {
+      getExposureState: () =>
+        Effect.gen(function* () {
+          Deferred.unsafeDone(entered, Effect.void)
+          states++
+          return {
+            state: states === 1 ? ('exposing' as const) : ('idle' as const),
+            imageReady: false,
+          }
+        }),
+      stopExposure: () =>
+        Effect.sync(() => {
+          order.push('stop')
+        }),
+      park: () =>
+        Effect.sync(() => {
+          order.push('park')
+        }),
+      startExposure: () =>
+        Effect.sync(() => {
+          order.push('start')
+        }),
+    })
+    const testLayer = makeTestLayer(
+      makeFakeRegistry(Effect.succeed(session)),
+      EventBusLive,
+      sequenceStorage([]),
+    )
+    await Effect.runPromise(
+      sequenceProgram(testLayer, function* () {
+        yield* runConfigureExternalSequence({
+          lightCount: 2,
+          darkCount: 0,
+          durationSec: 1,
+        })
+        yield* runStartExternalSequence
+        yield* Deferred.await(entered)
+        const store = yield* AggregateStore
+        assert.equal((yield* store.get).sequence.phase, 'lights')
+        yield* runPark
+      }),
+    )
     assert.deepEqual(order, ['start', 'stop', 'park'])
   })
 
   it('rejects sequence storage preflight before any camera start', async () => {
     let starts = 0
-    const session = makeExternalSession('sequence-preflight', () => Effect.succeed({ state: 'ready', imageReady: true }), undefined, undefined, () => Effect.sync(() => { starts++ }))
-    const storage = Layer.succeed(FrameStorage, { preflightExternalFrameStorage: () => Effect.fail(new Error('full')), saveExternalFrame: () => Effect.succeed(saved()) })
-    const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)), EventBusLive, storage)
-    await Effect.runPromise(sequenceProgram(testLayer, function* () {
-      yield* runConfigureExternalSequence({ lightCount: 1, darkCount: 0, durationSec: 1 })
-      yield* runStartExternalSequence
-      yield* Effect.sleep('100 millis')
-    }))
+    const session = makeExternalSession('sequence-preflight', {
+      getExposureState: () =>
+        Effect.succeed({ state: 'ready', imageReady: true }),
+      startExposure: () =>
+        Effect.sync(() => {
+          starts++
+        }),
+    })
+    const storage = Layer.succeed(FrameStorage, {
+      preflightExternalFrameStorage: () => Effect.fail(new Error('full')),
+      saveExternalFrame: () => Effect.succeed(saved()),
+    })
+    const failedLatch = Deferred.unsafeMake<void>(
+      Symbol('sequence-preflight-failed'),
+    )
+    const failedEntered = Deferred.unsafeMake<void>(
+      Symbol('sequence-preflight-failed-entered'),
+    )
+    const testLayer = makeTestLayer(
+      makeFakeRegistry(Effect.succeed(session)),
+      makeBlockingEventBusLayer('capture.failed', failedLatch, failedEntered),
+      storage,
+    )
+    await Effect.runPromise(
+      sequenceProgram(testLayer, function* () {
+        yield* runConfigureExternalSequence({
+          lightCount: 1,
+          darkCount: 0,
+          durationSec: 1,
+        })
+        yield* runStartExternalSequence
+        yield* Deferred.await(failedEntered)
+        const store = yield* AggregateStore
+        assert.equal((yield* store.get).sequence.phase, 'failed')
+        Deferred.unsafeDone(failedLatch, Effect.void)
+      }),
+    )
     assert.equal(starts, 0)
   })
 
   it('finish during the cover pause cannot continue dark frames', async () => {
     let starts = 0
-    const session = makeExternalSession('sequence-finish', () => Effect.succeed({ state: 'ready', imageReady: true }), undefined, undefined, () => Effect.sync(() => { starts++ }), () => Effect.succeed(frame()))
-    const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)), EventBusLive, sequenceStorage([]))
-    const result = await Effect.runPromise(sequenceProgram(testLayer, function* () {
-      yield* runConfigureExternalSequence({ lightCount: 1, darkCount: 1, durationSec: 1 })
-      yield* runStartExternalSequence
-      yield* Effect.sleep('700 millis')
-      yield* runFinishExternalSequence
-      yield* runContinueExternalSequence.pipe(Effect.either)
-      yield* Effect.sleep('100 millis')
-    }))
+    const session = makeExternalSession('sequence-finish', {
+      getExposureState: () =>
+        Effect.succeed({ state: 'ready', imageReady: true }),
+      startExposure: () =>
+        Effect.sync(() => {
+          starts++
+        }),
+      getLatestFrame: () => Effect.succeed(frame()),
+    })
+    const awaitingLatch = Deferred.unsafeMake<void>(Symbol('awaiting-darks'))
+    const awaitingEntered = Deferred.unsafeMake<void>(
+      Symbol('awaiting-darks-entered'),
+    )
+    const testLayer = makeTestLayer(
+      makeFakeRegistry(Effect.succeed(session)),
+      makeBlockingEventBusLayer(
+        'capture.succeeded',
+        awaitingLatch,
+        awaitingEntered,
+        2,
+      ),
+      sequenceStorage([]),
+    )
+    const result = await Effect.runPromise(
+      sequenceProgram(testLayer, function* () {
+        yield* runConfigureExternalSequence({
+          lightCount: 1,
+          darkCount: 1,
+          durationSec: 1,
+        })
+        yield* runStartExternalSequence
+        yield* Deferred.await(awaitingEntered)
+        const store = yield* AggregateStore
+        assert.equal((yield* store.get).sequence.phase, 'awaiting-darks')
+        Deferred.unsafeDone(awaitingLatch, Effect.void)
+        yield* runFinishExternalSequence
+        yield* runContinueExternalSequence.pipe(Effect.either)
+      }),
+    )
     assert.equal(starts, 1)
     assert.equal(result.sequence.phase, 'complete')
   })
 
   for (const action of ['finish', 'stop', 'park'] as const) {
     it(`${action} remains available during the dark-cover pause`, async () => {
-      const session = makeExternalSession(
-        `sequence-awaiting-${action}`,
-        () => Effect.succeed({ state: 'idle', imageReady: false }),
+      const session = makeExternalSession(`sequence-awaiting-${action}`, {
+        getExposureState: () =>
+          Effect.succeed({ state: 'idle', imageReady: false }),
+      })
+      const testLayer = makeTestLayer(
+        makeFakeRegistry(Effect.succeed(session)),
+        EventBusLive,
+        sequenceStorage([]),
       )
-      const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)), EventBusLive, sequenceStorage([]))
-      const result = await Effect.runPromise(sequenceProgram(testLayer, function* () {
+      const result = await Effect.runPromise(
+        sequenceProgram(testLayer, function* () {
+          const store = yield* AggregateStore
+          yield* store.update((current) => ({
+            ...current,
+            sequence: {
+              phase: 'awaiting-darks',
+              plan: { lightCount: 1, darkCount: 1, durationSec: 1 },
+              target: { id: 'target', name: 'Target', short: 'target' },
+              completed: 1,
+              failed: 0,
+            },
+          }))
+          if (action === 'finish') yield* runFinishExternalSequence
+          if (action === 'stop') yield* runStopCapture
+          if (action === 'park') yield* runPark
+        }),
+      )
+      assert.equal(
+        result.sequence.phase,
+        action === 'finish' ? 'complete' : 'stopped',
+      )
+    })
+  }
+
+  it('stop preempts a queued sequence start before it can start hardware', async () => {
+    let starts = 0
+    const entered = Deferred.unsafeMake<void>(Symbol('sequence-start-entered'))
+    const resume = Deferred.unsafeMake<void>(Symbol('sequence-start-resume'))
+    const released: Array<'sequence' | 'sequence-continue'> = []
+    const session = makeExternalSession('sequence-queued-stop', {
+      getExposureState: () =>
+        Effect.succeed({ state: 'ready', imageReady: true }),
+      startExposure: () =>
+        Effect.sync(() => {
+          starts++
+        }),
+      getLatestFrame: () => Effect.succeed(frame()),
+    })
+    const testLayer = makeTestLayer(
+      makeFakeRegistry(Effect.succeed(session)),
+      EventBusLive,
+      sequenceStorage([]),
+      makeDelayedSequenceCoordinatorLayer(entered, resume, released),
+    )
+    await Effect.runPromise(
+      sequenceProgram(testLayer, function* () {
+        const store = yield* AggregateStore
+        yield* store.update((current) => ({
+          ...current,
+          sequence: {
+            phase: 'idle',
+            plan: { lightCount: 1, darkCount: 0, durationSec: 1 },
+            completed: 0,
+            failed: 0,
+          },
+        }))
+        const startFiber = yield* Effect.fork(runStartExternalSequence)
+        yield* Deferred.await(entered)
+        assert.equal((yield* store.get).sequence.phase, 'idle')
+        yield* store.update((current) => ({
+          ...current,
+          sequence: {
+            ...current.sequence,
+            phase: 'lights',
+            target: { id: 'target', name: 'Target', short: 'target' },
+          },
+        }))
+        assert.equal((yield* store.get).sequence.phase, 'lights')
+        yield* runStopCapture
+        assert.equal((yield* store.get).sequence.phase, 'stopped')
+        Deferred.unsafeDone(resume, Effect.void)
+        yield* startFiber.await
+      }),
+    )
+    assert.equal(starts, 0)
+    assert.deepEqual(released, ['sequence'])
+  })
+
+  it('finish preempts a queued dark continuation before it can start hardware', async () => {
+    let starts = 0
+    const entered = Deferred.unsafeMake<void>(
+      Symbol('sequence-continue-entered'),
+    )
+    const resume = Deferred.unsafeMake<void>(Symbol('sequence-continue-resume'))
+    const released: Array<'sequence' | 'sequence-continue'> = []
+    const session = makeExternalSession('sequence-queued-finish', {
+      getExposureState: () =>
+        Effect.succeed({ state: 'ready', imageReady: true }),
+      startExposure: () =>
+        Effect.sync(() => {
+          starts++
+        }),
+      getLatestFrame: () => Effect.succeed(frame()),
+    })
+    const testLayer = makeTestLayer(
+      makeFakeRegistry(Effect.succeed(session)),
+      EventBusLive,
+      sequenceStorage([]),
+      makeDelayedSequenceCoordinatorLayer(entered, resume, released),
+    )
+    await Effect.runPromise(
+      sequenceProgram(testLayer, function* () {
         const store = yield* AggregateStore
         yield* store.update((current) => ({
           ...current,
@@ -925,140 +1323,232 @@ describe('workflow interruption safety', () => {
             failed: 0,
           },
         }))
-        if (action === 'finish') yield* runFinishExternalSequence
-        if (action === 'stop') yield* runStopCapture
-        if (action === 'park') yield* runPark
-      }))
-      assert.equal(result.sequence.phase, action === 'finish' ? 'complete' : 'stopped')
-    })
-  }
-
-  it('stop preempts a queued sequence start before it can start hardware', async () => {
-    let starts = 0
-    const session = makeExternalSession('sequence-queued-stop', () => Effect.succeed({ state: 'ready', imageReady: true }), undefined, undefined, () => Effect.sync(() => { starts++ }), () => Effect.succeed(frame()))
-    const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)), EventBusLive, sequenceStorage([]))
-    await Effect.runPromise(sequenceProgram(testLayer, function* () {
-      yield* runConfigureExternalSequence({ lightCount: 1, darkCount: 0, durationSec: 1 })
-      yield* runStartExternalSequence
-      yield* runStopCapture
-      yield* Effect.sleep('600 millis')
-    }))
+        const continueFiber = yield* Effect.fork(runContinueExternalSequence)
+        yield* Deferred.await(entered)
+        assert.equal((yield* store.get).sequence.phase, 'awaiting-darks')
+        yield* runFinishExternalSequence
+        assert.equal((yield* store.get).sequence.phase, 'complete')
+        Deferred.unsafeDone(resume, Effect.void)
+        yield* continueFiber.await
+      }),
+    )
     assert.equal(starts, 0)
-  })
-
-  it('finish preempts a queued dark continuation before it can start hardware', async () => {
-    let starts = 0
-    const session = makeExternalSession('sequence-queued-finish', () => Effect.succeed({ state: 'ready', imageReady: true }), undefined, undefined, () => Effect.sync(() => { starts++ }), () => Effect.succeed(frame()))
-    const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)), EventBusLive, sequenceStorage([]))
-    await Effect.runPromise(sequenceProgram(testLayer, function* () {
-      yield* runConfigureExternalSequence({ lightCount: 1, darkCount: 1, durationSec: 1 })
-      yield* runStartExternalSequence
-      yield* Effect.sleep('700 millis')
-      yield* runContinueExternalSequence
-      yield* runFinishExternalSequence
-      yield* Effect.sleep('600 millis')
-    }))
-    assert.equal(starts, 1)
+    assert.deepEqual(released, ['sequence-continue'])
   })
 
   for (const request of ['start', 'continue'] as const) {
     for (const action of ['finish', 'stop', 'park'] as const) {
       it(`${action} terminalization between ${request} request and lease acquisition cannot start an exposure`, async () => {
         let starts = 0
-        const entered = Deferred.unsafeMake<void>(Symbol(`sequence-${request}-${action}-entered`))
-        const resume = Deferred.unsafeMake<void>(Symbol(`sequence-${request}-${action}-resume`))
-        const released: Array<'sequence' | 'sequence-continue'> = []
-        const session = makeExternalSession(
-          `sequence-${request}-${action}`,
-          () => Effect.succeed({ state: 'ready', imageReady: true }),
-          undefined,
-          undefined,
-          () => Effect.sync(() => { starts++ }),
-          () => Effect.succeed(frame()),
+        const entered = Deferred.unsafeMake<void>(
+          Symbol(`sequence-${request}-${action}-entered`),
         )
+        const resume = Deferred.unsafeMake<void>(
+          Symbol(`sequence-${request}-${action}-resume`),
+        )
+        const released: Array<'sequence' | 'sequence-continue'> = []
+        const session = makeExternalSession(`sequence-${request}-${action}`, {
+          getExposureState: () =>
+            Effect.succeed({ state: 'ready', imageReady: true }),
+          startExposure: () =>
+            Effect.sync(() => {
+              starts++
+            }),
+          getLatestFrame: () => Effect.succeed(frame()),
+        })
         const testLayer = makeTestLayer(
           makeFakeRegistry(Effect.succeed(session)),
           EventBusLive,
           sequenceStorage([]),
           makeDelayedSequenceCoordinatorLayer(entered, resume, released),
         )
-        const result = await Effect.runPromise(sequenceProgram(testLayer, function* () {
-          const store = yield* AggregateStore
-          yield* store.update((current) => ({
-            ...current,
-            sequence: request === 'start'
-              ? { phase: 'idle', plan: { lightCount: 1, darkCount: 1, durationSec: 1 }, completed: 0, failed: 0 }
-              : { phase: 'awaiting-darks', plan: { lightCount: 1, darkCount: 1, durationSec: 1 }, target: { id: 'target', name: 'Target', short: 'target' }, completed: 1, failed: 0 },
-          }))
-          const requestFiber = yield* Effect.fork(request === 'start' ? runStartExternalSequence : runContinueExternalSequence)
-          yield* Deferred.await(entered)
-          yield* store.update((current) => ({
-            ...current,
-            sequence: {
-              ...current.sequence,
-              phase: action === 'finish' ? 'awaiting-darks' : 'lights',
-              target: current.sequence.target ?? { id: 'target', name: 'Target', short: 'target' },
-            },
-          }))
-          if (action === 'finish') yield* runFinishExternalSequence
-          if (action === 'stop') yield* runStopCapture
-          if (action === 'park') yield* runPark
-          Deferred.unsafeDone(resume, Effect.void)
-          yield* requestFiber.await
-          return yield* store.get
-        }))
+        const result = await Effect.runPromise(
+          sequenceProgram(testLayer, function* () {
+            const store = yield* AggregateStore
+            yield* store.update((current) => ({
+              ...current,
+              sequence:
+                request === 'start'
+                  ? {
+                      phase: 'idle',
+                      plan: { lightCount: 1, darkCount: 1, durationSec: 1 },
+                      completed: 0,
+                      failed: 0,
+                    }
+                  : {
+                      phase: 'awaiting-darks',
+                      plan: { lightCount: 1, darkCount: 1, durationSec: 1 },
+                      target: { id: 'target', name: 'Target', short: 'target' },
+                      completed: 1,
+                      failed: 0,
+                    },
+            }))
+            const requestFiber = yield* Effect.fork(
+              request === 'start'
+                ? runStartExternalSequence
+                : runContinueExternalSequence,
+            )
+            yield* Deferred.await(entered)
+            yield* store.update((current) => ({
+              ...current,
+              sequence: {
+                ...current.sequence,
+                phase: action === 'finish' ? 'awaiting-darks' : 'lights',
+                target: current.sequence.target ?? {
+                  id: 'target',
+                  name: 'Target',
+                  short: 'target',
+                },
+              },
+            }))
+            if (action === 'finish') yield* runFinishExternalSequence
+            if (action === 'stop') yield* runStopCapture
+            if (action === 'park') yield* runPark
+            Deferred.unsafeDone(resume, Effect.void)
+            yield* requestFiber.await
+            return yield* store.get
+          }),
+        )
 
         assert.equal(starts, 0)
-        assert.deepEqual(released, [request === 'start' ? 'sequence' : 'sequence-continue'])
-        assert.equal(result.sequence.phase, action === 'finish' ? 'complete' : 'stopped')
+        assert.deepEqual(released, [
+          request === 'start' ? 'sequence' : 'sequence-continue',
+        ])
+        assert.equal(
+          result.sequence.phase,
+          action === 'finish' ? 'complete' : 'stopped',
+        )
       })
     }
   }
 
   it('rejects configuration and sequence start while capture owns the rig', async () => {
     let stopped = false
-    const session = makeExternalSession(
-      'sequence-capture-conflict',
-      () => Effect.succeed(stopped ? { state: 'idle' as const, imageReady: false } : { state: 'exposing' as const, imageReady: false }),
-      () => Effect.sync(() => { stopped = true }),
+    const session = makeExternalSession('sequence-capture-conflict', {
+      getExposureState: () =>
+        Effect.succeed(
+          stopped
+            ? { state: 'idle' as const, imageReady: false }
+            : { state: 'exposing' as const, imageReady: false },
+        ),
+      stopExposure: () =>
+        Effect.sync(() => {
+          stopped = true
+        }),
+    })
+    const testLayer = makeTestLayer(
+      makeFakeRegistry(Effect.succeed(session)),
+      EventBusLive,
+      sequenceStorage([]),
     )
-    const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)), EventBusLive, sequenceStorage([]))
     let configureRejected = false
     let startRejected = false
-    await Effect.runPromise(sequenceProgram(testLayer, function* () {
-      yield* runConfigureExternalSequence({ lightCount: 1, darkCount: 0, durationSec: 1 })
-      yield* runStartCapture
-      configureRejected = Either.isLeft(yield* runConfigureExternalSequence({ lightCount: 2, darkCount: 0, durationSec: 1 }).pipe(Effect.either))
-      startRejected = Either.isLeft(yield* runStartExternalSequence.pipe(Effect.either))
-      yield* runStopCapture
-    }))
+    await Effect.runPromise(
+      sequenceProgram(testLayer, function* () {
+        yield* runConfigureExternalSequence({
+          lightCount: 1,
+          darkCount: 0,
+          durationSec: 1,
+        })
+        yield* runStartCapture
+        configureRejected = Either.isLeft(
+          yield* runConfigureExternalSequence({
+            lightCount: 2,
+            darkCount: 0,
+            durationSec: 1,
+          }).pipe(Effect.either),
+        )
+        startRejected = Either.isLeft(
+          yield* runStartExternalSequence.pipe(Effect.either),
+        )
+        yield* runStopCapture
+      }),
+    )
     assert.equal(configureRejected, true)
     assert.equal(startRejected, true)
   })
 
   for (const phase of ['lights', 'awaiting-darks'] as const) {
     it(`resets a ${phase} sequence when reconnecting`, async () => {
-      const session = makeExternalSession(`sequence-reset-${phase}`, () => Effect.succeed(phase === 'lights' ? { state: 'exposing' as const, imageReady: false } : { state: 'ready' as const, imageReady: true }), undefined, undefined, () => Effect.void, () => Effect.succeed(frame()))
-      const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)), EventBusLive, sequenceStorage([]))
-      const result = await Effect.runPromise(Effect.gen(function* () {
-        yield* runConnect({ pluginKind: 'fake-seestar', deviceId: `test:${phase}` })
-        const store = yield* AggregateStore
-        yield* store.update((current) => ({ ...current, currentTarget: { id: 'target', name: 'Target', short: 'target' } }))
-        yield* runConfigureExternalSequence({ lightCount: 1, darkCount: phase === 'awaiting-darks' ? 1 : 0, durationSec: 1 })
-        yield* runStartExternalSequence
-        yield* Effect.sleep(phase === 'lights' ? '100 millis' : '700 millis')
-        yield* runDisconnect
-        yield* runConnect({ pluginKind: 'fake-seestar', deviceId: `test:${phase}` })
-        return yield* store.get
-      }).pipe(Effect.provide(testLayer)))
-      assert.deepEqual(result.sequence, { phase: 'idle', completed: 0, failed: 0 })
+      const exposingEntered = Deferred.unsafeMake<void>(
+        Symbol(`sequence-${phase}-exposing`),
+      )
+      const awaitingLatch = Deferred.unsafeMake<void>(
+        Symbol(`sequence-${phase}-awaiting`),
+      )
+      const awaitingEntered = Deferred.unsafeMake<void>(
+        Symbol(`sequence-${phase}-awaiting-entered`),
+      )
+      const session = makeExternalSession(`sequence-reset-${phase}`, {
+        getExposureState: () =>
+          phase === 'lights'
+            ? Effect.gen(function* () {
+                Deferred.unsafeDone(exposingEntered, Effect.void)
+                return { state: 'exposing' as const, imageReady: false }
+              })
+            : Effect.succeed({ state: 'ready' as const, imageReady: true }),
+        startExposure: () => Effect.void,
+        getLatestFrame: () => Effect.succeed(frame()),
+      })
+      const testLayer = makeTestLayer(
+        makeFakeRegistry(Effect.succeed(session)),
+        makeBlockingEventBusLayer(
+          'capture.succeeded',
+          awaitingLatch,
+          awaitingEntered,
+          2,
+        ),
+        sequenceStorage([]),
+      )
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* runConnect({
+            pluginKind: 'fake-seestar',
+            deviceId: `test:${phase}`,
+          })
+          const store = yield* AggregateStore
+          yield* store.update((current) => ({
+            ...current,
+            currentTarget: { id: 'target', name: 'Target', short: 'target' },
+          }))
+          yield* runConfigureExternalSequence({
+            lightCount: 1,
+            darkCount: phase === 'awaiting-darks' ? 1 : 0,
+            durationSec: 1,
+          })
+          yield* runStartExternalSequence
+          if (phase === 'lights') {
+            yield* Deferred.await(exposingEntered)
+            assert.equal((yield* store.get).sequence.phase, 'lights')
+          } else {
+            yield* Deferred.await(awaitingEntered)
+            assert.equal((yield* store.get).sequence.phase, 'awaiting-darks')
+            Deferred.unsafeDone(awaitingLatch, Effect.void)
+          }
+          yield* runDisconnect
+          yield* runConnect({
+            pluginKind: 'fake-seestar',
+            deviceId: `test:${phase}`,
+          })
+          return yield* store.get
+        }).pipe(Effect.provide(testLayer)),
+      )
+      assert.deepEqual(result.sequence, {
+        phase: 'idle',
+        completed: 0,
+        failed: 0,
+      })
     })
   }
 
   it('interrupt during displaced-session cleanup => cleanup completes and ownership clears', async () => {
     let displacedDisconnectCompleted = false
-    const displacedCleanupEntered = Deferred.unsafeMake<void>(Symbol('cleanup-entered'))
-    const allowDisplacedCleanup = Deferred.unsafeMake<void>(Symbol('allow-cleanup'))
+    const displacedCleanupEntered = Deferred.unsafeMake<void>(
+      Symbol('cleanup-entered'),
+    )
+    const allowDisplacedCleanup = Deferred.unsafeMake<void>(
+      Symbol('allow-cleanup'),
+    )
 
     const sessionA = makeSession(
       'sA',
@@ -1114,5 +1604,4 @@ describe('workflow interruption safety', () => {
     assert.equal(result.session.sessionId, undefined)
     assert.equal(displacedDisconnectCompleted, true)
   })
-
 })

@@ -6,8 +6,8 @@ import { electronApi } from '../../lib/electron-api'
 import './library-filmstrip.css'
 
 export default function LibraryFilmstrip() {
-  const { library, currentTarget, captureMode } = useProjectionStore(selectLibraryModel)
-  const isExternal = captureMode === 'external'
+  const { library, currentTarget, capturePresentation } = useProjectionStore(selectLibraryModel)
+  const isExternal = capturePresentation === 'exposure'
   const scopeLabel = isExternal
     ? 'Exposures'
     : library.scope === 'all_targets'

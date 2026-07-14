@@ -4,6 +4,11 @@ import type {
   CaptureProjection,
 } from '../../../../shared/api-v2'
 import { useProjectionStore } from '../../state/projection-store'
+import {
+  isCaptureInFlight,
+  isExternalSequenceActive,
+  isExternalSequenceTerminal,
+} from '../../../../shared/lifecycle'
 import { selectCameraPanelModel } from '../../state/projection-selectors'
 import { useElapsedSeconds } from '../../hooks/use-elapsed-seconds'
 import { useConfigureExternalSequenceMutation, useContinueExternalSequenceMutation, useFinishExternalSequenceMutation, useSetExposureDurationMutation, useStartExternalSequenceMutation } from '../../mutations/use-workspace-mutations'
@@ -56,7 +61,7 @@ export function CameraPanel() {
 
   if (!available) return null
 
-  const isExposing = capture.phase === 'capturing' || capture.phase === 'starting'
+  const isExposing = isCaptureInFlight(capture.phase)
   const configuredSec = camera?.exposureSec ?? DEFAULT_EXPOSURE_SEC
   const parsedDraft = Number(draftSec)
   const draftValid =
@@ -69,7 +74,7 @@ export function CameraPanel() {
   const lightSeconds = plan.lightCount * plan.durationSec
   const darkSeconds = plan.darkCount * plan.durationSec
   const estimatedStorageMiB = Math.ceil((plan.lightCount + plan.darkCount) * 50 * 1.25)
-  const sequenceActive = sequence.phase === 'lights' || sequence.phase === 'awaiting-darks' || sequence.phase === 'darks'
+  const sequenceActive = isExternalSequenceActive(sequence.phase)
   const sequenceError = [configureSequence, startSequence, continueSequence, finishSequence].find((mutation) => mutation.isError)?.error
 
   return (
@@ -138,10 +143,10 @@ export function CameraPanel() {
             <span>Plan</span><strong>{planValid ? `${formatDuration(lightSeconds)} lights · ${formatDuration(darkSeconds)} darks · ~${estimatedStorageMiB} MiB` : 'Invalid plan'}</strong>
           </div>
           {!supportsDarkExposure ? <p className="help-line">This camera cannot start dark exposures.</p> : null}
-          {sequence.phase === 'idle' || sequence.phase === 'complete' || sequence.phase === 'stopped' || sequence.phase === 'failed' ? <button type="button" className="btn btn-sm primary" disabled={!canStartSequence || !currentTarget || configureSequence.isPending || startSequence.isPending} onClick={() => configureSequence.mutate(plan, { onSuccess: () => startSequence.mutate() })}>Start sequence</button> : null}
+          {isExternalSequenceTerminal(sequence.phase) ? <button type="button" className="btn btn-sm primary" disabled={!canStartSequence || !currentTarget || isExposing || configureSequence.isPending || startSequence.isPending} onClick={() => configureSequence.mutate(plan, { onSuccess: () => startSequence.mutate() })}>Start sequence</button> : null}
           {sequenceActive ? <p className="help-line">{sequence.frameKind} {sequence.currentIndex} · {sequence.completed} completed · {sequence.failed} failed · {capture.deviceState ?? capture.phase}</p> : null}
-          {sequence.phase === 'awaiting-darks' ? <><p className="help-line">Cover the lens, then start darks. Sony darks also send Light=false.</p><button type="button" className="btn btn-sm primary" onClick={() => continueSequence.mutate()}>Start darks</button><button type="button" className="btn btn-sm" onClick={() => finishSequence.mutate()}>Finish without darks</button></> : null}
-          {sequence.phase === 'complete' || sequence.phase === 'stopped' || sequence.phase === 'failed' ? <p className="help-line">{sequence.phase}: {sequence.completed} completed, {sequence.failed} failed{sequence.lastError ? ` · ${sequence.lastError}` : ''}</p> : null}
+          {sequence.phase === 'awaiting-darks' ? <><p className="help-line">Cover the lens, then start darks. Sony darks also send Light=false.</p><button type="button" className="btn btn-sm primary" disabled={continueSequence.isPending || finishSequence.isPending} onClick={() => continueSequence.mutate()}>Start darks</button><button type="button" className="btn btn-sm" disabled={continueSequence.isPending || finishSequence.isPending} onClick={() => finishSequence.mutate()}>Finish without darks</button></> : null}
+          {isExternalSequenceTerminal(sequence.phase) && sequence.phase !== 'idle' ? <p className="help-line">{sequence.phase}: {sequence.completed} completed, {sequence.failed} failed{sequence.lastError ? ` · ${sequence.lastError}` : ''}</p> : null}
         </div>
 
         {(capture.phase === 'failed' || capture.phase === 'partial') &&

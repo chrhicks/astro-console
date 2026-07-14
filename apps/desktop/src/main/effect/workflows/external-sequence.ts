@@ -7,6 +7,7 @@ import type { DeviceSession } from '../device/device-plugin'
 import { FrameStorage } from '../storage/frame-storage'
 import { captureExternalFrame } from './external-exposure'
 import type { ExternalSequencePlan, ExternalSequenceProjection } from '../../../shared/api-v2'
+import { isExternalSequenceTerminal } from '../../../shared/lifecycle'
 
 export const MAX_SEQUENCE_LIGHTS = 360
 export const MAX_SEQUENCE_DARKS = 360
@@ -27,14 +28,14 @@ export const runConfigureExternalSequence = (plan: ExternalSequencePlan) =>
     const lease = yield* coordinator.acquire(session, 'sequence')
     if (!lease) return yield* Effect.fail(new Error('Another operation is active'))
     const updated = yield* coordinator.commitIfLease(lease, (current) => {
-      if (!isTerminalSequencePhase(current.sequence.phase)) return current
+      if (!isExternalSequenceTerminal(current.sequence.phase)) return current
       return {
         ...current,
         sequence: { phase: 'idle', plan: Object.freeze({ ...plan }), completed: 0, failed: 0 },
       }
     })
     yield* coordinator.release(lease)
-    if (!updated || !isTerminalSequencePhase(updated.sequence.phase)) {
+    if (!updated || !isExternalSequenceTerminal(updated.sequence.phase)) {
       return yield* Effect.fail(new Error('Sequence is active and cannot be reconfigured'))
     }
     yield* bus.publish('sequence.configured', {})
@@ -169,10 +170,6 @@ function runSequencePhase(session: DeviceSession, plan: ExternalSequencePlan, ta
 
 function isPlanValid(plan: ExternalSequencePlan) {
   return Number.isInteger(plan.lightCount) && plan.lightCount >= 1 && plan.lightCount <= MAX_SEQUENCE_LIGHTS && Number.isInteger(plan.darkCount) && plan.darkCount >= 0 && plan.darkCount <= MAX_SEQUENCE_DARKS && Number.isFinite(plan.durationSec) && plan.durationSec > 0 && plan.durationSec <= 3600
-}
-
-function isTerminalSequencePhase(phase: ExternalSequenceProjection['phase']) {
-  return phase === 'idle' || phase === 'complete' || phase === 'stopped' || phase === 'failed'
 }
 
 function hasExternalCapture(session: DeviceSession | null): session is DeviceSession {

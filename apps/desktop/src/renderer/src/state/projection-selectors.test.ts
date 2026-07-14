@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { it } from 'node:test'
 import type { DesktopStatus } from '../../../shared/api-v2'
-import { selectWorkAreaModel } from './projection-selectors'
+import { selectCapturePresentation, selectWorkAreaModel } from './projection-selectors'
 
 it('does not select an older preview when the newest frame has none', () => {
   const status: DesktopStatus = {
@@ -36,3 +36,22 @@ it('does not select an older preview when the newest frame has none', () => {
   assert.equal(model.latestPreviewPath, null)
   assert.equal(model.latestPreviewUnavailable, true)
 })
+
+it('classifies capture presentation from the stable workspace capability', () => {
+  assert.equal(selectCapturePresentation({
+    ...DEFAULT_WORKSPACE,
+    capabilities: { ...DEFAULT_WORKSPACE.capabilities, capture: 'external' },
+  }), 'exposure')
+  assert.equal(selectCapturePresentation({
+    ...DEFAULT_WORKSPACE,
+    capabilities: { ...DEFAULT_WORKSPACE.capabilities, capture: 'native' },
+  }), 'capture')
+})
+
+const DEFAULT_WORKSPACE = {
+  state: 'primed' as const,
+  stateLabel: 'Primed',
+  surface: { kind: 'idle' as const, label: 'Idle' },
+  capabilities: { preview: 'unsupported' as const, capture: 'unsupported' as const, darkExposure: 'no' as const, autofocus: 'no' as const, filterWheel: 'no' as const, storage: 'no' as const },
+  actions: [],
+}

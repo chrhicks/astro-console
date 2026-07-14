@@ -5,6 +5,7 @@ import { OperationCoordinator } from '../session/operation-coordinator'
 import { AggregateStore } from '../state/aggregate-store'
 import type { RigOperationContext } from '../rig/rig-model'
 import { stopExternalExposure } from './external-exposure'
+import { isCaptureInFlight, isExternalSequenceRecoveryActive } from '../../../shared/lifecycle'
 
 export const runPark = Effect.gen(function* () {
   const store = yield* AggregateStore
@@ -50,7 +51,7 @@ export const runPark = Effect.gen(function* () {
 
         const current = yield* store.get
 
-        if (current.capture.phase === 'capturing' || current.capture.phase === 'starting') {
+        if (isCaptureInFlight(current.capture.phase)) {
           // Atomically move capture out of the active phase before calling
           // stop so a pending runStartCapture cannot later commit 'capturing'
           // or fork its poller. Stop/park recovery supersedes ordinary
@@ -86,7 +87,7 @@ export const runPark = Effect.gen(function* () {
                         mode: captureStop.mode === 'external' ? 'external' : undefined,
                         lastError: message,
                       },
-                      sequence: cur.sequence.phase === 'lights' || cur.sequence.phase === 'darks' || cur.sequence.phase === 'awaiting-darks'
+                      sequence: isExternalSequenceRecoveryActive(cur.sequence.phase)
                         ? { ...cur.sequence, phase: 'failed', frameKind: undefined, currentIndex: undefined, lastError: message }
                         : cur.sequence,
                     }))
@@ -190,7 +191,7 @@ export const runPark = Effect.gen(function* () {
           device: { ...cur.device, ...refreshed.device },
           preview: refreshed.preview,
           capture: refreshed.capture,
-          sequence: cur.sequence.phase === 'lights' || cur.sequence.phase === 'darks' || cur.sequence.phase === 'awaiting-darks'
+          sequence: isExternalSequenceRecoveryActive(cur.sequence.phase)
             ? { ...cur.sequence, phase: 'stopped', frameKind: undefined, currentIndex: undefined }
             : cur.sequence,
           pointing: { phase: 'idle', target: null },

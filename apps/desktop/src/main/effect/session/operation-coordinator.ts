@@ -11,6 +11,7 @@ import {
 } from '../state/aggregate'
 import { RuntimeStateRef } from '../state/runtime-state-ref'
 import { SessionManager } from './session-manager'
+import { isCaptureInFlight } from '../../../shared/lifecycle'
 
 // A handle to the current operation lease. The signal is aborted when a
 // recovery operation preempts this lease or when the session lifecycle
@@ -196,8 +197,7 @@ export const OperationCoordinatorLive = Layer.effect(
 // incompatible ordinary starts even after the start command returns.
 function isAggregateBusy(aggregate: SessionAggregate, kind: OrdinaryKind): boolean {
   if (
-    aggregate.capture.phase === 'starting' ||
-    aggregate.capture.phase === 'capturing'
+    isCaptureInFlight(aggregate.capture.phase)
   ) {
     return true
   }

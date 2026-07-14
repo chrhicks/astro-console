@@ -67,6 +67,7 @@ export default function InspectorPanel() {
     preview,
     device,
     workspace,
+    capturePresentation,
   } = useProjectionStore(selectInspectorModel)
   const details = useTargetDetailsQuery(target?.id ?? null)
   const pointMutation = usePointToTargetMutation()
@@ -95,7 +96,7 @@ export default function InspectorPanel() {
     device.canPoint !== false &&
     !isSlewPending &&
     !isBelowHorizon
-  const isExternalCapture = capture.mode === 'external'
+  const isExternalCapture = capturePresentation === 'exposure'
   const elapsedSec = startedElapsed ?? capture.elapsedSec
   const captureCapability = workspace.capabilities.capture
   const hasNativeCapture = captureCapability === 'native'

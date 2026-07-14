@@ -16,7 +16,8 @@ import {
   useStopCaptureMutation,
 } from '../../mutations/use-workspace-mutations'
 import { electronApi } from '../../lib/electron-api'
-import { EXTERNAL_PREVIEW_FAILURE_COPY } from './external-preview-failure-copy'
+import { isCaptureInFlight } from '../../../../shared/lifecycle'
+import { decideWorkAreaStatus } from './work-area-status'
 import './work-area.css'
 
 const PREVIEW_BADGE_LABELS: Record<PreviewProjection['phase'], string> = {
@@ -97,6 +98,7 @@ export default function WorkArea() {
     workspace,
     preview,
     capture,
+    capturePresentation,
     device,
     latestPreviewPath,
     latestPreviewUnavailable,
@@ -110,9 +112,8 @@ export default function WorkArea() {
   const isCapturePending =
     startCaptureMutation.isPending || stopCaptureMutation.isPending
   const isSlewing = workspace.state === 'slewing'
-  const isCapturing =
-    capture.phase === 'capturing' || capture.phase === 'starting'
-  const isExternalCapture = workspace.capabilities.capture === 'external'
+  const isCapturing = isCaptureInFlight(capture.phase)
+  const isExternalCapture = capturePresentation === 'exposure'
   const [latestPreviewUrl, setLatestPreviewUrl] = useState<string | null>(null)
   useEffect(() => {
     if (!latestPreviewPath) {
@@ -144,23 +145,12 @@ export default function WorkArea() {
   const showOverlay = OVERLAY_STATES.has(workspace.state)
   const isConnected = workspace.state !== 'disconnected'
   const hasDeviceLocation = device.location != null
-  const statusMessage =
-    capture.phase === 'failed'
-      ? isExternalCapture
-        ? 'Exposure failed. Retry or start preview.'
-        : 'Capture failed. Retry or start preview.'
-      : capture.phase === 'partial'
-        ? isExternalCapture
-          ? EXTERNAL_PREVIEW_FAILURE_COPY
-          : 'Capture completed but frame was not saved. Retry or start preview.'
-        : pointing.phase === 'failed' && pointing.lastError
-        ? pointing.lastError
-        : isExternalCapture && workspace.state === 'capturing'
-          ? 'Exposure running.'
-          : isExternalCapture &&
-              (workspace.state === 'on_target' || workspace.state === 'primed')
-            ? 'Ready to preview or expose.'
-            : STATUS_MESSAGES[workspace.state]
+  const statusMessage = decideWorkAreaStatus(
+    capture,
+    pointing,
+    workspace,
+    capturePresentation,
+  )
   const previewBadgeLabel =
     isExternalCapture && latestPreviewUnavailable && preview.phase === 'none'
       ? 'Latest frame unavailable'
