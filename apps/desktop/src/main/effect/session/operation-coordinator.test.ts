@@ -126,4 +126,30 @@ describe('OperationCoordinator production semantics', () => {
       assert.equal(yield* coordinator.acquire(session, 'point'), null)
     }).pipe(Effect.provide(testLayer)))
   })
+
+  it('rejects ordinary work during the dark-cover pause but permits recovery and continuation', async () => {
+    await Effect.runPromise(Effect.gen(function* () {
+      const session = makeSession('awaiting-darks')
+      yield* installSession(session)
+      const store = yield* AggregateStore
+      yield* store.updateIfSession(session, (current) => ({
+        ...current,
+        sequence: { ...current.sequence, phase: 'awaiting-darks' },
+      }))
+      const coordinator = yield* OperationCoordinator
+
+      assert.equal(yield* coordinator.acquire(session, 'point'), null)
+      assert.equal(yield* coordinator.acquire(session, 'preview-start'), null)
+      assert.equal(yield* coordinator.acquire(session, 'capture-start'), null)
+      assert.equal(yield* coordinator.acquire(session, 'sequence'), null)
+      const continuation = yield* coordinator.acquire(session, 'sequence-continue')
+      assert.ok(continuation)
+      yield* coordinator.release(continuation)
+      const stop = yield* coordinator.acquireRecovery(session, 'stop-capture')
+      assert.ok(stop)
+      yield* coordinator.release(stop)
+      const park = yield* coordinator.acquireRecovery(session, 'park')
+      assert.ok(park)
+    }).pipe(Effect.provide(testLayer)))
+  })
 })

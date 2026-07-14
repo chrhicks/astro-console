@@ -59,6 +59,7 @@ export interface RigMount {
 
 export interface RigCameraExposureInput {
   readonly durationSec: number
+  readonly light?: boolean
 }
 
 // Device-reported exposure state. Mirrors the Alpaca camera state lifecycle
@@ -115,6 +116,12 @@ export interface RigFrameResult {
 // its imaging is stacking-based orchestration surfaced via RigCaptureWorkflow.
 export interface RigCamera {
   readonly startExposure: (
+    input: RigCameraExposureInput,
+    context?: RigOperationContext,
+  ) => Effect.Effect<void, unknown>
+  // Optional because a generic camera cannot truthfully promise that its
+  // normal exposure command produces a dark frame.
+  readonly startDarkExposure?: (
     input: RigCameraExposureInput,
     context?: RigOperationContext,
   ) => Effect.Effect<void, unknown>

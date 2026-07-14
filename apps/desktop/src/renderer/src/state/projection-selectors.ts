@@ -30,6 +30,7 @@ const DEFAULT_WORKSPACE: WorkspaceProjection = {
   capabilities: {
     preview: 'unsupported',
     capture: 'unsupported',
+    darkExposure: 'no',
     autofocus: 'no',
     filterWheel: 'no',
     storage: 'no',
@@ -89,11 +90,7 @@ export function selectInspectorModel(state: ProjectionState) {
 
 export function selectWorkAreaModel(state: ProjectionState) {
   const status = state.status
-  // Newest library asset that has a saved preview JPG. Assets are newest-first,
-  // so this is the most recent external capture preview for the main work area.
-  const latestPreviewAsset = status?.library.assets.find(
-    (a) => a.hasPreview,
-  )
+  const latestAsset = status?.library.assets.find((asset) => asset.saved)
   return {
     pointing: status?.pointing ?? IDLE_POINTING,
     currentTarget: status?.currentTarget ?? null,
@@ -101,7 +98,8 @@ export function selectWorkAreaModel(state: ProjectionState) {
     preview: status?.preview ?? NO_PREVIEW,
     capture: status?.capture ?? NO_CAPTURE,
     device: status?.device ?? {},
-    latestPreviewPath: latestPreviewAsset?.id ?? null,
+    latestPreviewPath: latestAsset?.hasPreview ? latestAsset.id : null,
+    latestPreviewUnavailable: latestAsset != null && !latestAsset.hasPreview,
   }
 }
 
@@ -131,7 +129,10 @@ export function selectCameraPanelModel(state: ProjectionState) {
   return {
     isConnected,
     available: isConnected && captureTier === 'external',
+    supportsDarkExposure: status?.workspace.capabilities.darkExposure === 'yes',
     camera: status?.camera ?? null,
     capture: status?.capture ?? NO_CAPTURE,
+    sequence: status?.sequence ?? { phase: 'idle' as const, completed: 0, failed: 0 },
+    currentTarget: status?.currentTarget ?? null,
   }
 }

@@ -26,6 +26,10 @@ function getState(): ProjectionState {
   return state
 }
 
+export function getProjectionState(): ProjectionState {
+  return state
+}
+
 function setState(next: ProjectionState) {
   state = next
   emit()
@@ -47,6 +51,15 @@ function subscribe(listener: () => void) {
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   return String(error)
+}
+
+export function applyDesktopStatusToProjectionStore(status: DesktopStatus) {
+  const current = state.status
+  if (current && (current.statusRevision > status.statusRevision || (current.statusRevision === status.statusRevision && current.lastUpdatedAt !== status.lastUpdatedAt))) return
+  setState({ status, hydrated: true, error: null })
+  if (status.session.phase === 'disconnected') {
+    setSelectedTarget(null)
+  }
 }
 
 export async function initializeProjectionStore() {
@@ -71,16 +84,13 @@ export async function initializeProjectionStore() {
       stopStatusSubscription = electronApi.onStatus((nextStatus) => {
         if (generation !== lifecycleGeneration) return
         receivedEvent = true
-        setState({ status: nextStatus, hydrated: true, error: null })
-        if (nextStatus.session.phase === 'disconnected') {
-          setSelectedTarget(null)
-        }
+        applyDesktopStatusToProjectionStore(nextStatus)
       })
 
       const status = await electronApi.getStatus()
       if (generation !== lifecycleGeneration) return
       if (!receivedEvent) {
-        setState({ status, hydrated: true, error: null })
+        applyDesktopStatusToProjectionStore(status)
       }
     } catch (error) {
       if (generation !== lifecycleGeneration) return

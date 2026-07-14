@@ -37,9 +37,10 @@ export const StatusStreamLive = Layer.effect(
               !event.name.startsWith('session.') &&
               !event.name.startsWith('pointing.') &&
               !event.name.startsWith('preview.') &&
-              !event.name.startsWith('capture.') &&
-              !event.name.startsWith('camera.') &&
-              !event.name.startsWith('observer.') &&
+                !event.name.startsWith('capture.') &&
+                !event.name.startsWith('camera.') &&
+                !event.name.startsWith('sequence.') &&
+                !event.name.startsWith('observer.') &&
               !event.name.startsWith('park.') &&
               event.name !== 'status.snapshot.emitted'
             ) {

@@ -1,6 +1,7 @@
 import type {
   CatalogQuery,
   ConnectRequestV2,
+  ConfigureExternalSequenceRequest,
   DesktopLogEntryV2,
   DesktopStatus,
   PointToTargetRequest,
@@ -31,6 +32,11 @@ export const electronApi = {
   parkMount: () => getApi().parkMount(),
   setExposureDuration: (input: SetExposureDurationRequest) =>
     getApi().setExposureDuration(input),
+  configureExternalSequence: (input: ConfigureExternalSequenceRequest) =>
+    getApi().configureExternalSequence(input),
+  startExternalSequence: () => getApi().startExternalSequence(),
+  continueExternalSequence: () => getApi().continueExternalSequence(),
+  finishExternalSequence: () => getApi().finishExternalSequence(),
   openSavedAsset: (filePath: string) => getApi().openSavedAsset(filePath),
   revealSavedAsset: (filePath: string) => getApi().revealSavedAsset(filePath),
   getSavedAssetPreview: (filePath: string) =>

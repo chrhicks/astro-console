@@ -4,6 +4,7 @@ import { SessionManager } from '../session/session-manager'
 import { OperationCoordinator } from '../session/operation-coordinator'
 import { AggregateStore } from '../state/aggregate-store'
 import type { RigOperationContext } from '../rig/rig-model'
+import { stopExternalExposure } from './external-exposure'
 
 export const runPark = Effect.gen(function* () {
   const store = yield* AggregateStore
@@ -64,7 +65,13 @@ export const runPark = Effect.gen(function* () {
             const captureStop = session.rig.captureStop
             const ctx: RigOperationContext = { signal: lease.signal }
             if (captureStop) {
-              yield* captureStop.stop(ctx).pipe(
+              const stop =
+                captureStop.mode === 'external'
+                  ? session.rig.camera
+                    ? stopExternalExposure(captureStop, session.rig.camera, ctx)
+                    : Effect.fail(new Error('Connected rig does not expose a generic camera'))
+                  : captureStop.stop(ctx)
+              yield* stop.pipe(
                 Effect.catchAll((error) =>
                   Effect.gen(function* () {
                     const message = toErrorMessage(error)
@@ -79,6 +86,9 @@ export const runPark = Effect.gen(function* () {
                         mode: captureStop.mode === 'external' ? 'external' : undefined,
                         lastError: message,
                       },
+                      sequence: cur.sequence.phase === 'lights' || cur.sequence.phase === 'darks' || cur.sequence.phase === 'awaiting-darks'
+                        ? { ...cur.sequence, phase: 'failed', frameKind: undefined, currentIndex: undefined, lastError: message }
+                        : cur.sequence,
                     }))
                     if (updated) {
                       yield* bus.publish('park.failed', { error: message, step: 'stop-capture' })
@@ -151,6 +161,11 @@ export const runPark = Effect.gen(function* () {
                   ...cur.session,
                   lastError: message,
                 },
+                device: {
+                  ...cur.device,
+                  mountClosed: undefined,
+                  warnings: [...(cur.device.warnings ?? []), 'Park state is unconfirmed'],
+                },
               }))
               if (updated) {
                 yield* bus.publish('park.failed', { error: message, step: 'park-arm' })
@@ -175,6 +190,9 @@ export const runPark = Effect.gen(function* () {
           device: { ...cur.device, ...refreshed.device },
           preview: refreshed.preview,
           capture: refreshed.capture,
+          sequence: cur.sequence.phase === 'lights' || cur.sequence.phase === 'darks' || cur.sequence.phase === 'awaiting-darks'
+            ? { ...cur.sequence, phase: 'stopped', frameKind: undefined, currentIndex: undefined }
+            : cur.sequence,
           pointing: { phase: 'idle', target: null },
           currentTarget: null,
         }))

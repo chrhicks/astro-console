@@ -27,7 +27,7 @@ export interface OperationLease {
 
 // Ordinary hardware mutations that are mutually exclusive and must wait for
 // any current operation to finish before acquiring.
-type OrdinaryKind = 'point' | 'preview-start' | 'capture-start'
+type OrdinaryKind = 'point' | 'preview-start' | 'capture-start' | 'sequence' | 'sequence-continue'
 
 // Recovery operations that preempt any current ordinary operation and
 // acquire immediately.
@@ -55,6 +55,7 @@ export interface OperationCoordinator {
   // Release the lease if it is still current. Called by workflow finalizers.
   // No-op if the lease was already preempted or invalidated.
   readonly release: (lease: OperationLease) => Effect.Effect<void>
+  readonly isCurrent: (lease: OperationLease) => Effect.Effect<boolean>
 
   // Atomically commit an aggregate update only if the lease is still
   // current AND the session still owns the aggregate. Returns the updated
@@ -103,7 +104,7 @@ export const OperationCoordinatorLive = Layer.effect(
                   }
                   return [null, state]
                 }
-                if (isAggregateBusy(state.aggregate)) return [null, state]
+                if (isAggregateBusy(state.aggregate, kind)) return [null, state]
                 const operation: OperationRuntimeState = {
                   id,
                   sessionId: session.sessionId,
@@ -174,6 +175,8 @@ export const OperationCoordinatorLive = Layer.effect(
           return [undefined, { ...state, operation: null }]
         }),
 
+      isCurrent: (lease: OperationLease) => Ref.get(ref).pipe(Effect.map((state) => ownsLease(state, lease))),
+
       commitIfLease: (lease: OperationLease, f) =>
         Ref.modify(
           ref,
@@ -191,7 +194,7 @@ export const OperationCoordinatorLive = Layer.effect(
 // pointing state that would conflict with a new ordinary start. This
 // enforces the conflict semantics: active preview/capture blocks
 // incompatible ordinary starts even after the start command returns.
-function isAggregateBusy(aggregate: SessionAggregate): boolean {
+function isAggregateBusy(aggregate: SessionAggregate, kind: OrdinaryKind): boolean {
   if (
     aggregate.capture.phase === 'starting' ||
     aggregate.capture.phase === 'capturing'
@@ -205,6 +208,7 @@ function isAggregateBusy(aggregate: SessionAggregate): boolean {
     return true
   }
   if (aggregate.pointing.phase === 'slewing') return true
+  if (aggregate.sequence.phase === 'awaiting-darks' && kind !== 'sequence-continue') return true
   return false
 }
 

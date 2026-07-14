@@ -16,6 +16,7 @@ import {
   useStopCaptureMutation,
 } from '../../mutations/use-workspace-mutations'
 import { electronApi } from '../../lib/electron-api'
+import { EXTERNAL_PREVIEW_FAILURE_COPY } from './external-preview-failure-copy'
 import './work-area.css'
 
 const PREVIEW_BADGE_LABELS: Record<PreviewProjection['phase'], string> = {
@@ -98,6 +99,7 @@ export default function WorkArea() {
     capture,
     device,
     latestPreviewPath,
+    latestPreviewUnavailable,
   } = useProjectionStore(selectWorkAreaModel)
   const selectedTarget = useSelectedTarget((state) => state.target)
   const pointMutation = usePointToTargetMutation()
@@ -149,7 +151,7 @@ export default function WorkArea() {
         : 'Capture failed. Retry or start preview.'
       : capture.phase === 'partial'
         ? isExternalCapture
-          ? 'Exposure completed but frame was not saved. Retry or start preview.'
+          ? EXTERNAL_PREVIEW_FAILURE_COPY
           : 'Capture completed but frame was not saved. Retry or start preview.'
         : pointing.phase === 'failed' && pointing.lastError
         ? pointing.lastError
@@ -160,7 +162,9 @@ export default function WorkArea() {
             ? 'Ready to preview or expose.'
             : STATUS_MESSAGES[workspace.state]
   const previewBadgeLabel =
-    isExternalCapture && latestPreviewUrl && preview.phase === 'none'
+    isExternalCapture && latestPreviewUnavailable && preview.phase === 'none'
+      ? 'Latest frame unavailable'
+      : isExternalCapture && latestPreviewUrl && preview.phase === 'none'
       ? 'Latest frame'
       : PREVIEW_BADGE_LABELS[preview.phase]
 

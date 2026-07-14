@@ -5,12 +5,10 @@ import { OperationCoordinator, type OperationLease } from '../session/operation-
 import { AggregateStore } from '../state/aggregate-store'
 import {
   FrameStorage,
-  type SavedFrame,
 } from '../storage/frame-storage'
-import { registerManagedAsset } from '../storage/asset-registry'
+import { stopExternalExposure, captureExternalFrame } from './external-exposure'
 import type { DeviceSession } from '../device/device-plugin'
-import type { RigCamera, RigFrameResult, RigOperationContext } from '../rig/rig-model'
-import type { LibraryAsset } from '../../../shared/api-v2'
+import type { RigCamera, RigOperationContext } from '../rig/rig-model'
 
 // Default exposure duration for the generic camera path when no user-configured
 // value exists yet. Not a stacking frame count.
@@ -182,14 +180,12 @@ export const runStartCapture = Effect.gen(function* () {
           (yield* store.get).camera?.exposureSec,
         )
 
-        yield* bus.publish('capture.started', {})
-
-        const ctx: RigOperationContext = { signal: lease.signal }
-
-        yield* camera.startExposure({ durationSec }, ctx).pipe(
+        const storage = yield* FrameStorage
+        yield* storage.preflightExternalFrameStorage().pipe(
           Effect.catchAll((error) =>
             Effect.gen(function* () {
-              const message = toErrorMessage(error)
+              if (lease.signal.aborted) return
+              const message = `Storage preflight failed: ${toErrorMessage(error)}`
               const updated = yield* coordinator.commitIfLease(lease, (current) => ({
                 ...current,
                 capture: { phase: 'failed', mode: 'external', lastError: message },
@@ -202,7 +198,7 @@ export const runStartCapture = Effect.gen(function* () {
           ),
         )
 
-        if (lease.signal.aborted) return
+        yield* bus.publish('capture.started', {})
 
         // Atomically claim the capturing transition: only the fiber that
         // observes phase === 'starting' inside the commit commits 'capturing'.
@@ -277,7 +273,13 @@ export const runStopCapture = Effect.gen(function* () {
         if (capture) {
           const ctx: RigOperationContext = { signal: lease.signal }
 
-          yield* capture.stop(ctx).pipe(
+          const stop =
+            capture.mode === 'external'
+              ? session.rig.camera
+                ? stopExternalExposure(capture, session.rig.camera, ctx)
+                : Effect.fail(new Error('Connected rig does not expose a generic camera'))
+              : capture.stop(ctx)
+          yield* stop.pipe(
             Effect.catchAll((error) =>
               Effect.gen(function* () {
                 const message = toErrorMessage(error)
@@ -288,6 +290,9 @@ export const runStopCapture = Effect.gen(function* () {
                     mode: capture.mode === 'external' ? 'external' : undefined,
                     lastError: message,
                   },
+                  sequence: current.sequence.phase === 'lights' || current.sequence.phase === 'darks' || current.sequence.phase === 'awaiting-darks'
+                    ? { ...current.sequence, phase: 'failed', frameKind: undefined, currentIndex: undefined, lastError: message }
+                    : current.sequence,
                 }))
                 if (updated) {
                   yield* bus.publish('capture.failed', { error: message })
@@ -308,6 +313,9 @@ export const runStopCapture = Effect.gen(function* () {
             device: { ...current.device, ...refreshed.device },
             preview: refreshed.preview,
             capture: refreshed.capture,
+            sequence: current.sequence.phase === 'lights' || current.sequence.phase === 'darks' || current.sequence.phase === 'awaiting-darks'
+              ? { ...current.sequence, phase: 'stopped', frameKind: undefined, currentIndex: undefined }
+              : current.sequence,
           }))
           if (!updated) return
 
@@ -326,21 +334,6 @@ export const runStopCapture = Effect.gen(function* () {
     ),
   )
 })
-
-// Polling interval for external camera exposure state. Balances responsiveness
-// (short exposures complete in ~1s) against HTTP overhead for long exposures.
-const EXPOSURE_POLL_INTERVAL_MS = 500
-
-// Safety margin beyond the configured duration before the polling loop gives
-// up. Covers sensor readout and transport latency without hanging forever.
-const EXPOSURE_TIMEOUT_MARGIN_MS = 30000
-
-// Number of consecutive cameraError polls to tolerate before classifying an
-// exposure as failed. The .63 Alpaca host can briefly report cameraError on
-// the first exposure of a fresh connection before imageready becomes true; at
-// a 500ms poll interval this gives a ~1.5s transient window. Persistent
-// errors still fail honestly once the threshold is reached.
-const MAX_CONSECUTIVE_ERROR_POLLS = 3
 
 // Daemon-fiber polling loop for external camera exposure completion. Reads
 // `RigCamera.getExposureState()` at a fixed interval and transitions the
@@ -369,271 +362,46 @@ function pollExternalExposure(
         const sessions = yield* SessionManager
         const coordinator = yield* OperationCoordinator
 
-        const deadline =
-          Date.now() + durationSec * 1000 + EXPOSURE_TIMEOUT_MARGIN_MS
-
-        let consecutiveErrorPolls = 0
-
-        while (Date.now() < deadline) {
-          if (lease.signal.aborted) return
-          if (!(yield* sessions.ownsSession(session))) return
-          const current = yield* store.get
-          if (current.capture.phase !== 'capturing') return
-          if (current.capture.startedAt !== startedAt) return
-
-          yield* Effect.sleep(EXPOSURE_POLL_INTERVAL_MS)
-
-          if (lease.signal.aborted) return
-
-          const ctx: RigOperationContext = { signal: lease.signal }
-          const result = yield* camera.getExposureState(ctx).pipe(Effect.either)
-
-          // Session replaced, capture stopped, or new exposure started while
-          // polling; exit quietly.
-          if (!(yield* sessions.ownsSession(session))) return
-          const afterRead = yield* store.get
-          if (afterRead.capture.phase !== 'capturing') return
-          if (afterRead.capture.startedAt !== startedAt) return
-
-          if (Either.isLeft(result)) {
-            const message = toErrorMessage(result.left)
-            const failed = yield* coordinator.commitIfLease(lease, (current) => ({
-              ...current,
-              capture: {
-                phase: 'failed',
-                mode: 'external',
-                deviceState: 'error',
-                lastError: message,
-              },
-            }))
-            if (failed) {
-              yield* bus.publish('capture.failed', { error: message })
-            }
-            return
-          }
-
-          const state = result.right
-
-          const stateUpdated = yield* coordinator.commitIfLease(lease, (current) => ({
-            ...current,
-            capture: {
-              ...current.capture,
-              deviceState: state.state,
-              lastError: state.lastError ?? current.capture.lastError,
-            },
+        const current = yield* store.get
+        const captureStop = session.rig.captureStop
+        if (captureStop?.mode !== 'external') return
+        const result = yield* captureExternalFrame(camera, captureStop, {
+          durationSec,
+          targetShort: current.currentTarget?.short,
+          onState: (state) => coordinator.commitIfLease(lease, (aggregate) => ({
+            ...aggregate,
+            capture: { ...aggregate.capture, deviceState: state.state },
+          })).pipe(Effect.asVoid),
+        }, { signal: lease.signal }).pipe(Effect.either)
+        if (lease.signal.aborted || !(yield* sessions.ownsSession(session))) return
+        const afterCapture = yield* store.get
+        if (afterCapture.capture.phase !== 'capturing' || afterCapture.capture.startedAt !== startedAt) return
+        if (Either.isLeft(result)) {
+          const message = toErrorMessage(result.left)
+          const failed = yield* coordinator.commitIfLease(lease, (aggregate) => ({
+            ...aggregate,
+            capture: { phase: 'failed', mode: 'external', lastError: message },
           }))
-          if (!stateUpdated) return
-
-          yield* bus.publish('capture.device-state.updated', {
-            deviceState: state.state,
-          })
-
-          if (state.state === 'ready') {
-            // Exposure completed; retrieve the finished frame, persist it to
-            // disk via FrameStorage, and add a library asset so the filmstrip
-            // shows a real entry. Retrieval and persistence failures are
-            // logged honestly but do not invalidate the completed exposure.
-            const frameCtx: RigOperationContext = { signal: lease.signal }
-            const frameResult = yield* camera.getLatestFrame(frameCtx).pipe(Effect.either)
-
-            if (lease.signal.aborted) return
-            if (!(yield* sessions.ownsSession(session))) return
-            const afterFrame = yield* store.get
-            if (afterFrame.capture.phase !== 'capturing') return
-            if (afterFrame.capture.startedAt !== startedAt) return
-
-            if (Either.isLeft(frameResult)) {
-              const message = toErrorMessage(frameResult.left)
-              yield* bus.publish('capture.frame.retrieval.failed', {
-                error: message,
-              })
-              // Atomically claim the partial transition only if this poller
-              // still owns the session and the current exposure (capturing +
-              // startedAt match). A stale poller or a newer exposure must not
-              // overwrite the aggregate.
-              const partial = yield* coordinator.commitIfLease(lease, (current) => {
-                if (
-                  current.capture.phase !== 'capturing' ||
-                  current.capture.startedAt !== startedAt
-                ) {
-                  return current
-                }
-                return {
-                  ...current,
-                  capture: {
-                    phase: 'partial',
-                    mode: 'external',
-                    deviceState: 'ready',
-                    lastError: message,
-                  },
-                }
-              })
-              if (partial && partial.capture.phase === 'partial') {
-                yield* bus.publish('capture.partial', {
-                  error: message,
-                  step: 'frame-retrieval',
-                })
-              }
-              return
-            }
-
-            const frame = frameResult.right
-            const storage = yield* FrameStorage
-            const saveResult = yield* storage
-              .saveExternalFrame({
-                capturedAt: frame.metadata?.capturedAt ?? new Date().toISOString(),
-                durationSec,
-                data: frame.data,
-                targetShort: afterFrame.currentTarget?.short,
-                frame: {
-                  width: frame.width,
-                  height: frame.height,
-                  rank: frame.imageBytes?.rank ?? 0,
-                  planes: frame.imageBytes?.planes,
-                  elementType: frame.imageBytes?.transmissionElementType ?? 0,
-                },
-              })
-              .pipe(Effect.either)
-
-            if (lease.signal.aborted) return
-            if (!(yield* sessions.ownsSession(session))) return
-            const afterSave = yield* store.get
-            if (afterSave.capture.phase !== 'capturing') return
-            if (afterSave.capture.startedAt !== startedAt) return
-
-            if (Either.isLeft(saveResult)) {
-              const message = toErrorMessage(saveResult.left)
-              yield* bus.publish('capture.frame.persist.failed', {
-                error: message,
-              })
-              // Atomically claim the partial transition only if this poller
-              // still owns the session and the current exposure.
-              const partial = yield* coordinator.commitIfLease(lease, (current) => {
-                if (
-                  current.capture.phase !== 'capturing' ||
-                  current.capture.startedAt !== startedAt
-                ) {
-                  return current
-                }
-                return {
-                  ...current,
-                  capture: {
-                    phase: 'partial',
-                    mode: 'external',
-                    deviceState: 'ready',
-                    lastError: message,
-                  },
-                }
-              })
-              if (partial && partial.capture.phase === 'partial') {
-                yield* bus.publish('capture.partial', {
-                  error: message,
-                  step: 'frame-persist',
-                })
-              }
-              return
-            }
-
-            const asset = createExternalLibraryAsset(
-              frame,
-              durationSec,
-              saveResult.right,
-            )
-            // Atomically commit the idle transition + library asset only if
-            // this poller still owns the session and the current exposure. A
-            // stale poller must not overwrite a newer capture state or
-            // prepend a stale asset.
-            const completed = yield* coordinator.commitIfLease(lease, (current) => {
-              if (
-                current.capture.phase !== 'capturing' ||
-                current.capture.startedAt !== startedAt
-              ) {
-                return current
-              }
-              return {
-                ...current,
-                capture: {
-                  phase: 'idle',
-                  mode: 'external',
-                  deviceState: 'ready',
-                },
-                library: {
-                  ...current.library,
-                  assets: [asset, ...current.library.assets],
-                },
-              }
-            })
-            if (completed && completed.capture.phase === 'idle') {
-              yield* bus.publish('capture.succeeded', {})
-            }
-            return
-          }
-
-          if (state.state === 'error') {
-            consecutiveErrorPolls++
-            // The .63 Alpaca host can briefly report cameraError on the first
-            // exposure of a fresh connection before imageready becomes true.
-            // Tolerate a small number of consecutive error polls before
-            // classifying the exposure as failed; the device may still move to
-            // ready on a subsequent poll.
-            if (consecutiveErrorPolls < MAX_CONSECUTIVE_ERROR_POLLS) continue
-            const message = state.lastError ?? 'Camera reported exposure error'
-            const failed = yield* coordinator.commitIfLease(lease, (current) => ({
-              ...current,
-              capture: {
-                phase: 'failed',
-                mode: 'external',
-                deviceState: 'error',
-                lastError: message,
-              },
-            }))
-            if (failed) {
-              yield* bus.publish('capture.failed', { error: message })
-            }
-            return
-          }
-
-          consecutiveErrorPolls = 0
-
-          if (state.state === 'idle') {
-            // Device returned to idle without reaching ready; treat as
-            // stopped (e.g. stopExposure was called externally or the device
-            // aborted).
-            const stopped = yield* coordinator.commitIfLease(lease, (current) => ({
-              ...current,
-              capture: {
-                phase: 'idle',
-                mode: 'external',
-                deviceState: 'idle',
-              },
-            }))
-            if (stopped) {
-              yield* bus.publish('capture.stopped', {})
-            }
-            return
-          }
+          if (failed) yield* bus.publish('capture.failed', { error: message })
+          return
         }
-
-        // Timeout: exposure did not complete within the expected window.
-        if (lease.signal.aborted) return
-        if (!(yield* sessions.ownsSession(session))) return
-        const final = yield* store.get
-        if (final.capture.phase !== 'capturing') return
-        if (final.capture.startedAt !== startedAt) return
-
-        const timedOut = yield* coordinator.commitIfLease(lease, (current) => ({
-          ...current,
+        const completed = yield* coordinator.commitIfLease(lease, (aggregate) => ({
+          ...aggregate,
           capture: {
-            phase: 'failed',
+            phase: result.right.saved.previewError ? 'partial' : 'idle',
             mode: 'external',
-            lastError: 'Exposure did not complete within expected time',
+            deviceState: 'ready',
+            lastError: result.right.saved.previewError,
           },
+          library: { ...aggregate.library, assets: [result.right.asset, ...aggregate.library.assets] },
         }))
-        if (timedOut) {
-          yield* bus.publish('capture.failed', {
-            error: 'Exposure did not complete within expected time',
-          })
+        if (completed?.capture.phase === 'partial') {
+          yield* bus.publish('capture.partial', { error: result.right.saved.previewError, step: 'preview-persist' })
+          return
         }
+        if (completed) yield* bus.publish('capture.succeeded', {})
+        return
+
       }),
     () =>
       Effect.gen(function* () {
@@ -653,31 +421,4 @@ function resolveExposureDuration(configured: number | undefined): number {
     return configured
   }
   return DEFAULT_EXPOSURE_DURATION_SEC
-}
-
-// Builds a library asset entry from a retrieved and persisted external frame.
-// Only metadata (id/name/timestamp/kind + saved-file location and frame
-// geometry) is surfaced to the renderer; the frame bytes stay on disk so
-// DesktopStatus does not carry full image payloads.
-function createExternalLibraryAsset(
-  frame: RigFrameResult,
-  durationSec: number,
-  saved: SavedFrame,
-): LibraryAsset {
-  const capturedAt = frame.metadata?.capturedAt ?? new Date().toISOString()
-  const timePart = capturedAt.slice(11, 19).replace(/:/g, '')
-  return {
-    id: registerManagedAsset(saved.absolutePath),
-    name: `exposure_${durationSec}s_${timePart}`,
-    capturedAt,
-    kind: 'exposure',
-    saved: true,
-    savedFileSize: saved.fileSize,
-    hasPreview: saved.previewFilePath != null,
-    previewFileSize: saved.previewFileSize,
-    frameWidth: frame.width || undefined,
-    frameHeight: frame.height || undefined,
-    framePixelFormat:
-      frame.pixelFormat === 'unknown' ? undefined : frame.pixelFormat,
-  }
 }

@@ -70,6 +70,7 @@ export default function InspectorPanel() {
   } = useProjectionStore(selectInspectorModel)
   const details = useTargetDetailsQuery(target?.id ?? null)
   const pointMutation = usePointToTargetMutation()
+  const startedElapsed = useElapsedSeconds(capture)
 
   if (!target) {
     return (
@@ -95,7 +96,6 @@ export default function InspectorPanel() {
     !isSlewPending &&
     !isBelowHorizon
   const isExternalCapture = capture.mode === 'external'
-  const startedElapsed = useElapsedSeconds(capture)
   const elapsedSec = startedElapsed ?? capture.elapsedSec
   const captureCapability = workspace.capabilities.capture
   const hasNativeCapture = captureCapability === 'native'

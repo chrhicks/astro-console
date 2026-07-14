@@ -4,6 +4,7 @@ import type {
   CatalogPage,
   CatalogQuery,
   ConnectRequestV2,
+  ConfigureExternalSequenceRequest,
   DesktopDiscoveredDeviceV2,
   DesktopLogEntryV2,
   DesktopStatus as DesktopStatusV2,
@@ -54,6 +55,11 @@ export const apiV2: SeestarDesktopApiV2 = {
     invoke('seestar:v2:park', DesktopStatusSchema),
   setExposureDuration: (input: SetExposureDurationRequest) =>
     invoke('seestar:v2:set-exposure-duration', DesktopStatusSchema, input),
+  configureExternalSequence: (input: ConfigureExternalSequenceRequest) =>
+    invoke('seestar:v2:configure-external-sequence', DesktopStatusSchema, input),
+  startExternalSequence: () => invoke('seestar:v2:start-external-sequence', DesktopStatusSchema),
+  continueExternalSequence: () => invoke('seestar:v2:continue-external-sequence', DesktopStatusSchema),
+  finishExternalSequence: () => invoke('seestar:v2:finish-external-sequence', DesktopStatusSchema),
   openSavedAsset: (assetId: string) =>
     invoke('seestar:v2:open-saved-asset', Schema.Undefined, assetId),
   revealSavedAsset: (assetId: string) =>

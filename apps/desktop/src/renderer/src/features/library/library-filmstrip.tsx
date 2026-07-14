@@ -135,6 +135,7 @@ function FilmstripThumb({
             )}
           </div>
         )}
+        {asset.previewError && <div className="thumb-error">Preview failed: {asset.previewError}</div>}
         {error && <div className="thumb-error">{error}</div>}
       </div>
     </div>

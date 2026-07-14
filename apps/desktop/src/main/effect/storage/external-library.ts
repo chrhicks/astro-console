@@ -63,6 +63,7 @@ async function readAssetFromDisk(fitsPath: string): Promise<LibraryAsset | null>
     name: path.basename(fitsPath, '.fits'),
     capturedAt: parseCapturedAtFromName(fitsPath, stat.mtime),
     kind: 'exposure',
+    frameKind: path.basename(path.dirname(fitsPath)) === 'darks' ? 'dark' : 'light',
     saved: true,
     savedFileSize: stat.size,
     hasPreview: preview != null,

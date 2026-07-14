@@ -1,5 +1,6 @@
 import {
   CameraSettings,
+  ExternalSequenceProjection,
   CaptureProjection,
   DeviceProjection,
   LibraryProjection,
@@ -38,8 +39,10 @@ export interface SessionAggregate {
   // Null when the connected rig has no generic RigCamera. Kept separate from
   // the volatile capture projection so rig refresh does not reset it.
   camera: CameraSettings | null
+  sequence: ExternalSequenceProjection
   currentTarget: TargetSummary | null
   diagnostics: {}
+  statusRevision: number
   lastUpdatedAt: string
 }
 
@@ -52,6 +55,8 @@ export type OperationKind =
   | 'point'
   | 'preview-start'
   | 'capture-start'
+  | 'sequence'
+  | 'sequence-continue'
   | 'stop-preview'
   | 'stop-capture'
   | 'park'
@@ -97,6 +102,7 @@ export function createInitialAggregate(): SessionAggregate {
       capabilities: {
         preview: 'unsupported',
         capture: 'unsupported',
+        darkExposure: 'no',
         autofocus: 'no',
         filterWheel: 'no',
         storage: 'no',
@@ -105,7 +111,9 @@ export function createInitialAggregate(): SessionAggregate {
     },
     currentTarget: null,
     diagnostics: {},
+    statusRevision: 0,
     camera: null,
+    sequence: { phase: 'idle', completed: 0, failed: 0 },
     lastUpdatedAt: new Date().toISOString(),
   }
 }
@@ -123,6 +131,7 @@ export function createInitialRuntimeState(): RuntimeState {
 export function stampAggregate(next: SessionAggregate): SessionAggregate {
   return {
     ...next,
+    statusRevision: next.statusRevision + 1,
     lastUpdatedAt: new Date().toISOString(),
   }
 }

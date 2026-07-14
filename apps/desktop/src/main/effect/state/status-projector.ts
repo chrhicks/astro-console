@@ -31,6 +31,7 @@ interface RigSupport {
   canPoint: boolean
   preview: boolean
   capture: WorkspaceCapabilityTier
+  darkExposure: boolean
   autofocus: boolean
   filterWheel: boolean
   storage: boolean
@@ -42,6 +43,7 @@ export function projectRigSupport(rig: ConnectedRig): RigSupport {
     canPoint: rig.pointing !== undefined,
     preview: rig.preview !== undefined,
     capture: rig.capture ? 'native' : rig.camera ? 'external' : 'unsupported',
+    darkExposure: rig.camera?.startDarkExposure !== undefined,
     autofocus: rig.autofocus !== undefined,
     filterWheel: rig.filterWheel !== undefined,
     storage: rig.storage !== undefined,
@@ -84,7 +86,9 @@ function project(
     preview: aggregate.preview,
     workspace: projectWorkspace(aggregate, rigSupport, sessionActive),
     camera: aggregate.camera ?? undefined,
+    sequence: aggregate.sequence,
     currentTarget: aggregate.currentTarget,
+    statusRevision: aggregate.statusRevision,
     lastUpdatedAt: aggregate.lastUpdatedAt,
     lastError: aggregate.session.lastError,
   }
@@ -117,6 +121,7 @@ function projectCapabilities(
     return {
       preview: 'unsupported',
       capture: 'unsupported',
+      darkExposure: 'no',
       autofocus: 'no',
       filterWheel: 'no',
       storage: 'no',
@@ -125,6 +130,7 @@ function projectCapabilities(
   return {
     preview: rigSupport.preview ? 'native' : 'unsupported',
     capture: rigSupport.capture,
+    darkExposure: rigSupport.darkExposure ? 'yes' : 'no',
     autofocus: rigSupport.autofocus ? 'yes' : 'no',
     filterWheel: rigSupport.filterWheel ? 'yes' : 'no',
     storage: rigSupport.storage ? 'yes' : 'no',

@@ -77,6 +77,23 @@ export interface CameraSettings {
   exposureSec: number
 }
 
+export interface ExternalSequencePlan {
+  lightCount: number
+  durationSec: number
+  darkCount: number
+}
+
+export interface ExternalSequenceProjection {
+  phase: 'idle' | 'lights' | 'awaiting-darks' | 'darks' | 'complete' | 'stopped' | 'failed'
+  plan?: ExternalSequencePlan
+  frameKind?: 'light' | 'dark'
+  currentIndex?: number
+  completed: number
+  failed: number
+  lastError?: string
+  target?: TargetSummary
+}
+
 export type PreviewPhase = 'none' | 'starting' | 'active' | 'error'
 
 // Rig-neutral preview source: 'native' means the rig's own live preview
@@ -96,6 +113,7 @@ export interface LibraryAsset {
   name: string
   capturedAt: string
   kind: 'stack' | 'sub' | 'calibration' | 'exposure'
+  frameKind?: 'light' | 'dark'
   // Persisted frame location for external exposures. Present only when the
   // frame bytes were saved to disk by the main-process FrameStorage service;
   // absent for native stacking assets and when an external frame failed to
@@ -105,11 +123,12 @@ export interface LibraryAsset {
   savedFileSize?: number
   // Sibling JPG preview path for external exposures. Present when the
   // FrameStorage service generated a preview JPG alongside the FITS file;
-  // absent when preview generation failed (the FITS still exists) or for
+  // absent when preview persistence failed (the FITS still exists) or for
   // native stacking assets. The UI uses this for the main preview area and
   // filmstrip thumbnails instead of on-demand FITS processing.
   hasPreview?: boolean
   previewFileSize?: number
+  previewError?: string
   frameWidth?: number
   frameHeight?: number
   framePixelFormat?: string
@@ -181,6 +200,7 @@ export type WorkspaceCapabilityFlag = 'yes' | 'no'
 export interface WorkspaceCapabilities {
   preview: WorkspaceCapabilityTier
   capture: WorkspaceCapabilityTier
+  darkExposure: WorkspaceCapabilityFlag
   autofocus: WorkspaceCapabilityFlag
   filterWheel: WorkspaceCapabilityFlag
   storage: WorkspaceCapabilityFlag
@@ -227,7 +247,9 @@ export interface DesktopStatus {
   library: LibraryProjection
   workspace: WorkspaceProjection
   camera?: CameraSettings
+  sequence: ExternalSequenceProjection
   currentTarget: TargetSummary | null
+  statusRevision: number
   lastUpdatedAt: string
   lastError?: string
 }
@@ -288,6 +310,8 @@ export interface SetExposureDurationRequest {
   durationSec: number
 }
 
+export interface ConfigureExternalSequenceRequest extends ExternalSequencePlan {}
+
 export interface SeestarDesktopApiV2 {
   discover(): Promise<readonly DesktopDiscoveredDeviceV2[]>
   connect(input: ConnectRequestV2): Promise<DesktopStatus>
@@ -305,6 +329,10 @@ export interface SeestarDesktopApiV2 {
   setExposureDuration(
     input: SetExposureDurationRequest,
   ): Promise<DesktopStatus>
+  configureExternalSequence(input: ConfigureExternalSequenceRequest): Promise<DesktopStatus>
+  startExternalSequence(): Promise<DesktopStatus>
+  continueExternalSequence(): Promise<DesktopStatus>
+  finishExternalSequence(): Promise<DesktopStatus>
   // Open a persisted external frame in the OS default handler. The opaque ID
   // is resolved by main only within the managed library.
   openSavedAsset(assetId: string): Promise<void>

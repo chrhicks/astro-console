@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { Context, Effect, Layer } from 'effect'
@@ -17,10 +18,11 @@ export type { FrameDescriptor } from './fits-writer'
 export interface SavedFrame {
   readonly absolutePath: string
   readonly fileSize: number
-  // Sibling JPG preview written alongside the FITS file. Absent when preview
-  // generation failed; the FITS file still exists in that case.
+  // Sibling JPG preview written alongside the FITS file. The FITS still exists
+  // when preview persistence fails; previewError describes that partial result.
   readonly previewFilePath?: string
   readonly previewFileSize?: number
+  readonly previewError?: string
 }
 
 export interface FrameStorageSaveInput {
@@ -31,6 +33,7 @@ export interface FrameStorageSaveInput {
   // date/target/lights tree. Omit when no target is selected; frames then
   // land in an "untargeted" bucket.
   readonly targetShort?: string
+  readonly frameKind?: 'light' | 'dark'
   // Parsed frame descriptor used to serialise the pixels as a FITS primary
   // HDU. When the element type or rank cannot be represented safely the save
   // fails honestly instead of writing a misleading file.
@@ -38,6 +41,7 @@ export interface FrameStorageSaveInput {
 }
 
 export interface FrameStorage {
+  readonly preflightExternalFrameStorage: (frameCount?: number) => Effect.Effect<void, unknown>
   // Persists an external frame as a FITS primary HDU under
   // userData/library/external-frames/<date>/<target>/lights/ with a
   // deterministic, readable filename. Returns the absolute path and byte
@@ -46,6 +50,11 @@ export interface FrameStorage {
     input: FrameStorageSaveInput,
   ) => Effect.Effect<SavedFrame, unknown>
 }
+
+// A full-resolution frame from the known camera is about 46 MiB. Require
+// 512 MiB rather than trying to reserve an exact future frame count.
+const KNOWN_EXTERNAL_FRAME_BYTES = 50 * 1024 * 1024
+const MINIMUM_EXTERNAL_FRAME_FREE_BYTES = 512 * 1024 * 1024
 
 export const FrameStorage =
   Context.GenericTag<FrameStorage>('FrameStorage')
@@ -68,14 +77,14 @@ function sanitizeTargetDir(raw: string | undefined): string {
   return sanitized || 'untargeted'
 }
 
-// Scans the lights directory for existing sequence numbers and returns the
+// Scans a frame directory for existing sequence numbers and returns the
 // next zero-padded 4-digit index. Starts at 0001 for a new/empty folder.
-async function resolveNextSequence(dir: string): Promise<string> {
+export async function resolveNextSequence(dir: string, frameKind: 'light' | 'dark'): Promise<string> {
   let max = 0
   try {
     const entries = await fs.readdir(dir)
     for (const entry of entries) {
-      const match = entry.match(/_light_(\d+)\.fits$/)
+      const match = entry.match(new RegExp(`_${frameKind}_(\\d+)\\.fits$`))
       if (match) {
         const n = Number.parseInt(match[1], 10)
         if (n > max) max = n
@@ -87,9 +96,35 @@ async function resolveNextSequence(dir: string): Promise<string> {
   return (max + 1).toString().padStart(4, '0')
 }
 
+async function prepareExternalFramesRoot(): Promise<string> {
+  const root = resolveExternalFramesRoot()
+  await fs.mkdir(root, { recursive: true })
+  return fs.realpath(root)
+}
+
+async function preflightExternalFrameStorage(frameCount = 1): Promise<void> {
+  const root = await prepareExternalFramesRoot()
+  const stats = await fs.statfs(root)
+  const freeBytes = stats.bavail * stats.bsize
+  const requiredBytes = Math.max(
+    MINIMUM_EXTERNAL_FRAME_FREE_BYTES,
+    Math.ceil(KNOWN_EXTERNAL_FRAME_BYTES * frameCount * 1.25),
+  )
+  if (freeBytes < requiredBytes) {
+    throw new Error(
+        `External frame storage has insufficient free space (${freeBytes} bytes available; requires at least ${requiredBytes} bytes)`,
+    )
+  }
+
+  const probePath = path.join(root, `.storage-probe-${randomUUID()}`)
+  await writeFileExclusive(probePath, new Uint8Array(1))
+  await fs.unlink(probePath)
+}
+
 export const FrameStorageLive = Layer.succeed(
   FrameStorage,
   {
+    preflightExternalFrameStorage: (frameCount) => Effect.tryPromise(() => preflightExternalFrameStorage(frameCount)),
     saveExternalFrame: (input) =>
       Effect.gen(function* () {
         const capturedAt = parseCapturedAt(input.capturedAt)
@@ -103,19 +138,18 @@ export const FrameStorageLive = Layer.succeed(
         const targetDir = sanitizeTargetDir(input.targetShort)
         const date = capturedAt.date
         const time = capturedAt.time
-        const root = resolveExternalFramesRoot()
         // Resolve the root through realpath so the trusted anchor is the true
         // filesystem location. The root may not exist yet on first run; create
         // it before realpath so the anchor is always concrete.
-        yield* Effect.tryPromise(() => fs.mkdir(root, { recursive: true }))
-        const realRoot = yield* Effect.tryPromise(() => fs.realpath(root))
-        const dir = path.join(realRoot, date, targetDir, 'lights')
+        const realRoot = yield* Effect.tryPromise(prepareExternalFramesRoot)
+        const frameKind = input.frameKind ?? 'light'
+        const dir = path.join(realRoot, date, targetDir, frameKind === 'dark' ? 'darks' : 'lights')
         const realDir = yield* Effect.tryPromise(() =>
           ensureDirBeneathRoot(dir, realRoot),
         )
-        const sequence = yield* Effect.tryPromise(() => resolveNextSequence(realDir))
+        const sequence = yield* Effect.tryPromise(() => resolveNextSequence(realDir, frameKind))
         const dateTime = time ? `${date}-${time}` : date
-        const baseName = `${dateTime}_${targetDir.toLowerCase()}_light`
+        const baseName = `${dateTime}_${targetDir.toLowerCase()}_${frameKind}`
         const bytes = yield* writeFits(input.data, input.frame)
         // Atomically and exclusively create the FITS file without following
         // a final symlink, retrying sequence collisions so a predictable name
@@ -126,18 +160,23 @@ export const FrameStorageLive = Layer.succeed(
         const previewPath = fits.absolutePath.replace(/\.fits$/, '.preview.jpg')
         const preview = yield* Effect.tryPromise(async () => {
           const jpg = generatePreviewJpeg(input.data, input.frame)
-          if (!jpg) return null
+          if (!jpg) {
+            throw new Error('Preview generation is unavailable for this frame layout')
+          }
           await writeFileExclusive(previewPath, jpg)
           return { previewFilePath: previewPath, previewFileSize: jpg.byteLength }
-        }).pipe(
-          // Best-effort: preview failure must not invalidate the saved FITS.
-          Effect.catchAll(() => Effect.succeed(null)),
-        )
+        }).pipe(Effect.either)
         return {
           absolutePath: fits.absolutePath,
           fileSize: fits.fileSize,
-          previewFilePath: preview?.previewFilePath,
-          previewFileSize: preview?.previewFileSize,
+          previewFilePath: preview._tag === 'Right' ? preview.right?.previewFilePath : undefined,
+          previewFileSize: preview._tag === 'Right' ? preview.right?.previewFileSize : undefined,
+          previewError:
+            preview._tag === 'Left'
+              ? preview.left instanceof Error
+                ? preview.left.message
+                : String(preview.left)
+              : undefined,
         }
       }),
   } satisfies FrameStorage,

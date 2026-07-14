@@ -44,6 +44,7 @@ describe('Rig capability projection', () => {
       canPoint: false,
       preview: false,
       capture: 'unsupported',
+      darkExposure: false,
       autofocus: false,
       filterWheel: false,
       storage: false,
@@ -60,6 +61,17 @@ describe('Rig capability projection', () => {
     const support = projectRigSupport(rig)
     assert.equal(support.canPark, true)
     assert.equal(support.autofocus, true)
+  })
+
+  it('projects dark exposure from the callable camera surface', () => {
+    const rig: ConnectedRig = {
+      ...base,
+      camera: { ...camera, startDarkExposure: () => Effect.void },
+      captureStop: { mode: 'external', stop: camera.stopExposure },
+    }
+
+    assert.equal(projectRigSupport(rig).darkExposure, true)
+    assert.equal(projectRigSupport({ ...rig, camera }).darkExposure, false)
   })
 })
 

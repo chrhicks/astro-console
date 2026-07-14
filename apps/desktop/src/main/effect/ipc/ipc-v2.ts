@@ -18,6 +18,7 @@ import {
   MAX_EXPOSURE_DURATION_SEC,
 } from '../workflows/capture-workflows'
 import { runPark } from '../workflows/park-workflows'
+import { runConfigureExternalSequence, runContinueExternalSequence, runFinishExternalSequence, runStartExternalSequence, MAX_SEQUENCE_DARKS, MAX_SEQUENCE_LIGHTS } from '../workflows/external-sequence'
 import { resolveExternalFramesRoot } from '../storage/frame-storage'
 import { getManagedAssetPath } from '../storage/asset-registry'
 import { CatalogStore } from '../catalog/catalog-store'
@@ -144,6 +145,16 @@ export function registerIpcV2Handlers(allowed: WebContents) {
     ),
   )
 
+  handle('seestar:v2:configure-external-sequence', (_event, input) =>
+    appRuntime.runPromise(Effect.gen(function* () {
+      const decoded = yield* decodeIpc(ExternalSequencePlanSchema, input)
+      return yield* runConfigureExternalSequence(decoded).pipe(Effect.flatMap(() => getProjectedStatus()))
+    })),
+  )
+  handle('seestar:v2:start-external-sequence', () => appRuntime.runPromise(runStartExternalSequence.pipe(Effect.flatMap(() => getProjectedStatus()))))
+  handle('seestar:v2:continue-external-sequence', () => appRuntime.runPromise(runContinueExternalSequence.pipe(Effect.flatMap(() => getProjectedStatus()))))
+  handle('seestar:v2:finish-external-sequence', () => appRuntime.runPromise(runFinishExternalSequence.pipe(Effect.flatMap(() => getProjectedStatus()))))
+
   handle('seestar:v2:open-saved-asset', (_event, assetId) =>
     openSavedAsset(requireAssetId(assetId)),
   )
@@ -191,6 +202,12 @@ const SetExposureDurationRequestSchema = Schema.Struct({
     Schema.greaterThan(0),
     Schema.lessThanOrEqualTo(MAX_EXPOSURE_DURATION_SEC),
   ),
+})
+
+const ExternalSequencePlanSchema = Schema.Struct({
+  lightCount: Schema.Number.pipe(Schema.int(), Schema.between(1, MAX_SEQUENCE_LIGHTS)),
+  durationSec: Schema.Number.pipe(Schema.greaterThan(0), Schema.lessThanOrEqualTo(MAX_EXPOSURE_DURATION_SEC)),
+  darkCount: Schema.Number.pipe(Schema.int(), Schema.between(0, MAX_SEQUENCE_DARKS)),
 })
 
 function decodeIpc<A, I>(

@@ -65,6 +65,7 @@ export type AppEventName =
   | 'session.keepalive.recovered'
   | 'session.keepalive.stale'
   | 'seestar.capture.stack.failed'
+  | 'sequence.configured'
   | 'status.snapshot.emitted'
 
 export const EventBus = Context.GenericTag<EventBus>('EventBus')

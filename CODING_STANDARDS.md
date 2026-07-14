@@ -37,6 +37,10 @@ Source: `anomalyco/opencode` `v2` branch, distilled from `.references/opencode-v
 - Move real supporting concepts into small helpers placed close to the caller, usually below the main export.
 - Do not extract helpers for simple expressions just to reduce line count.
 - Add comments only for non-obvious constraints, surprising behavior, or important invariants.
+- Give each shared domain decision and derived state one owner. Reuse that owner rather than recomputing the rule in workflows, projections, and UI.
+- Keep a selector or predicate local when it only shapes one component's presentation. Give reusable or domain-significant selection a named, centralized owner near the state it interprets.
+- Name business-priority condition chains as decision functions when their ordering affects behavior. Simple local presentation ternaries remain appropriate when they do not encode a shared rule.
+- Model lifecycles with explicit discriminated states when transition validity, cancellation, recovery, or terminal behavior matters; do not infer them from unrelated flags.
 
 ## Repo-Specific Patterns From OpenCode V2
 
@@ -52,6 +56,7 @@ Enforceable boundaries for this repo. For rationale and migration details see `d
 
 - Decode unknown input at every trust boundary. Decode IPC outputs and device events before the renderer consumes them.
 - Keep vendor protocol details below the Rig boundary, inside SDK/vendor protocol packages or thin adapters.
+- Keep vendor-specific quirks, compatibility behavior, and telemetry normalization in the owning adapter; expose only the normalized domain contract above it.
 - Callable Rig surfaces are the canonical capability source. Booleans only express semantics not structurally expressible there.
 - Keep generic camera exposure distinct from vendor-native capture.
 - Workflows orchestrate. Adapters translate and assemble. Projectors are pure UI normalization.
@@ -69,6 +74,9 @@ Enforceable boundaries for this repo. For rationale and migration details see `d
 - Use the project's standard typecheck command instead of calling `tsc` directly when local scripts define the contract.
 - Prefer testing real behavior over duplicating implementation logic in tests.
 - Avoid mocks unless they are the only realistic option.
+- Make reusable fakes fail closed for unconfigured behavior and expose configured scenarios visibly; do not let a permissive default hide an untested path. A one-off test may use the smallest local fake that makes its scenario clear.
+- Synchronize lifecycle and race tests with deterministic barriers, events, or controllable promises. Do not use fixed sleeps as proof that an asynchronous transition occurred.
+- Prefer named fixture configuration to growing optional positional arguments when a fixture has several independently meaningful settings.
 - For UI, CLI, or TUI changes, pair automated checks with a focused smoke test and capture screenshot evidence when the change is visible.
 
 ## Contribution Hygiene

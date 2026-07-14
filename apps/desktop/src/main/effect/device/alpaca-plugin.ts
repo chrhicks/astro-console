@@ -30,8 +30,9 @@ import {
 const DISCOVERY_TIMEOUT_MS = 3000
 // Real hardware can take longer than the 3s probe to acknowledge device commands.
 const COMMAND_TIMEOUT_MS = 15000
-const SLEW_POLL_INTERVAL_MS = 500
+const MOUNT_POLL_INTERVAL_MS = 1000
 const SLEW_TIMEOUT_MS = 120000
+const UNPARK_SETTLE_TIMEOUT_MS = 10000
 
 // Initial telescope state read at connect time. Groups the properties that
 // populate the device projection and gate mount/pointing capabilities.
@@ -46,6 +47,11 @@ interface TelescopeState {
   canSlewAsync: boolean
   driverVersion: string | undefined
   name: string | undefined
+}
+
+interface MountState {
+  atPark: boolean
+  slewing: boolean
 }
 
 interface AlpacaDiscoveredRig extends DesktopDiscoveredDeviceV2 {
@@ -277,20 +283,12 @@ export function createAlpacaPlugin(): DevicePlugin {
                     ) =>
                       Effect.tryPromise({
                         try: async () => {
-                          // Minimal readiness: unpark if parked so the mount can slew.
-                          const atPark = await client.get(
-                            `${base}/atpark`,
-                            Schema.Boolean,
-                            context?.signal,
+                          await prepareMountForSlew(
+                            client,
+                            base,
+                            state,
+                            context,
                           )
-                          if (atPark && state.canUnpark) {
-                            await client.put(
-                              `${base}/unpark`,
-                              {},
-                              COMMAND_TIMEOUT_MS,
-                              context?.signal,
-                            )
-                          }
                         },
                         catch: (error) =>
                           new Error(
@@ -519,7 +517,7 @@ function buildMount(
                   client.get(`${base}/atpark`, Schema.Boolean, context?.signal),
                 true,
                 SLEW_TIMEOUT_MS,
-                SLEW_POLL_INTERVAL_MS,
+                MOUNT_POLL_INTERVAL_MS,
                 context?.signal,
               )
             },
@@ -533,13 +531,16 @@ function buildMount(
     stopMotion: canSlewAtAll
       ? (context) =>
           Effect.tryPromise({
-            try: () =>
-              client.put(
+            try: async () => {
+              const mountState = await readMountState(client, base, context)
+              if (mountState.atPark) return
+              await client.put(
                 `${base}/abortslew`,
                 {},
                 COMMAND_TIMEOUT_MS,
                 context?.signal,
-              ),
+              )
+            },
             catch: (error) =>
               new Error(`Alpaca stop failed: ${toErrorMessage(error)}`),
           })
@@ -561,6 +562,7 @@ function buildSlewToCoordinates(
   return (input: RigCoordinates, context?: RigOperationContext) =>
     Effect.tryPromise({
       try: async () => {
+        await prepareMountForSlew(client, base, state, context)
         if (state.canSlewAsync) {
           await client.put(
             `${base}/slewtocoordinatesasync`,
@@ -569,11 +571,13 @@ function buildSlewToCoordinates(
             context?.signal,
           )
           await pollUntil(
-            () =>
-              client.get(`${base}/slewing`, Schema.Boolean, context?.signal),
-            false,
+            async () => {
+              const mountState = await readMountState(client, base, context)
+              return !mountState.atPark && !mountState.slewing
+            },
+            true,
             SLEW_TIMEOUT_MS,
-            SLEW_POLL_INTERVAL_MS,
+            MOUNT_POLL_INTERVAL_MS,
             context?.signal,
           )
         } else {
@@ -590,6 +594,70 @@ function buildSlewToCoordinates(
     })
 }
 
+async function prepareMountForSlew(
+  client: AlpacaClient,
+  base: string,
+  state: TelescopeState,
+  context?: RigOperationContext,
+): Promise<void> {
+  const mountState = await readMountState(client, base, context)
+  if (mountState.atPark) {
+    if (!state.canUnpark) {
+      throw new Error('Mount is parked and cannot unpark; no slew was sent.')
+    }
+    await client.put(`${base}/unpark`, {}, COMMAND_TIMEOUT_MS, context?.signal)
+    try {
+      await pollUntil(
+        async () => {
+          const next = await readMountState(client, base, context)
+          return !next.atPark && !next.slewing
+        },
+        true,
+        UNPARK_SETTLE_TIMEOUT_MS,
+        MOUNT_POLL_INTERVAL_MS,
+        context?.signal,
+      )
+    } catch (error) {
+      if (context?.signal?.aborted) throw error
+      throw new Error('Mount did not settle after unpark; no slew was sent.')
+    }
+    return
+  }
+  try {
+    await pollUntil(
+      async () => {
+        const next = await readMountState(client, base, context)
+        return !next.atPark && !next.slewing
+      },
+      true,
+      UNPARK_SETTLE_TIMEOUT_MS,
+      MOUNT_POLL_INTERVAL_MS,
+      context?.signal,
+    )
+  } catch (error) {
+    if (context?.signal?.aborted) throw error
+    throw new Error('Mount did not settle before slew; no slew was sent.')
+  }
+}
+
+async function readMountState(
+  client: AlpacaClient,
+  base: string,
+  context?: RigOperationContext,
+): Promise<MountState> {
+  const atPark = await client.get(
+    `${base}/atpark`,
+    Schema.Boolean,
+    context?.signal,
+  )
+  const slewing = await client.get(
+    `${base}/slewing`,
+    Schema.Boolean,
+    context?.signal,
+  )
+  return { atPark, slewing }
+}
+
 function buildCamera(client: AlpacaClient, base: string): RigCamera {
   return {
     startExposure: (input, context) =>
@@ -597,7 +665,7 @@ function buildCamera(client: AlpacaClient, base: string): RigCamera {
         try: () =>
           client.put(
             `${base}/startexposure`,
-            { Duration: input.durationSec, Light: true },
+            { Duration: input.durationSec, Light: input.light ?? true },
             // Some drivers block startexposure until the exposure completes;
             // allow the full duration plus a command-ack margin.
             input.durationSec * 1000 + COMMAND_TIMEOUT_MS,
@@ -606,6 +674,20 @@ function buildCamera(client: AlpacaClient, base: string): RigCamera {
         catch: (error) =>
           new Error(
             `Alpaca camera startExposure failed: ${toErrorMessage(error)}`,
+          ),
+      }),
+    startDarkExposure: (input, context) =>
+      Effect.tryPromise({
+        try: () =>
+          client.put(
+            `${base}/startexposure`,
+            { Duration: input.durationSec, Light: false },
+            input.durationSec * 1000 + COMMAND_TIMEOUT_MS,
+            context?.signal,
+          ),
+        catch: (error) =>
+          new Error(
+            `Alpaca camera startDarkExposure failed: ${toErrorMessage(error)}`,
           ),
       }),
     stopExposure: (context) =>
