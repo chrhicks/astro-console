@@ -133,41 +133,36 @@ export const OperationCoordinatorLive = Layer.effect(
           const id = crypto.randomUUID()
           const controller = new AbortController()
 
-          while (true) {
-            const result = yield* Ref.modify(
-              ref,
-              (state): readonly [OperationLease | 'busy' | null, RuntimeState] => {
-                if (state.session !== session) return [null, state]
-                if (state.operation && isRecovery(state.operation.kind)) {
-                  // Park has priority over an in-flight stop. Nothing may
-                  // preempt park, and duplicate/competing stops are rejected
-                  // rather than queued to run with stale intent later.
-                  if (kind !== 'park' || state.operation.kind === 'park') {
-                    return [null, state]
-                  }
+          return yield* Ref.modify(
+            ref,
+            (state): readonly [OperationLease | null, RuntimeState] => {
+              if (state.session !== session) return [null, state]
+              if (state.operation && isRecovery(state.operation.kind)) {
+                // Park has priority over an in-flight stop. Nothing may
+                // preempt park, and duplicate/competing stops are rejected
+                // rather than queued to run with stale intent later.
+                if (kind !== 'park' || state.operation.kind === 'park') {
+                  return [null, state]
                 }
-                if (state.operation) state.operation.controller.abort()
-                const operation: OperationRuntimeState = {
-                  id,
-                  sessionId: session.sessionId,
-                  kind,
-                  generation: state.generation,
-                  controller,
-                }
-                const lease: OperationLease = {
-                  id,
-                  sessionId: session.sessionId,
-                  kind,
-                  generation: state.generation,
-                  signal: controller.signal,
-                }
-                return [lease, { ...state, operation }]
-              },
-            )
-
-            if (result !== 'busy') return result
-            yield* Effect.sleep(ACQUIRE_POLL_INTERVAL_MS)
-          }
+              }
+              if (state.operation) state.operation.controller.abort()
+              const operation: OperationRuntimeState = {
+                id,
+                sessionId: session.sessionId,
+                kind,
+                generation: state.generation,
+                controller,
+              }
+              const lease: OperationLease = {
+                id,
+                sessionId: session.sessionId,
+                kind,
+                generation: state.generation,
+                signal: controller.signal,
+              }
+              return [lease, { ...state, operation }]
+            },
+          )
         }),
 
       release: (lease: OperationLease) =>

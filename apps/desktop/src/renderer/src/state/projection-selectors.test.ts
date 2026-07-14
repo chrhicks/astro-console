@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { it } from 'node:test'
 import type { DesktopStatus } from '../../../shared/api-v2'
-import { selectCapturePresentation, selectWorkAreaModel } from './projection-selectors'
+import { capturePhaseLabel, selectCapturePresentation, selectWorkAreaModel } from './projection-selectors'
 
 it('does not select an older preview when the newest frame has none', () => {
   const status: DesktopStatus = {
@@ -46,6 +46,12 @@ it('classifies capture presentation from the stable workspace capability', () =>
     ...DEFAULT_WORKSPACE,
     capabilities: { ...DEFAULT_WORKSPACE.capabilities, capture: 'native' },
   }), 'capture')
+})
+
+it('labels only exposure captures as exposing', () => {
+  assert.equal(capturePhaseLabel('capturing', 'capture'), 'Capturing')
+  assert.equal(capturePhaseLabel('capturing', 'exposure'), 'Exposing')
+  assert.equal(capturePhaseLabel('starting', 'exposure'), 'Starting')
 })
 
 const DEFAULT_WORKSPACE = {

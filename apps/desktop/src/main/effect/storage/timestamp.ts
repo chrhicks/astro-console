@@ -19,7 +19,7 @@ export function parseCapturedAt(
   const mi = Number(match[5])
   const s = Number(match[6])
   if (mo < 1 || mo > 12) return null
-  if (d < 1 || d > daysInMonth(y, mo)) return null
+  if (d < 1 || d > new Date(y, mo, 0).getDate()) return null
   if (h > 23 || mi > 59 || s > 59) return null
   // Parse to a canonical instant and derive path components from UTC so
   // a timezone offset is normalized before directory/filename construction.
@@ -29,10 +29,6 @@ export function parseCapturedAt(
     date: formatUtcDate(instant),
     time: formatUtcTime(instant),
   }
-}
-
-function daysInMonth(year: number, month: number): number {
-  return new Date(year, month, 0).getDate()
 }
 
 function formatUtcDate(instant: Date): string {

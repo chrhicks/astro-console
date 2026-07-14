@@ -289,10 +289,6 @@ function parseArgs(argv: string[]): FetchArgs {
     }
   }
 
-  if (out.quickLookColumns < 1) {
-    out.quickLookColumns = 1
-  }
-
   return out
 }
 
@@ -433,11 +429,10 @@ function deriveTargetCount(
   availableCount: number | undefined,
   requestedCount: number,
 ): number {
-  const normalizedRequested = Math.max(1, requestedCount)
   if (availableCount === undefined || availableCount <= 0) {
-    return normalizedRequested
+    return requestedCount
   }
-  return Math.min(normalizedRequested, availableCount)
+  return Math.min(requestedCount, availableCount)
 }
 
 async function fetchLatestSubframes(
@@ -661,7 +656,7 @@ function buildQuickLookHtml(input: {
     main { max-width: 1200px; margin: 0 auto; padding: 20px; }
     .meta { margin-bottom: 18px; }
     .meta p { margin: 4px 0; }
-    .grid { display: grid; grid-template-columns: repeat(${Math.max(1, input.columns)}, minmax(0, 1fr)); gap: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(${input.columns}, minmax(0, 1fr)); gap: 12px; }
     .card { background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(31, 41, 51, 0.08); }
     .card img { display: block; width: 100%; height: auto; background: #0f172a; }
     .card p { margin: 0; padding: 10px; }

@@ -6,7 +6,7 @@ import type {
 import type { CapturePresentation } from '../../state/projection-selectors'
 import { EXTERNAL_PREVIEW_FAILURE_COPY } from './external-preview-failure-copy'
 
-const STATUS_MESSAGES: Record<WorkspaceProjection['state'], string> = {
+export const STATUS_MESSAGES: Record<WorkspaceProjection['state'], string> = {
   disconnected: 'Connect a device to begin.',
   idle_no_target: 'Select a target to point the telescope.',
   primed: 'Ready to preview or capture.',

@@ -100,17 +100,16 @@ function discoverHosts(timeoutMs: number): Promise<DiscoveredHost[]> {
     const socket = dgram.createSocket('udp4')
     const hosts = new Map<string, DiscoveredHost>()
     let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
     const finish = () => {
       if (settled) return
       settled = true
+      if (timer) clearTimeout(timer)
       socket.close()
       resolve([...hosts.values()])
     }
-    const timer = setTimeout(finish, timeoutMs)
-    socket.on('error', () => {
-      clearTimeout(timer)
-      finish()
-    })
+    timer = setTimeout(finish, timeoutMs)
+    socket.on('error', finish)
     socket.on('message', (message, info) => {
       try {
         const parsed = Schema.decodeUnknownSync(DiscoveryResponse)(

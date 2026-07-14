@@ -1,9 +1,14 @@
 import { resolveSeestarPemPath } from '../config.js'
 import { SeestarDevice } from '../device.js'
-import { createConsoleLogger, type LogLevel } from '../logging.js'
+import { createConsoleLogger } from '../logging.js'
 import type { DevelopmentSmokeTestOptions } from '../types.js'
-
-const DEFAULT_HOST = process.env.SEESTAR_HOST ?? '192.168.4.29'
+import {
+  DEFAULT_HOST,
+  asLogLevel,
+  asNumber,
+  asString,
+  parseArgs,
+} from './live-session.js'
 
 function main(): void {
   const options = parseArgs(process.argv.slice(2))
@@ -76,58 +81,10 @@ function main(): void {
     })
 }
 
-function parseArgs(
-  argv: string[],
-): Record<string, string | boolean | undefined> {
-  const out: Record<string, string | boolean | undefined> = {}
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i]
-    if (arg === '--help' || arg === '-h') {
-      out.help = true
-      continue
-    }
-    if (arg === '--json') {
-      out.json = true
-      continue
-    }
-    if (!arg.startsWith('--')) {
-      continue
-    }
-    const key = arg.slice(2)
-    const value = argv[i + 1]
-    out[toCamelCase(key)] = value
-    i += 1
-  }
-  return out
-}
-
-function asString(value: string | boolean | undefined): string | undefined {
-  return typeof value === 'string' ? value : undefined
-}
-
-function asNumber(value: string | undefined): number | undefined {
-  if (!value) return undefined
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : undefined
-}
-
 function asBoolean(value: string | undefined): boolean | undefined {
   if (value === undefined) return undefined
   if (value === 'true') return true
   if (value === 'false') return false
-  return undefined
-}
-
-function asLogLevel(value: string): LogLevel | undefined {
-  if (
-    value === 'trace' ||
-    value === 'debug' ||
-    value === 'info' ||
-    value === 'warn' ||
-    value === 'error'
-  ) {
-    return value
-  }
   return undefined
 }
 
@@ -152,10 +109,6 @@ function asOpenArm(
     return value
   }
   return undefined
-}
-
-function toCamelCase(value: string): string {
-  return value.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
 }
 
 function printReport(report: {

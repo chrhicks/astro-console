@@ -124,12 +124,7 @@ function resolveFitsType(elementType: number): FitsType | null {
 function buildFitsHeader(
   cards: Array<[string, number | boolean]>,
 ): Buffer {
-  const lines: string[] = []
-  for (const [keyword, value] of cards) {
-    lines.push(fitsCard(keyword, value))
-  }
-  lines.push('END'.padEnd(80))
-  let header = lines.join('')
+  let header = `${cards.map(([keyword, value]) => fitsCard(keyword, value)).join('')}END`.padEnd(80)
   const blockSize = 2880
   const pad = (blockSize - (header.length % blockSize)) % blockSize
   if (pad > 0) header += ' '.repeat(pad)

@@ -182,6 +182,26 @@ export const runPark = Effect.gen(function* () {
 
         if (lease.signal.aborted) return
 
+        if (refreshed.device.mountClosed !== true) {
+          const error = new Error('Park command completed but mount closure was not confirmed')
+          const updated = yield* coordinator.commitIfLease(lease, (cur) => ({
+            ...cur,
+            session: {
+              ...cur.session,
+              lastError: error.message,
+            },
+            device: {
+              ...cur.device,
+              mountClosed: undefined,
+              warnings: [...(cur.device.warnings ?? []), 'Park state is unconfirmed'],
+            },
+          }))
+          if (updated) {
+            yield* bus.publish('park.failed', { error: error.message, step: 'park-arm' })
+          }
+          return yield* Effect.fail(error)
+        }
+
         const parked = yield* coordinator.commitIfLease(lease, (cur) => ({
           ...cur,
           session: {

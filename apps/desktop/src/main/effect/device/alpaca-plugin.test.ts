@@ -7,6 +7,10 @@ import { EventBusLive } from '../event/event-bus'
 import { createAlpacaPlugin, toDiscoveredRig } from './alpaca-plugin'
 
 const requests: { path: string; method: string }[] = []
+let lastConnectRequests: { path: string; method: string }[] = []
+let lastConnectMaxInFlightRequests = 0
+let inFlightRequests = 0
+let maxInFlightRequests = 0
 let scenario: AlpacaScenario = { atParkValues: [] }
 let port = 0
 const plugin = createAlpacaPlugin()
@@ -15,6 +19,7 @@ interface AlpacaScenario {
   atParkDefault?: boolean
   atParkValues: boolean[]
   canUnpark?: boolean
+  responseDelayMs?: number
   slewingDefault?: boolean
   slewingValues?: boolean[]
 }
@@ -24,31 +29,47 @@ const server = createServer((request, response) => {
     .pathname
   const method = request.method ?? 'GET'
   requests.push({ path, method })
+  inFlightRequests += 1
+  maxInFlightRequests = Math.max(maxInFlightRequests, inFlightRequests)
+  const end = (body: object) => {
+    const respond = () => {
+      response.end(JSON.stringify(body))
+      inFlightRequests -= 1
+    }
+    if (scenario.responseDelayMs) {
+      setTimeout(respond, scenario.responseDelayMs)
+      return
+    }
+    respond()
+  }
 
   if (method === 'GET' && path === '/management/v1/configureddevices') {
-    response.end(
-      JSON.stringify({
-        Value: [
-          {
-            DeviceName: 'Example Mount',
-            DeviceType: 'Telescope',
-            DeviceNumber: 0,
-            UniqueID: 'mount-test',
-          },
-        ],
-        ErrorNumber: 0,
-      }),
-    )
+    end({
+      Value: [
+        {
+          DeviceName: 'Example Mount',
+          DeviceType: 'Telescope',
+          DeviceNumber: 0,
+          UniqueID: 'mount-test',
+        },
+        {
+          DeviceName: 'Example Camera',
+          DeviceType: 'Camera',
+          DeviceNumber: 0,
+        },
+      ],
+      ErrorNumber: 0,
+    })
     return
   }
 
   const scripted = getScriptedResponse(method, path)
   if (!scripted) {
     response.statusCode = 405
-    response.end(JSON.stringify({ ErrorNumber: 1, ErrorMessage: `Unexpected ${request.method} ${path}` }))
+    end({ ErrorNumber: 1, ErrorMessage: `Unexpected ${request.method} ${path}` })
     return
   }
-  response.end(JSON.stringify(scripted))
+  end(scripted)
 })
 const discoverySocket = dgram.createSocket('udp4')
 
@@ -82,6 +103,8 @@ async function connectMount(nextScenario: AlpacaScenario) {
     atParkValues: [...nextScenario.atParkValues],
     slewingValues: [...(nextScenario.slewingValues ?? [])],
   }
+  requests.length = 0
+  maxInFlightRequests = 0
   const session = await Effect.runPromise(
     plugin
       .connect({
@@ -90,7 +113,10 @@ async function connectMount(nextScenario: AlpacaScenario) {
       })
       .pipe(Effect.provide(EventBusLive)),
   )
+  lastConnectRequests = [...requests]
+  lastConnectMaxInFlightRequests = maxInFlightRequests
   requests.length = 0
+  maxInFlightRequests = 0
   return session
 }
 
@@ -100,6 +126,7 @@ function getScriptedResponse(method: string, path: string) {
     '/api/v1/telescope/0/park',
     '/api/v1/telescope/0/unpark',
     '/api/v1/telescope/0/slewtocoordinatesasync',
+    '/api/v1/camera/0/connected',
   ].includes(path)) {
     return { ErrorNumber: 0 }
   }
@@ -129,6 +156,14 @@ function getScriptedValue(path: string): boolean | number | string | undefined {
       return '1.0'
     case '/api/v1/telescope/0/name':
       return 'Example Mount'
+    case '/api/v1/camera/0/connected':
+      return true
+    case '/api/v1/camera/0/camerastate':
+      return 0
+    case '/api/v1/camera/0/imageready':
+      return false
+    case '/api/v1/camera/0/lastexposureduration':
+      return 1
   }
 }
 
@@ -147,6 +182,53 @@ test('maps vendor discovery facts to the desktop device identity', () => {
   assert.equal(rig.deviceId, 'alpaca:telescope:mount-1')
   assert.equal(rig.displayName, 'Example Mount')
   assert.equal(rig.cameraDeviceNumber, 3)
+})
+
+test('serializes connect and camera state reads for one Alpaca server', async () => {
+  const session = await connectMount({
+    atParkValues: [false, false],
+    responseDelayMs: 5,
+  })
+  const camera = session.rig.camera
+
+  assert.equal(lastConnectMaxInFlightRequests, 1)
+  assert.deepEqual(lastConnectRequests, [
+    { path: '/api/v1/telescope/0/connected', method: 'GET' },
+    { path: '/api/v1/telescope/0/atpark', method: 'GET' },
+    { path: '/api/v1/telescope/0/canpark', method: 'GET' },
+    { path: '/api/v1/telescope/0/canunpark', method: 'GET' },
+    { path: '/api/v1/telescope/0/tracking', method: 'GET' },
+    { path: '/api/v1/telescope/0/sitelatitude', method: 'GET' },
+    { path: '/api/v1/telescope/0/sitelongitude', method: 'GET' },
+    { path: '/api/v1/telescope/0/canslew', method: 'GET' },
+    { path: '/api/v1/telescope/0/canslewasync', method: 'GET' },
+    { path: '/api/v1/telescope/0/driverversion', method: 'GET' },
+    { path: '/api/v1/telescope/0/name', method: 'GET' },
+    { path: '/api/v1/camera/0/connected', method: 'GET' },
+  ])
+  assert.ok(camera)
+  await Effect.runPromise(
+    camera.getExposureState({ signal: new AbortController().signal }),
+  )
+
+  assert.equal(maxInFlightRequests, 1)
+  assert.deepEqual(requests, [
+    { path: '/api/v1/camera/0/camerastate', method: 'GET' },
+    { path: '/api/v1/camera/0/imageready', method: 'GET' },
+    { path: '/api/v1/camera/0/lastexposureduration', method: 'GET' },
+  ])
+
+  requests.length = 0
+  maxInFlightRequests = 0
+  await Effect.runPromise(session.rig.refresh)
+
+  assert.equal(maxInFlightRequests, 1)
+  assert.deepEqual(requests, [
+    { path: '/api/v1/telescope/0/atpark', method: 'GET' },
+    { path: '/api/v1/telescope/0/tracking', method: 'GET' },
+  ])
+
+  await Effect.runPromise(session.disconnect)
 })
 
 test('park skips the command and polling when the mount is parked with stale slewing', async () => {

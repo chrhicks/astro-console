@@ -599,10 +599,6 @@ function parseArgs(argv: string[]): StackWatchArgs {
     out.maxSamples = 1
   }
 
-  if (out.albumSampleSize < 1) {
-    out.albumSampleSize = 1
-  }
-
   return out
 }
 

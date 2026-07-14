@@ -19,14 +19,15 @@ async function makeRoot(): Promise<string> {
   return fs.realpath(dir)
 }
 
-describe('ensureDirBeneathRoot', () => {
-  beforeEach(async () => {
-    root = await makeRoot()
-  })
-  afterEach(async () => {
-    await fs.rm(root, { recursive: true, force: true })
-  })
+beforeEach(async () => {
+  root = await makeRoot()
+})
 
+afterEach(async () => {
+  await fs.rm(root, { recursive: true, force: true })
+})
+
+describe('ensureDirBeneathRoot', () => {
   it('creates nested directories beneath root', async () => {
     const dir = path.join(root, '2024-01-15', 'm31', 'lights')
     const result = await ensureDirBeneathRoot(dir, root)
@@ -74,13 +75,6 @@ describe('ensureDirBeneathRoot', () => {
 })
 
 describe('writeFileExclusive', () => {
-  beforeEach(async () => {
-    root = await makeRoot()
-  })
-  afterEach(async () => {
-    await fs.rm(root, { recursive: true, force: true })
-  })
-
   it('creates a new file exclusively', async () => {
     const filePath = path.join(root, 'test.fits')
     const data = new Uint8Array([1, 2, 3])
@@ -119,13 +113,6 @@ describe('writeFileExclusive', () => {
 })
 
 describe('writeFileExclusiveWithSequence', () => {
-  beforeEach(async () => {
-    root = await makeRoot()
-  })
-  afterEach(async () => {
-    await fs.rm(root, { recursive: true, force: true })
-  })
-
   it('writes at the starting sequence when no collision', async () => {
     const data = new Uint8Array([1, 2])
     const result = await writeFileExclusiveWithSequence(

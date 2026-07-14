@@ -9,6 +9,15 @@ import type { ProjectionState } from './projection-store'
 
 export type CapturePresentation = 'capture' | 'exposure'
 
+const CAPTURE_PHASE_LABELS: Record<CaptureProjection['phase'], string> = {
+  idle: 'Idle',
+  starting: 'Starting',
+  capturing: 'Capturing',
+  stopped: 'Stopped',
+  failed: 'Failed',
+  partial: 'Partial',
+}
+
 const IDLE_POINTING: PointingProjection = { phase: 'idle', target: null }
 
 const NO_PREVIEW: PreviewProjection = {
@@ -120,6 +129,14 @@ export function selectCapturePresentation(
   workspace: WorkspaceProjection | undefined,
 ): CapturePresentation {
   return workspace?.capabilities.capture === 'external' ? 'exposure' : 'capture'
+}
+
+export function capturePhaseLabel(
+  phase: CaptureProjection['phase'],
+  presentation: CapturePresentation,
+): string {
+  if (presentation === 'exposure' && phase === 'capturing') return 'Exposing'
+  return CAPTURE_PHASE_LABELS[phase]
 }
 
 export function selectBrowseContextKey(state: ProjectionState) {

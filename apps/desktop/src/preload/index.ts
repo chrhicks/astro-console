@@ -7,7 +7,6 @@ import type {
   ConfigureExternalSequenceRequest,
   DesktopDiscoveredDeviceV2,
   DesktopLogEntryV2,
-  DesktopStatus as DesktopStatusV2,
   FakeRuntimeSnapshot,
   PointToTargetRequest,
   SeestarDesktopApiV2,
@@ -26,11 +25,11 @@ import {
 
 export const apiV2: SeestarDesktopApiV2 = {
   discover: () => invoke('seestar:v2:discover', Schema.Array(DesktopDiscoveredDeviceSchema)),
-  getStatus: () => invoke('seestar:v2:get-status', DesktopStatusSchema),
+  getStatus: () => invokeStatus('seestar:v2:get-status'),
   connect: (input: ConnectRequestV2) =>
-    invoke('seestar:v2:connect', DesktopStatusSchema, input),
+    invokeStatus('seestar:v2:connect', input),
   disconnect: () =>
-    invoke('seestar:v2:disconnect', DesktopStatusSchema),
+    invokeStatus('seestar:v2:disconnect'),
   getLogs: () =>
     invoke('seestar:v2:get-logs', Schema.Array(DesktopLogEntrySchema)),
   browseTargets: (query?: CatalogQuery) =>
@@ -42,24 +41,24 @@ export const apiV2: SeestarDesktopApiV2 = {
       targetId,
     ),
   pointToTarget: (input: PointToTargetRequest) =>
-    invoke('seestar:v2:point-to-target', DesktopStatusSchema, input),
+    invokeStatus('seestar:v2:point-to-target', input),
   startPreview: () =>
-    invoke('seestar:v2:start-preview', DesktopStatusSchema),
+    invokeStatus('seestar:v2:start-preview'),
   stopPreview: () =>
-    invoke('seestar:v2:stop-preview', DesktopStatusSchema),
+    invokeStatus('seestar:v2:stop-preview'),
   startCapture: () =>
-    invoke('seestar:v2:start-capture', DesktopStatusSchema),
+    invokeStatus('seestar:v2:start-capture'),
   stopCapture: () =>
-    invoke('seestar:v2:stop-capture', DesktopStatusSchema),
+    invokeStatus('seestar:v2:stop-capture'),
   parkMount: () =>
-    invoke('seestar:v2:park', DesktopStatusSchema),
+    invokeStatus('seestar:v2:park'),
   setExposureDuration: (input: SetExposureDurationRequest) =>
-    invoke('seestar:v2:set-exposure-duration', DesktopStatusSchema, input),
+    invokeStatus('seestar:v2:set-exposure-duration', input),
   configureExternalSequence: (input: ConfigureExternalSequenceRequest) =>
-    invoke('seestar:v2:configure-external-sequence', DesktopStatusSchema, input),
-  startExternalSequence: () => invoke('seestar:v2:start-external-sequence', DesktopStatusSchema),
-  continueExternalSequence: () => invoke('seestar:v2:continue-external-sequence', DesktopStatusSchema),
-  finishExternalSequence: () => invoke('seestar:v2:finish-external-sequence', DesktopStatusSchema),
+    invokeStatus('seestar:v2:configure-external-sequence', input),
+  startExternalSequence: () => invokeStatus('seestar:v2:start-external-sequence'),
+  continueExternalSequence: () => invokeStatus('seestar:v2:continue-external-sequence'),
+  finishExternalSequence: () => invokeStatus('seestar:v2:finish-external-sequence'),
   openSavedAsset: (assetId: string) =>
     invoke('seestar:v2:open-saved-asset', Schema.Undefined, assetId),
   revealSavedAsset: (assetId: string) =>
@@ -101,6 +100,10 @@ if (exposeDevFakeApi) {
 
 async function invoke<A, I>(channel: string, schema: Schema.Schema<A, I>, ...args: unknown[]): Promise<A> {
   return Schema.decodeUnknownPromise(schema)(await ipcRenderer.invoke(channel, ...args))
+}
+
+function invokeStatus(channel: string, ...args: unknown[]) {
+  return invoke(channel, DesktopStatusSchema, ...args)
 }
 
 function subscribe<A, I>(

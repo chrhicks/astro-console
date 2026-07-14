@@ -9,11 +9,6 @@ let state: SelectedTargetState = { target: null }
 
 const listeners = new Set<() => void>()
 
-function setState(next: SelectedTargetState) {
-  state = next
-  for (const listener of listeners) listener()
-}
-
 function subscribe(listener: () => void) {
   listeners.add(listener)
   return () => {
@@ -26,7 +21,8 @@ function getState(): SelectedTargetState {
 }
 
 export function setSelectedTarget(target: TargetSummary | null) {
-  setState({ target })
+  state = { target }
+  for (const listener of listeners) listener()
 }
 
 export function useSelectedTarget<T>(

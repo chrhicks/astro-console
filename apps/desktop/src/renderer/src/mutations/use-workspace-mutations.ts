@@ -14,7 +14,7 @@ export function usePointToTargetMutation() {
 export function useStartPreviewMutation() {
   return useMutation({
     mutationKey: ['preview', 'start'],
-    mutationFn: () => electronApi.startPreview(),
+    mutationFn: electronApi.startPreview,
     onSuccess: applyDesktopStatusToProjectionStore,
   })
 }
@@ -22,7 +22,7 @@ export function useStartPreviewMutation() {
 export function useStopPreviewMutation() {
   return useMutation({
     mutationKey: ['preview', 'stop'],
-    mutationFn: () => electronApi.stopPreview(),
+    mutationFn: electronApi.stopPreview,
     onSuccess: applyDesktopStatusToProjectionStore,
   })
 }
@@ -30,7 +30,7 @@ export function useStopPreviewMutation() {
 export function useStartCaptureMutation() {
   return useMutation({
     mutationKey: ['capture', 'start'],
-    mutationFn: () => electronApi.startCapture(),
+    mutationFn: electronApi.startCapture,
     onSuccess: applyDesktopStatusToProjectionStore,
   })
 }
@@ -38,7 +38,7 @@ export function useStartCaptureMutation() {
 export function useStopCaptureMutation() {
   return useMutation({
     mutationKey: ['capture', 'stop'],
-    mutationFn: () => electronApi.stopCapture(),
+    mutationFn: electronApi.stopCapture,
     onSuccess: applyDesktopStatusToProjectionStore,
   })
 }
@@ -46,7 +46,7 @@ export function useStopCaptureMutation() {
 export function useParkMountMutation() {
   return useMutation({
     mutationKey: ['mount', 'park'],
-    mutationFn: () => electronApi.parkMount(),
+    mutationFn: electronApi.parkMount,
     onSuccess: applyDesktopStatusToProjectionStore,
   })
 }
@@ -63,11 +63,7 @@ export function useSetExposureDurationMutation() {
 export function useConfigureExternalSequenceMutation() {
   return useMutation({
     mutationKey: ['sequence', 'configure'],
-    mutationFn: (input: {
-      lightCount: number
-      durationSec: number
-      darkCount: number
-    }) => electronApi.configureExternalSequence(input),
+    mutationFn: electronApi.configureExternalSequence,
     onSuccess: applyDesktopStatusToProjectionStore,
   })
 }
@@ -75,7 +71,7 @@ export function useConfigureExternalSequenceMutation() {
 export function useStartExternalSequenceMutation() {
   return useMutation({
     mutationKey: ['sequence', 'start'],
-    mutationFn: () => electronApi.startExternalSequence(),
+    mutationFn: electronApi.startExternalSequence,
     onSuccess: applyDesktopStatusToProjectionStore,
   })
 }
@@ -83,7 +79,7 @@ export function useStartExternalSequenceMutation() {
 export function useContinueExternalSequenceMutation() {
   return useMutation({
     mutationKey: ['sequence', 'continue'],
-    mutationFn: () => electronApi.continueExternalSequence(),
+    mutationFn: electronApi.continueExternalSequence,
     onSuccess: applyDesktopStatusToProjectionStore,
   })
 }
@@ -91,7 +87,7 @@ export function useContinueExternalSequenceMutation() {
 export function useFinishExternalSequenceMutation() {
   return useMutation({
     mutationKey: ['sequence', 'finish'],
-    mutationFn: () => electronApi.finishExternalSequence(),
+    mutationFn: electronApi.finishExternalSequence,
     onSuccess: applyDesktopStatusToProjectionStore,
   })
 }

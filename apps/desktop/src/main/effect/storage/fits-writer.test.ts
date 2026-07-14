@@ -11,6 +11,10 @@ function serialize(
   return Effect.runPromise(writeFits(data, frame))
 }
 
+function frame(width: number, height: number, elementType: number): FrameDescriptor {
+  return { width, height, rank: 2, elementType }
+}
+
 // Parses a FITS primary HDU header block and returns the keyword/value cards
 // up to END, plus the byte offset where pixel data begins (next 2880-byte
 // block boundary after END).
@@ -74,17 +78,9 @@ function readBeInt32(bytes: Uint8Array, offset: number, index: number): number {
 }
 
 describe('writeFits UInt16 BZERO serialization', () => {
-  // elementType 8 = UInt16, BZERO = 32768, BITPIX = 16
-  const frame = (width: number, height: number): FrameDescriptor => ({
-    width,
-    height,
-    rank: 2,
-    elementType: 8,
-  })
-
   it('stores zero as -BZERO (Int16 min)', async () => {
     const data = leUint16Frame([0])
-    const fits = await serialize(data, frame(1, 1))
+    const fits = await serialize(data, frame(1, 1, 8))
     const { cards, dataStart } = parseFitsHeader(fits)
     assert.equal(cards.get('BITPIX'), 16)
     assert.equal(cards.get('BZERO'), 32768)
@@ -95,7 +91,7 @@ describe('writeFits UInt16 BZERO serialization', () => {
 
   it('stores midpoint (32768) as zero', async () => {
     const data = leUint16Frame([32768])
-    const fits = await serialize(data, frame(1, 1))
+    const fits = await serialize(data, frame(1, 1, 8))
     const { dataStart } = parseFitsHeader(fits)
     const stored = readBeInt16(fits, dataStart, 0)
     assert.equal(stored, 0)
@@ -104,7 +100,7 @@ describe('writeFits UInt16 BZERO serialization', () => {
 
   it('stores max (65535) as Int16 max', async () => {
     const data = leUint16Frame([65535])
-    const fits = await serialize(data, frame(1, 1))
+    const fits = await serialize(data, frame(1, 1, 8))
     const { dataStart } = parseFitsHeader(fits)
     const stored = readBeInt16(fits, dataStart, 0)
     assert.equal(stored, 32767)
@@ -114,7 +110,7 @@ describe('writeFits UInt16 BZERO serialization', () => {
   it('round-trips zero, midpoint, and max in one frame', async () => {
     const physical = [0, 32768, 65535]
     const data = leUint16Frame(physical)
-    const fits = await serialize(data, frame(3, 1))
+    const fits = await serialize(data, frame(3, 1, 8))
     const { dataStart } = parseFitsHeader(fits)
     for (let i = 0; i < physical.length; i++) {
       const stored = readBeInt16(fits, dataStart, i)
@@ -124,17 +120,9 @@ describe('writeFits UInt16 BZERO serialization', () => {
 })
 
 describe('writeFits UInt32 BZERO serialization', () => {
-  // elementType 9 = UInt32, BZERO = 2147483648, BITPIX = 32
-  const frame = (width: number, height: number): FrameDescriptor => ({
-    width,
-    height,
-    rank: 2,
-    elementType: 9,
-  })
-
   it('stores zero as -BZERO (Int32 min)', async () => {
     const data = leUint32Frame([0])
-    const fits = await serialize(data, frame(1, 1))
+    const fits = await serialize(data, frame(1, 1, 9))
     const { cards, dataStart } = parseFitsHeader(fits)
     assert.equal(cards.get('BITPIX'), 32)
     assert.equal(cards.get('BZERO'), 2147483648)
@@ -145,7 +133,7 @@ describe('writeFits UInt32 BZERO serialization', () => {
 
   it('stores midpoint (2147483648) as zero', async () => {
     const data = leUint32Frame([2147483648])
-    const fits = await serialize(data, frame(1, 1))
+    const fits = await serialize(data, frame(1, 1, 9))
     const { dataStart } = parseFitsHeader(fits)
     const stored = readBeInt32(fits, dataStart, 0)
     assert.equal(stored, 0)
@@ -154,7 +142,7 @@ describe('writeFits UInt32 BZERO serialization', () => {
 
   it('stores max (4294967295) as Int32 max', async () => {
     const data = leUint32Frame([4294967295])
-    const fits = await serialize(data, frame(1, 1))
+    const fits = await serialize(data, frame(1, 1, 9))
     const { dataStart } = parseFitsHeader(fits)
     const stored = readBeInt32(fits, dataStart, 0)
     assert.equal(stored, 2147483647)
@@ -164,7 +152,7 @@ describe('writeFits UInt32 BZERO serialization', () => {
   it('round-trips zero, midpoint, and max in one frame', async () => {
     const physical = [0, 2147483648, 4294967295]
     const data = leUint32Frame(physical)
-    const fits = await serialize(data, frame(3, 1))
+    const fits = await serialize(data, frame(3, 1, 9))
     const { dataStart } = parseFitsHeader(fits)
     for (let i = 0; i < physical.length; i++) {
       const stored = readBeInt32(fits, dataStart, i)
@@ -174,19 +162,10 @@ describe('writeFits UInt32 BZERO serialization', () => {
 })
 
 describe('writeFits signed Int16 byte swap', () => {
-  // elementType 1 = Int16, no BZERO. Verifies pure little-endian → big-endian
-  // conversion without value offset.
-  const frame = (width: number, height: number): FrameDescriptor => ({
-    width,
-    height,
-    rank: 2,
-    elementType: 1,
-  })
-
   it('byte-swaps little-endian Int16 to big-endian without offset', async () => {
     // LE bytes 0x01 0xFF → physical -255 as Int16 LE → BE 0xFF 0x01
     const data = new Uint8Array([0x01, 0xff])
-    const fits = await serialize(data, frame(1, 1))
+    const fits = await serialize(data, frame(1, 1, 1))
     const { cards, dataStart } = parseFitsHeader(fits)
     assert.equal(cards.get('BITPIX'), 16)
     assert.equal(cards.get('BZERO'), undefined)

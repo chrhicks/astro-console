@@ -26,7 +26,7 @@ import {
   runStartExternalSequence,
 } from './external-sequence'
 import { captureExternalFrame } from './external-exposure'
-import type { RigCamera } from '../rig/rig-model'
+import type { RigCamera, RigSessionRefresh } from '../rig/rig-model'
 import { FrameStorage } from '../storage/frame-storage'
 
 function makeSession(id: string, disconnectFn?: Effect.Effect<void>): DeviceSession {
@@ -65,6 +65,7 @@ interface ExternalSessionOptions {
   getExposureState: RigCamera['getExposureState']
   stopExposure?: () => Effect.Effect<void>
   park?: () => Effect.Effect<void>
+  refresh?: Effect.Effect<RigSessionRefresh>
   startExposure?: RigCamera['startExposure']
   getLatestFrame?: RigCamera['getLatestFrame']
   supportsDark?: boolean
@@ -78,6 +79,11 @@ function makeExternalSession(
     getExposureState,
     stopExposure = () => Effect.void,
     park = () => Effect.void,
+    refresh = Effect.succeed({
+      device: {},
+      preview: { phase: 'none', source: 'none', active: false },
+      capture: { phase: 'idle' },
+    }),
     startExposure = () => Effect.void,
     getLatestFrame = () => Effect.fail(new Error('No frame')),
     supportsDark = true,
@@ -107,11 +113,7 @@ function makeExternalSession(
         capture: { phase: 'idle' },
         library: { scope: 'current_target', assets: [], polling: false },
       },
-      refresh: Effect.succeed({
-        device: {},
-        preview: { phase: 'none', source: 'none', active: false },
-        capture: { phase: 'idle' },
-      }),
+      refresh,
       camera,
       captureStop: { mode: 'external', stop: camera.stopExposure },
       mount: { park },
@@ -654,6 +656,11 @@ describe('workflow interruption safety', () => {
         Effect.sync(() => {
           parkCalls++
         }),
+      refresh: Effect.succeed({
+        device: { mountClosed: true },
+        preview: { phase: 'none', source: 'none', active: false },
+        capture: { phase: 'idle' },
+      }),
     })
     const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)))
 
@@ -695,6 +702,103 @@ describe('workflow interruption safety', () => {
     assert.equal(result.device.mountClosed, undefined)
     assert.ok(result.device.warnings?.includes('Park state is unconfirmed'))
   })
+
+  for (const mountClosed of [false, undefined] as const) {
+    it(`fails closed when park completes but refresh reports mountClosed ${String(mountClosed)}`, async () => {
+      let parkCalls = 0
+      const events: Array<{ name: AppEvent['name']; payload: unknown }> = []
+      const session = makeExternalSession('park-unconfirmed', {
+        getExposureState: () =>
+          Effect.succeed({ state: 'idle', imageReady: false }),
+        park: () =>
+          Effect.sync(() => {
+            parkCalls++
+          }),
+        refresh: Effect.succeed({
+          device: { mountClosed },
+          preview: { phase: 'none', source: 'none', active: false },
+          capture: { phase: 'idle' },
+        }),
+      })
+      const busLayer = Layer.effect(
+        EventBus,
+        Effect.succeed({
+          publish: <A>(
+            name: AppEvent['name'],
+            payload: A,
+            options?: { sessionId?: string; host?: string },
+          ) =>
+            Effect.sync(() => {
+              events.push({ name, payload })
+              return {
+                eventId: events.length,
+                ts: new Date().toISOString(),
+                sessionId: options?.sessionId,
+                host: options?.host,
+                name,
+                payload,
+              }
+            }),
+          listen: () => Effect.sync(() => () => {}),
+          subscribe: () => Effect.succeed({} as never),
+        } satisfies EventBus),
+      )
+      const testLayer = makeTestLayer(
+        makeFakeRegistry(Effect.succeed(session)),
+        busLayer,
+      )
+
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* runConnect({
+            pluginKind: 'fake-seestar',
+            deviceId: 'test:park-unconfirmed',
+          })
+          const store = yield* AggregateStore
+          const target = { id: 'target', name: 'Target', short: 'target' }
+          yield* store.update((current) => ({
+            ...current,
+            currentTarget: target,
+            pointing: { phase: 'arrived', target },
+          }))
+          const park = yield* runPark.pipe(Effect.either)
+          return { park, state: yield* store.get }
+        }).pipe(Effect.provide(testLayer)),
+      )
+
+      assert.equal(Either.isLeft(result.park), true)
+      if (Either.isLeft(result.park)) {
+        assert.equal(
+          result.park.left.message,
+          'Park command completed but mount closure was not confirmed',
+        )
+      }
+      assert.equal(parkCalls, 1)
+      assert.equal(result.state.device.mountClosed, undefined)
+      assert.ok(
+        result.state.device.warnings?.includes('Park state is unconfirmed'),
+      )
+      assert.equal(
+        result.state.session.lastError,
+        'Park command completed but mount closure was not confirmed',
+      )
+      assert.equal(result.state.pointing.phase, 'arrived')
+      assert.equal(result.state.currentTarget?.id, 'target')
+      assert.deepEqual(
+        events.map((event) => event.name),
+        [
+          'session.connect.started',
+          'session.connect.succeeded',
+          'park.started',
+          'park.failed',
+        ],
+      )
+      assert.deepEqual(events.at(-1)?.payload, {
+        error: 'Park command completed but mount closure was not confirmed',
+        step: 'park-arm',
+      })
+    })
+  }
 
   it('external poller attempts stop before reporting a terminal camera error', async () => {
     let stateReads = 0
@@ -1084,6 +1188,11 @@ describe('workflow interruption safety', () => {
         Effect.sync(() => {
           order.push('park')
         }),
+      refresh: Effect.succeed({
+        device: { mountClosed: true },
+        preview: { phase: 'none', source: 'none', active: false },
+        capture: { phase: 'idle' },
+      }),
       startExposure: () =>
         Effect.sync(() => {
           order.push('start')
@@ -1203,6 +1312,15 @@ describe('workflow interruption safety', () => {
       const session = makeExternalSession(`sequence-awaiting-${action}`, {
         getExposureState: () =>
           Effect.succeed({ state: 'idle', imageReady: false }),
+        ...(action === 'park'
+          ? {
+              refresh: Effect.succeed({
+                device: { mountClosed: true },
+                preview: { phase: 'none', source: 'none', active: false },
+                capture: { phase: 'idle' },
+              }),
+            }
+          : {}),
       })
       const testLayer = makeTestLayer(
         makeFakeRegistry(Effect.succeed(session)),
@@ -1355,6 +1473,15 @@ describe('workflow interruption safety', () => {
               starts++
             }),
           getLatestFrame: () => Effect.succeed(frame()),
+          ...(action === 'park'
+            ? {
+                refresh: Effect.succeed({
+                  device: { mountClosed: true },
+                  preview: { phase: 'none', source: 'none', active: false },
+                  capture: { phase: 'idle' },
+                }),
+              }
+            : {}),
         })
         const testLayer = makeTestLayer(
           makeFakeRegistry(Effect.succeed(session)),

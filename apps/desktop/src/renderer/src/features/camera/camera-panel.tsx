@@ -1,27 +1,15 @@
 import { useEffect, useState } from 'react'
-import type {
-  CaptureDeviceState,
-  CaptureProjection,
-} from '../../../../shared/api-v2'
+import type { CaptureDeviceState } from '../../../../shared/api-v2'
 import { useProjectionStore } from '../../state/projection-store'
 import {
   isCaptureInFlight,
   isExternalSequenceActive,
   isExternalSequenceTerminal,
 } from '../../../../shared/lifecycle'
-import { selectCameraPanelModel } from '../../state/projection-selectors'
+import { capturePhaseLabel, selectCameraPanelModel } from '../../state/projection-selectors'
 import { useElapsedSeconds } from '../../hooks/use-elapsed-seconds'
 import { useConfigureExternalSequenceMutation, useContinueExternalSequenceMutation, useFinishExternalSequenceMutation, useSetExposureDurationMutation, useStartExternalSequenceMutation } from '../../mutations/use-workspace-mutations'
 import './camera-panel.css'
-
-const EXPOSURE_PHASE_LABELS: Record<CaptureProjection['phase'], string> = {
-  idle: 'Idle',
-  starting: 'Starting',
-  capturing: 'Exposing',
-  stopped: 'Stopped',
-  failed: 'Failed',
-  partial: 'Partial',
-}
 
 const DEVICE_STATE_LABELS: Record<CaptureDeviceState, string> = {
   idle: 'Idle',
@@ -86,7 +74,7 @@ export function CameraPanel() {
         <div className="kv">
           <span>Exposure</span>
           <strong id="cameraExposurePhase">
-            {EXPOSURE_PHASE_LABELS[capture.phase]}
+            {capturePhaseLabel(capture.phase, 'exposure')}
           </strong>
           {capture.deviceState ? (
             <>

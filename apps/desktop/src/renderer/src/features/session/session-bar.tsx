@@ -37,8 +37,6 @@ export function SessionBar() {
   >([])
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
 
-  const connectedDeviceId = deviceId
-
   const connectMutation = useConnectMutation()
   const discoverMutation = useDiscoverMutation()
   const disconnectMutation = useDisconnectMutation()
@@ -47,7 +45,7 @@ export function SessionBar() {
   const selectedDevice = selectPreferredDevice(
     discoveredDevices,
     selectedDeviceId,
-    connectedDeviceId,
+    deviceId,
   )
   const isBusy =
     isConnecting ||

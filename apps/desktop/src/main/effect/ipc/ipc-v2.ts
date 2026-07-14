@@ -48,16 +48,14 @@ export function registerIpcV2Handlers(allowed: WebContents) {
     appRuntime.runPromise(
       Effect.gen(function* () {
         const decoded = yield* decodeIpc(ConnectRequestSchema, input)
-        return yield* runConnect(decoded).pipe(
-          Effect.flatMap(() => getProjectedStatus()),
-        )
+        return yield* withProjectedStatus(runConnect(decoded))
       }),
     ),
   )
 
   handle('seestar:v2:disconnect', () =>
     appRuntime.runPromise(
-      runDisconnect.pipe(Effect.flatMap(() => getProjectedStatus())),
+      withProjectedStatus(runDisconnect),
     ),
   )
 
@@ -94,40 +92,38 @@ export function registerIpcV2Handlers(allowed: WebContents) {
     appRuntime.runPromise(
       Effect.gen(function* () {
         const decoded = yield* decodeIpc(PointToTargetRequestSchema, input)
-        return yield* runPointToTarget(decoded.targetId).pipe(
-          Effect.flatMap(() => getProjectedStatus()),
-        )
+        return yield* withProjectedStatus(runPointToTarget(decoded.targetId))
       }),
     ),
   )
 
   handle('seestar:v2:start-preview', () =>
     appRuntime.runPromise(
-      runStartPreview.pipe(Effect.flatMap(() => getProjectedStatus())),
+      withProjectedStatus(runStartPreview),
     ),
   )
 
   handle('seestar:v2:stop-preview', () =>
     appRuntime.runPromise(
-      runStopPreview.pipe(Effect.flatMap(() => getProjectedStatus())),
+      withProjectedStatus(runStopPreview),
     ),
   )
 
   handle('seestar:v2:start-capture', () =>
     appRuntime.runPromise(
-      runStartCapture.pipe(Effect.flatMap(() => getProjectedStatus())),
+      withProjectedStatus(runStartCapture),
     ),
   )
 
   handle('seestar:v2:stop-capture', () =>
     appRuntime.runPromise(
-      runStopCapture.pipe(Effect.flatMap(() => getProjectedStatus())),
+      withProjectedStatus(runStopCapture),
     ),
   )
 
   handle('seestar:v2:park', () =>
     appRuntime.runPromise(
-      runPark.pipe(Effect.flatMap(() => getProjectedStatus())),
+      withProjectedStatus(runPark),
     ),
   )
 
@@ -138,9 +134,7 @@ export function registerIpcV2Handlers(allowed: WebContents) {
           SetExposureDurationRequestSchema,
           input,
         )
-        return yield* runSetExposureDuration(decoded.durationSec).pipe(
-          Effect.flatMap(() => getProjectedStatus()),
-        )
+        return yield* withProjectedStatus(runSetExposureDuration(decoded.durationSec))
       }),
     ),
   )
@@ -148,12 +142,12 @@ export function registerIpcV2Handlers(allowed: WebContents) {
   handle('seestar:v2:configure-external-sequence', (_event, input) =>
     appRuntime.runPromise(Effect.gen(function* () {
       const decoded = yield* decodeIpc(ExternalSequencePlanSchema, input)
-      return yield* runConfigureExternalSequence(decoded).pipe(Effect.flatMap(() => getProjectedStatus()))
+      return yield* withProjectedStatus(runConfigureExternalSequence(decoded))
     })),
   )
-  handle('seestar:v2:start-external-sequence', () => appRuntime.runPromise(runStartExternalSequence.pipe(Effect.flatMap(() => getProjectedStatus()))))
-  handle('seestar:v2:continue-external-sequence', () => appRuntime.runPromise(runContinueExternalSequence.pipe(Effect.flatMap(() => getProjectedStatus()))))
-  handle('seestar:v2:finish-external-sequence', () => appRuntime.runPromise(runFinishExternalSequence.pipe(Effect.flatMap(() => getProjectedStatus()))))
+  handle('seestar:v2:start-external-sequence', () => appRuntime.runPromise(withProjectedStatus(runStartExternalSequence)))
+  handle('seestar:v2:continue-external-sequence', () => appRuntime.runPromise(withProjectedStatus(runContinueExternalSequence)))
+  handle('seestar:v2:finish-external-sequence', () => appRuntime.runPromise(withProjectedStatus(runFinishExternalSequence)))
 
   handle('seestar:v2:open-saved-asset', (_event, assetId) =>
     openSavedAsset(requireAssetId(assetId)),
@@ -174,6 +168,10 @@ function getProjectedStatus() {
     const projector = yield* StatusProjector
     return yield* projector.snapshot
   })
+}
+
+function withProjectedStatus<A, E, R>(workflow: Effect.Effect<A, E, R>) {
+  return workflow.pipe(Effect.flatMap(() => getProjectedStatus()))
 }
 
 // IPC input crosses the renderer→main trust boundary. Renderer payloads are

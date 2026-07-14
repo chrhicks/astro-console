@@ -171,34 +171,27 @@ function stateLabel(
   captureMode?: CaptureMode,
   deviceState?: CaptureDeviceState,
 ): string {
-  switch (state) {
-    case 'disconnected':
-      return 'Disconnected'
-    case 'idle_no_target':
-      return 'Idle'
-    case 'primed':
-      return 'Primed'
-    case 'ready_to_slew':
-      return 'Ready to slew'
-    case 'slewing':
-      return 'Slewing'
-    case 'on_target':
-      return 'On target'
-    case 'preview_starting':
-      return 'Starting preview'
-    case 'preview_active':
-      return 'Previewing'
-    case 'preview_error':
-      return 'Preview error'
-    case 'capturing':
-      if (captureMode === 'external') {
-        if (deviceState === 'reading') return 'Reading'
-        return 'Exposing'
-      }
-      return 'Capturing'
-    case 'parked':
-      return 'Parked'
+  if (state === 'capturing') {
+    if (captureMode === 'external') {
+      if (deviceState === 'reading') return 'Reading'
+      return 'Exposing'
+    }
+    return 'Capturing'
   }
+  return STATE_LABELS[state]
+}
+
+const STATE_LABELS: Record<Exclude<WorkspaceState, 'capturing'>, string> = {
+  disconnected: 'Disconnected',
+  idle_no_target: 'Idle',
+  primed: 'Primed',
+  ready_to_slew: 'Ready to slew',
+  slewing: 'Slewing',
+  on_target: 'On target',
+  preview_starting: 'Starting preview',
+  preview_active: 'Previewing',
+  preview_error: 'Preview error',
+  parked: 'Parked',
 }
 
 function projectSurface(target: TargetSummary | null): WorkspaceSurface {

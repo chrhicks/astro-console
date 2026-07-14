@@ -330,17 +330,7 @@ export function transformRow(row: OpenNgcRow): DeepSkyTarget {
 }
 
 export function transformRows(rows: OpenNgcRow[]): DeepSkyTarget[] {
-  const targets: DeepSkyTarget[] = []
-
-  for (const row of rows) {
-    if (!shouldIncludeRow(row)) {
-      continue
-    }
-
-    targets.push(transformRow(row))
-  }
-
-  return targets
+  return rows.filter(shouldIncludeRow).map(transformRow)
 }
 
 export function mergeCatalog(

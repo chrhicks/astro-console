@@ -5,7 +5,7 @@ import { Schema } from 'effect'
 import { resolveSeestarPemPath } from '../config.js'
 import { SeestarDevice } from '../device.js'
 import { createConsoleLogger, type LogLevel } from '../logging.js'
-import type { DeviceState, HorizCoord, ManualMoveOptions } from '../types.js'
+import type { DeviceState, HorizCoord } from '../types.js'
 
 const DEFAULT_HOST = process.env.SEESTAR_HOST
 const DEFAULT_TIMEOUT_MS = 15000
@@ -24,12 +24,6 @@ const NonNegativeInt = Schema.Number.pipe(
   Schema.greaterThanOrEqualTo(0),
 )
 const FiniteNumber = Schema.Number
-
-const ManualMoveSchema = Schema.Struct({
-  directionDeg: FiniteNumber,
-  speed: PositiveInt,
-  durationSec: PositiveInt,
-})
 
 const ScanConfigSchema = Schema.Struct({
   sampleCount: PositiveInt,
@@ -171,8 +165,6 @@ async function main(): Promise<void> {
     throw new Error('Provide --host <ip-or-hostname> or set SEESTAR_HOST')
   }
 
-  Schema.decodeUnknownSync(ScanConfigSchema)(args.config)
-
   const outputDir = path.resolve(args.outputDir)
   const framesDir = path.join(outputDir, 'frames')
   await mkdir(framesDir, { recursive: true })
@@ -237,13 +229,12 @@ async function main(): Promise<void> {
       )
 
       if (!args.dryRun && index < args.config.sampleCount - 1) {
-        const move = Schema.decodeUnknownSync(ManualMoveSchema)({
-          directionDeg: args.config.moveDirectionDeg,
-          speed: args.config.speed,
-          durationSec: args.config.durationSec,
-        })
         await expectAccepted(
-          device.manualMove(move as ManualMoveOptions),
+          device.manualMove({
+            directionDeg: args.config.moveDirectionDeg,
+            speed: args.config.speed,
+            durationSec: args.config.durationSec,
+          }),
           'Device rejected manual move request',
         )
         await delay(args.config.settleMs)

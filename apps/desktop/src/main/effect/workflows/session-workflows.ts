@@ -68,7 +68,7 @@ export const runDiscover = Effect.gen(function* () {
 })
 
 // Disconnected projection reducer used by connect failure/cancel finalizers.
-function disconnectedReducer(message: string) {
+function disconnectedReducer(message?: string) {
   return (aggregate: import('../state/aggregate').SessionAggregate) => ({
     ...aggregate,
     session: {
@@ -320,24 +320,7 @@ export const runDisconnect = Effect.gen(function* () {
         // state. Returns null if a newer intent superseded this one.
         const committed = yield* sessions.clear(
           intent,
-          (aggregate) => ({
-            ...aggregate,
-            session: {
-              ...aggregate.session,
-              phase: 'disconnected',
-              discovering: false,
-              lastError: undefined,
-              sessionId: undefined,
-            },
-            pointing: { phase: 'idle', target: null },
-            currentTarget: null,
-            device: {},
-            preview: { phase: 'none', source: 'none', active: false },
-            capture: { phase: 'idle' },
-            library: { scope: 'current_target', assets: [], polling: false },
-            camera: null,
-            sequence: { phase: 'idle', completed: 0, failed: 0 },
-          }),
+          disconnectedReducer(undefined),
         )
 
         if (!committed) return

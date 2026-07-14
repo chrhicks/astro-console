@@ -400,8 +400,6 @@ function pollExternalExposure(
           return
         }
         if (completed) yield* bus.publish('capture.succeeded', {})
-        return
-
       }),
     () =>
       Effect.gen(function* () {

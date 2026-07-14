@@ -227,10 +227,11 @@ export function createAlpacaPlugin(): DevicePlugin {
 
               const refresh = Effect.tryPromise({
                 try: async (): Promise<RigSessionRefresh> => {
-                  const [atPark, tracking] = await Promise.all([
-                    client.get(`${base}/atpark`, Schema.Boolean),
-                    client.get(`${base}/tracking`, Schema.Boolean),
-                  ])
+                  const atPark = await client.get(`${base}/atpark`, Schema.Boolean)
+                  const tracking = await client.get(
+                    `${base}/tracking`,
+                    Schema.Boolean,
+                  )
                   return {
                     device: { tracking, mountClosed: atPark, warnings },
                     preview: {
@@ -282,14 +283,8 @@ export function createAlpacaPlugin(): DevicePlugin {
                       context?: RigOperationContext,
                     ) =>
                       Effect.tryPromise({
-                        try: async () => {
-                          await prepareMountForSlew(
-                            client,
-                            base,
-                            state,
-                            context,
-                          )
-                        },
+                        try: () =>
+                          prepareMountForSlew(client, base, state, context),
                         catch: (error) =>
                           new Error(
                             `Alpaca prepare failed for ${host}: ${toErrorMessage(error)}`,
@@ -441,39 +436,36 @@ async function connectAndReadState(
   signal?: AbortSignal,
 ): Promise<TelescopeState> {
   await ensureDeviceConnected(client, base, signal)
-  const [
-    atPark,
-    canPark,
-    canUnpark,
-    tracking,
-    siteLatitude,
-    siteLongitude,
-    canSlew,
-    canSlewAsync,
-    driverVersion,
-    name,
-  ] = await Promise.all([
-    client.get(`${base}/atpark`, Schema.Boolean, signal).catch(() => undefined),
-    client.get(`${base}/canpark`, Schema.Boolean, signal).catch(() => false),
-    client.get(`${base}/canunpark`, Schema.Boolean, signal).catch(() => false),
-    client
-      .get(`${base}/tracking`, Schema.Boolean, signal)
-      .catch(() => undefined),
-    client
-      .get(`${base}/sitelatitude`, Schema.Number, signal)
-      .catch(() => undefined),
-    client
-      .get(`${base}/sitelongitude`, Schema.Number, signal)
-      .catch(() => undefined),
-    client.get(`${base}/canslew`, Schema.Boolean, signal).catch(() => false),
-    client
-      .get(`${base}/canslewasync`, Schema.Boolean, signal)
-      .catch(() => false),
-    client
-      .get(`${base}/driverversion`, Schema.String, signal)
-      .catch(() => undefined),
-    client.get(`${base}/name`, Schema.String, signal).catch(() => undefined),
-  ])
+  const atPark = await client
+    .get(`${base}/atpark`, Schema.Boolean, signal)
+    .catch(() => undefined)
+  const canPark = await client
+    .get(`${base}/canpark`, Schema.Boolean, signal)
+    .catch(() => false)
+  const canUnpark = await client
+    .get(`${base}/canunpark`, Schema.Boolean, signal)
+    .catch(() => false)
+  const tracking = await client
+    .get(`${base}/tracking`, Schema.Boolean, signal)
+    .catch(() => undefined)
+  const siteLatitude = await client
+    .get(`${base}/sitelatitude`, Schema.Number, signal)
+    .catch(() => undefined)
+  const siteLongitude = await client
+    .get(`${base}/sitelongitude`, Schema.Number, signal)
+    .catch(() => undefined)
+  const canSlew = await client
+    .get(`${base}/canslew`, Schema.Boolean, signal)
+    .catch(() => false)
+  const canSlewAsync = await client
+    .get(`${base}/canslewasync`, Schema.Boolean, signal)
+    .catch(() => false)
+  const driverVersion = await client
+    .get(`${base}/driverversion`, Schema.String, signal)
+    .catch(() => undefined)
+  const name = await client
+    .get(`${base}/name`, Schema.String, signal)
+    .catch(() => undefined)
   return {
     atPark,
     canPark,
@@ -515,7 +507,6 @@ function buildMount(
               await pollUntil(
                 () =>
                   client.get(`${base}/atpark`, Schema.Boolean, context?.signal),
-                true,
                 SLEW_TIMEOUT_MS,
                 MOUNT_POLL_INTERVAL_MS,
                 context?.signal,
@@ -575,7 +566,6 @@ function buildSlewToCoordinates(
               const mountState = await readMountState(client, base, context)
               return !mountState.atPark && !mountState.slewing
             },
-            true,
             SLEW_TIMEOUT_MS,
             MOUNT_POLL_INTERVAL_MS,
             context?.signal,
@@ -606,22 +596,6 @@ async function prepareMountForSlew(
       throw new Error('Mount is parked and cannot unpark; no slew was sent.')
     }
     await client.put(`${base}/unpark`, {}, COMMAND_TIMEOUT_MS, context?.signal)
-    try {
-      await pollUntil(
-        async () => {
-          const next = await readMountState(client, base, context)
-          return !next.atPark && !next.slewing
-        },
-        true,
-        UNPARK_SETTLE_TIMEOUT_MS,
-        MOUNT_POLL_INTERVAL_MS,
-        context?.signal,
-      )
-    } catch (error) {
-      if (context?.signal?.aborted) throw error
-      throw new Error('Mount did not settle after unpark; no slew was sent.')
-    }
-    return
   }
   try {
     await pollUntil(
@@ -629,14 +603,17 @@ async function prepareMountForSlew(
         const next = await readMountState(client, base, context)
         return !next.atPark && !next.slewing
       },
-      true,
       UNPARK_SETTLE_TIMEOUT_MS,
       MOUNT_POLL_INTERVAL_MS,
       context?.signal,
     )
   } catch (error) {
     if (context?.signal?.aborted) throw error
-    throw new Error('Mount did not settle before slew; no slew was sent.')
+    throw new Error(
+      mountState.atPark
+        ? 'Mount did not settle after unpark; no slew was sent.'
+        : 'Mount did not settle before slew; no slew was sent.',
+    )
   }
 }
 
@@ -707,18 +684,23 @@ function buildCamera(client: AlpacaClient, base: string): RigCamera {
     getExposureState: (context) =>
       Effect.tryPromise({
         try: async (): Promise<RigCameraExposureState> => {
-          const [state, imageReady, lastExposureDurationSec] =
-            await Promise.all([
-              client.get(`${base}/camerastate`, Schema.Number, context?.signal),
-              client.get(`${base}/imageready`, Schema.Boolean, context?.signal),
-              client
-                .get(
-                  `${base}/lastexposureduration`,
-                  Schema.Number,
-                  context?.signal,
-                )
-                .catch(() => undefined),
-            ])
+          const state = await client.get(
+            `${base}/camerastate`,
+            Schema.Number,
+            context?.signal,
+          )
+          const imageReady = await client.get(
+            `${base}/imageready`,
+            Schema.Boolean,
+            context?.signal,
+          )
+          const lastExposureDurationSec = await client
+            .get(
+              `${base}/lastexposureduration`,
+              Schema.Number,
+              context?.signal,
+            )
+            .catch(() => undefined)
           return mapAlpacaCameraState(
             state,
             imageReady,
@@ -813,7 +795,6 @@ function buildFilterWheel(client: AlpacaClient, base: string): RigFilterWheel {
 
 async function pollUntil(
   read: () => Promise<boolean>,
-  expected: boolean,
   timeoutMs: number,
   intervalMs: number,
   signal?: AbortSignal,
@@ -821,7 +802,7 @@ async function pollUntil(
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     if (signal?.aborted) throw new Error('Operation aborted')
-    if ((await read()) === expected) return
+    if (await read()) return
     await new Promise((resolve) => setTimeout(resolve, intervalMs))
   }
   throw new Error(`Polling did not converge within ${timeoutMs}ms`)
