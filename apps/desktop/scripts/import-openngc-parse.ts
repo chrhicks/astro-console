@@ -15,7 +15,7 @@ const CsvOptionalString = Schema.String.pipe(
 
 const CsvOptionalNumber = Schema.String.pipe(
   Schema.decodeTo(
-    Schema.UndefinedOr(Schema.Number),
+    Schema.UndefinedOr(Schema.Number.check(Schema.isFinite())),
     SchemaTransformation.transform({
       decode: (value) => (value === '' ? undefined : Number(value)),
       encode: (value) => (value === undefined ? '' : String(value)),

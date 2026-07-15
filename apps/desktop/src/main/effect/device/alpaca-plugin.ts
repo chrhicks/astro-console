@@ -68,12 +68,14 @@ export function createAlpacaPlugin(): DevicePlugin {
     new Map(),
   )
 
-  const discover = Effect.gen(function* () {
-    const configurations = yield* Effect.tryPromise({
-      try: () => discoverAlpacaRigs(DISCOVERY_TIMEOUT_MS),
-      catch: (error) =>
-        new Error(`Alpaca discovery failed: ${toErrorMessage(error)}`),
-    })
+  const discover = (input: { signal: AbortSignal }) => Effect.gen(function* () {
+    const configurations = yield* Effect.tryPromise(() =>
+      discoverAlpacaRigs(DISCOVERY_TIMEOUT_MS, input.signal),
+    ).pipe(
+      Effect.mapError(
+        (error) => new Error(`Alpaca discovery failed: ${toErrorMessage(error)}`),
+      ),
+    )
     const rigs = configurations.map(toDiscoveredRig)
     yield* Ref.set(
       discoveredRef,
@@ -84,7 +86,8 @@ export function createAlpacaPlugin(): DevicePlugin {
 
   return {
     kind: 'alpaca-rig',
-    discover,
+    discover: discover({ signal: new AbortController().signal }),
+    discoverWithSignal: discover,
 
     connect: (input: ConnectRequestV2) =>
       Effect.gen(function* () {

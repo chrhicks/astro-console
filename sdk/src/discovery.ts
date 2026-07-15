@@ -7,6 +7,7 @@ import { emitLog } from './logging.js'
 
 const MDNS_SEESTAR_HOSTNAME = 'seestar.local'
 const CONTROL_PORT = 4700
+const MAX_DISCOVERED_DEVICES = 16
 
 export interface DiscoveryOptions {
   port?: number
@@ -14,6 +15,7 @@ export interface DiscoveryOptions {
   broadcastAddress?: string
   logger?: Logger
   sessionId?: string
+  signal?: AbortSignal
 }
 
 export interface DiscoveredSeestar {
@@ -26,6 +28,7 @@ export interface DiscoveredSeestar {
 export async function discoverSeestars(
   options: DiscoveryOptions = {},
 ): Promise<DiscoveredSeestar[]> {
+  if (options.signal?.aborted) throw abortError()
   const discoveryPort = options.port ?? 4720
   const timeoutMs = options.timeoutMs ?? 3000
   const broadcastAddress = options.broadcastAddress ?? '255.255.255.255'
@@ -39,7 +42,9 @@ export async function discoverSeestars(
     timeoutMs: mdnsTimeoutMs,
     logger: options.logger,
     sessionId: options.sessionId,
+    signal: options.signal,
   })
+  if (options.signal?.aborted) throw abortError()
 
   return new Promise((resolve, reject) => {
     const socket = dgram.createSocket('udp4')
@@ -48,6 +53,17 @@ export async function discoverSeestars(
       devices.set(mdnsDevice.host, mdnsDevice)
     }
     let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer)
+      options.signal?.removeEventListener('abort', onAbort)
+      try {
+        socket.close()
+      } catch {
+        // The socket may be cancelled before bind completes.
+      }
+    }
 
     emitLog(options.logger, {
       level: 'info',
@@ -69,7 +85,7 @@ export async function discoverSeestars(
     const finish = () => {
       if (settled) return
       settled = true
-      socket.close()
+      cleanup()
       emitLog(options.logger, {
         level: 'info',
         event: 'discovery.scan.completed',
@@ -85,7 +101,7 @@ export async function discoverSeestars(
     const fail = (err: Error) => {
       if (settled) return
       settled = true
-      socket.close()
+      cleanup()
       emitLog(options.logger, {
         level: 'error',
         event: 'discovery.scan.failed',
@@ -98,7 +114,9 @@ export async function discoverSeestars(
       reject(err)
     }
 
-    const timer = setTimeout(finish, timeoutMs)
+    const onAbort = () => fail(abortError())
+    timer = setTimeout(finish, timeoutMs)
+    options.signal?.addEventListener('abort', onAbort, { once: true })
 
     socket.on('error', (err) => {
       clearTimeout(timer)
@@ -113,6 +131,8 @@ export async function discoverSeestars(
         if (record.method !== 'scan_iscope') return
         const result = record.result
         if (typeof result !== 'object' || result === null) return
+        if (!devices.has(rinfo.address) && devices.size >= MAX_DISCOVERED_DEVICES)
+          return
         devices.set(rinfo.address, {
           host: rinfo.address,
           port: 4700,
@@ -139,6 +159,7 @@ export async function discoverSeestars(
     })
 
     socket.bind(() => {
+      if (settled) return
       socket.setBroadcast(true)
       let pendingSends = targetAddresses.length
       let successfulSends = 0
@@ -233,6 +254,7 @@ async function probeMdnsSeestar(options: {
   timeoutMs: number
   logger?: Logger
   sessionId?: string
+  signal?: AbortSignal
 }): Promise<DiscoveredSeestar | null> {
   emitLog(options.logger, {
     level: 'debug',
@@ -249,9 +271,15 @@ async function probeMdnsSeestar(options: {
       dns.lookup(MDNS_SEESTAR_HOSTNAME, { family: 4 }),
       options.timeoutMs,
       `mDNS lookup timed out for ${MDNS_SEESTAR_HOSTNAME}`,
+      options.signal,
     )
 
-    await probeTcpPort(resolved.address, CONTROL_PORT, options.timeoutMs)
+    await probeTcpPort(
+      resolved.address,
+      CONTROL_PORT,
+      options.timeoutMs,
+      options.signal,
+    )
 
     emitLog(options.logger, {
       level: 'info',
@@ -289,25 +317,39 @@ function probeTcpPort(
   host: string,
   port: number,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ host, port })
+    const cleanup = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+    }
     const timer = setTimeout(() => {
+      cleanup()
       socket.destroy()
       reject(new Error(`TCP probe timed out for ${host}:${port}`))
     }, timeoutMs)
 
+    const onAbort = () => {
+      cleanup()
+      socket.destroy()
+      reject(abortError())
+    }
+
     socket.once('connect', () => {
-      clearTimeout(timer)
+      cleanup()
       socket.destroy()
       resolve()
     })
 
     socket.once('error', (error) => {
-      clearTimeout(timer)
+      cleanup()
       socket.destroy()
       reject(error)
     })
+    if (signal?.aborted) onAbort()
+    else signal?.addEventListener('abort', onAbort, { once: true })
   })
 }
 
@@ -315,23 +357,40 @@ function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
   message: string,
+  signal?: AbortSignal,
 ): Promise<T> {
   return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+    }
     const timer = setTimeout(() => {
+      cleanup()
       reject(new Error(message))
     }, timeoutMs)
 
+    const onAbort = () => {
+      cleanup()
+      reject(abortError())
+    }
+
     promise.then(
       (value) => {
-        clearTimeout(timer)
+        cleanup()
         resolve(value)
       },
       (error) => {
-        clearTimeout(timer)
+        cleanup()
         reject(error)
       },
     )
+    if (signal?.aborted) onAbort()
+    else signal?.addEventListener('abort', onAbort, { once: true })
   })
+}
+
+function abortError(): Error {
+  return new Error('Discovery aborted')
 }
 
 function calculateBroadcastAddress(

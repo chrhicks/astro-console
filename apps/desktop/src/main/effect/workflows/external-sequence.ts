@@ -8,6 +8,7 @@ import { FrameStorage } from '../storage/frame-storage'
 import { captureExternalFrame } from './external-exposure'
 import type { ExternalSequencePlan, ExternalSequenceProjection } from '../../../shared/api-v2'
 import { isExternalSequenceTerminal } from '../../../shared/lifecycle'
+import { HardwareWorkers } from '../runtime/hardware-workers'
 
 export const MAX_SEQUENCE_LIGHTS = 360
 export const MAX_SEQUENCE_DARKS = 360
@@ -25,16 +26,23 @@ export const runConfigureExternalSequence = (plan: ExternalSequencePlan) =>
       return yield* Effect.fail(new Error('Connected rig does not support dark exposures'))
     }
     const coordinator = yield* OperationCoordinator
-    const lease = yield* coordinator.acquire(session, 'sequence')
-    if (!lease) return yield* Effect.fail(new Error('Another operation is active'))
-    const updated = yield* coordinator.commitIfLease(lease, (current) => {
-      if (!isExternalSequenceTerminal(current.sequence.phase)) return current
-      return {
-        ...current,
-        sequence: { phase: 'idle', plan: Object.freeze({ ...plan }), completed: 0, failed: 0 },
-      }
-    })
-    yield* coordinator.release(lease)
+    const updated = yield* Effect.acquireUseRelease(
+      coordinator.acquire(session, 'sequence').pipe(
+        Effect.flatMap((lease) =>
+          lease
+            ? Effect.succeed(lease)
+            : Effect.fail(new Error('Another operation is active')),
+        ),
+      ),
+      (lease) => coordinator.commitIfLease(lease, (current) => {
+        if (!isExternalSequenceTerminal(current.sequence.phase)) return current
+        return {
+          ...current,
+          sequence: { phase: 'idle', plan: Object.freeze({ ...plan }), completed: 0, failed: 0 },
+        }
+      }),
+      (lease) => coordinator.release(lease),
+    )
     if (!updated || !isExternalSequenceTerminal(updated.sequence.phase)) {
       return yield* Effect.fail(new Error('Sequence is active and cannot be reconfigured'))
     }
@@ -46,20 +54,12 @@ export const runStartExternalSequence = Effect.gen(function* () {
   const sessions = yield* SessionManager
   const session = yield* sessions.getCurrent
   if (!session) return yield* Effect.fail(new Error('Connect a rig with an external camera before starting a sequence'))
-  const coordinator = yield* OperationCoordinator
-  const lease = yield* coordinator.acquire(session, 'sequence')
-  if (!lease) return yield* Effect.fail(new Error('Another operation is active'))
-  const current = yield* store.get
-  const plan = current.sequence.plan
-  if (!hasExternalCapture(session) || !(yield* sessions.ownsSession(session)) || !current.currentTarget || !plan || !isPlanValid(plan) || current.sequence.phase !== 'idle') {
-    yield* coordinator.release(lease)
-    return yield* Effect.fail(new Error('Sequence is not ready to start'))
-  }
-  if (plan.darkCount > 0 && !session.rig.camera?.startDarkExposure) {
-    yield* coordinator.release(lease)
-    return yield* Effect.fail(new Error('Connected rig does not support dark exposures'))
-  }
-  yield* runSequencePhase(session, Object.freeze({ ...plan }), current.currentTarget, 'light', 1, lease).pipe(Effect.forkDetach)
+  yield* launchSequencePhase(session, 'sequence', 'light', (current) => {
+    const plan = current.sequence.plan
+    if (!hasExternalCapture(session) || !current.currentTarget || !plan || !isPlanValid(plan) || current.sequence.phase !== 'idle') return null
+    if (plan.darkCount > 0 && !session.rig.camera?.startDarkExposure) return null
+    return { plan: Object.freeze({ ...plan }), target: current.currentTarget }
+  }, 'Sequence is not ready to start')
 })
 
 export const runContinueExternalSequence = Effect.gen(function* () {
@@ -69,17 +69,47 @@ export const runContinueExternalSequence = Effect.gen(function* () {
   if (!hasExternalCapture(session)) {
     return yield* Effect.fail(new Error('Dark confirmation is not available'))
   }
-  const coordinator = yield* OperationCoordinator
-  const lease = yield* coordinator.acquire(session, 'sequence-continue')
-  if (!lease) return yield* Effect.fail(new Error('Another operation is active'))
-  const current = yield* store.get
-  const plan = current.sequence.plan
-  if (!hasExternalCapture(session) || !(yield* sessions.ownsSession(session)) || !plan || current.sequence.phase !== 'awaiting-darks' || !current.sequence.target || !session.rig.camera?.startDarkExposure) {
-    yield* coordinator.release(lease)
-    return yield* Effect.fail(new Error('Dark confirmation is not available'))
-  }
-  yield* runSequencePhase(session, Object.freeze({ ...plan }), current.sequence.target, 'dark', 1, lease).pipe(Effect.forkDetach)
+  yield* launchSequencePhase(session, 'sequence-continue', 'dark', (current) => {
+    const plan = current.sequence.plan
+    if (!hasExternalCapture(session) || !plan || current.sequence.phase !== 'awaiting-darks' || !current.sequence.target || !session.rig.camera?.startDarkExposure) return null
+    return { plan: Object.freeze({ ...plan }), target: current.sequence.target }
+  }, 'Dark confirmation is not available')
 })
+
+function launchSequencePhase(
+  session: DeviceSession,
+  kind: 'sequence' | 'sequence-continue',
+  frameKind: 'light' | 'dark',
+  prepare: (current: import('../state/aggregate').SessionAggregate) => { plan: ExternalSequencePlan; target: NonNullable<ExternalSequenceProjection['target']> } | null,
+  error: string,
+) {
+  let handedOff = false
+  return Effect.acquireUseRelease(
+    Effect.gen(function* () {
+      const coordinator = yield* OperationCoordinator
+      const lease = yield* coordinator.acquire(session, kind)
+      if (!lease) return yield* Effect.fail(new Error('Another operation is active'))
+      return lease
+    }),
+    (lease) => Effect.gen(function* () {
+      const store = yield* AggregateStore
+      const sessions = yield* SessionManager
+      if (!(yield* sessions.ownsSession(session))) return yield* Effect.fail(new Error(error))
+      const prepared = prepare(yield* store.get)
+      if (!prepared) return yield* Effect.fail(new Error(error))
+      const workers = yield* HardwareWorkers
+      yield* Effect.uninterruptible(
+        workers.launch(runSequencePhase(session, prepared.plan, prepared.target, frameKind, 1, lease)).pipe(
+          Effect.tap(() => Effect.sync(() => { handedOff = true })),
+        ),
+      )
+    }),
+    (lease) => handedOff ? Effect.void : Effect.gen(function* () {
+      const coordinator = yield* OperationCoordinator
+      yield* coordinator.release(lease)
+    }),
+  )
+}
 
 export const runFinishExternalSequence = Effect.gen(function* () {
   const store = yield* AggregateStore

@@ -29,6 +29,9 @@ export function createFakeSeestarPlugin(): DevicePlugin {
     discover: Effect.sync(() => [
       ...fakeSeestarRuntime.getActiveScenario().discover,
     ]),
+    discoverWithSignal: () => Effect.sync(() => [
+      ...fakeSeestarRuntime.getActiveScenario().discover,
+    ]),
 
     connect: (input: ConnectRequestV2) =>
       Effect.gen(function* () {

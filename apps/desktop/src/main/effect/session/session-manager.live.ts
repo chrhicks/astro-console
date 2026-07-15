@@ -14,6 +14,7 @@ export const SessionManagerLive = Layer.effect(
   SessionManager,
   Effect.gen(function* () {
     const { ref } = yield* RuntimeStateRef
+    let activeConnect: AbortController | null = null
 
     return {
       getCurrent: Effect.map(Ref.get(ref), (s) => s.session),
@@ -28,6 +29,10 @@ export const SessionManagerLive = Layer.effect(
         { intent: ConnectIntent; superseded: DeviceSession | null },
         RuntimeState,
       ] => {
+        state.discoveryController?.abort()
+        activeConnect?.abort()
+        const controller = new AbortController()
+        activeConnect = controller
         const generation = state.generation + 1
         // Abort any current operation as part of the atomic lifecycle
         // transition. A new connect supersedes everything.
@@ -36,6 +41,8 @@ export const SessionManagerLive = Layer.effect(
         }
         const next: RuntimeState = {
           generation,
+          discoveryId: state.discoveryId,
+          discoveryController: null,
           session: null,
           aggregate: stampAggregate({
             ...state.aggregate,
@@ -50,7 +57,7 @@ export const SessionManagerLive = Layer.effect(
           operation: null,
         }
         return [
-          { intent: { generation }, superseded: state.session },
+          { intent: { generation, signal: controller.signal }, superseded: state.session },
           next,
         ]
       }),
@@ -68,6 +75,8 @@ export const SessionManagerLive = Layer.effect(
             nextAggregate,
             {
               generation: state.generation,
+              discoveryId: state.discoveryId,
+              discoveryController: state.discoveryController,
               session,
               aggregate: nextAggregate,
               operation: state.operation,
@@ -79,6 +88,9 @@ export const SessionManagerLive = Layer.effect(
         DisconnectIntent,
         RuntimeState,
       ] => {
+        state.discoveryController?.abort()
+        activeConnect?.abort()
+        activeConnect = null
         const generation = state.generation + 1
         // Abort and invalidate any current operation as part of the atomic
         // disconnect. The operation's workflow will see the signal abort
@@ -89,6 +101,8 @@ export const SessionManagerLive = Layer.effect(
         }
         const next: RuntimeState = {
           generation,
+          discoveryId: state.discoveryId,
+          discoveryController: null,
           session: null,
           aggregate: stampAggregate({
             ...state.aggregate,
@@ -118,6 +132,8 @@ export const SessionManagerLive = Layer.effect(
             nextAggregate,
             {
               generation: state.generation,
+              discoveryId: state.discoveryId,
+              discoveryController: state.discoveryController,
               session: null,
               aggregate: nextAggregate,
               operation: state.operation,

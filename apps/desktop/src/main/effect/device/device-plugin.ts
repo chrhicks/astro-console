@@ -61,6 +61,7 @@ export interface DeviceSession {
 export interface DevicePlugin {
   readonly kind: DevicePluginKind
   readonly discover: Effect.Effect<DesktopDiscoveredDeviceV2[], unknown>
+  readonly discoverWithSignal: (input: { signal: AbortSignal }) => Effect.Effect<DesktopDiscoveredDeviceV2[], unknown>
   readonly connect: (
     input: ConnectRequestV2,
   ) => Effect.Effect<DeviceSession, unknown, EventBus>

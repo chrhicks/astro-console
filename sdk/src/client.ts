@@ -10,6 +10,8 @@ import { decodeSeestarPushEvent } from './events.js'
 import type { Logger } from './logging.js'
 import { createNoopLogger, emitLog } from './logging.js'
 
+const MAX_RECEIVE_BUFFER_BYTES = 64 * 1024
+
 interface ClientObservabilityOptions {
   logger?: Logger
   sessionId?: string
@@ -30,7 +32,7 @@ export class SeestarClient {
     number,
     { method: string; startedAt: number }
   >()
-  private receiveBuffer = ''
+  private receiveBuffer = Buffer.alloc(0)
   private connected = false
   private pushListeners = new Set<PushEventListener>()
   private closeListeners = new Set<() => void>()
@@ -142,7 +144,7 @@ export class SeestarClient {
       this.socket.on('close', () => {
         this.socket = null
         this.connected = false
-        this.receiveBuffer = ''
+        this.receiveBuffer = Buffer.alloc(0)
         this.inflightRequests.clear()
         // Preserve responseQueue: a response may arrive just before close, and
         // sendSync checks the queue before treating the connection as lost.
@@ -188,7 +190,7 @@ export class SeestarClient {
       this.socket = null
     }
     this.connected = false
-    this.receiveBuffer = ''
+    this.receiveBuffer = Buffer.alloc(0)
     this.inflightRequests.clear()
   }
 
@@ -411,13 +413,22 @@ export class SeestarClient {
   }
 
   private onData(data: Buffer): void {
-    this.receiveBuffer += data.toString('utf-8')
+    if (this.receiveBuffer.length + data.length > MAX_RECEIVE_BUFFER_BYTES) {
+      this.closeOversizedReceiveBuffer()
+      return
+    }
+    this.receiveBuffer = Buffer.concat([this.receiveBuffer, data])
     let idx: number
     while ((idx = this.receiveBuffer.indexOf('\r\n')) >= 0) {
-      const line = this.receiveBuffer.slice(0, idx)
-      this.receiveBuffer = this.receiveBuffer.slice(idx + 2)
-      if (!line.trim()) continue
+      const lineBytes = this.receiveBuffer.subarray(0, idx)
+      this.receiveBuffer = this.receiveBuffer.subarray(idx + 2)
+      if (lineBytes.length > MAX_RECEIVE_BUFFER_BYTES) {
+        this.closeOversizedReceiveBuffer()
+        return
+      }
       try {
+        const line = new TextDecoder('utf-8', { fatal: true }).decode(lineBytes)
+        if (!line.trim()) continue
         const parsed: unknown = JSON.parse(line)
         const pushEvent = decodeSeestarPushEvent(parsed)
         if (pushEvent) {
@@ -499,10 +510,18 @@ export class SeestarClient {
           deviceModel: this.deviceModel,
           deviceSn: this.deviceSn,
           summary: 'Failed to parse line-delimited device message',
-          data: { linePreview: line.slice(0, 200) },
+            data: { linePreview: lineBytes.toString('utf-8', 0, 200) },
         })
       }
     }
+    if (this.receiveBuffer.length > MAX_RECEIVE_BUFFER_BYTES) {
+      this.closeOversizedReceiveBuffer()
+    }
+  }
+
+  private closeOversizedReceiveBuffer(): void {
+    this.receiveBuffer = Buffer.alloc(0)
+    this.socket?.destroy(new Error('Received oversized framed device message'))
   }
 }
 

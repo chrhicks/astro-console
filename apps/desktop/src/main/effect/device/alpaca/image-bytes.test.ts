@@ -24,3 +24,16 @@ test('returns an honest unknown frame for malformed geometry', () => {
   assert.equal(frame.pixelFormat, 'unknown')
   assert.equal(frame.data, data)
 })
+
+test('rejects rank-three frames without exactly three RGB planes', () => {
+  for (const planes of [2, 4]) {
+    const data = new Uint8Array(48)
+    const view = new DataView(data.buffer)
+    ;[1, 0, 1, 1, 44, 6, 6, 3, 1, 1, planes].forEach((value, index) =>
+      view.setInt32(index * 4, value, true),
+    )
+
+    const frame = parseAlpacaImageBytes(data)
+    assert.equal(frame.pixelFormat, 'unknown')
+  }
+})

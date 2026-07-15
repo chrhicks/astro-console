@@ -24,7 +24,7 @@ const PositiveInt = Schema.Number.pipe(
 const NonNegativeInt = Schema.Number.pipe(
   Schema.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
 )
-const FiniteNumber = Schema.Number
+const FiniteNumber = Schema.Number.check(Schema.isFinite())
 
 const ScanConfigSchema = Schema.Struct({
   sampleCount: PositiveInt,
@@ -42,9 +42,15 @@ const PositiveIntFromString = Schema.NumberFromString.pipe(
 const NonNegativeIntFromString = Schema.NumberFromString.pipe(
   Schema.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
 )
-const NumberFromString = Schema.NumberFromString
+const NumberFromString = Schema.NumberFromString.check(Schema.isFinite())
 
-const LogLevelSchema = Schema.Literals(['trace', 'debug', 'info', 'warn', 'error'])
+const LogLevelSchema = Schema.Literals([
+  'trace',
+  'debug',
+  'info',
+  'warn',
+  'error',
+])
 
 const CliOptionsSchema = Schema.Struct({
   help: Schema.optional(Schema.Boolean),
@@ -282,7 +288,8 @@ async function collectSample(input: {
   framePorts: readonly number[]
 }): Promise<TelemetrySample> {
   const horizontal = await input.device.getHorizCoord()
-  if (!horizontal) throw new Error('Device did not return horizontal coordinates')
+  if (!horizontal)
+    throw new Error('Device did not return horizontal coordinates')
 
   const state = (await input.device.getDeviceState()) ?? {}
   const raw = readSampleRaw(state)
@@ -507,16 +514,11 @@ function readSampleRaw(state: DeviceState): Record<string, unknown> {
   }
 }
 
-function parseFramePorts(value: string | undefined): number[] {
+function parseFramePorts(value: string | undefined): readonly number[] {
   if (!value) return DEFAULT_FRAME_PORTS
-  const ports = value
-    .split(',')
-    .map((part) => Number.parseInt(part.trim(), 10))
-    .filter((port) => Number.isInteger(port) && port > 0)
-  if (ports.length === 0) {
-    throw new Error('--frame-ports must include at least one positive integer')
-  }
-  return ports
+  return Schema.decodeUnknownSync(Schema.Array(PositiveIntFromString))(
+    value.split(',').map((part) => part.trim()),
+  )
 }
 
 function cameraKeyForPort(port: number): string {

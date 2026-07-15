@@ -7,9 +7,12 @@ import {
   registerIpcV2Handlers,
 } from './effect/ipc/ipc-v2'
 import { registerIpcV2DevHandlers } from './effect/ipc/ipc-v2-dev'
+import { appRuntime } from './effect/runtime/app-runtime'
+import { runDisconnect } from './effect/workflows/session-workflows'
 
 const rendererDevUrl = process.env.VITE_DEV_SERVER_URL
 const inspectPort = process.env.ELECTRON_INSPECT_PORT
+const gracefulShutdownDeadlineMs = 5000
 if (inspectPort) {
   app.commandLine.appendSwitch('remote-debugging-port', inspectPort)
 }
@@ -86,4 +89,20 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+let quitting = false
+
+app.on('before-quit', (event) => {
+  if (quitting) return
+  quitting = true
+  event.preventDefault()
+  const disconnect = appRuntime.runPromise(runDisconnect).catch(() => undefined)
+  const deadline = new Promise<void>((resolve) => {
+    setTimeout(resolve, gracefulShutdownDeadlineMs)
+  })
+  void Promise.race([disconnect, deadline])
+    .then(() => appRuntime.dispose())
+    .catch(() => undefined)
+    .then(() => app.exit())
 })

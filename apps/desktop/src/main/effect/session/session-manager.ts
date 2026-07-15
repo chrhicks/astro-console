@@ -5,6 +5,7 @@ import type { DeviceSession } from '../device/device-plugin'
 // only succeeds if no newer intent has superseded it.
 export interface ConnectIntent {
   readonly generation: number
+  readonly signal: AbortSignal
 }
 
 // A disconnect intent. Carries the session that was current when disconnect

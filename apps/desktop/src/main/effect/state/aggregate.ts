@@ -80,6 +80,8 @@ export interface OperationRuntimeState {
 // phase/sessionId, and operation lease are always atomically consistent.
 export interface RuntimeState {
   readonly generation: number
+  readonly discoveryId: number
+  readonly discoveryController: AbortController | null
   readonly session: DeviceSession | null
   readonly aggregate: SessionAggregate
   readonly operation: OperationRuntimeState | null
@@ -105,6 +107,8 @@ export function createInitialAggregate(): SessionAggregate {
 export function createInitialRuntimeState(): RuntimeState {
   return {
     generation: 0,
+    discoveryId: 0,
+    discoveryController: null,
     session: null,
     aggregate: createInitialAggregate(),
     operation: null,

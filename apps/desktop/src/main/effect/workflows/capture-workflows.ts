@@ -1,4 +1,4 @@
-import { Effect, Exit, Result } from 'effect'
+import { Effect, Result } from 'effect'
 import { EventBus } from '../event/event-bus'
 import { SessionManager } from '../session/session-manager'
 import { OperationCoordinator, type OperationLease } from '../session/operation-coordinator'
@@ -10,6 +10,7 @@ import { stopExternalExposure, captureExternalFrame } from './external-exposure'
 import type { DeviceSession } from '../device/device-plugin'
 import type { RigCamera, RigOperationContext } from '../rig/rig-model'
 import { isCaptureInFlight, isExternalSequenceRecoveryActive } from '../../../shared/lifecycle'
+import { HardwareWorkers } from '../runtime/hardware-workers'
 
 // Default exposure duration for the generic camera path when no user-configured
 // value exists yet. Not a stacking frame count.
@@ -227,13 +228,15 @@ export const runStartCapture = Effect.gen(function* () {
         // the lease and releases it on success/failure/partial/timeout.
         // startedAt is passed as a correlation token so a stale loop exits
         // if a new exposure replaces this one before the loop notices.
-        leaseTransferred = true
-        yield* pollExternalExposure(session, camera, durationSec, startedAt, lease).pipe(
-          Effect.forkDetach,
+        const workers = yield* HardwareWorkers
+        yield* Effect.uninterruptible(
+          workers.launch(
+            pollExternalExposure(session, camera, durationSec, startedAt, lease),
+          ).pipe(Effect.tap(() => Effect.sync(() => { leaseTransferred = true }))),
         )
       }),
     (_none, exit) => {
-      if (leaseTransferred && Exit.isSuccess(exit)) return Effect.void
+      if (leaseTransferred) return Effect.void
       return coordinator.release(lease)
     },
   ).pipe(

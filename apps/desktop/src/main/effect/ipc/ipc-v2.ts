@@ -18,7 +18,14 @@ import {
   MAX_EXPOSURE_DURATION_SEC,
 } from '../workflows/capture-workflows'
 import { runPark } from '../workflows/park-workflows'
-import { runConfigureExternalSequence, runContinueExternalSequence, runFinishExternalSequence, runStartExternalSequence, MAX_SEQUENCE_DARKS, MAX_SEQUENCE_LIGHTS } from '../workflows/external-sequence'
+import {
+  runConfigureExternalSequence,
+  runContinueExternalSequence,
+  runFinishExternalSequence,
+  runStartExternalSequence,
+  MAX_SEQUENCE_DARKS,
+  MAX_SEQUENCE_LIGHTS,
+} from '../workflows/external-sequence'
 import { resolveExternalFramesRoot } from '../storage/frame-storage'
 import { getManagedAssetPath } from '../storage/asset-registry'
 import { CatalogStore } from '../catalog/catalog-store'
@@ -40,9 +47,7 @@ export function registerIpcV2Handlers(allowed: WebContents) {
     ),
   )
 
-  handle('seestar:v2:discover', () =>
-    appRuntime.runPromise(runDiscover),
-  )
+  handle('seestar:v2:discover', () => appRuntime.runPromise(runDiscover))
 
   handle('seestar:v2:connect', (_event, input) =>
     appRuntime.runPromise(
@@ -54,9 +59,7 @@ export function registerIpcV2Handlers(allowed: WebContents) {
   )
 
   handle('seestar:v2:disconnect', () =>
-    appRuntime.runPromise(
-      withProjectedStatus(runDisconnect),
-    ),
+    appRuntime.runPromise(withProjectedStatus(runDisconnect)),
   )
 
   handle('seestar:v2:get-logs', () =>
@@ -98,33 +101,23 @@ export function registerIpcV2Handlers(allowed: WebContents) {
   )
 
   handle('seestar:v2:start-preview', () =>
-    appRuntime.runPromise(
-      withProjectedStatus(runStartPreview),
-    ),
+    appRuntime.runPromise(withProjectedStatus(runStartPreview)),
   )
 
   handle('seestar:v2:stop-preview', () =>
-    appRuntime.runPromise(
-      withProjectedStatus(runStopPreview),
-    ),
+    appRuntime.runPromise(withProjectedStatus(runStopPreview)),
   )
 
   handle('seestar:v2:start-capture', () =>
-    appRuntime.runPromise(
-      withProjectedStatus(runStartCapture),
-    ),
+    appRuntime.runPromise(withProjectedStatus(runStartCapture)),
   )
 
   handle('seestar:v2:stop-capture', () =>
-    appRuntime.runPromise(
-      withProjectedStatus(runStopCapture),
-    ),
+    appRuntime.runPromise(withProjectedStatus(runStopCapture)),
   )
 
   handle('seestar:v2:park', () =>
-    appRuntime.runPromise(
-      withProjectedStatus(runPark),
-    ),
+    appRuntime.runPromise(withProjectedStatus(runPark)),
   )
 
   handle('seestar:v2:set-exposure-duration', (_event, input) =>
@@ -134,20 +127,30 @@ export function registerIpcV2Handlers(allowed: WebContents) {
           SetExposureDurationRequestSchema,
           input,
         )
-        return yield* withProjectedStatus(runSetExposureDuration(decoded.durationSec))
+        return yield* withProjectedStatus(
+          runSetExposureDuration(decoded.durationSec),
+        )
       }),
     ),
   )
 
   handle('seestar:v2:configure-external-sequence', (_event, input) =>
-    appRuntime.runPromise(Effect.gen(function* () {
-      const decoded = yield* decodeIpc(ExternalSequencePlanSchema, input)
-      return yield* withProjectedStatus(runConfigureExternalSequence(decoded))
-    })),
+    appRuntime.runPromise(
+      Effect.gen(function* () {
+        const decoded = yield* decodeIpc(ExternalSequencePlanSchema, input)
+        return yield* withProjectedStatus(runConfigureExternalSequence(decoded))
+      }),
+    ),
   )
-  handle('seestar:v2:start-external-sequence', () => appRuntime.runPromise(withProjectedStatus(runStartExternalSequence)))
-  handle('seestar:v2:continue-external-sequence', () => appRuntime.runPromise(withProjectedStatus(runContinueExternalSequence)))
-  handle('seestar:v2:finish-external-sequence', () => appRuntime.runPromise(withProjectedStatus(runFinishExternalSequence)))
+  handle('seestar:v2:start-external-sequence', () =>
+    appRuntime.runPromise(withProjectedStatus(runStartExternalSequence)),
+  )
+  handle('seestar:v2:continue-external-sequence', () =>
+    appRuntime.runPromise(withProjectedStatus(runContinueExternalSequence)),
+  )
+  handle('seestar:v2:finish-external-sequence', () =>
+    appRuntime.runPromise(withProjectedStatus(runFinishExternalSequence)),
+  )
 
   handle('seestar:v2:open-saved-asset', (_event, assetId) =>
     openSavedAsset(requireAssetId(assetId)),
@@ -157,9 +160,8 @@ export function registerIpcV2Handlers(allowed: WebContents) {
     revealSavedAsset(requireAssetId(assetId)),
   )
 
-  handle(
-    'seestar:v2:get-saved-asset-preview',
-    (_event, assetId) => readSavedAssetPreview(requireAssetId(assetId)),
+  handle('seestar:v2:get-saved-asset-preview', (_event, assetId) =>
+    readSavedAssetPreview(requireAssetId(assetId)),
   )
 }
 
@@ -186,9 +188,23 @@ const ConnectRequestSchema = Schema.Struct({
 const CatalogQuerySchema = Schema.Struct({
   search: Schema.optional(Schema.String),
   upNowOnly: Schema.optional(Schema.Boolean),
-  typeFilter: Schema.optional(Schema.Literals(['dso', 'sun', 'moon', 'planet'])),
-  offset: Schema.optional(Schema.Number),
-  limit: Schema.optional(Schema.Number),
+  typeFilter: Schema.optional(
+    Schema.Literals(['dso', 'sun', 'moon', 'planet']),
+  ),
+  offset: Schema.optional(
+    Schema.Number.check(
+      Schema.isFinite(),
+      Schema.isInt(),
+      Schema.isGreaterThanOrEqualTo(0),
+    ),
+  ),
+  limit: Schema.optional(
+    Schema.Number.check(
+      Schema.isFinite(),
+      Schema.isInt(),
+      Schema.isGreaterThan(0),
+    ),
+  ),
 })
 
 const PointToTargetRequestSchema = Schema.Struct({
@@ -223,7 +239,9 @@ function decodeIpc<S extends Schema.ConstraintDecoder<unknown>>(
 ): Effect.Effect<S['Type'], Error> {
   const decoded = Schema.decodeUnknownResult(schema)(input)
   if (Result.isFailure(decoded)) {
-    return Effect.fail(new Error(`Invalid IPC input: ${decoded.failure.message}`))
+    return Effect.fail(
+      new Error(`Invalid IPC input: ${decoded.failure.message}`),
+    )
   }
   return Effect.succeed(decoded.success)
 }

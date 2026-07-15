@@ -41,9 +41,11 @@ export function createSeestarPlugin(): DevicePlugin {
   const discoveredRef = Ref.makeUnsafe<Map<string, DesktopDiscoveredDeviceV2>>(
     new Map(),
   )
-  const discover = Effect.gen(function* () {
+  const discover = (input: { signal: AbortSignal }) => Effect.gen(function* () {
     const discovered: Awaited<ReturnType<typeof discoverSeestars>> =
-      yield* Effect.tryPromise(() => discoverSeestars({ timeoutMs: 2500 }))
+      yield* Effect.tryPromise(() =>
+        discoverSeestars({ timeoutMs: 2500, signal: input.signal }),
+      )
 
     const mapped: DesktopDiscoveredDeviceV2[] = discovered.map((device) => {
       const productModel =
@@ -76,7 +78,8 @@ export function createSeestarPlugin(): DevicePlugin {
 
   return {
     kind: 'seestar',
-    discover,
+    discover: discover({ signal: new AbortController().signal }),
+    discoverWithSignal: discover,
 
     connect: (input: ConnectRequestV2) =>
       Effect.gen(function* () {

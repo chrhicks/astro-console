@@ -13,6 +13,7 @@ import { OperationCoordinatorLive } from '../session/operation-coordinator'
 import { StatusProjectorLive } from '../state/status-projector'
 import { StatusStreamLive } from '../event/status-stream'
 import { FrameStorageLive } from '../storage/frame-storage'
+import { HardwareWorkersLive } from './hardware-workers'
 
 // RuntimeStateRefLive is the shared foundation: both AggregateStoreLive and
 // SessionManagerLive depend on it and operate on the same Ref. They are
@@ -39,6 +40,7 @@ const baseLayer = Layer.mergeAll(
   DeviceRegistryLive,
   GeoServiceLive,
   FrameStorageLive,
+  HardwareWorkersLive,
 )
 
 const catalogLayer = Layer.provide(CatalogStoreLive, baseLayer)

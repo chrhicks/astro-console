@@ -7,6 +7,7 @@ const PREVIEW_JPEG_QUALITY = 85
 // Stride-sampling target so the intermediate PNG stays bounded before
 // nativeImage downscales to PREVIEW_MAX_EDGE.
 const PREVIEW_SAMPLE_TARGET = 2400
+const PREVIEW_MAX_PIXELS = 4_000_000
 const HISTOGRAM_BINS = 512
 const LOW_PERCENTILE = 0.005
 const HIGH_PERCENTILE = 0.995
@@ -67,24 +68,33 @@ function frameToRgba(data: Uint8Array, frame: FrameDescriptor): {
 } | null {
   if (frame.rank !== 2 && frame.rank !== 3) return null
   const planes = frame.rank === 3 ? frame.planes ?? 0 : 1
-  if (frame.rank === 3 && planes <= 0) return null
+  if (frame.rank === 3 && planes !== 3) return null
   if (frame.width <= 0 || frame.height <= 0) return null
 
   const type = resolvePreviewType(frame.elementType)
   if (!type) return null
 
-  const expectedBytes = type.bytesPerElement * frame.width * frame.height * planes
+  const pixels = frame.width * frame.height
+  const expectedBytes = type.bytesPerElement * pixels * planes
+  if (!Number.isSafeInteger(pixels) || !Number.isSafeInteger(expectedBytes)) {
+    return null
+  }
   if (data.length !== expectedBytes) return null
 
   const stride = Math.max(
     1,
     Math.ceil(Math.max(frame.width, frame.height) / PREVIEW_SAMPLE_TARGET),
+    Math.ceil(Math.sqrt(pixels / PREVIEW_MAX_PIXELS)),
   )
   const outWidth = Math.ceil(frame.width / stride)
   const outHeight = Math.ceil(frame.height / stride)
+  const outputPixels = outWidth * outHeight
+  if (!Number.isSafeInteger(outputPixels) || outputPixels > PREVIEW_MAX_PIXELS) {
+    return null
+  }
 
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-  const samples = new Float64Array(outWidth * outHeight * planes)
+  const samples = new Float64Array(outputPixels * planes)
   let min = Infinity
   let max = -Infinity
   let s = 0
@@ -102,8 +112,8 @@ function frameToRgba(data: Uint8Array, frame: FrameDescriptor): {
 
   const { low, high } = percentileClip(samples, min, max)
   const range = high > low ? high - low : 1
-  const buffer = Buffer.alloc(outWidth * outHeight * 4)
-  for (let i = 0; i < outWidth * outHeight; i++) {
+  const buffer = Buffer.alloc(outputPixels * 4)
+  for (let i = 0; i < outputPixels; i++) {
     if (planes === 1) {
       const g = clampByte((samples[i] - low) / range)
       buffer[i * 4] = g

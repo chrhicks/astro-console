@@ -21,7 +21,7 @@ export function parseAlpacaImageBytes(data: Uint8Array): RigFrameResult {
     (rank !== 2 && rank !== 3) ||
     width <= 0 ||
     height <= 0 ||
-    (rank === 3 && dimension3 <= 0) ||
+    (rank === 3 && dimension3 !== 3) ||
     dataStart < 44 ||
     dataStart > data.length
   )

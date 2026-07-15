@@ -24,19 +24,22 @@ export const NativeCaptureMonitorLive = Layer.effectDiscard(
         if (session.pluginKind !== 'seestar') return
         if (session.sessionId !== event.sessionId) return
 
-        const current = yield* store.get
-        if (current.capture.phase !== 'capturing') return
-
         const message = readFailureMessage(event.payload)
-        yield* store.update((current) => ({
-          ...current,
-          capture: { phase: 'failed', lastError: message },
-        }))
+        let captured = false
+        const committed = yield* store.updateIfSession(session, (current) => {
+          if (current.capture.phase !== 'capturing') return current
+          captured = true
+          return {
+            ...current,
+            capture: { phase: 'failed', lastError: message },
+          }
+        })
+        if (!committed || !captured) return
         yield* bus.publish('capture.failed', { error: message })
       })
     })
 
-    void unsubscribe
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribe))
   }),
 )
 

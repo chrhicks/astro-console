@@ -29,7 +29,7 @@ export const LogSinkLive = Layer.effect(
       ]).pipe(Effect.tap(() => Effect.sync(() => writeToConsole(entry))))
     })
 
-    void unsubscribe
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribe))
 
     return {
       list: Ref.get(ref),

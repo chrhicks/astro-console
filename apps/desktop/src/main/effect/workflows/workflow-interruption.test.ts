@@ -28,6 +28,7 @@ import {
 import { captureExternalFrame } from './external-exposure'
 import type { RigCamera, RigSessionRefresh } from '../rig/rig-model'
 import { FrameStorage } from '../storage/frame-storage'
+import { HardwareWorkers, HardwareWorkersLive } from '../runtime/hardware-workers'
 
 function makeSession(id: string, disconnectFn?: Effect.Effect<void>): DeviceSession {
   return {
@@ -156,8 +157,8 @@ function makeTestLayer(
   busLayer: Layer.Layer<EventBus> = EventBusLive,
   storageLayer: Layer.Layer<FrameStorage> = frameStorageTestLayer,
   coordinatorLayer: Layer.Layer<OperationCoordinator> = coordinatorTestLayer,
-): Layer.Layer<AggregateStore | SessionManager | OperationCoordinator | EventBus | DeviceRegistry | FrameStorage> {
-  return Layer.mergeAll(baseTestLayer, Layer.provide(coordinatorLayer, baseTestLayer), busLayer, registry, storageLayer)
+): Layer.Layer<AggregateStore | SessionManager | OperationCoordinator | EventBus | DeviceRegistry | FrameStorage | HardwareWorkers> {
+  return Layer.mergeAll(baseTestLayer, Layer.provide(coordinatorLayer, baseTestLayer), busLayer, registry, storageLayer, HardwareWorkersLive)
 }
 
 function makeDelayedSequenceCoordinatorLayer(
@@ -382,7 +383,7 @@ describe('workflow interruption safety', () => {
     assert.equal(result.library.assets[0].previewError, 'JPEG encoder failed')
   })
 
-  it('interrupt connect while plugin blocks => disconnected aggregate + pluginCleanupCalled', async () => {
+  it('disconnect cancels a blocked plugin connect and waits for cleanup', async () => {
     // The fake plugin's connect blocks on a Deferred before returning a
     // session. The plugin brackets its internal work with acquireUseRelease
     // so that interruption during the blocked await cleans up. We fork
@@ -393,6 +394,7 @@ describe('workflow interruption safety', () => {
     let pluginCleanupCalled = false
     const connectBlocked = Deferred.makeUnsafe<void>()
     const connectEntered = Deferred.makeUnsafe<void>()
+    const pluginCleaned = Deferred.makeUnsafe<void>()
 
     const fakeRegistry = makeFakeRegistry(
       Effect.acquireUseRelease(
@@ -410,6 +412,7 @@ describe('workflow interruption safety', () => {
         (_acquired, exit) => {
           if (Exit.isSuccess(exit)) return Effect.void
           pluginCleanupCalled = true
+          Deferred.doneUnsafe(pluginCleaned, Effect.void)
           return Effect.void
         },
       ),
@@ -423,8 +426,9 @@ describe('workflow interruption safety', () => {
           runConnect({ pluginKind: 'fake-seestar', deviceId: 'test:blocked' }),
         )
         yield* Deferred.await(connectEntered)
-        yield* Fiber.interrupt(fiber)
+        yield* runDisconnect
         yield* Fiber.await(fiber)
+        yield* Deferred.await(pluginCleaned)
 
         const store = yield* AggregateStore
         return yield* store.get
@@ -928,6 +932,69 @@ describe('workflow interruption safety', () => {
     )
     assert.equal(rejected, true)
     assert.equal(starts, 0)
+  })
+
+  it('interrupting sequence configuration releases its lease', async () => {
+    const commitEntered = Deferred.makeUnsafe<void>()
+    const released: string[] = []
+    const session = makeExternalSession('configure-interrupted', {
+      getExposureState: () =>
+        Effect.succeed({ state: 'idle', imageReady: false }),
+    })
+    const coordinatorLayer = Layer.effect(
+      OperationCoordinator,
+      Effect.gen(function* () {
+        const store = yield* AggregateStore
+        return {
+          acquire: (current, kind) =>
+            Effect.sync(() => {
+              const controller = new AbortController()
+              return {
+                id: `${kind}-${current.sessionId}`,
+                sessionId: current.sessionId,
+                kind,
+                generation: 0,
+                signal: controller.signal,
+              }
+            }),
+          acquireRecovery: () => Effect.succeed(null),
+          release: (lease) =>
+            Effect.sync(() => {
+              released.push(lease.id)
+            }),
+          isCurrent: () => Effect.succeed(true),
+          commitIfLease: (_lease, update) =>
+            Effect.gen(function* () {
+              Deferred.doneUnsafe(commitEntered, Effect.void)
+              yield* Effect.never
+              return yield* store.update(update)
+            }),
+        } satisfies OperationCoordinator
+      }),
+    )
+    const testLayer = makeTestLayer(
+      makeFakeRegistry(Effect.succeed(session)),
+      EventBusLive,
+      frameStorageTestLayer,
+      coordinatorLayer,
+    )
+
+    await Effect.runPromise(
+      sequenceProgram(testLayer, function* () {
+        const fiber = yield* Effect.forkChild(
+          runConfigureExternalSequence({
+            lightCount: 1,
+            darkCount: 0,
+            durationSec: 1,
+          }),
+        )
+        yield* Deferred.await(commitEntered)
+        yield* Fiber.interrupt(fiber)
+        yield* Fiber.await(fiber)
+      }),
+    )
+
+    assert.deepEqual(released, ['sequence-configure-interrupted'])
   })
 
   it('runs one light, waits for cover confirmation, then runs one dark', async () => {

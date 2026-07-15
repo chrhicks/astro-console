@@ -1,7 +1,9 @@
 import { Result, Schema } from 'effect'
 import type { SeestarLifecycleEvent, SeestarPushEvent } from './types.js'
 
-const PushNumber = Schema.Union([Schema.Number, Schema.NumberFromString])
+const PushNumber = Schema.Union([Schema.Number, Schema.NumberFromString]).check(
+  Schema.isFinite(),
+)
 
 const PushEventFields = Schema.Struct({
   Event: Schema.String,
@@ -9,7 +11,7 @@ const PushEventFields = Schema.Struct({
   timestamp: Schema.optional(Schema.String),
   state: Schema.optional(Schema.String),
   error: Schema.optional(Schema.String),
-  code: Schema.optional(Schema.Number),
+  code: Schema.optional(PushNumber),
   route: Schema.optional(Schema.Array(Schema.String)),
   position: Schema.optional(PushNumber),
   percent: Schema.optional(PushNumber),

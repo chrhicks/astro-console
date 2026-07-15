@@ -154,3 +154,60 @@ describe('AggregateStore updateIfSession CAS', () => {
     assert.equal(result, null)
   })
 })
+
+describe('AggregateStore discovery commits', () => {
+  it('rejects a superseded discovery commit without changing a newer lifecycle state', async () => {
+    const result = await runWithStore(
+      Effect.gen(function* () {
+        const sessions = yield* SessionManager
+        const store = yield* AggregateStore
+        const discovery = yield* store.beginDiscovery
+        yield* sessions.beginConnect
+        const committed = yield* store.updateIfDiscovery(
+          discovery,
+          (current) => ({
+            ...current,
+            session: {
+              ...current.session,
+              discovering: false,
+              lastError: 'stale discovery',
+            },
+          }),
+        )
+        return [committed, yield* store.get] as const
+      }),
+    )
+
+    assert.equal(result[0], null)
+    assert.equal(result[1].session.phase, 'connecting')
+    assert.equal(result[1].session.lastError, undefined)
+  })
+
+  it('rejects an older discovery after a newer discovery begins', async () => {
+    const result = await runWithStore(
+      Effect.gen(function* () {
+        const store = yield* AggregateStore
+        const first = yield* store.beginDiscovery
+        const second = yield* store.beginDiscovery
+        const firstCommit = yield* store.updateIfDiscovery(
+          first,
+          (current) => ({
+            ...current,
+            session: { ...current.session, discovering: false },
+          }),
+        )
+        const secondCommit = yield* store.updateIfDiscovery(
+          second,
+          (current) => ({
+            ...current,
+            session: { ...current.session, discovering: false },
+          }),
+        )
+        return [firstCommit, secondCommit] as const
+      }),
+    )
+
+    assert.equal(result[0], null)
+    assert.notEqual(result[1], null)
+  })
+})

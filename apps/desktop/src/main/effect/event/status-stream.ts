@@ -30,7 +30,21 @@ export const StatusStreamLive = Layer.effect(
     return {
       subscribe: (onStatus) =>
         Effect.gen(function* () {
-          const queue = yield* Queue.unbounded<DesktopStatus>()
+          const queue = yield* Queue.sliding<DesktopStatus>(1)
+          let closed = false
+          let fiber: Fiber.Fiber<void> | undefined
+
+          const close = () => {
+            if (closed) return
+            closed = true
+            unsubscribe()
+            const shutdown = Queue.shutdown(queue)
+            if (!fiber) {
+              Effect.runFork(shutdown)
+              return
+            }
+            Effect.runFork(shutdown.pipe(Effect.andThen(Fiber.interrupt(fiber))))
+          }
 
           const unsubscribe = yield* bus.listen((event) => {
             if (
@@ -54,18 +68,16 @@ export const StatusStreamLive = Layer.effect(
 
           yield* Queue.offer(queue, yield* projector.snapshot)
 
-          const fiber = yield* Stream.fromQueue(queue).pipe(
-            Stream.runForEach((status) => Effect.sync(() => onStatus(status))),
-            // This single status stream is currently owned by Electron-side
-            // unsubscribe cleanup. If we add more pushed streams, switch to a
-            // scoped subscription model owned per WebContents instead.
+          fiber = yield* Stream.fromQueue(queue).pipe(
+            Stream.runForEach((status) =>
+              (closed ? Effect.void : Effect.sync(() => onStatus(status))).pipe(
+                Effect.catch(() => Effect.sync(close)),
+              ),
+            ),
             Effect.forkDetach,
           )
 
-          return () => {
-            unsubscribe()
-            Effect.runFork(Fiber.interrupt(fiber))
-          }
+          return close
         }),
       publishSnapshot,
     } satisfies StatusStream

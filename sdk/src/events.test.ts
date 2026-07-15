@@ -37,3 +37,18 @@ test('normalizes stack failures into lifecycle events', () => {
     undefined,
   )
 })
+
+test('rejects non-finite push event numbers', () => {
+  assert.equal(
+    decodeSeestarPushEvent({ Event: 'Stack', percent: Number.NaN }),
+    undefined,
+  )
+  assert.equal(
+    decodeSeestarPushEvent({ Event: 'Stack', lapse_ms: 'Infinity' }),
+    undefined,
+  )
+  assert.equal(
+    decodeSeestarPushEvent({ Event: 'Stack', code: Number.NaN }),
+    undefined,
+  )
+})

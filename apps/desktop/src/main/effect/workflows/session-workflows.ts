@@ -16,21 +16,14 @@ export const runDiscover = Effect.gen(function* () {
   const bus = yield* EventBus
   const registry = yield* DeviceRegistry
 
-  yield* store.update((current) => ({
-    ...current,
-    session: {
-      ...current.session,
-      discovering: true,
-      lastError: undefined,
-    },
-  }))
+  const intent = yield* store.beginDiscovery
 
   yield* bus.publish('session.discover.started', {})
 
-  return yield* registry.discoverAll.pipe(
+  return yield* registry.discoverAll(intent.signal).pipe(
     Effect.tap((discovered) =>
       Effect.gen(function* () {
-        yield* store.update((current) => ({
+        const committed = yield* store.updateIfDiscovery(intent, (current) => ({
           ...current,
           session: {
             ...current.session,
@@ -38,6 +31,8 @@ export const runDiscover = Effect.gen(function* () {
             lastError: undefined,
           },
         }))
+
+        if (!committed) return
 
         yield* bus.publish('session.discover.completed', {
           count: discovered.length,
@@ -48,7 +43,7 @@ export const runDiscover = Effect.gen(function* () {
       Effect.gen(function* () {
         const message = toErrorMessage(error)
 
-        yield* store.update((current) => ({
+        const committed = yield* store.updateIfDiscovery(intent, (current) => ({
           ...current,
           session: {
             ...current.session,
@@ -57,9 +52,11 @@ export const runDiscover = Effect.gen(function* () {
           },
         }))
 
-        yield* bus.publish('session.discover.failed', {
-          error: message,
-        })
+        if (committed) {
+          yield* bus.publish('session.discover.failed', {
+            error: message,
+          })
+        }
 
         return yield* Effect.fail(error)
       }),
@@ -145,9 +142,16 @@ export const runConnect = (input: ConnectRequestV2) =>
             deviceId: input.deviceId,
           })
 
-          const connected = yield* registry.get(input.pluginKind).pipe(
-            Effect.flatMap((plugin) => plugin.connect(input)),
-          )
+          const connected = yield* registry
+            .get(input.pluginKind)
+            .pipe(
+              Effect.flatMap((plugin) =>
+                Effect.raceFirst(
+                  plugin.connect(input),
+                  interruptOnAbort(intent.signal),
+                ),
+              ),
+            )
 
           // Track the session so the release finalizer can disconnect it
           // if install fails or is superseded.
@@ -156,9 +160,10 @@ export const runConnect = (input: ConnectRequestV2) =>
           // External-camera rigs (Alpaca) start with an empty connect
           // library. Rehydrate saved assets from disk so prior captures
           // reappear without a new exposure.
-          const library = connected.rig.camera && !connected.rig.capture
-            ? yield* hydrateExternalLibrary(connected.rig.connect.library)
-            : connected.rig.connect.library
+          const library =
+            connected.rig.camera && !connected.rig.capture
+              ? yield* hydrateExternalLibrary(connected.rig.connect.library)
+              : connected.rig.connect.library
 
           // Atomically install the session and project the final connected
           // state in one Ref.modify. Returns null if a newer intent
@@ -358,7 +363,10 @@ export const runDisconnect = Effect.gen(function* () {
             'session.disconnect.failed',
             { error: reason },
             current
-              ? { sessionId: current.sessionId, host: current.rig.identity.host }
+              ? {
+                  sessionId: current.sessionId,
+                  host: current.rig.identity.host,
+                }
               : undefined,
           )
         }
@@ -371,9 +379,33 @@ function toErrorMessage(error: unknown): string {
   return String(error)
 }
 
-function exitFailureReason(exit: Exit.Exit<unknown, unknown>, action: string): string {
+function interruptOnAbort(signal: AbortSignal): Effect.Effect<never, unknown> {
+  return Effect.tryPromise({
+    try: (effectSignal) =>
+      new Promise<never>((_resolve, reject) => {
+        const cleanup = () => {
+          signal.removeEventListener('abort', abort)
+          effectSignal.removeEventListener('abort', cleanup)
+        }
+        const abort = () => {
+          cleanup()
+          reject(new Error('Connect superseded by a newer intent'))
+        }
+        if (signal.aborted) abort()
+        else signal.addEventListener('abort', abort, { once: true })
+        effectSignal.addEventListener('abort', cleanup, { once: true })
+      }),
+    catch: (error) => error,
+  })
+}
+
+function exitFailureReason(
+  exit: Exit.Exit<unknown, unknown>,
+  action: string,
+): string {
   if (!Exit.isFailure(exit)) return `${action} failed`
-  if (exit.cause.reasons.some(Cause.isInterruptReason)) return `${action} interrupted`
+  if (exit.cause.reasons.some(Cause.isInterruptReason))
+    return `${action} interrupted`
   return toErrorMessage(Cause.squash(exit.cause))
 }
 

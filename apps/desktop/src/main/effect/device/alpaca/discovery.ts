@@ -4,6 +4,8 @@ import { Schema } from 'effect'
 
 const DISCOVERY_PORT = 32227
 const PROBE_TIMEOUT_MS = 3000
+const MAX_DISCOVERED_HOSTS = 16
+const PROBE_CONCURRENCY = 4
 
 const ConfiguredDevicesResponse = Schema.Struct({
   Value: Schema.Array(
@@ -46,22 +48,51 @@ export interface DiscoveredAlpacaConfiguration {
 
 export async function discoverAlpacaRigs(
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<DiscoveredAlpacaConfiguration[]> {
-  const hosts = await discoverHosts(timeoutMs)
-  const rigs = await Promise.all(hosts.map(probeHost))
+  if (signal?.aborted) throw abortError()
+  const hosts = await discoverHosts(timeoutMs, signal)
+  const rigs = await probeHosts(hosts, signal)
   return rigs.filter(
     (rig): rig is DiscoveredAlpacaConfiguration => rig !== null,
   )
 }
 
+async function probeHosts(
+  hosts: DiscoveredHost[],
+  signal?: AbortSignal,
+): Promise<Array<DiscoveredAlpacaConfiguration | null>> {
+  const rigs: Array<DiscoveredAlpacaConfiguration | null> = Array.from(
+    { length: hosts.length },
+    () => null,
+  )
+  let next = 0
+  const workers = Array.from(
+    { length: Math.min(PROBE_CONCURRENCY, hosts.length) },
+    async () => {
+      while (next < hosts.length) {
+        if (signal?.aborted) throw abortError()
+        const index = next++
+        const host = hosts[index]
+        if (host) rigs[index] = await probeHost(host, signal)
+      }
+    },
+  )
+  await Promise.all(workers)
+  return rigs
+}
+
 async function probeHost(
   host: DiscoveredHost,
+  signal?: AbortSignal,
 ): Promise<DiscoveredAlpacaConfiguration | null> {
   try {
     const res = await fetch(
       `http://${host.host}:${host.port}/management/v1/configureddevices`,
       {
-        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+          signal: signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(PROBE_TIMEOUT_MS)])
+            : AbortSignal.timeout(PROBE_TIMEOUT_MS),
       },
     )
     if (!res.ok) return null
@@ -91,24 +122,39 @@ async function probeHost(
       filterWheelDeviceNumber: filterWheel?.DeviceNumber,
     }
   } catch {
+    if (signal?.aborted) throw abortError()
     return null
   }
 }
 
-function discoverHosts(timeoutMs: number): Promise<DiscoveredHost[]> {
-  return new Promise((resolve) => {
+function discoverHosts(timeoutMs: number, signal?: AbortSignal): Promise<DiscoveredHost[]> {
+  return new Promise((resolve, reject) => {
     const socket = dgram.createSocket('udp4')
     const hosts = new Map<string, DiscoveredHost>()
     let settled = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    const cleanup = () => {
+      if (timer) clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      try {
+        socket.close()
+      } catch {}
+    }
     const finish = () => {
       if (settled) return
       settled = true
-      if (timer) clearTimeout(timer)
-      socket.close()
+      cleanup()
       resolve([...hosts.values()])
     }
+    const onAbort = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(abortError())
+    }
     timer = setTimeout(finish, timeoutMs)
+    if (signal?.aborted) onAbort()
+    else signal?.addEventListener('abort', onAbort, { once: true })
     socket.on('error', finish)
     socket.on('message', (message, info) => {
       try {
@@ -117,6 +163,7 @@ function discoverHosts(timeoutMs: number): Promise<DiscoveredHost[]> {
         )
         const key = `${info.address}:${parsed.AlpacaPort}`
         if (hosts.has(key)) return
+        if (hosts.size >= MAX_DISCOVERED_HOSTS) return
         hosts.set(key, {
           host: info.address,
           port: parsed.AlpacaPort,
@@ -128,6 +175,7 @@ function discoverHosts(timeoutMs: number): Promise<DiscoveredHost[]> {
       }
     })
     socket.bind(() => {
+      if (settled) return
       socket.setBroadcast(true)
       const payload = Buffer.from('alpacadiscovery1')
       broadcastTargets().forEach((target) =>
@@ -135,6 +183,10 @@ function discoverHosts(timeoutMs: number): Promise<DiscoveredHost[]> {
       )
     })
   })
+}
+
+function abortError(): Error {
+  return new Error('Alpaca discovery aborted')
 }
 
 function broadcastTargets(): string[] {
