@@ -22,16 +22,12 @@ let initializePromise: Promise<void> | null = null
 // from a stale lifecycle can detect they are outdated and bail before writing.
 let lifecycleGeneration = 0
 
-function getState(): ProjectionState {
+export function getProjectionState(): ProjectionState {
   return state
 }
 
 function setState(next: ProjectionState) {
   state = next
-  emit()
-}
-
-function emit() {
   for (const listener of listeners) {
     listener()
   }
@@ -44,9 +40,13 @@ function subscribe(listener: () => void) {
   }
 }
 
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
+export function applyDesktopStatusToProjectionStore(status: DesktopStatus) {
+  const current = state.status
+  if (current && (current.statusRevision > status.statusRevision || (current.statusRevision === status.statusRevision && current.lastUpdatedAt !== status.lastUpdatedAt))) return
+  setState({ status, hydrated: true, error: null })
+  if (status.session.phase === 'disconnected') {
+    setSelectedTarget(null)
+  }
 }
 
 export async function initializeProjectionStore() {
@@ -59,10 +59,8 @@ export async function initializeProjectionStore() {
     // live event already established a healthy subscribed state.
     let receivedEvent = false
     try {
-      if (stopStatusSubscription) {
-        stopStatusSubscription()
-        stopStatusSubscription = null
-      }
+      stopStatusSubscription?.()
+      stopStatusSubscription = null
 
       // Subscribe before fetching the snapshot so status updates pushed
       // between the snapshot and the subscription are not lost. The handler
@@ -71,16 +69,13 @@ export async function initializeProjectionStore() {
       stopStatusSubscription = electronApi.onStatus((nextStatus) => {
         if (generation !== lifecycleGeneration) return
         receivedEvent = true
-        setState({ status: nextStatus, hydrated: true, error: null })
-        if (nextStatus.session.phase === 'disconnected') {
-          setSelectedTarget(null)
-        }
+        applyDesktopStatusToProjectionStore(nextStatus)
       })
 
       const status = await electronApi.getStatus()
       if (generation !== lifecycleGeneration) return
       if (!receivedEvent) {
-        setState({ status, hydrated: true, error: null })
+        applyDesktopStatusToProjectionStore(status)
       }
     } catch (error) {
       if (generation !== lifecycleGeneration) return
@@ -90,7 +85,7 @@ export async function initializeProjectionStore() {
       if (receivedEvent) return
       setState({
         status: null,
-        error: toErrorMessage(error),
+        error: error instanceof Error ? error.message : String(error),
         hydrated: true,
       })
     }
@@ -101,13 +96,9 @@ export async function initializeProjectionStore() {
 
 export function disposeProjectionStore() {
   lifecycleGeneration++
-  if (stopStatusSubscription) {
-    stopStatusSubscription()
-    stopStatusSubscription = null
-  }
-  if (initializePromise) {
-    initializePromise = null
-  }
+  stopStatusSubscription?.()
+  stopStatusSubscription = null
+  initializePromise = null
 
   setSelectedTarget(null)
   setState({ status: null, hydrated: false, error: null })
@@ -116,6 +107,6 @@ export function disposeProjectionStore() {
 export function useProjectionStore<T>(
   selector: (state: ProjectionState) => T,
 ): T {
-  const snapshot = useSyncExternalStore(subscribe, getState, getState)
+  const snapshot = useSyncExternalStore(subscribe, getProjectionState, getProjectionState)
   return selector(snapshot)
 }

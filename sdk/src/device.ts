@@ -17,6 +17,7 @@ import {
   type Logger,
 } from './logging.js'
 import { listShareDirectory } from './smb.js'
+import { toSeestarLifecycleEvent } from './events.js'
 import type {
   ActionWaitOptions,
   AlbumsResult,
@@ -31,6 +32,8 @@ import type {
   ManualMoveOptions,
   PreflightSummary,
   SeestarPushEvent,
+  SeestarLifecycleEvent,
+  SeestarSnapshot,
   SeestarViewMode,
   StartupSequenceOptions,
   StartupSequenceReport,
@@ -75,6 +78,10 @@ export class SeestarDevice {
   // Serializes state-changing commands and their waits on this instance so
   // overlapping mutations cannot reach the hardware concurrently.
   private mutationChain: Promise<void> = Promise.resolve()
+  // Terminal close flag. Set by disconnect() so queued mutations and
+  // ensureAuthenticated reject before send instead of silently reconnecting a
+  // session the caller intended to close.
+  private closed = false
 
   constructor(private config: ClientConfig) {
     this.host = config.host
@@ -103,6 +110,7 @@ export class SeestarDevice {
   }
 
   async connect(): Promise<void> {
+    if (this.closed) throw new Error('Seestar session is closed')
     if (this.isConnected()) return
     if (this.connectPromise) return this.connectPromise
     const promise = (async () => {
@@ -113,9 +121,24 @@ export class SeestarDevice {
           logger: this.logger,
           sessionId: this.sessionId,
         })
+        // Recheck closed after discovery: a disconnect during discovery must
+        // not continue to configure/connect.
+        if (this.closed) throw new Error('Seestar session is closed')
         this.configureClient(this.host)
       }
-      await this.client.connect()
+      await this.client.connect().catch((error) => {
+        // If closed during connect, the socket destruction rejects
+        // client.connect() with "Client disconnected". Recheck closed so
+        // the caller sees "session is closed" instead of a transport error.
+        if (this.closed) throw new Error('Seestar session is closed')
+        throw error
+      })
+      // Recheck closed after client.connect(): a disconnect during connect
+      // must disconnect the newly connected client and throw.
+      if (this.closed) {
+        this.client.disconnect()
+        throw new Error('Seestar session is closed')
+      }
     })()
     this.connectPromise = promise
     try {
@@ -126,10 +149,13 @@ export class SeestarDevice {
   }
 
   async authenticate(): Promise<boolean> {
+    if (this.closed) throw new Error('Seestar session is closed')
     if (this.isConnected() && this.authenticated) return true
     if (this.authPromise) return this.authPromise
     const promise = (async () => {
+      if (this.closed) throw new Error('Seestar session is closed')
       const authenticated = await this.auth.authenticate()
+      if (this.closed) throw new Error('Seestar session is closed')
       this.authenticated = authenticated
       return authenticated
     })()
@@ -142,11 +168,14 @@ export class SeestarDevice {
   }
 
   async connectAndAuth(): Promise<boolean> {
+    if (this.closed) throw new Error('Seestar session is closed')
     await this.connect()
+    if (this.closed) throw new Error('Seestar session is closed')
     return this.authenticate()
   }
 
   disconnect(): void {
+    this.closed = true
     this.authenticated = false
     this.connectPromise = undefined
     this.authPromise = undefined
@@ -191,6 +220,23 @@ export class SeestarDevice {
   async getViewState(): Promise<ViewStateResult | null> {
     const resp = await this.client.sendSync('get_view_state', '')
     return parseViewState(resp)
+  }
+
+  async getSnapshot(): Promise<SeestarSnapshot> {
+    const [deviceState, viewState] = await Promise.all([
+      this.getDeviceState(),
+      this.getViewState(),
+    ])
+    return { deviceState, viewState }
+  }
+
+  subscribeToLifecycleEvents(
+    listener: (event: SeestarLifecycleEvent) => void,
+  ): () => void {
+    return this.rawClient.subscribeToPushEvents((event) => {
+      const lifecycleEvent = toSeestarLifecycleEvent(event)
+      if (lifecycleEvent) listener(lifecycleEvent)
+    })
   }
 
   async getSetting(): Promise<unknown> {
@@ -1380,7 +1426,10 @@ export class SeestarDevice {
       const signal = wait.signal
         ? AbortSignal.any([controller.signal, wait.signal])
         : controller.signal
-      const completion = this.waitForWheelPosition(position, { ...wait, signal })
+      const completion = this.waitForWheelPosition(position, {
+        ...wait,
+        signal,
+      })
       try {
         const resp = await this.client.sendSync('set_wheel_position', position)
         const ok = resp.code === 0
@@ -2000,11 +2049,17 @@ export class SeestarDevice {
 
       const readEventNumber = (
         event: SeestarPushEvent | undefined,
-        ...keys: string[]
+        ...keys: Array<
+          | 'percent'
+          | 'lapse_ms'
+          | 'lapseMs'
+          | 'elapsed_ms'
+          | 'elapsedMs'
+        >
       ): number | undefined => {
         if (!event) return undefined
         for (const key of keys) {
-          const value = asNumber((event as Record<string, unknown>)[key])
+          const value = event[key]
           if (typeof value === 'number') return value
         }
         return undefined
@@ -2250,9 +2305,15 @@ export class SeestarDevice {
   }
 
   private async ensureAuthenticated(): Promise<void> {
+    if (this.closed) {
+      throw new Error('Seestar session is closed')
+    }
     if (!this.isConnected()) {
       this.authenticated = false
       await this.connect()
+    }
+    if (this.closed) {
+      throw new Error('Seestar session is closed')
     }
     const authenticated = await this.authenticate()
     if (!authenticated) {
@@ -2262,9 +2323,16 @@ export class SeestarDevice {
 
   // Run a mutating operation after any prior mutation on this instance has
   // settled. The chain never breaks on rejection, so a failed command cannot
-  // stall the next one.
+  // stall the next one. Once disconnect() has been called, queued mutations
+  // reject before send instead of reaching the device or reconnecting.
   private runMutation<T>(fn: () => Promise<T>): Promise<T> {
-    const result = this.mutationChain.then(fn, fn)
+    const run = (): Promise<T> => {
+      if (this.closed) {
+        return Promise.reject(new Error('Seestar session is closed'))
+      }
+      return fn()
+    }
+    const result = this.mutationChain.then(run, run)
     this.mutationChain = result.then(
       () => undefined,
       () => undefined,
@@ -2275,8 +2343,12 @@ export class SeestarDevice {
   // Recovery commands (stop/park) bypass the chain head so they can reach the
   // device even while a prior mutation is still waiting for completion, but
   // they still extend the chain tail so a later mutation cannot overlap with
-  // a recovery that is still settling.
+  // a recovery that is still settling. Once disconnect() has been called,
+  // recovery commands also reject before send.
   private runRecovery<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.closed) {
+      return Promise.reject(new Error('Seestar session is closed'))
+    }
     const result = fn()
     this.mutationChain = Promise.all([this.mutationChain, result]).then(
       () => undefined,

@@ -5,7 +5,7 @@ import { Schema } from 'effect'
 import { resolveSeestarPemPath } from '../config.js'
 import { SeestarDevice } from '../device.js'
 import { createConsoleLogger, type LogLevel } from '../logging.js'
-import type { DeviceState, HorizCoord, ManualMoveOptions } from '../types.js'
+import type { DeviceState, HorizCoord } from '../types.js'
 
 const DEFAULT_HOST = process.env.SEESTAR_HOST
 const DEFAULT_TIMEOUT_MS = 15000
@@ -18,18 +18,13 @@ const DEFAULT_FRAME_TIMEOUT_MS = 10000
 const DEFAULT_LOG_LEVEL: LogLevel = 'info'
 const DEFAULT_FRAME_PORTS = [4554]
 
-const PositiveInt = Schema.Number.pipe(Schema.int(), Schema.positive())
-const NonNegativeInt = Schema.Number.pipe(
-  Schema.int(),
-  Schema.greaterThanOrEqualTo(0),
+const PositiveInt = Schema.Number.pipe(
+  Schema.check(Schema.isInt(), Schema.isGreaterThan(0)),
 )
-const FiniteNumber = Schema.Number
-
-const ManualMoveSchema = Schema.Struct({
-  directionDeg: FiniteNumber,
-  speed: PositiveInt,
-  durationSec: PositiveInt,
-})
+const NonNegativeInt = Schema.Number.pipe(
+  Schema.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+)
+const FiniteNumber = Schema.Number.check(Schema.isFinite())
 
 const ScanConfigSchema = Schema.Struct({
   sampleCount: PositiveInt,
@@ -42,22 +37,20 @@ const ScanConfigSchema = Schema.Struct({
 })
 
 const PositiveIntFromString = Schema.NumberFromString.pipe(
-  Schema.int(),
-  Schema.positive(),
+  Schema.check(Schema.isInt(), Schema.isGreaterThan(0)),
 )
 const NonNegativeIntFromString = Schema.NumberFromString.pipe(
-  Schema.int(),
-  Schema.greaterThanOrEqualTo(0),
+  Schema.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
 )
-const NumberFromString = Schema.NumberFromString
+const NumberFromString = Schema.NumberFromString.check(Schema.isFinite())
 
-const LogLevelSchema = Schema.Literal(
+const LogLevelSchema = Schema.Literals([
   'trace',
   'debug',
   'info',
   'warn',
   'error',
-)
+])
 
 const CliOptionsSchema = Schema.Struct({
   help: Schema.optional(Schema.Boolean),
@@ -97,19 +90,19 @@ const TelemetrySampleSchema = Schema.Struct({
   framePath: Schema.optional(Schema.String),
   frameError: Schema.optional(Schema.String),
   frames: Schema.optional(
-    Schema.Record({
-      key: Schema.String,
-      value: Schema.Struct({
+    Schema.Record(
+      Schema.String,
+      Schema.Struct({
         port: PositiveInt,
         path: Schema.optional(Schema.String),
         error: Schema.optional(Schema.String),
       }),
-    }),
+    ),
   ),
   compassDirectionDeg: Schema.optional(FiniteNumber),
   balanceAngleDeg: Schema.optional(FiniteNumber),
   mountClosed: Schema.optional(Schema.Boolean),
-  raw: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+  raw: Schema.Record(Schema.String, Schema.Unknown),
 })
 
 const HorizonScanArtifactSchema = Schema.Struct({
@@ -170,8 +163,6 @@ async function main(): Promise<void> {
   if (!host) {
     throw new Error('Provide --host <ip-or-hostname> or set SEESTAR_HOST')
   }
-
-  Schema.decodeUnknownSync(ScanConfigSchema)(args.config)
 
   const outputDir = path.resolve(args.outputDir)
   const framesDir = path.join(outputDir, 'frames')
@@ -237,13 +228,12 @@ async function main(): Promise<void> {
       )
 
       if (!args.dryRun && index < args.config.sampleCount - 1) {
-        const move = Schema.decodeUnknownSync(ManualMoveSchema)({
-          directionDeg: args.config.moveDirectionDeg,
-          speed: args.config.speed,
-          durationSec: args.config.durationSec,
-        })
         await expectAccepted(
-          device.manualMove(move as ManualMoveOptions),
+          device.manualMove({
+            directionDeg: args.config.moveDirectionDeg,
+            speed: args.config.speed,
+            durationSec: args.config.durationSec,
+          }),
           'Device rejected manual move request',
         )
         await delay(args.config.settleMs)
@@ -298,7 +288,8 @@ async function collectSample(input: {
   framePorts: readonly number[]
 }): Promise<TelemetrySample> {
   const horizontal = await input.device.getHorizCoord()
-  if (!horizontal) throw new Error('Device did not return horizontal coordinates')
+  if (!horizontal)
+    throw new Error('Device did not return horizontal coordinates')
 
   const state = (await input.device.getDeviceState()) ?? {}
   const raw = readSampleRaw(state)
@@ -523,16 +514,11 @@ function readSampleRaw(state: DeviceState): Record<string, unknown> {
   }
 }
 
-function parseFramePorts(value: string | undefined): number[] {
+function parseFramePorts(value: string | undefined): readonly number[] {
   if (!value) return DEFAULT_FRAME_PORTS
-  const ports = value
-    .split(',')
-    .map((part) => Number.parseInt(part.trim(), 10))
-    .filter((port) => Number.isInteger(port) && port > 0)
-  if (ports.length === 0) {
-    throw new Error('--frame-ports must include at least one positive integer')
-  }
-  return ports
+  return Schema.decodeUnknownSync(Schema.Array(PositiveIntFromString))(
+    value.split(',').map((part) => part.trim()),
+  )
 }
 
 function cameraKeyForPort(port: number): string {

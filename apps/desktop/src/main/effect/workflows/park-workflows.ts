@@ -1,16 +1,21 @@
 import { Effect } from 'effect'
 import { EventBus } from '../event/event-bus'
 import { SessionManager } from '../session/session-manager'
+import { OperationCoordinator } from '../session/operation-coordinator'
 import { AggregateStore } from '../state/aggregate-store'
+import type { RigOperationContext } from '../rig/rig-model'
+import { stopExternalExposure } from './external-exposure'
+import { isCaptureInFlight, isExternalSequenceRecoveryActive } from '../../../shared/lifecycle'
 
 export const runPark = Effect.gen(function* () {
   const store = yield* AggregateStore
   const bus = yield* EventBus
   const sessions = yield* SessionManager
+  const coordinator = yield* OperationCoordinator
 
   const session = yield* sessions.getCurrent
   if (!session) {
-    yield* store.update((current) => ({
+    yield* store.updateIfSession(null, (current) => ({
       ...current,
       session: {
         ...current.session,
@@ -23,132 +28,201 @@ export const runPark = Effect.gen(function* () {
     return
   }
 
-  yield* bus.publish('park.started', {})
+  // Recovery: preempt any current ordinary operation (point/preview/capture)
+  // and acquire immediately. Park supersedes all ordinary ops, stops active
+  // preview/capture via the correct Rig surface, and blocks new starts until
+  // parking finishes (the lease is held for the duration of park).
+  const lease = yield* coordinator.acquireRecovery(session, 'park')
+  if (!lease) return
 
-  yield* store.update((current) => ({
-    ...current,
-    session: {
-      ...current.session,
-      lastError: undefined,
-    },
-  }))
-
-  const current = yield* store.get
-
-  if (current.capture.phase === 'capturing' || current.capture.phase === 'starting') {
-    const capture = session.rig.capture
-    if (!capture) {
-      return yield* Effect.fail(
-        new Error('Connected rig does not support capture'),
-      )
-    }
-    yield* capture.stop().pipe(
-      Effect.catchAll((error) =>
-        Effect.gen(function* () {
-          if ((yield* sessions.getCurrent) !== session) {
-            return yield* Effect.fail(error)
-          }
-          const message = toErrorMessage(error)
-          yield* store.update((cur) => ({
-            ...cur,
-            session: {
-              ...cur.session,
-              lastError: message,
-            },
-            capture: { phase: 'failed', lastError: message },
-          }))
-          yield* bus.publish('park.failed', { error: message, step: 'stop-capture' })
-          return yield* Effect.fail(error)
-        }),
-      ),
-    )
-
-    if ((yield* sessions.getCurrent) !== session) return
-  }
-
-  if (current.preview.phase === 'active' || current.preview.phase === 'starting') {
-    const preview = session.rig.preview
-    if (!preview) {
-      return yield* Effect.fail(
-        new Error('Connected rig does not support preview'),
-      )
-    }
-    yield* preview.stop().pipe(
-      Effect.catchAll((error) =>
-        Effect.gen(function* () {
-          if ((yield* sessions.getCurrent) !== session) {
-            return yield* Effect.fail(error)
-          }
-          const message = toErrorMessage(error)
-          yield* store.update((cur) => ({
-            ...cur,
-            session: {
-              ...cur.session,
-              lastError: message,
-            },
-            preview: {
-              phase: 'error',
-              source: 'none',
-              active: false,
-              lastError: message,
-            },
-          }))
-          yield* bus.publish('park.failed', { error: message, step: 'stop-preview' })
-          return yield* Effect.fail(error)
-        }),
-      ),
-    )
-
-    if ((yield* sessions.getCurrent) !== session) return
-  }
-
-  const mount = session.rig.mount
-  if (!mount) {
-    return yield* Effect.fail(
-      new Error('Connected rig does not support mount park'),
-    )
-  }
-
-  yield* mount.park().pipe(
-    Effect.catchAll((error) =>
+  yield* Effect.acquireUseRelease(
+    Effect.void,
+    () =>
       Effect.gen(function* () {
-        if ((yield* sessions.getCurrent) !== session) {
+        yield* bus.publish('park.started', {})
+
+        yield* coordinator.commitIfLease(lease, (current) => ({
+          ...current,
+          session: {
+            ...current.session,
+            lastError: undefined,
+          },
+        }))
+
+        const current = yield* store.get
+
+        if (isCaptureInFlight(current.capture.phase)) {
+          // Atomically move capture out of the active phase before calling
+          // stop so a pending runStartCapture cannot later commit 'capturing'
+          // or fork its poller. Stop/park recovery supersedes ordinary
+          // operations.
+          const stopClaimedResult = yield* coordinator.commitIfLease(lease, (cur) => {
+            if (cur.capture.phase !== 'capturing' && cur.capture.phase !== 'starting') {
+              return cur
+            }
+            return { ...cur, capture: { ...cur.capture, phase: 'stopped' } }
+          })
+          if (stopClaimedResult && stopClaimedResult.capture.phase === 'stopped') {
+            const captureStop = session.rig.captureStop
+            const ctx: RigOperationContext = { signal: lease.signal }
+            if (captureStop) {
+              const stop =
+                captureStop.mode === 'external'
+                  ? session.rig.camera
+                    ? stopExternalExposure(captureStop, session.rig.camera, ctx)
+                    : Effect.fail(new Error('Connected rig does not expose a generic camera'))
+                  : captureStop.stop(ctx)
+              yield* stop.pipe(
+                Effect.catch((error) =>
+                  Effect.gen(function* () {
+                    const message = toErrorMessage(error)
+                    const updated = yield* coordinator.commitIfLease(lease, (cur) => ({
+                      ...cur,
+                      session: {
+                        ...cur.session,
+                        lastError: message,
+                      },
+                      capture: {
+                        phase: 'failed',
+                        mode: captureStop.mode === 'external' ? 'external' : undefined,
+                        lastError: message,
+                      },
+                      sequence: isExternalSequenceRecoveryActive(cur.sequence.phase)
+                        ? { ...cur.sequence, phase: 'failed', frameKind: undefined, currentIndex: undefined, lastError: message }
+                        : cur.sequence,
+                    }))
+                    if (updated) {
+                      yield* bus.publish('park.failed', { error: message, step: 'stop-capture' })
+                    }
+                    return yield* Effect.fail(error)
+                  }),
+                ),
+              )
+            } else {
+              return yield* Effect.fail(
+                new Error('Connected rig does not support capture'),
+              )
+            }
+
+            if (lease.signal.aborted) return
+          }
+        }
+
+        if (current.preview.phase === 'active' || current.preview.phase === 'starting') {
+          const preview = session.rig.preview
+          if (!preview) {
+            return yield* Effect.fail(
+              new Error('Connected rig does not support preview'),
+            )
+          }
+          const ctx: RigOperationContext = { signal: lease.signal }
+          yield* preview.stop(ctx).pipe(
+            Effect.catch((error) =>
+              Effect.gen(function* () {
+                const message = toErrorMessage(error)
+                const updated = yield* coordinator.commitIfLease(lease, (cur) => ({
+                  ...cur,
+                  session: {
+                    ...cur.session,
+                    lastError: message,
+                  },
+                  preview: {
+                    phase: 'error',
+                    source: 'none',
+                    active: false,
+                    lastError: message,
+                  },
+                }))
+                if (updated) {
+                  yield* bus.publish('park.failed', { error: message, step: 'stop-preview' })
+                }
+                return yield* Effect.fail(error)
+              }),
+            ),
+          )
+
+          if (lease.signal.aborted) return
+        }
+
+        const mount = session.rig.mount
+        if (!mount?.park) {
+          return yield* Effect.fail(
+            new Error('Connected rig does not support mount park'),
+          )
+        }
+
+        const ctx: RigOperationContext = { signal: lease.signal }
+        yield* mount.park(ctx).pipe(
+          Effect.catch((error) =>
+            Effect.gen(function* () {
+              const message = toErrorMessage(error)
+              const updated = yield* coordinator.commitIfLease(lease, (cur) => ({
+                ...cur,
+                session: {
+                  ...cur.session,
+                  lastError: message,
+                },
+                device: {
+                  ...cur.device,
+                  mountClosed: undefined,
+                  warnings: [...(cur.device.warnings ?? []), 'Park state is unconfirmed'],
+                },
+              }))
+              if (updated) {
+                yield* bus.publish('park.failed', { error: message, step: 'park-arm' })
+              }
+              return yield* Effect.fail(error)
+            }),
+          ),
+        )
+
+        if (lease.signal.aborted) return
+
+        const refreshed = yield* session.rig.refresh
+
+        if (lease.signal.aborted) return
+
+        if (refreshed.device.mountClosed !== true) {
+          const error = new Error('Park command completed but mount closure was not confirmed')
+          const updated = yield* coordinator.commitIfLease(lease, (cur) => ({
+            ...cur,
+            session: {
+              ...cur.session,
+              lastError: error.message,
+            },
+            device: {
+              ...cur.device,
+              mountClosed: undefined,
+              warnings: [...(cur.device.warnings ?? []), 'Park state is unconfirmed'],
+            },
+          }))
+          if (updated) {
+            yield* bus.publish('park.failed', { error: error.message, step: 'park-arm' })
+          }
           return yield* Effect.fail(error)
         }
-        const message = toErrorMessage(error)
-        yield* store.update((cur) => ({
+
+        const parked = yield* coordinator.commitIfLease(lease, (cur) => ({
           ...cur,
           session: {
             ...cur.session,
-            lastError: message,
+            lastError: undefined,
           },
+          device: { ...cur.device, ...refreshed.device },
+          preview: refreshed.preview,
+          capture: refreshed.capture,
+          sequence: isExternalSequenceRecoveryActive(cur.sequence.phase)
+            ? { ...cur.sequence, phase: 'stopped', frameKind: undefined, currentIndex: undefined }
+            : cur.sequence,
+          pointing: { phase: 'idle', target: null },
+          currentTarget: null,
         }))
-        yield* bus.publish('park.failed', { error: message, step: 'park-arm' })
-        return yield* Effect.fail(error)
+        if (!parked) return
+
+        yield* bus.publish('park.succeeded', {})
       }),
-    ),
+    () => coordinator.release(lease),
   )
-
-  if ((yield* sessions.getCurrent) !== session) return
-
-  const refreshed = yield* session.rig.refresh
-
-  if ((yield* sessions.getCurrent) !== session) return
-
-  yield* store.update((cur) => ({
-    ...cur,
-    session: {
-      ...cur.session,
-      lastError: undefined,
-    },
-    device: { ...cur.device, ...refreshed.device },
-    preview: refreshed.preview,
-    capture: refreshed.capture,
-    pointing: { phase: 'idle', target: null },
-    currentTarget: null,
-  }))
-
-  yield* bus.publish('park.succeeded', {})
 })
 
 function toErrorMessage(error: unknown): string {

@@ -1,12 +1,6 @@
-import type {
-  CaptureProjection,
-  DeviceProjection,
-  PointingProjection,
-  PreviewProjection,
-  TargetDetails,
-} from '../../../../shared/api-v2'
+import type { DeviceProjection, PointingProjection, PreviewProjection, TargetDetails } from '../../../../shared/api-v2'
 import { useProjectionStore } from '../../state/projection-store'
-import { selectInspectorModel } from '../../state/projection-selectors'
+import { capturePhaseLabel, selectInspectorModel } from '../../state/projection-selectors'
 import {
   setSelectedTarget,
   useSelectedTarget,
@@ -20,22 +14,6 @@ const POINTING_PHASE_LABELS: Record<PointingProjection['phase'], string> = {
   idle: 'Idle',
   slewing: 'Slewing',
   arrived: 'Arrived',
-  failed: 'Failed',
-}
-
-const CAPTURE_PHASE_LABELS: Record<CaptureProjection['phase'], string> = {
-  idle: 'Idle',
-  starting: 'Starting',
-  capturing: 'Capturing',
-  stopped: 'Stopped',
-  failed: 'Failed',
-}
-
-const EXPOSURE_PHASE_LABELS: Record<CaptureProjection['phase'], string> = {
-  idle: 'Idle',
-  starting: 'Starting',
-  capturing: 'Exposing',
-  stopped: 'Stopped',
   failed: 'Failed',
 }
 
@@ -65,9 +43,11 @@ export default function InspectorPanel() {
     preview,
     device,
     workspace,
+    capturePresentation,
   } = useProjectionStore(selectInspectorModel)
   const details = useTargetDetailsQuery(target?.id ?? null)
   const pointMutation = usePointToTargetMutation()
+  const startedElapsed = useElapsedSeconds(capture)
 
   if (!target) {
     return (
@@ -92,16 +72,12 @@ export default function InspectorPanel() {
     device.canPoint !== false &&
     !isSlewPending &&
     !isBelowHorizon
-  const isExternalCapture = capture.mode === 'external'
-  const startedElapsed = useElapsedSeconds(capture)
+  const isExternalCapture = capturePresentation === 'exposure'
   const elapsedSec = startedElapsed ?? capture.elapsedSec
   const captureCapability = workspace.capabilities.capture
   const hasNativeCapture = captureCapability === 'native'
   const hasExternalCapture = captureCapability === 'external'
   const hasFilterWheel = workspace.capabilities.filterWheel === 'yes'
-  const capturePhaseLabels = isExternalCapture
-    ? EXPOSURE_PHASE_LABELS
-    : CAPTURE_PHASE_LABELS
 
   return (
     <div>
@@ -181,7 +157,7 @@ export default function InspectorPanel() {
             <div className="kv">
               <span>{isExternalCapture ? 'Exposure' : 'Capture'}</span>
               <strong id="capturePhase">
-                {capturePhaseLabels[capture.phase]}
+                {capturePhaseLabel(capture.phase, capturePresentation)}
               </strong>
               {hasNativeCapture ? (
                 <>
@@ -194,7 +170,8 @@ export default function InspectorPanel() {
               <span>Elapsed</span>
               <strong id="captureElapsed">{formatElapsed(elapsedSec)}</strong>
             </div>
-            {capture.phase === 'failed' && capture.lastError ? (
+            {(capture.phase === 'failed' || capture.phase === 'partial') &&
+            capture.lastError ? (
               <p className="inspector-pointing-error">{capture.lastError}</p>
             ) : null}
             {hasNativeCapture ? (

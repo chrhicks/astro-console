@@ -39,3 +39,4 @@ node_modules/
 prototype/
 docs/
 apps/desktop/*.tsbuildinfo
+.bak*

@@ -1,11 +1,7 @@
 import { useEffect, useState } from 'react'
-import type {
-  CaptureProjection,
-  PreviewProjection,
-  WorkspaceState,
-} from '../../../../shared/api-v2'
+import type { PreviewProjection, WorkspaceState } from '../../../../shared/api-v2'
 import { useProjectionStore } from '../../state/projection-store'
-import { selectWorkAreaModel } from '../../state/projection-selectors'
+import { capturePhaseLabel, selectWorkAreaModel } from '../../state/projection-selectors'
 import { useSelectedTarget } from '../../state/selected-target-store'
 import { useElapsedSeconds } from '../../hooks/use-elapsed-seconds'
 import {
@@ -16,6 +12,8 @@ import {
   useStopCaptureMutation,
 } from '../../mutations/use-workspace-mutations'
 import { electronApi } from '../../lib/electron-api'
+import { isCaptureInFlight } from '../../../../shared/lifecycle'
+import { decideWorkAreaStatus, STATUS_MESSAGES } from './work-area-status'
 import './work-area.css'
 
 const PREVIEW_BADGE_LABELS: Record<PreviewProjection['phase'], string> = {
@@ -25,40 +23,10 @@ const PREVIEW_BADGE_LABELS: Record<PreviewProjection['phase'], string> = {
   error: 'Preview error',
 }
 
-const CAPTURE_PHASE_LABELS: Record<CaptureProjection['phase'], string> = {
-  idle: 'Idle',
-  starting: 'Starting',
-  capturing: 'Capturing',
-  stopped: 'Stopped',
-  failed: 'Failed',
-}
-
-const EXPOSURE_PHASE_LABELS: Record<CaptureProjection['phase'], string> = {
-  idle: 'Idle',
-  starting: 'Starting',
-  capturing: 'Exposing',
-  stopped: 'Stopped',
-  failed: 'Failed',
-}
-
 const ACTIVITY_LABELS: Record<'idle' | 'previewing' | 'capturing', string> = {
   idle: 'Idle',
   previewing: 'Previewing',
   capturing: 'Capturing',
-}
-
-const STATUS_MESSAGES: Record<WorkspaceState, string> = {
-  disconnected: 'Connect a device to begin.',
-  idle_no_target: 'Select a target to point the telescope.',
-  primed: 'Ready to preview or capture.',
-  ready_to_slew: 'Slew failed. Retry to try again.',
-  slewing: 'Slewing to target…',
-  on_target: 'Ready to preview or capture.',
-  preview_starting: 'Starting live preview…',
-  preview_active: 'Live preview active.',
-  preview_error: 'Preview failed to start.',
-  capturing: 'Stacking frames.',
-  parked: 'Mount is parked. Slew or unpark before resuming.',
 }
 
 const OVERLAY_STATES: ReadonlySet<WorkspaceState> = new Set([
@@ -94,8 +62,10 @@ export default function WorkArea() {
     workspace,
     preview,
     capture,
+    capturePresentation,
     device,
     latestPreviewPath,
+    latestPreviewUnavailable,
   } = useProjectionStore(selectWorkAreaModel)
   const selectedTarget = useSelectedTarget((state) => state.target)
   const pointMutation = usePointToTargetMutation()
@@ -106,9 +76,8 @@ export default function WorkArea() {
   const isCapturePending =
     startCaptureMutation.isPending || stopCaptureMutation.isPending
   const isSlewing = workspace.state === 'slewing'
-  const isCapturing =
-    capture.phase === 'capturing' || capture.phase === 'starting'
-  const isExternalCapture = workspace.capabilities.capture === 'external'
+  const isCapturing = isCaptureInFlight(capture.phase)
+  const isExternalCapture = capturePresentation === 'exposure'
   const [latestPreviewUrl, setLatestPreviewUrl] = useState<string | null>(null)
   useEffect(() => {
     if (!latestPreviewPath) {
@@ -128,9 +97,6 @@ export default function WorkArea() {
       cancelled = true
     }
   }, [latestPreviewPath])
-  const capturePhaseLabels = isExternalCapture
-    ? EXPOSURE_PHASE_LABELS
-    : CAPTURE_PHASE_LABELS
   const startedElapsed = useElapsedSeconds(capture)
   const elapsedSec = startedElapsed ?? capture.elapsedSec
   const displayTarget = isSlewing
@@ -140,21 +106,16 @@ export default function WorkArea() {
   const showOverlay = OVERLAY_STATES.has(workspace.state)
   const isConnected = workspace.state !== 'disconnected'
   const hasDeviceLocation = device.location != null
-  const statusMessage =
-    capture.phase === 'failed'
-      ? isExternalCapture
-        ? 'Exposure failed. Retry or start preview.'
-        : 'Capture failed. Retry or start preview.'
-      : pointing.phase === 'failed' && pointing.lastError
-        ? pointing.lastError
-        : isExternalCapture && workspace.state === 'capturing'
-          ? 'Exposure running.'
-          : isExternalCapture &&
-              (workspace.state === 'on_target' || workspace.state === 'primed')
-            ? 'Ready to preview or expose.'
-            : STATUS_MESSAGES[workspace.state]
+  const statusMessage = decideWorkAreaStatus(
+    capture,
+    pointing,
+    workspace,
+    capturePresentation,
+  )
   const previewBadgeLabel =
-    isExternalCapture && latestPreviewUrl && preview.phase === 'none'
+    isExternalCapture && latestPreviewUnavailable && preview.phase === 'none'
+      ? 'Latest frame unavailable'
+      : isExternalCapture && latestPreviewUrl && preview.phase === 'none'
       ? 'Latest frame'
       : PREVIEW_BADGE_LABELS[preview.phase]
 
@@ -300,12 +261,13 @@ export default function WorkArea() {
         <span className="metric">
           {isExternalCapture ? 'Exposure' : 'Capture'}{' '}
           <strong id="metricCapture">
-            {capturePhaseLabels[capture.phase]}
+            {capturePhaseLabel(capture.phase, capturePresentation)}
           </strong>
         </span>
       </div>
 
-      {capture.phase === 'failed' && capture.lastError ? (
+      {(capture.phase === 'failed' || capture.phase === 'partial') &&
+      capture.lastError ? (
         <div className="work-error-strip" id="workCaptureError">
           {capture.lastError}
         </div>

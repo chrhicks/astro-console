@@ -74,7 +74,7 @@ export interface TargetSummary {
   visibilityLabel?: string // "Up now", "Later tonight", "Not tonight"
   recommendedFilter: FilterPosition | null // null if device has no filter wheel
   type: TargetType
-  availableActions: TargetAction[] // device-capability-dependent
+  availableActions: readonly TargetAction[] // device-capability-dependent
 }
 
 export interface CatalogQuery {
@@ -86,7 +86,7 @@ export interface CatalogQuery {
 }
 
 export interface CatalogPage {
-  targets: TargetSummary[]
+  targets: readonly TargetSummary[]
   total: number
   offset: number
   limit: number

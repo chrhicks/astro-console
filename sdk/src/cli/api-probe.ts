@@ -3,6 +3,11 @@ import { SeestarClient } from '../client.js'
 import { resolveSeestarPemPath } from '../config.js'
 import { discoverSeestars } from '../discovery.js'
 import { createConsoleLogger, type LogLevel } from '../logging.js'
+import {
+  asLogLevel,
+  asNumber,
+  toErrorMessage,
+} from './live-session.js'
 
 const DEFAULT_HOST = process.env.SEESTAR_HOST
 const DEFAULT_METHODS = [
@@ -184,26 +189,6 @@ function parseArgs(argv: string[]): ProbeArgs {
   return out
 }
 
-function asNumber(value: string | undefined): number | undefined {
-  if (!value) return undefined
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : undefined
-}
-
-function asLogLevel(value: string | undefined): LogLevel | undefined {
-  if (!value) return undefined
-  if (
-    value === 'trace' ||
-    value === 'debug' ||
-    value === 'info' ||
-    value === 'warn' ||
-    value === 'error'
-  ) {
-    return value
-  }
-  return undefined
-}
-
 function summarizeResult(value: unknown): unknown {
   if (Array.isArray(value)) {
     return {
@@ -234,11 +219,6 @@ function sliceObject(
     out[key] = record[key]
   }
   return out
-}
-
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
 }
 
 function printHelp(): void {

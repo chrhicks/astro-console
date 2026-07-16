@@ -8,7 +8,7 @@ export interface LogSink {
   readonly list: Effect.Effect<DesktopLogEntryV2[]>
 }
 
-export const LogSink = Context.GenericTag<LogSink>('LogSink')
+export const LogSink = Context.Service<LogSink>('LogSink')
 
 export const LogSinkLive = Layer.effect(
   LogSink,
@@ -29,7 +29,7 @@ export const LogSinkLive = Layer.effect(
       ]).pipe(Effect.tap(() => Effect.sync(() => writeToConsole(entry))))
     })
 
-    void unsubscribe
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribe))
 
     return {
       list: Ref.get(ref),

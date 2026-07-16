@@ -90,10 +90,29 @@ export interface SeestarPushEvent {
   error?: string
   code?: number
   route?: string[]
-  [key: string]: unknown
+  position?: number
+  percent?: number
+  lapse_ms?: number
+  lapseMs?: number
+  elapsed_ms?: number
+  elapsedMs?: number
+  stacked_frame?: number
+  stacked_frames?: number
+  dropped_frame?: number
+  dropped_frames?: number
 }
 
 export type PushEventListener = (event: SeestarPushEvent) => void
+
+export interface SeestarSnapshot {
+  deviceState: DeviceState | null
+  viewState: ViewStateResult | null
+}
+
+export type SeestarLifecycleEvent = {
+  type: 'capture.failed'
+  error: string
+}
 
 export interface WaitOptions {
   timeoutMs?: number

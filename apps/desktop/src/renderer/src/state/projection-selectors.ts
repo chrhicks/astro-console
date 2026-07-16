@@ -7,6 +7,17 @@ import type {
 } from '../../../shared/api-v2'
 import type { ProjectionState } from './projection-store'
 
+export type CapturePresentation = 'capture' | 'exposure'
+
+const CAPTURE_PHASE_LABELS: Record<CaptureProjection['phase'], string> = {
+  idle: 'Idle',
+  starting: 'Starting',
+  capturing: 'Capturing',
+  stopped: 'Stopped',
+  failed: 'Failed',
+  partial: 'Partial',
+}
+
 const IDLE_POINTING: PointingProjection = { phase: 'idle', target: null }
 
 const NO_PREVIEW: PreviewProjection = {
@@ -30,6 +41,7 @@ const DEFAULT_WORKSPACE: WorkspaceProjection = {
   capabilities: {
     preview: 'unsupported',
     capture: 'unsupported',
+    darkExposure: 'no',
     autofocus: 'no',
     filterWheel: 'no',
     storage: 'no',
@@ -84,16 +96,13 @@ export function selectInspectorModel(state: ProjectionState) {
     preview: status?.preview ?? NO_PREVIEW,
     device: status?.device ?? {},
     workspace: status?.workspace ?? DEFAULT_WORKSPACE,
+    capturePresentation: selectCapturePresentation(status?.workspace),
   }
 }
 
 export function selectWorkAreaModel(state: ProjectionState) {
   const status = state.status
-  // Newest library asset that has a saved preview JPG. Assets are newest-first,
-  // so this is the most recent external capture preview for the main work area.
-  const latestPreviewAsset = status?.library.assets.find(
-    (a) => a.previewFilePath,
-  )
+  const latestAsset = status?.library.assets.find((asset) => asset.saved)
   return {
     pointing: status?.pointing ?? IDLE_POINTING,
     currentTarget: status?.currentTarget ?? null,
@@ -101,7 +110,9 @@ export function selectWorkAreaModel(state: ProjectionState) {
     preview: status?.preview ?? NO_PREVIEW,
     capture: status?.capture ?? NO_CAPTURE,
     device: status?.device ?? {},
-    latestPreviewPath: latestPreviewAsset?.previewFilePath ?? null,
+    capturePresentation: selectCapturePresentation(status?.workspace),
+    latestPreviewPath: latestAsset?.hasPreview ? latestAsset.id : null,
+    latestPreviewUnavailable: latestAsset != null && !latestAsset.hasPreview,
   }
 }
 
@@ -110,8 +121,22 @@ export function selectLibraryModel(state: ProjectionState) {
   return {
     library: status?.library ?? NO_LIBRARY,
     currentTarget: status?.currentTarget ?? null,
-    captureMode: status?.capture.mode ?? null,
+    capturePresentation: selectCapturePresentation(status?.workspace),
   }
+}
+
+export function selectCapturePresentation(
+  workspace: WorkspaceProjection | undefined,
+): CapturePresentation {
+  return workspace?.capabilities.capture === 'external' ? 'exposure' : 'capture'
+}
+
+export function capturePhaseLabel(
+  phase: CaptureProjection['phase'],
+  presentation: CapturePresentation,
+): string {
+  if (presentation === 'exposure' && phase === 'capturing') return 'Exposing'
+  return CAPTURE_PHASE_LABELS[phase]
 }
 
 export function selectBrowseContextKey(state: ProjectionState) {
@@ -131,7 +156,10 @@ export function selectCameraPanelModel(state: ProjectionState) {
   return {
     isConnected,
     available: isConnected && captureTier === 'external',
+    supportsDarkExposure: status?.workspace.capabilities.darkExposure === 'yes',
     camera: status?.camera ?? null,
     capture: status?.capture ?? NO_CAPTURE,
+    sequence: status?.sequence ?? { phase: 'idle' as const, completed: 0, failed: 0 },
+    currentTarget: status?.currentTarget ?? null,
   }
 }

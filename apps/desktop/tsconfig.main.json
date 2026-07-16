@@ -3,6 +3,10 @@
     "target": "ES2022",
     "module": "CommonJS",
     "moduleResolution": "Node",
+    "baseUrl": ".",
+    "paths": {
+      "effect": ["node_modules/effect/dist/index.d.ts"]
+    },
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,
@@ -11,5 +15,6 @@
     "resolveJsonModule": true,
     "types": ["node", "electron"]
   },
-  "include": ["src/main/**/*", "src/preload/**/*", "src/shared/**/*"]
+  "include": ["src/main/**/*", "src/shared/**/*"],
+  "exclude": ["src/**/*.test.ts"]
 }

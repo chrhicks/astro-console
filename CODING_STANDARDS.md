@@ -2,6 +2,10 @@
 
 Source: `anomalyco/opencode` `v2` branch, distilled from `.references/opencode-v2/AGENTS.md`, `.references/opencode-v2/CONTRIBUTING.md`, `.references/opencode-v2/.editorconfig`, `.references/opencode-v2/package.json`, `.references/opencode-v2/.husky/pre-push`, `.references/opencode-v2/.github/pull_request_template.md`, `.references/opencode-v2/.opencode/agent/*.md`, and `.references/opencode-v2/.opencode/skills/{effect,debug-opencode}/SKILL.md`.
 
+## Effect
+
+Use the `effect` skill when implementing anything. Choose the references that apply to the task you're trying to implement or review.
+
 ## Core Working Style
 
 - Make the smallest correct change.
@@ -37,6 +41,21 @@ Source: `anomalyco/opencode` `v2` branch, distilled from `.references/opencode-v
 - Move real supporting concepts into small helpers placed close to the caller, usually below the main export.
 - Do not extract helpers for simple expressions just to reduce line count.
 - Add comments only for non-obvious constraints, surprising behavior, or important invariants.
+- Give each shared domain decision and derived state one owner. Reuse that owner rather than recomputing the rule in workflows, projections, and UI.
+- Keep a selector or predicate local when it only shapes one component's presentation. Give reusable or domain-significant selection a named, centralized owner near the state it interprets.
+- Name business-priority condition chains as decision functions when their ordering affects behavior. Simple local presentation ternaries remain appropriate when they do not encode a shared rule.
+- Model lifecycles with explicit discriminated states when transition validity, cancellation, recovery, or terminal behavior matters; do not infer them from unrelated flags.
+
+## Stateful Changes And Review
+
+For a change that adds or alters state, phases, capabilities, or action eligibility, authors and reviewers must:
+
+- Name the canonical owner for each stateful or action decision, and make other layers consume that decision rather than recreate it.
+- Trace each equivalent phase, capability, and action-eligibility rule through the workflow/runtime, projector, and renderer; resolve mismatches at the canonical owner.
+- Centralize a predicate or selector only when it is shared or names a domain-significant rule. Keep simple local presentation expressions local.
+- Derive projections from authoritative inputs when those inputs are available. Store a projection only as an intentional cache, and document its authority, invalidation, and reason for storage.
+- Distinguish stable capabilities from transient activity: derive eligibility and presentation from a stable capability when that is the rule, not from an operation mode that happens to imply it now.
+- Do not apply blanket ternary bans or state-machine mandates. Use the smallest representation that makes the decision and its ownership clear.
 
 ## Repo-Specific Patterns From OpenCode V2
 
@@ -46,12 +65,33 @@ Source: `anomalyco/opencode` `v2` branch, distilled from `.references/opencode-v
 - In Effect generators, bind services to named variables before calling methods instead of nesting service yields.
 - In Drizzle schemas, prefer `snake_case` field names so column names do not need remapping strings.
 
+## Architecture Invariants
+
+Enforceable boundaries for this repo. For rationale and migration details see `docs/architecture-v4.md`. Before feature work, identify the owning layer: SDK/vendor protocol, adapter, workflow/runtime, projector, renderer, or storage.
+
+- Decode unknown input at every trust boundary. Decode IPC outputs and device events before the renderer consumes them.
+- Keep vendor protocol details below the Rig boundary, inside SDK/vendor protocol packages or thin adapters.
+- Keep vendor-specific quirks, compatibility behavior, and telemetry normalization in the owning adapter; expose only the normalized domain contract above it.
+- Callable Rig surfaces are the canonical capability source. Booleans only express semantics not structurally expressible there.
+- Keep generic camera exposure distinct from vendor-native capture.
+- Workflows orchestrate. Adapters translate and assemble. Projectors are pure UI normalization.
+- The renderer consumes typed projections and actions, never vendor or transport state.
+- Guard every async state commit with session identity/generation and operation identity.
+- Coordinate connect/disconnect lifecycle. Disconnect terminally cancels and rejects queued work.
+- Stop/park/disconnect recovery supersedes ordinary operations and must not wait behind them.
+- Correlate aggregate state and active session atomically. Aggregate state is the app-facing truth.
+- Treat storage/media as a subsystem: validated paths, bounded inputs, honest partial failure.
+- Keep event and action vocabularies as closed typed unions or maps.
+
 ## Testing And Verification
 
 - Verify from the narrowest relevant package or app directory, not from a monorepo root that intentionally blocks root tests.
 - Use the project's standard typecheck command instead of calling `tsc` directly when local scripts define the contract.
 - Prefer testing real behavior over duplicating implementation logic in tests.
 - Avoid mocks unless they are the only realistic option.
+- Make reusable fakes fail closed for unconfigured behavior and expose configured scenarios visibly; do not let a permissive default hide an untested path. A one-off test may use the smallest local fake that makes its scenario clear.
+- Synchronize lifecycle and race tests with deterministic barriers, events, or controllable promises. Do not use fixed sleeps as proof that an asynchronous transition occurred.
+- Prefer named fixture configuration to growing optional positional arguments when a fixture has several independently meaningful settings.
 - For UI, CLI, or TUI changes, pair automated checks with a focused smoke test and capture screenshot evidence when the change is visible.
 
 ## Contribution Hygiene
@@ -122,6 +162,41 @@ function requireConfig(input: unknown) {
 ```
 
 Do not extract a helper that is only a renamed one-line expression.
+
+### Example: ordered business decision
+
+Do this when status precedence affects behavior:
+
+```ts
+function decideWorkStatus(work: Work) {
+  if (work.cancelledAt) return "cancelled"
+  if (work.failedAt) return "failed"
+  if (work.completedAt) return "completed"
+  return "active"
+}
+```
+
+Not this:
+
+```ts
+const status = work.cancelledAt ? "cancelled" : work.failedAt ? "failed" : work.completedAt ? "completed" : "active"
+```
+
+### Example: stable capability selector
+
+Do this when eligibility is determined by a stable capability:
+
+```ts
+function canConfigureDarks(camera: Camera) {
+  return Boolean(camera.startDarkExposure)
+}
+```
+
+Not this when `captureMode` only describes current activity:
+
+```ts
+const canConfigureDarks = captureMode !== "capturing"
+```
 
 ### Example: generated surfaces
 

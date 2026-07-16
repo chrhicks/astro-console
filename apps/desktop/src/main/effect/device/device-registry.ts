@@ -9,12 +9,12 @@ import { createFakeSeestarPlugin } from './fake-seestar-plugin'
 import { createSeestarPlugin } from './seestar-plugin'
 
 export interface DeviceRegistry {
-  readonly discoverAll: Effect.Effect<DesktopDiscoveredDeviceV2[], unknown>
+  readonly discoverAll: (signal: AbortSignal) => Effect.Effect<DesktopDiscoveredDeviceV2[], unknown>
   readonly get: (kind: DevicePluginKind) => Effect.Effect<DevicePlugin, unknown>
 }
 
 export const DeviceRegistry =
-  Context.GenericTag<DeviceRegistry>('DeviceRegistry')
+  Context.Service<DeviceRegistry>('DeviceRegistry')
 
 export const DeviceRegistryLive = Layer.sync(DeviceRegistry, () => {
   const fakeSeestar = createFakeSeestarPlugin()
@@ -28,8 +28,8 @@ export const DeviceRegistryLive = Layer.sync(DeviceRegistry, () => {
   ])
 
   return {
-    discoverAll: Effect.all(
-      [...plugins.values()].map((plugin) => plugin.discover),
+    discoverAll: (signal) => Effect.all(
+        [...plugins.values()].map((plugin) => plugin.discoverWithSignal({ signal })),
     ).pipe(Effect.map((discovered) => discovered.flat())),
     get: (kind) => {
       const plugin = plugins.get(kind)

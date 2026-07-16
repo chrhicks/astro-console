@@ -442,25 +442,17 @@ function toSummary(scenario: FakeScenario): FakeScenarioSummary {
   }
 }
 
-function deviceForScenario(scenario: FakeScenario): DeviceProjection {
-  if (scenario.connect.outcome.kind === 'success') {
-    return scenario.connect.outcome.device
-  }
-  return {}
-}
-
-function connectedState(scenario: FakeScenario): FakeScenarioAfterPoint {
-  return scenario.connected ?? CONNECTED_IDLE
-}
-
 function snapshot(): FakeRuntimeSnapshot {
   const scenario = activeScenario()
-  const connected = connectedState(scenario)
+  const connected = scenario.connected ?? CONNECTED_IDLE
   return {
     scenarios: SCENARIOS.map(toSummary),
     activeScenarioId: scenario.id,
     connectOutcome: scenario.connect.outcome.kind,
-    device: deviceForScenario(scenario),
+    device:
+      scenario.connect.outcome.kind === 'success'
+        ? scenario.connect.outcome.device
+        : {},
     preview: connected.preview,
     capture: connected.capture,
     library: connected.library,

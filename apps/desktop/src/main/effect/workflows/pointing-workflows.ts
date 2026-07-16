@@ -8,18 +8,23 @@ import { computeSolarSystemCoordinates } from '../../../shared/visibility-engine
 import { CatalogStore } from '../catalog/catalog-store'
 import { EventBus } from '../event/event-bus'
 import { SessionManager } from '../session/session-manager'
+import { OperationCoordinator, type OperationLease } from '../session/operation-coordinator'
 import { AggregateStore } from '../state/aggregate-store'
+import type { RigOperationContext } from '../rig/rig-model'
+import { GeoService } from '../geo/geo-service'
 
 export const runPointToTarget = (targetId: string) =>
   Effect.gen(function* () {
     const store = yield* AggregateStore
     const bus = yield* EventBus
     const sessions = yield* SessionManager
+    const coordinator = yield* OperationCoordinator
     const catalog = yield* CatalogStore
+    const geo = yield* GeoService
 
     const session = yield* sessions.getCurrent
     if (!session) {
-      yield* store.update((current) => ({
+      yield* store.updateIfSession(null, (current) => ({
         ...current,
         pointing: {
           phase: 'failed',
@@ -35,157 +40,171 @@ export const runPointToTarget = (targetId: string) =>
       return
     }
 
-    const target = yield* catalog.getById(targetId)
-    const summary = yield* catalog.getSummaryById(targetId)
-    if (!target || !summary) {
-      yield* store.update((current) => ({
-        ...current,
-        pointing: {
-          phase: 'failed',
-          target: null,
-          targetId,
-          lastError: 'Target not found in catalog',
-        },
-      }))
-      yield* bus.publish('pointing.failed', {
-        targetId,
-        error: 'Target not found in catalog',
-      })
-      return
-    }
+    const lease = yield* coordinator.acquire(session, 'point')
+    if (!lease) return
 
-    const startedAt = new Date().toISOString()
+    yield* Effect.acquireUseRelease(
+      Effect.void,
+      () =>
+        Effect.gen(function* () {
+          const target = yield* catalog.getById(targetId)
+          const summary = yield* catalog.getSummaryById(targetId)
+          if (!target || !summary) {
+            yield* coordinator.commitIfLease(lease, (current) => ({
+              ...current,
+              pointing: {
+                phase: 'failed',
+                target: null,
+                targetId,
+                lastError: 'Target not found in catalog',
+              },
+            }))
+            yield* bus.publish('pointing.failed', {
+              targetId,
+              error: 'Target not found in catalog',
+            })
+            return
+          }
 
-    const setStep = (step: string) =>
-      store.update((current) => ({
-        ...current,
-        pointing: {
-          phase: 'slewing',
-          target: summary,
-          targetId,
-          startedAt,
-          step,
-        },
-      }))
+          const startedAt = new Date().toISOString()
 
-    const failStep = (step: string, error: unknown) =>
-      Effect.gen(function* () {
-        const message = toErrorMessage(error)
-        yield* store.update((current) => ({
-          ...current,
-          pointing: {
-            phase: 'failed',
-            target: summary,
-            targetId,
-            startedAt,
-            step,
-            lastError: message,
-          },
-        }))
-        yield* bus.publish('pointing.failed', { targetId, error: message })
-        return yield* Effect.fail(error)
-      })
+          const setStep = (step: string) =>
+            coordinator.commitIfLease(lease, (current) => ({
+              ...current,
+              pointing: {
+                phase: 'slewing',
+                target: summary,
+                targetId,
+                startedAt,
+                step,
+              },
+            }))
 
-    const guardSession = (step: string, error: unknown) =>
-      Effect.gen(function* () {
-        if ((yield* sessions.getCurrent) !== session) {
-          return yield* Effect.fail(error)
-        }
-        return yield* failStep(step, error)
-      })
+          const failStep = (step: string, error: unknown) =>
+            Effect.gen(function* () {
+              const message = toErrorMessage(error)
+              yield* coordinator.commitIfLease(lease, (current) => ({
+                ...current,
+                pointing: {
+                  phase: 'failed',
+                  target: summary,
+                  targetId,
+                  startedAt,
+                  step,
+                  lastError: message,
+                },
+              }))
+              yield* bus.publish('pointing.failed', { targetId, error: message })
+              return yield* Effect.fail(error)
+            })
 
-    yield* setStep('Resolving coordinates')
+          const guardLease = (step: string, error: unknown) =>
+            Effect.gen(function* () {
+              if (lease.signal.aborted) return
+              return yield* failStep(step, error)
+            })
 
-    const observerLocation = session.rig.observerLocation
+          yield* setStep('Resolving coordinates')
 
-    const coordinates = yield* resolvePointingCoordinates(
-      target,
-      observerLocation,
+          const { location: observerLocation } = yield* geo.resolveObserverLocation(
+            session.rig.observerLocation,
+          )
+
+          const coordinates = yield* resolvePointingCoordinates(
+            target,
+            observerLocation ?? undefined,
+          ).pipe(
+            Effect.catch((error) => failStep('Resolving coordinates', error)),
+          )
+
+          const pointing = session.rig.pointing
+          if (!pointing) {
+            return yield* failStep(
+              'Preparing device for slew',
+              new Error('Connected rig does not support pointing'),
+            )
+          }
+
+          // Proven Seestar pre-slew sequence: sync device time and location,
+          // then stop any active view so the mount is in a clean state before
+          // slewing. The rig pointing workflow owns all readiness steps
+          // including opening the arm if the mount is parked/closed.
+          yield* setStep('Preparing device for slew')
+
+          const ctx: RigOperationContext = { signal: lease.signal }
+
+          yield* Effect.gen(function* () {
+            if (!observerLocation) {
+              return yield* Effect.fail(
+                new Error('Need observer location before pointing'),
+              )
+            }
+            yield* pointing.prepare(observerLocation, ctx)
+          }).pipe(
+            Effect.catch((error) => guardLease('Preparing device for slew', error)),
+          )
+
+          if (lease.signal.aborted) return
+
+          yield* setStep('Slewing to target')
+
+          yield* bus.publish('pointing.started', { targetId })
+
+          yield* pointing
+            .pointToCoordinates(
+              {
+                targetType: target.targetType,
+                targetName: summary.name,
+                raHours: coordinates.raHours,
+                decDeg: coordinates.decDeg,
+              },
+              ctx,
+            )
+            .pipe(
+              Effect.catch((error) => guardLease('Slewing to target', error)),
+            )
+
+          if (lease.signal.aborted) return
+
+          // Prefer a rig-provided post-point override (e.g. fake device's
+          // scenario-driven projection); fall back to a refresh round-trip.
+          const afterPoint = pointing.afterPoint
+            ? yield* pointing.afterPoint
+            : null
+
+          if (afterPoint) {
+            const updated = yield* coordinator.commitIfLease(lease, (current) => ({
+              ...current,
+              pointing: { phase: 'arrived', target: summary, targetId, startedAt },
+              currentTarget: summary,
+              device: afterPoint.device ?? current.device,
+              preview: afterPoint.preview,
+              capture: afterPoint.capture,
+              library: afterPoint.library,
+            }))
+            if (!updated) return
+          } else {
+            const refreshed = yield* session.rig.refresh
+            if (lease.signal.aborted) return
+            const updated = yield* coordinator.commitIfLease(lease, (current) => ({
+              ...current,
+              pointing: { phase: 'arrived', target: summary, targetId, startedAt },
+              currentTarget: summary,
+              device: { ...current.device, ...refreshed.device },
+              preview: refreshed.preview,
+              capture: refreshed.capture,
+            }))
+            if (!updated) return
+          }
+
+          yield* bus.publish('pointing.succeeded', { targetId })
+        }),
+      () => coordinator.release(lease),
     ).pipe(
-      Effect.catchAll((error) => failStep('Resolving coordinates', error)),
+      Effect.catch((error) =>
+        lease.signal.aborted ? Effect.void : Effect.fail(error),
+      ),
     )
-
-    const pointing = session.rig.pointing
-    if (!pointing) {
-      return yield* failStep(
-        'Preparing device for slew',
-        new Error('Connected rig does not support pointing'),
-      )
-    }
-
-    // Proven Seestar pre-slew sequence: sync device time and location, then
-    // stop any active view so the mount is in a clean state before slewing.
-    // The rig pointing workflow owns all readiness steps including opening
-    // the arm if the mount is parked/closed.
-    yield* setStep('Preparing device for slew')
-
-    yield* Effect.gen(function* () {
-      if (!observerLocation) {
-        return yield* Effect.fail(
-          new Error('Need observer location before pointing'),
-        )
-      }
-      yield* pointing.prepare(observerLocation)
-    }).pipe(
-      Effect.catchAll((error) => guardSession('Preparing device for slew', error)),
-    )
-
-    if ((yield* sessions.getCurrent) !== session) {
-      return
-    }
-
-    yield* setStep('Slewing to target')
-
-    yield* bus.publish('pointing.started', { targetId })
-
-    yield* pointing
-      .pointToCoordinates({
-        targetType: target.targetType,
-        targetName: summary.name,
-        raHours: coordinates.raHours,
-        decDeg: coordinates.decDeg,
-      })
-      .pipe(
-        Effect.catchAll((error) => guardSession('Slewing to target', error)),
-      )
-
-    // Session replaced or cleared mid-slew; don't restore arrived/currentTarget.
-    if ((yield* sessions.getCurrent) !== session) {
-      return
-    }
-
-    // Prefer a rig-provided post-point override (e.g. fake device's
-    // scenario-driven projection); fall back to a refresh round-trip.
-    const afterPoint = pointing.afterPoint
-      ? yield* pointing.afterPoint
-      : null
-
-    if (afterPoint) {
-      yield* store.update((current) => ({
-        ...current,
-        pointing: { phase: 'arrived', target: summary, targetId, startedAt },
-        currentTarget: summary,
-        device: afterPoint.device ?? current.device,
-        preview: afterPoint.preview,
-        capture: afterPoint.capture,
-        library: afterPoint.library,
-      }))
-    } else {
-      const refreshed = yield* session.rig.refresh
-      if ((yield* sessions.getCurrent) !== session) {
-        return
-      }
-      yield* store.update((current) => ({
-        ...current,
-        pointing: { phase: 'arrived', target: summary, targetId, startedAt },
-        currentTarget: summary,
-        device: { ...current.device, ...refreshed.device },
-        preview: refreshed.preview,
-        capture: refreshed.capture,
-      }))
-    }
-
-    yield* bus.publish('pointing.succeeded', { targetId })
   })
 
 function resolvePointingCoordinates(

@@ -1,30 +1,28 @@
 import { app } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { Context, Effect, Layer } from 'effect'
+import { Context, Effect, Layer, Result } from 'effect'
 
 import { generatePreviewJpeg } from './frame-preview'
+import { writeFits, type FrameDescriptor } from './fits-writer'
+import { parseCapturedAt } from './timestamp'
+import {
+  ensureDirBeneathRoot,
+  writeFileExclusive,
+  writeFileExclusiveWithSequence,
+} from './safe-write'
+
+export type { FrameDescriptor } from './fits-writer'
 
 export interface SavedFrame {
   readonly absolutePath: string
   readonly fileSize: number
-  // Sibling JPG preview written alongside the FITS file. Absent when preview
-  // generation failed; the FITS file still exists in that case.
+  // Sibling JPG preview written alongside the FITS file. The FITS still exists
+  // when preview persistence fails; previewError describes that partial result.
   readonly previewFilePath?: string
   readonly previewFileSize?: number
-}
-
-// Parsed frame geometry and numeric element type needed to write a faithful
-// FITS primary HDU. `width`/`height` are the ASCOM NumX/NumY dimensions;
-// `rank` is 2 for mono/Bayer and 3 for colour; `planes` is the colour-plane
-// count (Dimension3) for rank 3; `elementType` is the numeric type actually
-// used for the serialized pixel buffer.
-export interface FrameDescriptor {
-  readonly width: number
-  readonly height: number
-  readonly rank: number
-  readonly planes?: number
-  readonly elementType: number
+  readonly previewError?: string
 }
 
 export interface FrameStorageSaveInput {
@@ -35,6 +33,7 @@ export interface FrameStorageSaveInput {
   // date/target/lights tree. Omit when no target is selected; frames then
   // land in an "untargeted" bucket.
   readonly targetShort?: string
+  readonly frameKind?: 'light' | 'dark'
   // Parsed frame descriptor used to serialise the pixels as a FITS primary
   // HDU. When the element type or rank cannot be represented safely the save
   // fails honestly instead of writing a misleading file.
@@ -42,6 +41,7 @@ export interface FrameStorageSaveInput {
 }
 
 export interface FrameStorage {
+  readonly preflightExternalFrameStorage: (frameCount?: number) => Effect.Effect<void, unknown>
   // Persists an external frame as a FITS primary HDU under
   // userData/library/external-frames/<date>/<target>/lights/ with a
   // deterministic, readable filename. Returns the absolute path and byte
@@ -51,8 +51,13 @@ export interface FrameStorage {
   ) => Effect.Effect<SavedFrame, unknown>
 }
 
+// A full-resolution frame from the known camera is about 46 MiB. Require
+// 512 MiB rather than trying to reserve an exact future frame count.
+const KNOWN_EXTERNAL_FRAME_BYTES = 50 * 1024 * 1024
+const MINIMUM_EXTERNAL_FRAME_FREE_BYTES = 512 * 1024 * 1024
+
 export const FrameStorage =
-  Context.GenericTag<FrameStorage>('FrameStorage')
+  Context.Service<FrameStorage>('FrameStorage')
 
 // Root for externally retrieved frames, organized as <date>/<target>/lights/
 // under app-owned userData storage. Exported so the IPC layer can validate
@@ -72,14 +77,14 @@ function sanitizeTargetDir(raw: string | undefined): string {
   return sanitized || 'untargeted'
 }
 
-// Scans the lights directory for existing sequence numbers and returns the
+// Scans a frame directory for existing sequence numbers and returns the
 // next zero-padded 4-digit index. Starts at 0001 for a new/empty folder.
-async function resolveNextSequence(dir: string): Promise<string> {
+export async function resolveNextSequence(dir: string, frameKind: 'light' | 'dark'): Promise<string> {
   let max = 0
   try {
     const entries = await fs.readdir(dir)
     for (const entry of entries) {
-      const match = entry.match(/_light_(\d+)\.fits$/)
+      const match = entry.match(new RegExp(`_${frameKind}_(\\d+)\\.fits$`))
       if (match) {
         const n = Number.parseInt(match[1], 10)
         if (n > max) max = n
@@ -91,178 +96,92 @@ async function resolveNextSequence(dir: string): Promise<string> {
   return (max + 1).toString().padStart(4, '0')
 }
 
+async function prepareExternalFramesRoot(): Promise<string> {
+  const root = resolveExternalFramesRoot()
+  await fs.mkdir(root, { recursive: true })
+  return fs.realpath(root)
+}
+
+async function preflightExternalFrameStorage(frameCount = 1): Promise<void> {
+  const root = await prepareExternalFramesRoot()
+  const stats = await fs.statfs(root)
+  const freeBytes = stats.bavail * stats.bsize
+  const requiredBytes = Math.max(
+    MINIMUM_EXTERNAL_FRAME_FREE_BYTES,
+    Math.ceil(KNOWN_EXTERNAL_FRAME_BYTES * frameCount * 1.25),
+  )
+  if (freeBytes < requiredBytes) {
+    throw new Error(
+        `External frame storage has insufficient free space (${freeBytes} bytes available; requires at least ${requiredBytes} bytes)`,
+    )
+  }
+
+  const probePath = path.join(root, `.storage-probe-${randomUUID()}`)
+  await writeFileExclusive(probePath, new Uint8Array(1))
+  await fs.unlink(probePath)
+}
+
 export const FrameStorageLive = Layer.succeed(
   FrameStorage,
   {
+    preflightExternalFrameStorage: (frameCount) => Effect.tryPromise(() => preflightExternalFrameStorage(frameCount)),
     saveExternalFrame: (input) =>
       Effect.gen(function* () {
+        const capturedAt = parseCapturedAt(input.capturedAt)
+        if (!capturedAt) {
+          return yield* Effect.fail(
+            new Error(
+              `Invalid capturedAt timestamp: ${input.capturedAt}`,
+            ),
+          )
+        }
         const targetDir = sanitizeTargetDir(input.targetShort)
-        const date = input.capturedAt.slice(0, 10) || 'unknown-date'
-        const time = input.capturedAt.slice(11, 19).replace(/:/g, '')
-        const dir = path.join(
-          resolveExternalFramesRoot(),
-          date,
-          targetDir,
-          'lights',
+        const date = capturedAt.date
+        const time = capturedAt.time
+        // Resolve the root through realpath so the trusted anchor is the true
+        // filesystem location. The root may not exist yet on first run; create
+        // it before realpath so the anchor is always concrete.
+        const realRoot = yield* Effect.tryPromise(prepareExternalFramesRoot)
+        const frameKind = input.frameKind ?? 'light'
+        const dir = path.join(realRoot, date, targetDir, frameKind === 'dark' ? 'darks' : 'lights')
+        const realDir = yield* Effect.tryPromise(() =>
+          ensureDirBeneathRoot(dir, realRoot),
         )
-        yield* Effect.tryPromise(() => fs.mkdir(dir, { recursive: true }))
-        const sequence = yield* Effect.tryPromise(() => resolveNextSequence(dir))
+        const sequence = yield* Effect.tryPromise(() => resolveNextSequence(realDir, frameKind))
         const dateTime = time ? `${date}-${time}` : date
-        const fileName =
-          `${dateTime}_${targetDir.toLowerCase()}_light_${sequence}.fits`
-        const absolutePath = path.join(dir, fileName)
+        const baseName = `${dateTime}_${targetDir.toLowerCase()}_${frameKind}`
         const bytes = yield* writeFits(input.data, input.frame)
-        yield* Effect.tryPromise(() => fs.writeFile(absolutePath, bytes))
-        const previewPath = absolutePath.replace(/\.fits$/, '.preview.jpg')
+        // Atomically and exclusively create the FITS file without following
+        // a final symlink, retrying sequence collisions so a predictable name
+        // cannot overwrite an existing file.
+        const fits = yield* Effect.tryPromise(() =>
+          writeFileExclusiveWithSequence(realDir, baseName, '.fits', bytes, Number.parseInt(sequence, 10)),
+        )
+        const previewPath = fits.absolutePath.replace(/\.fits$/, '.preview.jpg')
         const preview = yield* Effect.tryPromise(async () => {
           const jpg = generatePreviewJpeg(input.data, input.frame)
-          if (!jpg) return null
-          await fs.writeFile(previewPath, jpg)
+          if (!jpg) {
+            throw new Error('Preview generation is unavailable for this frame layout')
+          }
+          await writeFileExclusive(previewPath, jpg)
           return { previewFilePath: previewPath, previewFileSize: jpg.byteLength }
-        }).pipe(
-          // Best-effort: preview failure must not invalidate the saved FITS.
-          Effect.catchAll(() => Effect.succeed(null)),
-        )
+        }).pipe(Effect.result)
         return {
-          absolutePath,
-          fileSize: bytes.byteLength,
-          previewFilePath: preview?.previewFilePath,
-          previewFileSize: preview?.previewFileSize,
+          absolutePath: fits.absolutePath,
+          fileSize: fits.fileSize,
+          previewFilePath: Result.isSuccess(preview)
+            ? preview.success.previewFilePath
+            : undefined,
+          previewFileSize: Result.isSuccess(preview)
+            ? preview.success.previewFileSize
+            : undefined,
+          previewError:
+            Result.isFailure(preview)
+              ? preview.failure instanceof Error
+                ? preview.failure.message
+                : String(preview.failure)
+              : undefined,
         }
       }),
   } satisfies FrameStorage,
 )
-
-// Serialises an Alpaca ImageBytes frame as a FITS primary HDU. The pixel
-// bytes are kept in ASCOM row-major order (last declared dimension fastest)
-// and the FITS axes are labelled so NAXIS1 is that fastest axis, which
-// preserves the byte stream without reordering. Multi-byte elements are
-// byte-swapped to the big-endian representation FITS requires. Fails with a
-// clear error when the element type or rank cannot be represented as a
-// faithful FITS primary HDU.
-function writeFits(
-  data: Uint8Array,
-  frame: FrameDescriptor,
-): Effect.Effect<Uint8Array, Error> {
-  const type = resolveFitsType(frame.elementType)
-  if (!type) {
-    return Effect.fail(
-      new Error(
-        `Unsupported Alpaca transmission element type ${frame.elementType} for FITS export`,
-      ),
-    )
-  }
-  if (frame.rank !== 2 && frame.rank !== 3) {
-    return Effect.fail(
-      new Error(`Unsupported image rank ${frame.rank} for FITS export`),
-    )
-  }
-  const planes = frame.rank === 3 ? frame.planes ?? 0 : 1
-  if (frame.rank === 3 && planes <= 0) {
-    return Effect.fail(new Error('Color frame is missing colour plane count'))
-  }
-  if (frame.width <= 0 || frame.height <= 0) {
-    return Effect.fail(new Error('Frame dimensions must be positive'))
-  }
-  const expectedBytes = type.bytesPerElement * frame.width * frame.height * planes
-  if (data.length !== expectedBytes) {
-    return Effect.fail(
-      new Error(
-        `Frame data length ${data.length} does not match expected ${expectedBytes} bytes`,
-      ),
-    )
-  }
-
-  // NAXIS1 is the fastest-varying axis in FITS. ASCOM serialises the image
-  // array with the last declared dimension fastest, so map height (rank 2)
-  // or colour planes (rank 3) onto NAXIS1 to preserve the byte order.
-  const cards: Array<[string, number | boolean]> = [
-    ['SIMPLE', true],
-    ['BITPIX', type.bitpix],
-    ['NAXIS', frame.rank],
-  ]
-  if (frame.rank === 2) {
-    cards.push(['NAXIS1', frame.height], ['NAXIS2', frame.width])
-  } else {
-    cards.push(
-      ['NAXIS1', planes],
-      ['NAXIS2', frame.height],
-      ['NAXIS3', frame.width],
-    )
-  }
-  if (type.bzero !== undefined) {
-    cards.push(['BZERO', type.bzero], ['BSCALE', 1])
-  }
-  cards.push(['EXTEND', true])
-
-  const header = buildFitsHeader(cards)
-  const pixels = toBigEndian(data, type.bytesPerElement)
-  const dataBlock = padToBlock(pixels)
-  return Effect.succeed(Buffer.concat([header, dataBlock]))
-}
-
-interface FitsType {
-  readonly bitpix: number
-  readonly bytesPerElement: number
-  readonly bzero?: number
-}
-
-// ASCOM Alpaca ImageBytes transmission element-type codes mapped to a FITS
-// primary HDU representation. Unsigned 16/32-bit values use BZERO scaling per
-// the FITS convention so the stored signed integers reconstruct the unsigned
-// pixels.
-function resolveFitsType(elementType: number): FitsType | null {
-  switch (elementType) {
-    case 1: return { bitpix: 16, bytesPerElement: 2 } // Int16
-    case 2: return { bitpix: 32, bytesPerElement: 4 } // Int32
-    case 3: return { bitpix: -64, bytesPerElement: 8 } // Double (Float64)
-    case 4: return { bitpix: -32, bytesPerElement: 4 } // Single (Float32)
-    case 6: return { bitpix: 8, bytesPerElement: 1 } // Byte
-    case 7: return { bitpix: 64, bytesPerElement: 8 } // Int64
-    case 8: return { bitpix: 16, bytesPerElement: 2, bzero: 32768 } // UInt16
-    case 9: return { bitpix: 32, bytesPerElement: 4, bzero: 2147483648 } // UInt32
-    default: return null
-  }
-}
-
-function buildFitsHeader(
-  cards: Array<[string, number | boolean]>,
-): Buffer {
-  const lines: string[] = []
-  for (const [keyword, value] of cards) {
-    lines.push(fitsCard(keyword, value))
-  }
-  lines.push('END'.padEnd(80))
-  let header = lines.join('')
-  const blockSize = 2880
-  const pad = (blockSize - (header.length % blockSize)) % blockSize
-  if (pad > 0) header += ' '.repeat(pad)
-  return Buffer.from(header, 'ascii')
-}
-
-function fitsCard(keyword: string, value: number | boolean): string {
-  const key = keyword.padEnd(8).slice(0, 8)
-  const valueField =
-    typeof value === 'boolean'
-      ? (value ? 'T' : 'F').padStart(20)
-      : String(value).padStart(20)
-  return `${key}= ${valueField}`.padEnd(80)
-}
-
-function toBigEndian(data: Uint8Array, bytesPerElement: number): Uint8Array {
-  if (bytesPerElement === 1) return data
-  const out = Buffer.alloc(data.length)
-  for (let i = 0; i < data.length; i += bytesPerElement) {
-    for (let j = 0; j < bytesPerElement; j++) {
-      out[i + j] = data[i + bytesPerElement - 1 - j]
-    }
-  }
-  return out
-}
-
-function padToBlock(data: Uint8Array): Uint8Array {
-  const blockSize = 2880
-  const pad = (blockSize - (data.length % blockSize)) % blockSize
-  if (pad === 0) return data
-  return Buffer.concat([data, Buffer.alloc(pad, 0)])
-}

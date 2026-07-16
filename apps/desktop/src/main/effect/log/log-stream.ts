@@ -9,7 +9,7 @@ export interface LogStream {
   ) => Effect.Effect<() => void>
 }
 
-export const LogStream = Context.GenericTag<LogStream>('LogStream')
+export const LogStream = Context.Service<LogStream>('LogStream')
 
 export const LogStreamLive = Layer.effect(
   LogStream,
@@ -20,7 +20,23 @@ export const LogStreamLive = Layer.effect(
     return {
       subscribe: (onLog) =>
         Effect.gen(function* () {
-          const queue = yield* Queue.unbounded<DesktopLogEntryV2>()
+          // Preserve the oldest queued logs and drop newer entries when a
+          // renderer cannot keep up.
+          const queue = yield* Queue.dropping<DesktopLogEntryV2>(250)
+          let closed = false
+          let fiber: Fiber.Fiber<void> | undefined
+
+          const close = () => {
+            if (closed) return
+            closed = true
+            unsubscribe()
+            const shutdown = Queue.shutdown(queue)
+            if (!fiber) {
+              Effect.runFork(shutdown)
+              return
+            }
+            Effect.runFork(shutdown.pipe(Effect.andThen(Fiber.interrupt(fiber))))
+          }
 
           const unsubscribe = yield* bus.listen((event) => {
             if (event.name === 'status.snapshot.emitted') {
@@ -35,15 +51,16 @@ export const LogStreamLive = Layer.effect(
             yield* Queue.offer(queue, entry)
           }
 
-          const fiber = yield* Stream.fromQueue(queue).pipe(
-            Stream.runForEach((entry) => Effect.sync(() => onLog(entry))),
-            Effect.forkDaemon,
+          fiber = yield* Stream.fromQueue(queue).pipe(
+            Stream.runForEach((entry) =>
+              (closed ? Effect.void : Effect.sync(() => onLog(entry))).pipe(
+                Effect.catch(() => Effect.sync(close)),
+              ),
+            ),
+            Effect.forkDetach,
           )
 
-          return () => {
-            unsubscribe()
-            Effect.runFork(Fiber.interrupt(fiber))
-          }
+          return close
         }),
     } satisfies LogStream
   }),

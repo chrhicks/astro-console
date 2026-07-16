@@ -39,7 +39,7 @@ export interface PointingProjection {
   lastError?: string
 }
 
-export type CapturePhase = 'idle' | 'starting' | 'capturing' | 'stopped' | 'failed'
+export type CapturePhase = 'idle' | 'starting' | 'capturing' | 'stopped' | 'failed' | 'partial'
 
 // Distinguishes native stacking orchestration (Seestar RigCaptureWorkflow)
 // from generic external camera exposure (RigCamera start/stop). Native rigs
@@ -77,6 +77,23 @@ export interface CameraSettings {
   exposureSec: number
 }
 
+export interface ExternalSequencePlan {
+  lightCount: number
+  durationSec: number
+  darkCount: number
+}
+
+export interface ExternalSequenceProjection {
+  phase: 'idle' | 'lights' | 'awaiting-darks' | 'darks' | 'complete' | 'stopped' | 'failed'
+  plan?: ExternalSequencePlan
+  frameKind?: 'light' | 'dark'
+  currentIndex?: number
+  completed: number
+  failed: number
+  lastError?: string
+  target?: TargetSummary
+}
+
 export type PreviewPhase = 'none' | 'starting' | 'active' | 'error'
 
 // Rig-neutral preview source: 'native' means the rig's own live preview
@@ -96,20 +113,22 @@ export interface LibraryAsset {
   name: string
   capturedAt: string
   kind: 'stack' | 'sub' | 'calibration' | 'exposure'
+  frameKind?: 'light' | 'dark'
   // Persisted frame location for external exposures. Present only when the
   // frame bytes were saved to disk by the main-process FrameStorage service;
   // absent for native stacking assets and when an external frame failed to
   // persist. The pixel format/dimensions describe how to interpret the saved
   // FITS payload for later post-processing.
-  savedFilePath?: string
+  saved?: boolean
   savedFileSize?: number
   // Sibling JPG preview path for external exposures. Present when the
   // FrameStorage service generated a preview JPG alongside the FITS file;
-  // absent when preview generation failed (the FITS still exists) or for
+  // absent when preview persistence failed (the FITS still exists) or for
   // native stacking assets. The UI uses this for the main preview area and
   // filmstrip thumbnails instead of on-demand FITS processing.
-  previewFilePath?: string
+  hasPreview?: boolean
   previewFileSize?: number
+  previewError?: string
   frameWidth?: number
   frameHeight?: number
   framePixelFormat?: string
@@ -119,7 +138,7 @@ export type LibraryScope = 'current_target' | 'all_targets'
 
 export interface LibraryProjection {
   scope: LibraryScope
-  assets: LibraryAsset[]
+  assets: readonly LibraryAsset[]
   polling: boolean
 }
 
@@ -159,7 +178,7 @@ export interface DeviceProjection {
   activity?: 'idle' | 'previewing' | 'capturing'
   storageFreeMb?: number
   storageTotalMb?: number
-  warnings?: string[]
+  warnings?: readonly string[]
 }
 
 export type WorkspaceState =
@@ -181,6 +200,7 @@ export type WorkspaceCapabilityFlag = 'yes' | 'no'
 export interface WorkspaceCapabilities {
   preview: WorkspaceCapabilityTier
   capture: WorkspaceCapabilityTier
+  darkExposure: WorkspaceCapabilityFlag
   autofocus: WorkspaceCapabilityFlag
   filterWheel: WorkspaceCapabilityFlag
   storage: WorkspaceCapabilityFlag
@@ -215,7 +235,7 @@ export interface WorkspaceProjection {
   stateLabel: string
   surface: WorkspaceSurface
   capabilities: WorkspaceCapabilities
-  actions: WorkspaceAction[]
+  actions: readonly WorkspaceAction[]
 }
 
 export interface DesktopStatus {
@@ -227,7 +247,9 @@ export interface DesktopStatus {
   library: LibraryProjection
   workspace: WorkspaceProjection
   camera?: CameraSettings
+  sequence: ExternalSequenceProjection
   currentTarget: TargetSummary | null
+  statusRevision: number
   lastUpdatedAt: string
   lastError?: string
 }
@@ -288,12 +310,14 @@ export interface SetExposureDurationRequest {
   durationSec: number
 }
 
+export interface ConfigureExternalSequenceRequest extends ExternalSequencePlan {}
+
 export interface SeestarDesktopApiV2 {
-  discover(): Promise<DesktopDiscoveredDeviceV2[]>
+  discover(): Promise<readonly DesktopDiscoveredDeviceV2[]>
   connect(input: ConnectRequestV2): Promise<DesktopStatus>
   disconnect(): Promise<DesktopStatus>
   getStatus(): Promise<DesktopStatus>
-  getLogs(): Promise<DesktopLogEntryV2[]>
+  getLogs(): Promise<readonly DesktopLogEntryV2[]>
   browseTargets(query?: CatalogQuery): Promise<CatalogPage>
   getTargetById(targetId: string): Promise<TargetDetails | null>
   pointToTarget(input: PointToTargetRequest): Promise<DesktopStatus>
@@ -305,14 +329,17 @@ export interface SeestarDesktopApiV2 {
   setExposureDuration(
     input: SetExposureDurationRequest,
   ): Promise<DesktopStatus>
-  // Open a persisted external frame in the OS default handler. Only valid for
-  // assets with a savedFilePath; rejects if the path is outside the library.
-  openSavedAsset(filePath: string): Promise<void>
+  configureExternalSequence(input: ConfigureExternalSequenceRequest): Promise<DesktopStatus>
+  startExternalSequence(): Promise<DesktopStatus>
+  continueExternalSequence(): Promise<DesktopStatus>
+  finishExternalSequence(): Promise<DesktopStatus>
+  // Open a persisted external frame in the OS default handler. The opaque ID
+  // is resolved by main only within the managed library.
+  openSavedAsset(assetId: string): Promise<void>
   // Reveal a persisted external frame in the platform file manager.
-  revealSavedAsset(filePath: string): Promise<void>
-  // Read a saved external preview JPG as a data URL. Returns null when the
-  // path is outside the library or the preview file is missing.
-  getSavedAssetPreview(filePath: string): Promise<string | null>
+  revealSavedAsset(assetId: string): Promise<void>
+  // Read the managed preview sibling for an asset as a data URL.
+  getSavedAssetPreview(assetId: string): Promise<string | null>
   onLog(listener: (entry: DesktopLogEntryV2) => void): () => void
   onStatus(listener: (status: DesktopStatus) => void): () => void
 }
@@ -327,7 +354,7 @@ export interface FakeScenarioSummary {
 }
 
 export interface FakeRuntimeSnapshot {
-  scenarios: FakeScenarioSummary[]
+  scenarios: readonly FakeScenarioSummary[]
   activeScenarioId: string
   connectOutcome: 'success' | 'failure'
   device: DeviceProjection

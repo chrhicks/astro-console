@@ -1,29 +1,33 @@
-import { ipcMain } from 'electron'
-import { Effect } from 'effect'
+import { Effect, Result, Schema } from 'effect'
+import type { WebContents } from 'electron'
 import { appRuntime } from '../runtime/app-runtime'
 import { fakeSeestarRuntime } from '../device/fake-seestar-runtime'
 import { AggregateStore } from '../state/aggregate-store'
 import { EventBus } from '../event/event-bus'
 import { SessionManager } from '../session/session-manager'
 import type { FakeRuntimeSnapshot } from '../../../shared/api-v2'
+import { ownedIpcHandle } from './owned-ipc'
 
 // Development-only IPC surface for the fake Seestar scenario runtime. Registered
 // only when the app is not packaged so it cannot leak into product builds.
-export function registerIpcV2DevHandlers() {
-  ipcMain.handle('seestar:dev:fake:list-scenarios', () =>
+export function registerIpcV2DevHandlers(allowed: WebContents) {
+  const handle = ownedIpcHandle(allowed)
+  handle('seestar:dev:fake:list-scenarios', () =>
     fakeSeestarRuntime.snapshot(),
   )
 
-  ipcMain.handle(
+  handle(
     'seestar:dev:fake:load-scenario',
-    async (_event, scenarioId: string) => {
-      const next = fakeSeestarRuntime.loadScenario(scenarioId)
+    async (_event, scenarioId) => {
+      const decoded = Schema.decodeUnknownResult(Schema.String)(scenarioId)
+      if (Result.isFailure(decoded)) throw new Error('Invalid scenario id')
+      const next = fakeSeestarRuntime.loadScenario(decoded.success)
       await refreshFakeProjection(next)
       return next
     },
   )
 
-  ipcMain.handle('seestar:dev:fake:reset', async () => {
+  handle('seestar:dev:fake:reset', async () => {
     const next = fakeSeestarRuntime.reset()
     await refreshFakeProjection(next)
     return next

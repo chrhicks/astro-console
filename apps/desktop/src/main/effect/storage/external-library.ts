@@ -3,6 +3,7 @@ import path from 'node:path'
 
 import type { LibraryAsset } from '../../../shared/api-v2'
 import { resolveExternalFramesRoot } from './frame-storage'
+import { registerManagedAsset } from './asset-registry'
 
 // Scans the external-frames root and rebuilds LibraryAsset entries from saved
 // FITS files and their sibling preview JPGs. Best-effort: unreadable files or
@@ -13,46 +14,59 @@ export async function readExternalLibraryFromDisk(): Promise<LibraryAsset[]> {
   const fitsFiles = await listFitsFiles(root)
   const assets: LibraryAsset[] = []
   for (const fitsPath of fitsFiles) {
-    const asset = await readAssetFromDisk(root, fitsPath)
+    const asset = await readAssetFromDisk(fitsPath)
     if (asset) assets.push(asset)
   }
   assets.sort((a, b) => b.capturedAt.localeCompare(a.capturedAt))
   return assets
 }
 
-async function listFitsFiles(dir: string): Promise<string[]> {
-  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => null)
-  if (!entries) return []
+const MAX_LIBRARY_ENTRIES = 5_000
+const MAX_VISITED_ENTRIES = 20_000
+const MAX_DEPTH = 12
+const MAX_FITS_BYTES = 4 * 1024 * 1024 * 1024
+
+async function listFitsFiles(root: string): Promise<string[]> {
   const files: string[] = []
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name)
-    if (entry.isDirectory()) {
-      for (const sub of await listFitsFiles(full)) files.push(sub)
-    } else if (entry.isFile() && entry.name.endsWith('.fits')) {
-      files.push(full)
+  const pending = [{ dir: root, depth: 0 }]
+  let visited = 0
+  while (pending.length && visited < MAX_VISITED_ENTRIES) {
+    const current = pending.shift()
+    if (!current) break
+    const entries = await fs.readdir(current.dir, { withFileTypes: true }).catch(() => null)
+    if (!entries) continue
+    for (const entry of entries) {
+      visited += 1
+      if (visited > MAX_VISITED_ENTRIES) break
+      const full = path.join(current.dir, entry.name)
+      if (entry.isDirectory() && current.depth < MAX_DEPTH) {
+        pending.push({ dir: full, depth: current.depth + 1 })
+      } else if (entry.isFile() && entry.name.endsWith('.fits')) {
+        files.push(full)
+        if (files.length >= MAX_LIBRARY_ENTRIES) return files
+      }
     }
   }
   return files
 }
 
-async function readAssetFromDisk(
-  root: string,
-  fitsPath: string,
-): Promise<LibraryAsset | null> {
+async function readAssetFromDisk(fitsPath: string): Promise<LibraryAsset | null> {
   const stat = await fs.stat(fitsPath).catch(() => null)
-  if (!stat) return null
+  if (!stat?.isFile() || stat.size > MAX_FITS_BYTES) return null
+  const canonicalPath = await fs.realpath(fitsPath).catch(() => null)
+  if (!canonicalPath) return null
   const previewPath = fitsPath.replace(/\.fits$/, '.preview.jpg')
   const preview = await readPreviewSibling(previewPath)
   const dimensions = await readFitsDimensions(fitsPath)
-  const relativePath = path.relative(root, fitsPath)
   return {
-    id: `ext-${relativePath}`,
+    id: registerManagedAsset(canonicalPath),
     name: path.basename(fitsPath, '.fits'),
     capturedAt: parseCapturedAtFromName(fitsPath, stat.mtime),
     kind: 'exposure',
-    savedFilePath: fitsPath,
+    frameKind: path.basename(path.dirname(fitsPath)) === 'darks' ? 'dark' : 'light',
+    saved: true,
     savedFileSize: stat.size,
-    previewFilePath: preview?.previewFilePath,
+    hasPreview: preview != null,
     previewFileSize: preview?.previewFileSize,
     frameWidth: dimensions?.width,
     frameHeight: dimensions?.height,

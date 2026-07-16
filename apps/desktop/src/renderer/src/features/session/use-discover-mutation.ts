@@ -4,6 +4,6 @@ import { electronApi } from '../../lib/electron-api'
 export function useDiscoverMutation() {
   return useMutation({
     mutationKey: ['session', 'discover'],
-    mutationFn: () => electronApi.discover(),
+    mutationFn: electronApi.discover,
   })
 }
