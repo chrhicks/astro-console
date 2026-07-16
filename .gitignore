@@ -37,6 +37,6 @@ sdk/**/*.pyc
 dist/
 node_modules/
 prototype/
-docs/
+.local/
 apps/desktop/*.tsbuildinfo
 .bak*
