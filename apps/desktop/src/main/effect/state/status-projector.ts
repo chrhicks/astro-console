@@ -29,6 +29,7 @@ export const StatusProjector =
 
 interface RigSupport {
   canPark: boolean
+  canUnpark: boolean
   canPoint: boolean
   preview: boolean
   capture: WorkspaceCapabilityTier
@@ -41,6 +42,7 @@ interface RigSupport {
 export function projectRigSupport(rig: ConnectedRig): RigSupport {
   return {
     canPark: rig.mount?.park !== undefined,
+    canUnpark: rig.mount?.unpark !== undefined,
     canPoint: rig.pointing !== undefined,
     preview: rig.preview !== undefined,
     capture: rig.capture ? 'native' : rig.camera ? 'external' : 'unsupported',
@@ -111,7 +113,7 @@ function projectWorkspace(
     ),
     surface: projectSurface(aggregate.pointing.target ?? aggregate.currentTarget),
     capabilities: projectedCapabilities,
-    actions: projectActions(state, rigSupport),
+    actions: projectWorkspaceActions(state, rigSupport),
   }
 }
 
@@ -200,12 +202,17 @@ function projectSurface(target: TargetSummary | null): WorkspaceSurface {
   return { kind: 'solar', label: 'Solar system' }
 }
 
-function projectActions(
+export function projectWorkspaceActions(
   state: WorkspaceState,
   rigSupport: RigSupport | null,
 ): WorkspaceAction[] {
   if (state === 'disconnected') {
     return [{ id: 'connect', label: 'Connect device', enabled: true }]
+  }
+  if (state === 'parked') {
+    return rigSupport?.canUnpark
+      ? [{ id: 'unpark', label: 'Unpark mount', enabled: true }]
+      : []
   }
   if (state === 'idle_no_target') {
     return [{ id: 'select-target', label: 'Select target', enabled: true }]

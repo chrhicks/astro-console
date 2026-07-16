@@ -151,7 +151,7 @@ export const DesktopStatusSchema = Schema.Struct({
       Schema.Struct({
         id: Schema.Literals([
           'connect', 'select-target', 'retry-slew', 'retry-preview',
-          'stop-preview', 'stop-capture', 'preview', 'capture',
+          'stop-preview', 'stop-capture', 'preview', 'capture', 'unpark',
         ]),
         label: Schema.String,
         enabled: Schema.Boolean,

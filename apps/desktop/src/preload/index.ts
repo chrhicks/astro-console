@@ -52,6 +52,8 @@ export const apiV2: SeestarDesktopApiV2 = {
     invokeStatus('seestar:v2:stop-capture'),
   parkMount: () =>
     invokeStatus('seestar:v2:park'),
+  unparkMount: () =>
+    invokeStatus('seestar:v2:unpark'),
   setExposureDuration: (input: SetExposureDurationRequest) =>
     invokeStatus('seestar:v2:set-exposure-duration', input),
   configureExternalSequence: (input: ConfigureExternalSequenceRequest) =>

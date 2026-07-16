@@ -18,7 +18,7 @@ import type { DeviceSession } from '../device/device-plugin'
 import type { ConnectRequestV2, DesktopDiscoveredDeviceV2 } from '../../../shared/api-v2'
 import { runConnect, runDisconnect } from './session-workflows'
 import { runStartCapture, runStopCapture } from './capture-workflows'
-import { runPark } from './park-workflows'
+import { runPark, runUnpark } from './park-workflows'
 import {
   runConfigureExternalSequence,
   runContinueExternalSequence,
@@ -66,6 +66,7 @@ interface ExternalSessionOptions {
   getExposureState: RigCamera['getExposureState']
   stopExposure?: () => Effect.Effect<void>
   park?: () => Effect.Effect<void>
+  unpark?: () => Effect.Effect<void>
   refresh?: Effect.Effect<RigSessionRefresh>
   startExposure?: RigCamera['startExposure']
   getLatestFrame?: RigCamera['getLatestFrame']
@@ -80,6 +81,7 @@ function makeExternalSession(
     getExposureState,
     stopExposure = () => Effect.void,
     park = () => Effect.void,
+    unpark,
     refresh = Effect.succeed({
       device: {},
       preview: { phase: 'none', source: 'none', active: false },
@@ -117,7 +119,7 @@ function makeExternalSession(
       refresh,
       camera,
       captureStop: { mode: 'external', stop: camera.stopExposure },
-      mount: { park },
+      mount: { park, unpark },
     },
   }
 }
@@ -705,6 +707,36 @@ describe('workflow interruption safety', () => {
 
     assert.equal(result.device.mountClosed, undefined)
     assert.ok(result.device.warnings?.includes('Park state is unconfirmed'))
+  })
+
+  it('unparks through the mount capability and refreshes the parked projection', async () => {
+    let unparkCalls = 0
+    const session = makeExternalSession('s1', {
+      getExposureState: () => Effect.succeed({ state: 'idle', imageReady: false }),
+      unpark: () => Effect.sync(() => { unparkCalls++ }),
+      refresh: Effect.succeed({
+        device: { mountClosed: false },
+        preview: { phase: 'none', source: 'none', active: false },
+        capture: { phase: 'idle' },
+      }),
+    })
+    const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)))
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* runConnect({ pluginKind: 'fake-seestar', deviceId: 'test:s1' })
+        const store = yield* AggregateStore
+        yield* store.update((current) => ({
+          ...current,
+          device: { ...current.device, mountClosed: true },
+        }))
+        yield* runUnpark
+        return yield* store.get
+      }).pipe(Effect.provide(testLayer)),
+    )
+
+    assert.equal(unparkCalls, 1)
+    assert.equal(result.device.mountClosed, false)
   })
 
   for (const mountClosed of [false, undefined] as const) {

@@ -41,3 +41,22 @@ it('forwards all external sequence actions to the preload API', async () => {
 
   assert.deepEqual(calls, ['configure', 'start', 'continue', 'finish'])
 })
+
+it('forwards unpark to the preload API', async () => {
+  const calls: string[] = []
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      seestarV2: {
+        unparkMount: () => {
+          calls.push('unpark')
+          return Promise.resolve(undefined)
+        },
+      },
+    },
+  })
+
+  await electronApi.unparkMount()
+
+  assert.deepEqual(calls, ['unpark'])
+})

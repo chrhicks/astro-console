@@ -1,7 +1,7 @@
 import { Effect } from 'effect'
 import { EventBus } from '../event/event-bus'
 import { SessionManager } from '../session/session-manager'
-import { OperationCoordinator } from '../session/operation-coordinator'
+import { OperationCoordinator, type OperationLease } from '../session/operation-coordinator'
 import { AggregateStore } from '../state/aggregate-store'
 import type { RigOperationContext } from '../rig/rig-model'
 import { stopExternalExposure } from './external-exposure'
@@ -224,6 +224,106 @@ export const runPark = Effect.gen(function* () {
     () => coordinator.release(lease),
   )
 })
+
+export const runUnpark = Effect.gen(function* () {
+  const store = yield* AggregateStore
+  const bus = yield* EventBus
+  const sessions = yield* SessionManager
+  const coordinator = yield* OperationCoordinator
+
+  const session = yield* sessions.getCurrent
+  if (!session) {
+    return yield* Effect.fail(new Error('No device connected'))
+  }
+
+  const lease = yield* coordinator.acquire(session, 'unpark')
+  if (!lease) return
+
+  yield* Effect.acquireUseRelease(
+    Effect.void,
+    () =>
+      Effect.gen(function* () {
+        const current = yield* store.get
+        if (current.device.mountClosed !== true) {
+          return yield* failUnpark(
+            lease,
+            new Error('Mount is not parked'),
+            bus,
+            coordinator,
+          )
+        }
+
+        const unpark = session.rig.mount?.unpark
+        if (!unpark) {
+          return yield* failUnpark(
+            lease,
+            new Error('Connected rig does not support mount unpark'),
+            bus,
+            coordinator,
+          )
+        }
+
+        yield* bus.publish('unpark.started', {})
+
+        const ctx: RigOperationContext = { signal: lease.signal }
+        yield* unpark(ctx).pipe(
+          Effect.catch((error) => failUnpark(lease, error, bus, coordinator)),
+        )
+
+        if (lease.signal.aborted) return
+
+        const refreshed = yield* session.rig.refresh.pipe(
+          Effect.catch((error) => failUnpark(lease, error, bus, coordinator)),
+        )
+
+        if (lease.signal.aborted) return
+
+        if (refreshed.device.mountClosed !== false) {
+          return yield* failUnpark(
+            lease,
+            new Error('Unpark command completed but mount opening was not confirmed'),
+            bus,
+            coordinator,
+          )
+        }
+
+        const updated = yield* coordinator.commitIfLease(lease, (aggregate) => ({
+          ...aggregate,
+          session: { ...aggregate.session, lastError: undefined },
+          device: { ...aggregate.device, ...refreshed.device },
+          preview: refreshed.preview,
+          capture: refreshed.capture,
+        }))
+        if (!updated) return
+
+        yield* bus.publish('unpark.succeeded', {})
+      }),
+    () => coordinator.release(lease),
+  ).pipe(
+    Effect.catch((error) =>
+      lease.signal.aborted ? Effect.void : Effect.fail(error),
+    ),
+  )
+})
+
+function failUnpark(
+  lease: OperationLease,
+  error: unknown,
+  bus: EventBus,
+  coordinator: OperationCoordinator,
+) {
+  return Effect.gen(function* () {
+    const message = toErrorMessage(error)
+    const updated = yield* coordinator.commitIfLease(lease, (current) => ({
+      ...current,
+      session: { ...current.session, lastError: message },
+    }))
+    if (updated) {
+      yield* bus.publish('unpark.failed', { error: message })
+    }
+    return yield* Effect.fail(error)
+  })
+}
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message

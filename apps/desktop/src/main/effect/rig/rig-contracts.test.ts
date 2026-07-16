@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { Effect } from 'effect'
 import { resolveAvailableActions } from '../catalog/catalog-store.live'
-import { projectRigSupport } from '../state/status-projector'
+import { projectRigSupport, projectWorkspaceActions } from '../state/status-projector'
 import type { ConnectedRig, RigCamera } from './rig-model'
 
 const base = {
@@ -41,6 +41,7 @@ describe('Rig capability projection', () => {
 
     assert.deepEqual(projectRigSupport(rig), {
       canPark: false,
+      canUnpark: false,
       canPoint: false,
       preview: false,
       capture: 'unsupported',
@@ -61,6 +62,26 @@ describe('Rig capability projection', () => {
     const support = projectRigSupport(rig)
     assert.equal(support.canPark, true)
     assert.equal(support.autofocus, true)
+  })
+
+  it('offers unpark only for a parked rig with a callable unpark operation', () => {
+    const rig: ConnectedRig = {
+      ...base,
+      mount: { unpark: () => Effect.void },
+    }
+
+    assert.deepEqual(
+      projectWorkspaceActions('parked', projectRigSupport(rig)),
+      [{ id: 'unpark', label: 'Unpark mount', enabled: true }],
+    )
+    assert.deepEqual(
+      projectWorkspaceActions('parked', projectRigSupport({ ...rig, mount: {} })),
+      [],
+    )
+    assert.deepEqual(
+      projectWorkspaceActions('primed', projectRigSupport(rig)),
+      [],
+    )
   })
 
   it('projects dark exposure from the callable camera surface', () => {

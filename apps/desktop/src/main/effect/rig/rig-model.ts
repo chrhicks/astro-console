@@ -52,6 +52,7 @@ export interface RigMount {
     context?: RigOperationContext,
   ) => Effect.Effect<void, unknown>
   readonly park?: (context?: RigOperationContext) => Effect.Effect<void, unknown>
+  readonly unpark?: (context?: RigOperationContext) => Effect.Effect<void, unknown>
   readonly stopMotion?: (
     context?: RigOperationContext,
   ) => Effect.Effect<void, unknown>

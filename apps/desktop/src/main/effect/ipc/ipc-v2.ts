@@ -17,7 +17,7 @@ import {
   runStopCapture,
   MAX_EXPOSURE_DURATION_SEC,
 } from '../workflows/capture-workflows'
-import { runPark } from '../workflows/park-workflows'
+import { runPark, runUnpark } from '../workflows/park-workflows'
 import {
   runConfigureExternalSequence,
   runContinueExternalSequence,
@@ -118,6 +118,10 @@ export function registerIpcV2Handlers(allowed: WebContents) {
 
   handle('seestar:v2:park', () =>
     appRuntime.runPromise(withProjectedStatus(runPark)),
+  )
+
+  handle('seestar:v2:unpark', () =>
+    appRuntime.runPromise(withProjectedStatus(runUnpark)),
   )
 
   handle('seestar:v2:set-exposure-duration', (_event, input) =>

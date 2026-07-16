@@ -457,7 +457,6 @@ async function connectAndReadState(
     .catch(() => false)
   const canUnpark = await client
     .get(`${base}/canunpark`, Schema.Boolean, signal)
-    .catch(() => false)
   const tracking = await client
     .get(`${base}/tracking`, Schema.Boolean, signal)
     .catch(() => undefined)
@@ -499,7 +498,7 @@ function buildMount(
   state: TelescopeState,
 ): ConnectedRig['mount'] | undefined {
   const canSlewAtAll = state.canSlew || state.canSlewAsync
-  if (!state.canPark && !canSlewAtAll) return undefined
+  if (!state.canPark && !state.canUnpark && !canSlewAtAll) return undefined
   return {
     park: state.canPark
       ? (context) =>
@@ -527,6 +526,36 @@ function buildMount(
             },
             catch: (error) =>
               new Error(`Alpaca park failed: ${toErrorMessage(error)}`),
+          })
+      : undefined,
+    unpark: state.canUnpark
+      ? (context) =>
+          Effect.tryPromise({
+            try: async () => {
+              const atPark = await client.get(
+                `${base}/atpark`,
+                Schema.Boolean,
+                context?.signal,
+              )
+              if (!atPark) return
+              await client.put(
+                `${base}/unpark`,
+                {},
+                COMMAND_TIMEOUT_MS,
+                context?.signal,
+              )
+              await pollUntil(
+                async () => {
+                  const mountState = await readMountState(client, base, context)
+                  return !mountState.atPark && !mountState.slewing
+                },
+                UNPARK_SETTLE_TIMEOUT_MS,
+                MOUNT_POLL_INTERVAL_MS,
+                context?.signal,
+              )
+            },
+            catch: (error) =>
+              new Error(`Alpaca unpark failed: ${toErrorMessage(error)}`),
           })
       : undefined,
     slewToCoordinates: canSlewAtAll

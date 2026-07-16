@@ -222,6 +222,7 @@ export type WorkspaceActionId =
   | 'stop-capture'
   | 'preview'
   | 'capture'
+  | 'unpark'
 
 export interface WorkspaceAction {
   id: WorkspaceActionId
@@ -326,6 +327,7 @@ export interface SeestarDesktopApiV2 {
   startCapture(): Promise<DesktopStatus>
   stopCapture(): Promise<DesktopStatus>
   parkMount(): Promise<DesktopStatus>
+  unparkMount(): Promise<DesktopStatus>
   setExposureDuration(
     input: SetExposureDurationRequest,
   ): Promise<DesktopStatus>

@@ -10,6 +10,7 @@ import {
   useStopPreviewMutation,
   useStartCaptureMutation,
   useStopCaptureMutation,
+  useUnparkMountMutation,
 } from '../../mutations/use-workspace-mutations'
 import { electronApi } from '../../lib/electron-api'
 import { isCaptureInFlight } from '../../../../shared/lifecycle'
@@ -73,6 +74,7 @@ export default function WorkArea() {
   const stopPreviewMutation = useStopPreviewMutation()
   const startCaptureMutation = useStartCaptureMutation()
   const stopCaptureMutation = useStopCaptureMutation()
+  const unparkMutation = useUnparkMountMutation()
   const isCapturePending =
     startCaptureMutation.isPending || stopCaptureMutation.isPending
   const isSlewing = workspace.state === 'slewing'
@@ -375,6 +377,20 @@ export default function WorkArea() {
                     onClick={() => stopCaptureMutation.mutate()}
                   >
                     {action.label}
+                  </button>
+                )
+              }
+              if (action.id === 'unpark') {
+                return (
+                  <button
+                    type="button"
+                    key={action.id}
+                    className={`work-action-chip${action.enabled ? '' : ' disabled'}${unparkMutation.isPending ? ' pending' : ''}`}
+                    disabled={!action.enabled || unparkMutation.isPending}
+                    aria-label="Unpark mount"
+                    onClick={() => unparkMutation.mutate()}
+                  >
+                    {unparkMutation.isPending ? 'Unparking...' : action.label}
                   </button>
                 )
               }

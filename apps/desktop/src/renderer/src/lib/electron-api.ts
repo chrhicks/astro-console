@@ -30,6 +30,7 @@ export const electronApi = {
   startCapture: () => getApi().startCapture(),
   stopCapture: () => getApi().stopCapture(),
   parkMount: () => getApi().parkMount(),
+  unparkMount: () => getApi().unparkMount(),
   setExposureDuration: (input: SetExposureDurationRequest) =>
     getApi().setExposureDuration(input),
   configureExternalSequence: (input: ConfigureExternalSequenceRequest) =>

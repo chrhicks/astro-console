@@ -51,6 +51,14 @@ export function useParkMountMutation() {
   })
 }
 
+export function useUnparkMountMutation() {
+  return useMutation({
+    mutationKey: ['mount', 'unpark'],
+    mutationFn: electronApi.unparkMount,
+    onSuccess: applyDesktopStatusToProjectionStore,
+  })
+}
+
 export function useSetExposureDurationMutation() {
   return useMutation({
     mutationKey: ['camera', 'set-exposure-duration'],

@@ -55,6 +55,7 @@ export type OperationKind =
   | 'capture-start'
   | 'sequence'
   | 'sequence-continue'
+  | 'unpark'
   | 'stop-preview'
   | 'stop-capture'
   | 'park'

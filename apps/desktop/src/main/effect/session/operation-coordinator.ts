@@ -28,7 +28,7 @@ export interface OperationLease {
 
 // Ordinary hardware mutations that are mutually exclusive and must wait for
 // any current operation to finish before acquiring.
-type OrdinaryKind = 'point' | 'preview-start' | 'capture-start' | 'sequence' | 'sequence-continue'
+type OrdinaryKind = 'point' | 'preview-start' | 'capture-start' | 'sequence' | 'sequence-continue' | 'unpark'
 
 // Recovery operations that preempt any current ordinary operation and
 // acquire immediately.

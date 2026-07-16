@@ -19,6 +19,7 @@ interface AlpacaScenario {
   atParkDefault?: boolean
   atParkValues: boolean[]
   canUnpark?: boolean
+  canUnparkSchemaError?: boolean
   responseDelayMs?: number
   slewingDefault?: boolean
   slewingValues?: boolean[]
@@ -60,6 +61,15 @@ const server = createServer((request, response) => {
       ],
       ErrorNumber: 0,
     })
+    return
+  }
+
+  if (
+    method === 'GET' &&
+    path === '/api/v1/telescope/0/canunpark' &&
+    scenario.canUnparkSchemaError
+  ) {
+    end({ Value: 'true', ErrorNumber: 0 })
     return
   }
 
@@ -241,6 +251,61 @@ test('park skips the command and polling when the mount is parked with stale sle
   assert.deepEqual(requests, [
     { path: '/api/v1/telescope/0/atpark', method: 'GET' },
   ])
+
+  await Effect.runPromise(session.disconnect)
+})
+
+test('connect omits unpark when canunpark is false', async () => {
+  const session = await connectMount({ atParkValues: [], canUnpark: false })
+
+  assert.equal(session.rig.mount?.unpark, undefined)
+
+  await Effect.runPromise(session.disconnect)
+})
+
+test('connect fails on an invalid canunpark response and a fresh connect can succeed', async () => {
+  scenario = { atParkValues: [], canUnparkSchemaError: true }
+  requests.length = 0
+
+  await assert.rejects(
+    Effect.runPromise(
+      plugin
+        .connect({
+          pluginKind: 'alpaca-rig',
+          deviceId: 'alpaca:telescope:mount-test',
+        })
+        .pipe(Effect.provide(EventBusLive)),
+    ),
+    /Alpaca connect failed/,
+  )
+
+  const session = await connectMount({ atParkValues: [], canUnpark: true })
+  assert.ok(session.rig.mount?.unpark)
+
+  await Effect.runPromise(session.disconnect)
+})
+
+test('unpark commands a parked mount without slewing', async () => {
+  const session = await connectMount({
+    atParkValues: [true, true, false],
+    canUnpark: true,
+    slewingDefault: false,
+  })
+  const mount = session.rig.mount
+
+  assert.ok(mount?.unpark)
+  await Effect.runPromise(mount.unpark({ signal: new AbortController().signal }))
+
+  assert.deepEqual(requests, [
+    { path: '/api/v1/telescope/0/atpark', method: 'GET' },
+    { path: '/api/v1/telescope/0/unpark', method: 'PUT' },
+    { path: '/api/v1/telescope/0/atpark', method: 'GET' },
+    { path: '/api/v1/telescope/0/slewing', method: 'GET' },
+  ])
+  assert.equal(
+    requests.some((request) => request.path.includes('/slewtocoordinates')),
+    false,
+  )
 
   await Effect.runPromise(session.disconnect)
 })
