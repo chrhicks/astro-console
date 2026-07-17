@@ -134,6 +134,7 @@ export function createFakeSeestarPlugin(): DevicePlugin {
           observerLocation: outcome.device.location,
           connect: {
             device: outcome.device,
+            pointing: scenario.connectedPointing,
             preview: connected.preview,
             capture: connected.capture,
             library: connected.library,
@@ -141,6 +142,7 @@ export function createFakeSeestarPlugin(): DevicePlugin {
           refresh,
           mount: {
             park: () => parkArm(),
+            ...(scenario.supportsStopMotion ? { stopMotion: () => Effect.void } : {}),
           },
           pointing: {
             // prepare owns all readiness steps before slewing: sync time

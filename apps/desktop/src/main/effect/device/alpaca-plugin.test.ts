@@ -172,6 +172,8 @@ function getScriptedValue(path: string): boolean | number | string | undefined {
       return 0
     case '/api/v1/camera/0/imageready':
       return false
+    case '/api/v1/camera/0/canstopexposure':
+      return true
     case '/api/v1/camera/0/lastexposureduration':
       return 1
   }
@@ -215,6 +217,9 @@ test('serializes connect and camera state reads for one Alpaca server', async ()
     { path: '/api/v1/telescope/0/driverversion', method: 'GET' },
     { path: '/api/v1/telescope/0/name', method: 'GET' },
     { path: '/api/v1/camera/0/connected', method: 'GET' },
+    { path: '/api/v1/camera/0/camerastate', method: 'GET' },
+    { path: '/api/v1/camera/0/imageready', method: 'GET' },
+    { path: '/api/v1/camera/0/canstopexposure', method: 'GET' },
   ])
   assert.ok(camera)
   await Effect.runPromise(

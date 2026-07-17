@@ -11,10 +11,12 @@ import {
   useStartCaptureMutation,
   useStopCaptureMutation,
   useUnparkMountMutation,
+  useAbortSlewMutation,
 } from '../../mutations/use-workspace-mutations'
 import { electronApi } from '../../lib/electron-api'
 import { isCaptureInFlight } from '../../../../shared/lifecycle'
-import { decideWorkAreaStatus, STATUS_MESSAGES } from './work-area-status'
+import { decideWorkAreaStatus, slewOverlayMessage, STATUS_MESSAGES } from './work-area-status'
+import { workAreaTelemetry } from './work-area-telemetry'
 import './work-area.css'
 
 const PREVIEW_BADGE_LABELS: Record<PreviewProjection['phase'], string> = {
@@ -75,6 +77,7 @@ export default function WorkArea() {
   const startCaptureMutation = useStartCaptureMutation()
   const stopCaptureMutation = useStopCaptureMutation()
   const unparkMutation = useUnparkMountMutation()
+  const abortSlewMutation = useAbortSlewMutation()
   const isCapturePending =
     startCaptureMutation.isPending || stopCaptureMutation.isPending
   const isSlewing = workspace.state === 'slewing'
@@ -108,6 +111,7 @@ export default function WorkArea() {
   const showOverlay = OVERLAY_STATES.has(workspace.state)
   const isConnected = workspace.state !== 'disconnected'
   const hasDeviceLocation = device.location != null
+  const telemetry = workAreaTelemetry(device)
   const statusMessage = decideWorkAreaStatus(
     capture,
     pointing,
@@ -194,6 +198,11 @@ export default function WorkArea() {
               Device time stale
             </span>
           ) : null}
+          {telemetry.map((item) => (
+            <span key={item.title} className="chip" title={item.title}>
+              {item.label}
+            </span>
+          ))}
           {device.warnings && device.warnings.length > 0 ? (
             <span className="chip warn" title={device.warnings.join('\n')}>
               {device.warnings.length} warning
@@ -233,7 +242,7 @@ export default function WorkArea() {
                 : STATUS_MESSAGES[workspace.state]}
             </p>
             {isSlewing ? (
-              <p>Slew cannot be cancelled from the console.</p>
+              <p>{slewOverlayMessage(workspace)}</p>
             ) : null}
             {preview.phase === 'error' && preview.lastError ? (
               <p className="work-overlay-error">{preview.lastError}</p>
@@ -313,6 +322,20 @@ export default function WorkArea() {
                     }}
                   >
                     {action.label}
+                  </button>
+                )
+              }
+              if (action.id === 'abort-slew') {
+                return (
+                  <button
+                    type="button"
+                    key={action.id}
+                    className={`work-action-chip${action.enabled ? '' : ' disabled'}${abortSlewMutation.isPending ? ' pending' : ''}`}
+                    disabled={!action.enabled || abortSlewMutation.isPending}
+                    aria-label="Abort slew"
+                    onClick={() => abortSlewMutation.mutate()}
+                  >
+                    {abortSlewMutation.isPending ? 'Aborting...' : action.label}
                   </button>
                 )
               }

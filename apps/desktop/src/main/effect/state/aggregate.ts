@@ -58,6 +58,7 @@ export type OperationKind =
   | 'unpark'
   | 'stop-preview'
   | 'stop-capture'
+  | 'abort-slew'
   | 'park'
   | 'disconnect'
 

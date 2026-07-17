@@ -19,6 +19,7 @@ import type {
   DevicePluginKind,
   DeviceProjection,
   LibraryProjection,
+  PointingProjection,
   PreviewProjection,
   TargetType,
 } from '../../../shared/api-v2'
@@ -118,11 +119,12 @@ export interface RigCaptureStop {
 
 // Connect-time projection bundle: the initial public state surfaced right
 // after a rig connects. `device` is the full connect-time device projection
-// (identity, location, firmware, etc.); `preview`/`capture`/`library` are
-// the initial aggregate projections. Distinct from RigSessionRefresh,
+// (identity, location, firmware, etc.); `pointing`/`preview`/`capture`/
+// `library` are the initial aggregate projections. Distinct from RigSessionRefresh,
 // which carries only volatile post-command device fields.
 export interface RigConnectState {
   readonly device: DeviceProjection
+  readonly pointing?: PointingProjection
   readonly preview: PreviewProjection
   readonly capture: CaptureProjection
   readonly library: LibraryProjection

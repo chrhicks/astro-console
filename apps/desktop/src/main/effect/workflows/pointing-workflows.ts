@@ -207,6 +207,83 @@ export const runPointToTarget = (targetId: string) =>
     )
   })
 
+export const runAbortSlew = Effect.gen(function* () {
+  const store = yield* AggregateStore
+  const bus = yield* EventBus
+  const sessions = yield* SessionManager
+  const coordinator = yield* OperationCoordinator
+  const session = yield* sessions.getCurrent
+
+  if (!session) return yield* Effect.fail(new Error('No device connected'))
+
+  const lease = yield* coordinator.acquireRecovery(session, 'abort-slew')
+  if (!lease) return
+
+  yield* Effect.acquireUseRelease(
+    Effect.void,
+    () =>
+      Effect.gen(function* () {
+        const current = yield* store.get
+        if (current.pointing.phase !== 'slewing') {
+          return yield* failAbortSlew(
+            lease,
+            new Error('No slew is in progress'),
+            bus,
+            coordinator,
+          )
+        }
+
+        const stopMotion = session.rig.mount?.stopMotion
+        if (!stopMotion) {
+          return yield* failAbortSlew(
+            lease,
+            new Error('Connected rig does not support aborting slew'),
+            bus,
+            coordinator,
+          )
+        }
+
+        yield* bus.publish('pointing.abort.started', {})
+        const context: RigOperationContext = { signal: lease.signal }
+        yield* stopMotion(context).pipe(
+          Effect.catch((error) => failAbortSlew(lease, error, bus, coordinator)),
+        )
+
+        if (lease.signal.aborted) return
+
+        const refreshed = yield* session.rig.refresh.pipe(
+          Effect.catch((error) => failAbortSlew(lease, error, bus, coordinator)),
+        )
+
+        if (lease.signal.aborted) return
+
+        const updated = yield* coordinator.commitIfLease(lease, (aggregate) => ({
+          ...aggregate,
+          session: { ...aggregate.session, lastError: undefined },
+          device: { ...aggregate.device, ...refreshed.device },
+          preview: refreshed.preview,
+          capture: refreshed.capture,
+          pointing: {
+            phase: 'failed',
+            target: aggregate.pointing.target,
+            targetId: aggregate.pointing.targetId,
+            startedAt: aggregate.pointing.startedAt,
+            step: 'Slew aborted',
+            lastError: 'Slew aborted by operator',
+          },
+        }))
+        if (!updated) return
+
+        yield* bus.publish('pointing.abort.succeeded', {})
+      }),
+    () => coordinator.release(lease),
+  ).pipe(
+    Effect.catch((error) =>
+      lease.signal.aborted ? Effect.void : Effect.fail(error),
+    ),
+  )
+})
+
 function resolvePointingCoordinates(
   target: DeepSkyTarget | SolarSystemTarget,
   deviceLocation: { lat: number; lon: number } | undefined,
@@ -228,6 +305,23 @@ function resolvePointingCoordinates(
   return Effect.succeed(
     computeSolarSystemCoordinates(target.body, observer, new Date()),
   )
+}
+
+function failAbortSlew(
+  lease: OperationLease,
+  error: unknown,
+  bus: EventBus,
+  coordinator: OperationCoordinator,
+) {
+  return Effect.gen(function* () {
+    const message = toErrorMessage(error)
+    const updated = yield* coordinator.commitIfLease(lease, (current) => ({
+      ...current,
+      session: { ...current.session, lastError: message },
+    }))
+    if (updated) yield* bus.publish('pointing.abort.failed', { error: message })
+    return yield* Effect.fail(error)
+  })
 }
 
 function toErrorMessage(error: unknown) {

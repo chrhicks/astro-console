@@ -53,6 +53,12 @@ interface TelescopeState {
   readonly name?: string
 }
 
+interface ComponentCapabilities {
+  readonly camera: boolean
+  readonly focuser: boolean
+  readonly filterWheel: boolean
+}
+
 export function createAlpacaRig(
   input: AlpacaRigConfig,
 ): Effect.Effect<RigSession, RigError> {
@@ -81,19 +87,26 @@ export function createAlpacaRig(
         Effect.gen(function* () {
           const state = yield* connectAndReadState(client, telescope)
           yield* connectComponents(client, bases.slice(1))
+          const components = yield* probeComponents(client, {
+            camera,
+            focuser,
+            filterWheel,
+          })
           const location =
             state.siteLatitude === undefined ||
             state.siteLongitude === undefined
               ? undefined
               : { lat: state.siteLatitude, lon: state.siteLongitude }
           const mount = buildMount(client, telescope, state)
-          const rigCamera = camera ? buildCamera(client, camera) : undefined
+          const rigCamera = camera && components.camera
+            ? buildCamera(client, camera)
+            : undefined
           const snapshot = {
             mount: { parked: state.atPark, tracking: state.tracking },
             preview: { active: false, source: 'none' as const },
             capture: {
               active: false,
-              mode: camera ? ('external' as const) : undefined,
+              mode: rigCamera ? ('external' as const) : undefined,
             },
             warnings: [],
           }
@@ -111,7 +124,7 @@ export function createAlpacaRig(
             observerLocation: location,
             snapshot,
             refresh: alpacaError('refresh')(
-              readSnapshot(client, telescope, camera),
+              readSnapshot(client, telescope, rigCamera ? camera : undefined),
             ),
             disconnect: alpacaError('disconnect')(disconnectAll(client, bases)),
             mount,
@@ -130,7 +143,7 @@ export function createAlpacaRig(
                 }
               : undefined,
             camera: rigCamera,
-            focuser: focuser
+            focuser: focuser && components.focuser
               ? {
                   moveTo: (position) =>
                     command(
@@ -141,7 +154,7 @@ export function createAlpacaRig(
                     ),
                 }
               : undefined,
-            filterWheel: filterWheel
+            filterWheel: filterWheel && components.filterWheel
               ? {
                   setPosition: (position, context) =>
                     command(
@@ -168,6 +181,38 @@ function connectComponents(client: AlpacaClient, bases: readonly string[]) {
   return Effect.forEach(bases, (base) => ensureConnected(client, base), {
     concurrency: 1,
   })
+}
+
+function probeComponents(
+  client: AlpacaClient,
+  bases: {
+    readonly camera: string | undefined
+    readonly focuser: string | undefined
+    readonly filterWheel: string | undefined
+  },
+): Effect.Effect<ComponentCapabilities, AlpacaTransportError | AlpacaProtocolError> {
+  return Effect.gen(function* () {
+    const camera = bases.camera
+      ? yield* Effect.all([
+          endpointAvailable(client.get(`${bases.camera}/camerastate`, Schema.Number)),
+          endpointAvailable(client.get(`${bases.camera}/imageready`, Schema.Boolean)),
+          optional(client.get(`${bases.camera}/canstopexposure`, Schema.Boolean)).pipe(
+            Effect.map((value) => value === true),
+          ),
+        ]).pipe(Effect.map((results) => results.every(Boolean)))
+      : false
+    const focuser = bases.focuser
+      ? yield* endpointAvailable(client.get(`${bases.focuser}/ismoving`, Schema.Boolean))
+      : false
+    const filterWheel = bases.filterWheel
+      ? yield* endpointAvailable(client.get(`${bases.filterWheel}/position`, Schema.Number))
+      : false
+    return { camera, focuser, filterWheel }
+  })
+}
+
+function endpointAvailable<A>(effect: Effect.Effect<A, AlpacaError>) {
+  return optional(effect).pipe(Effect.map((value) => value !== undefined))
 }
 
 function connectAndReadState(client: AlpacaClient, base: string) {

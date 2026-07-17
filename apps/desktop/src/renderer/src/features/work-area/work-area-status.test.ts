@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { it } from 'node:test'
-import { decideWorkAreaStatus } from './work-area-status'
+import { decideWorkAreaStatus, slewOverlayMessage } from './work-area-status'
 
 const workspace = {
   state: 'primed' as const,
@@ -31,5 +31,20 @@ it('uses external copy for an actionable external workspace', () => {
       'exposure',
     ),
     'Ready to preview or expose.',
+  )
+})
+
+it('matches slew overlay copy to the canonical abort action', () => {
+  assert.equal(
+    slewOverlayMessage({
+      ...workspace,
+      state: 'slewing',
+      actions: [{ id: 'abort-slew', label: 'Abort slew', enabled: true }],
+    }),
+    'Use Abort slew to stop the mount.',
+  )
+  assert.equal(
+    slewOverlayMessage({ ...workspace, state: 'slewing' }),
+    'This rig cannot abort a slew from the console.',
   )
 })

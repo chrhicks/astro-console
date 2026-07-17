@@ -59,6 +59,14 @@ export function useUnparkMountMutation() {
   })
 }
 
+export function useAbortSlewMutation() {
+  return useMutation({
+    mutationKey: ['pointing', 'abort-slew'],
+    mutationFn: electronApi.abortSlew,
+    onSuccess: applyDesktopStatusToProjectionStore,
+  })
+}
+
 export function useSetExposureDurationMutation() {
   return useMutation({
     mutationKey: ['camera', 'set-exposure-duration'],

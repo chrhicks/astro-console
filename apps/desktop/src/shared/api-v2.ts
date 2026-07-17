@@ -223,6 +223,7 @@ export type WorkspaceActionId =
   | 'preview'
   | 'capture'
   | 'unpark'
+  | 'abort-slew'
 
 export interface WorkspaceAction {
   id: WorkspaceActionId
@@ -328,6 +329,7 @@ export interface SeestarDesktopApiV2 {
   stopCapture(): Promise<DesktopStatus>
   parkMount(): Promise<DesktopStatus>
   unparkMount(): Promise<DesktopStatus>
+  abortSlew(): Promise<DesktopStatus>
   setExposureDuration(
     input: SetExposureDurationRequest,
   ): Promise<DesktopStatus>

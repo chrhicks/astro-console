@@ -60,3 +60,22 @@ it('forwards unpark to the preload API', async () => {
 
   assert.deepEqual(calls, ['unpark'])
 })
+
+it('forwards abort slew to the preload API', async () => {
+  const calls: string[] = []
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      seestarV2: {
+        abortSlew: () => {
+          calls.push('abort-slew')
+          return Promise.resolve(undefined)
+        },
+      },
+    },
+  })
+
+  await electronApi.abortSlew()
+
+  assert.deepEqual(calls, ['abort-slew'])
+})

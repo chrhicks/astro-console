@@ -19,6 +19,7 @@ import type { ConnectRequestV2, DesktopDiscoveredDeviceV2 } from '../../../share
 import { runConnect, runDisconnect } from './session-workflows'
 import { runStartCapture, runStopCapture } from './capture-workflows'
 import { runPark, runUnpark } from './park-workflows'
+import { runAbortSlew } from './pointing-workflows'
 import {
   runConfigureExternalSequence,
   runContinueExternalSequence,
@@ -26,7 +27,7 @@ import {
   runStartExternalSequence,
 } from './external-sequence'
 import { captureExternalFrame } from './external-exposure'
-import type { RigCamera, RigSessionRefresh } from '../rig/rig-model'
+import type { RigCamera, RigMount, RigSessionRefresh } from '../rig/rig-model'
 import { FrameStorage } from '../storage/frame-storage'
 import { HardwareWorkers, HardwareWorkersLive } from '../runtime/hardware-workers'
 
@@ -66,7 +67,8 @@ interface ExternalSessionOptions {
   getExposureState: RigCamera['getExposureState']
   stopExposure?: () => Effect.Effect<void>
   park?: () => Effect.Effect<void>
-  unpark?: () => Effect.Effect<void>
+  unpark?: RigMount['unpark']
+  stopMotion?: () => Effect.Effect<void>
   refresh?: Effect.Effect<RigSessionRefresh>
   startExposure?: RigCamera['startExposure']
   getLatestFrame?: RigCamera['getLatestFrame']
@@ -82,6 +84,7 @@ function makeExternalSession(
     stopExposure = () => Effect.void,
     park = () => Effect.void,
     unpark,
+    stopMotion,
     refresh = Effect.succeed({
       device: {},
       preview: { phase: 'none', source: 'none', active: false },
@@ -119,7 +122,7 @@ function makeExternalSession(
       refresh,
       camera,
       captureStop: { mode: 'external', stop: camera.stopExposure },
-      mount: { park, unpark },
+      mount: { park, unpark, stopMotion },
     },
   }
 }
@@ -711,9 +714,13 @@ describe('workflow interruption safety', () => {
 
   it('unparks through the mount capability and refreshes the parked projection', async () => {
     let unparkCalls = 0
+    let unparkSignal: AbortSignal | undefined
     const session = makeExternalSession('s1', {
       getExposureState: () => Effect.succeed({ state: 'idle', imageReady: false }),
-      unpark: () => Effect.sync(() => { unparkCalls++ }),
+      unpark: (context) => Effect.sync(() => {
+        unparkCalls++
+        unparkSignal = context?.signal
+      }),
       refresh: Effect.succeed({
         device: { mountClosed: false },
         preview: { phase: 'none', source: 'none', active: false },
@@ -736,7 +743,43 @@ describe('workflow interruption safety', () => {
     )
 
     assert.equal(unparkCalls, 1)
+    assert.ok(unparkSignal)
+    assert.equal(unparkSignal.aborted, false)
     assert.equal(result.device.mountClosed, false)
+  })
+
+  it('aborts a slew through the mount capability and commits the refreshed state', async () => {
+    let stopCalls = 0
+    const session = makeExternalSession('s1', {
+      getExposureState: () => Effect.succeed({ state: 'idle', imageReady: false }),
+      stopMotion: () => Effect.sync(() => { stopCalls++ }),
+      refresh: Effect.succeed({
+        device: { tracking: false },
+        preview: { phase: 'none', source: 'none', active: false },
+        capture: { phase: 'idle' },
+      }),
+    })
+    const testLayer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)))
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* runConnect({ pluginKind: 'fake-seestar', deviceId: 'test:s1' })
+        const store = yield* AggregateStore
+        const target = { id: 'target', name: 'Target', short: 'target' }
+        yield* store.update((current) => ({
+          ...current,
+          pointing: { phase: 'slewing', target, targetId: target.id },
+        }))
+        yield* runAbortSlew
+        return yield* store.get
+      }).pipe(Effect.provide(testLayer)),
+    )
+
+    assert.equal(stopCalls, 1)
+    assert.equal(result.pointing.phase, 'failed')
+    assert.equal(result.pointing.lastError, 'Slew aborted by operator')
+    assert.equal(result.device.tracking, false)
+    assert.equal(result.session.lastError, undefined)
   })
 
   for (const mountClosed of [false, undefined] as const) {

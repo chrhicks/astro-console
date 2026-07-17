@@ -6,7 +6,13 @@ import type {
   SeestarViewMode,
   ViewStateResult,
 } from '../types.js'
-import type { RigError, RigEvent, RigSession, RigSnapshot } from './contracts.js'
+import type {
+  RigDeviceTelemetry,
+  RigError,
+  RigEvent,
+  RigSession,
+  RigSnapshot,
+} from './contracts.js'
 import { RigProtocolError, RigRejectedError, RigTransportError } from './contracts.js'
 
 const WAIT = {
@@ -151,13 +157,15 @@ export function createSeestarRig(input: SeestarRigConfig): Effect.Effect<RigSess
             publish({ type: event.type, message: event.error })
           })
           scheduleKeepalive()
+           let telemetry = toTelemetry(preflight)
           const initialSnapshot = {
             mount: { parked: preflight.mountClosed, tracking: preflight.tracking },
             preview: { active: false, source: 'none' as const },
             capture: { active: false },
+            telemetry,
             warnings,
           }
-          const snapshot = () => snapshotEffect(device, warnings)
+          const snapshot = () => snapshotEffect(device, warnings, telemetry)
 
           return {
             identity: {
@@ -171,7 +179,7 @@ export function createSeestarRig(input: SeestarRigConfig): Effect.Effect<RigSess
             },
             observerLocation: preflight.location,
             snapshot: initialSnapshot,
-            refresh: snapshot(),
+            refresh: Effect.suspend(snapshot),
             disconnect: deviceEffect('disconnect', stop),
             events: Stream.fromPubSub(events),
             mount: {
@@ -181,6 +189,14 @@ export function createSeestarRig(input: SeestarRigConfig): Effect.Effect<RigSess
               ).pipe(Effect.flatMap((accepted) =>
                 accepted ? Effect.void : Effect.fail(rejected('mount.park', 'Device rejected park request')),
               ))),
+              unpark: (context) => action('mount.unpark', Effect.gen(function* () {
+                const current = yield* snapshotEffect(device, warnings, telemetry)
+                if (current.mount.parked !== true) return
+                if (!(yield* deviceEffect(
+                  'mount.unpark.moveToHorizon',
+                  () => device.moveToHorizon({ ...WAIT, timeoutMs: 60000, signal: context?.signal }),
+                ))) return yield* Effect.fail(rejected('mount.unpark', 'Device rejected move-to-horizon request'))
+              })),
             },
             pointing: {
               prepare: (pointing, context) => action('pointing.prepare', Effect.gen(function* () {
@@ -190,12 +206,18 @@ export function createSeestarRig(input: SeestarRigConfig): Effect.Effect<RigSess
                 if (!(yield* deviceEffect('pointing.prepare.setUserLocation', () => device.setUserLocation(pointing.lat, pointing.lon)))) {
                   return yield* Effect.fail(rejected('pointing.prepare', 'Device rejected set-user-location request'))
                 }
-                const current = yield* snapshotEffect(device, warnings)
+                const refreshedPreflight = yield* deviceEffect(
+                  'pointing.prepare.preflight',
+                  () => device.preflightCheck(),
+                )
+                warnings = refreshedPreflight.warnings
+                telemetry = toTelemetry(refreshedPreflight)
+                const current = yield* snapshotEffect(device, warnings, telemetry)
                 if (current.preview.active && !(yield* deviceEffect(
                   'pointing.prepare.stopView',
                   () => device.stopView(undefined, { ...WAIT, timeoutMs: 30000, signal: context?.signal }),
                 ))) return yield* Effect.fail(rejected('pointing.prepare', 'Device rejected stop-view request'))
-                const next = yield* snapshotEffect(device, warnings)
+                const next = yield* snapshotEffect(device, warnings, telemetry)
                 if (next.mount.parked && !(yield* deviceEffect(
                   'pointing.prepare.moveToHorizon',
                   () => device.moveToHorizon({ ...WAIT, timeoutMs: 60000, signal: context?.signal }),
@@ -239,7 +261,7 @@ export function createSeestarRig(input: SeestarRigConfig): Effect.Effect<RigSess
             },
             nativeCapture: {
               start: (context) => action('capture.start', Effect.gen(function* () {
-                const current = yield* snapshotEffect(device, warnings)
+                const current = yield* snapshotEffect(device, warnings, telemetry)
                 if (!current.preview.active && !(yield* deviceEffect('capture.start.startView', () => device.startView(lastViewMode, undefined, { ...WAIT, timeoutMs: 30000, signal: context?.signal })))) return yield* Effect.fail(rejected('capture.start', 'Device rejected start-view request before stacking'))
                 if (!(yield* deviceEffect('capture.start.startStack', () => device.startStack(true, { ...WAIT, timeoutMs: 30000, signal: context?.signal })))) return yield* Effect.fail(rejected('capture.start', 'Device rejected start-stack request'))
               })),
@@ -301,13 +323,21 @@ function deviceEffect<A>(operation: string, run: () => Promise<A>): Effect.Effec
   })
 }
 
-function snapshotEffect(device: SeestarRigDevice, warnings: readonly string[]): Effect.Effect<RigSnapshot, RigError> {
+function snapshotEffect(
+  device: SeestarRigDevice,
+  warnings: readonly string[],
+  telemetry: RigDeviceTelemetry,
+): Effect.Effect<RigSnapshot, RigError> {
   return deviceEffect('refresh', () => device.getSnapshot()).pipe(
-    Effect.flatMap((snapshot) => toSnapshot(snapshot, warnings)),
+    Effect.flatMap((snapshot) => toSnapshot(snapshot, warnings, telemetry)),
   )
 }
 
-function toSnapshot(snapshot: { readonly deviceState: DeviceState | null; readonly viewState: ViewStateResult | null }, warnings: readonly string[]): Effect.Effect<RigSnapshot, RigProtocolError> {
+function toSnapshot(
+  snapshot: { readonly deviceState: DeviceState | null; readonly viewState: ViewStateResult | null },
+  warnings: readonly string[],
+  telemetry: RigDeviceTelemetry,
+): Effect.Effect<RigSnapshot, RigProtocolError> {
   const mount: Effect.Effect<typeof MountState.Type | undefined, RigProtocolError> = snapshot.deviceState
     ? decodeMountState(snapshot.deviceState.mount)
     : Effect.succeed(undefined)
@@ -322,9 +352,30 @@ function toSnapshot(snapshot: { readonly deviceState: DeviceState | null; readon
       mount: { parked: mount?.close, tracking: mount?.tracking },
       preview: { active, source: active ? 'native' as const : 'none' as const },
       capture: { active: capture, mode: capture ? 'native' as const : undefined },
+      telemetry,
       warnings: mount?.close === false ? warnings.filter((warning) => warning !== 'Mount is currently parked/closed') : warnings,
     }
   }))
+}
+
+function toTelemetry(preflight: {
+  readonly batteryPercent?: number
+  readonly deviceTempC?: number
+  readonly batteryTempC?: number
+  readonly storageFreeMb?: number
+  readonly storageTotalMb?: number
+  readonly deviceTime?: RigDeviceTelemetry['deviceTime']
+  readonly deviceTimeLooksStale?: boolean
+}): RigDeviceTelemetry {
+  return {
+    batteryPercent: preflight.batteryPercent,
+    deviceTempC: preflight.deviceTempC,
+    batteryTempC: preflight.batteryTempC,
+    storageFreeMb: preflight.storageFreeMb,
+    storageTotalMb: preflight.storageTotalMb,
+    deviceTime: preflight.deviceTime,
+    deviceTimeLooksStale: preflight.deviceTimeLooksStale,
+  }
 }
 
 function decodeMountState(value: unknown): Effect.Effect<typeof MountState.Type, RigProtocolError> {

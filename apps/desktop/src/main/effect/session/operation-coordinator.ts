@@ -32,7 +32,7 @@ type OrdinaryKind = 'point' | 'preview-start' | 'capture-start' | 'sequence' | '
 
 // Recovery operations that preempt any current ordinary operation and
 // acquire immediately.
-type RecoveryKind = 'stop-preview' | 'stop-capture' | 'park'
+type RecoveryKind = 'stop-preview' | 'stop-capture' | 'abort-slew' | 'park'
 
 export interface OperationCoordinator {
   // Acquire an ordinary operation lease. Waits until no current operation
@@ -208,7 +208,7 @@ function isAggregateBusy(aggregate: SessionAggregate, kind: OrdinaryKind): boole
 }
 
 function isRecovery(kind: OperationKind): kind is RecoveryKind {
-  return kind === 'stop-preview' || kind === 'stop-capture' || kind === 'park'
+  return kind === 'stop-preview' || kind === 'stop-capture' || kind === 'abort-slew' || kind === 'park'
 }
 
 function ownsLease(state: RuntimeState, lease: OperationLease): boolean {

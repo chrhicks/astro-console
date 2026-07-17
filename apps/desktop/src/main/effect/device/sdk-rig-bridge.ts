@@ -99,6 +99,7 @@ function toRefresh(snapshot: RigSnapshot): RigSessionRefresh {
     device: {
       tracking: snapshot.mount.tracking,
       mountClosed: snapshot.mount.parked,
+      ...snapshot.telemetry,
       warnings: [...snapshot.warnings],
     },
     preview: toPreview(snapshot),

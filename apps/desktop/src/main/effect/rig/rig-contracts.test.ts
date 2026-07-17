@@ -42,6 +42,7 @@ describe('Rig capability projection', () => {
     assert.deepEqual(projectRigSupport(rig), {
       canPark: false,
       canUnpark: false,
+      canStopMotion: true,
       canPoint: false,
       preview: false,
       capture: 'unsupported',
@@ -80,6 +81,22 @@ describe('Rig capability projection', () => {
     )
     assert.deepEqual(
       projectWorkspaceActions('primed', projectRigSupport(rig)),
+      [],
+    )
+  })
+
+  it('offers abort slew only while a callable stop-motion operation is available', () => {
+    const rig: ConnectedRig = {
+      ...base,
+      mount: { stopMotion: () => Effect.void },
+    }
+
+    assert.deepEqual(
+      projectWorkspaceActions('slewing', projectRigSupport(rig)),
+      [{ id: 'abort-slew', label: 'Abort slew', enabled: true }],
+    )
+    assert.deepEqual(
+      projectWorkspaceActions('slewing', projectRigSupport({ ...rig, mount: {} })),
       [],
     )
   })

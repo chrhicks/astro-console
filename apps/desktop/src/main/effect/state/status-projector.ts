@@ -30,6 +30,7 @@ export const StatusProjector =
 interface RigSupport {
   canPark: boolean
   canUnpark: boolean
+  canStopMotion: boolean
   canPoint: boolean
   preview: boolean
   capture: WorkspaceCapabilityTier
@@ -43,6 +44,7 @@ export function projectRigSupport(rig: ConnectedRig): RigSupport {
   return {
     canPark: rig.mount?.park !== undefined,
     canUnpark: rig.mount?.unpark !== undefined,
+    canStopMotion: rig.mount?.stopMotion !== undefined,
     canPoint: rig.pointing !== undefined,
     preview: rig.preview !== undefined,
     capture: rig.capture ? 'native' : rig.camera ? 'external' : 'unsupported',
@@ -219,6 +221,11 @@ export function projectWorkspaceActions(
   }
   if (state === 'ready_to_slew') {
     return [{ id: 'retry-slew', label: 'Retry slew', enabled: true }]
+  }
+  if (state === 'slewing') {
+    return rigSupport?.canStopMotion
+      ? [{ id: 'abort-slew', label: 'Abort slew', enabled: true }]
+      : []
   }
   if (state === 'preview_error') {
     return [{ id: 'retry-preview', label: 'Retry preview', enabled: true }]

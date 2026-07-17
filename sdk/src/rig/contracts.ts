@@ -61,10 +61,29 @@ export interface RigCaptureSnapshot {
   readonly mode?: 'native' | 'external'
 }
 
+export interface RigDeviceTelemetry {
+  readonly batteryPercent?: number
+  readonly deviceTempC?: number
+  readonly batteryTempC?: number
+  readonly storageFreeMb?: number
+  readonly storageTotalMb?: number
+  readonly deviceTime?: {
+    readonly year: number
+    readonly mon: number
+    readonly day: number
+    readonly hour: number
+    readonly min: number
+    readonly sec: number
+    readonly timeZone?: string
+  }
+  readonly deviceTimeLooksStale?: boolean
+}
+
 export interface RigSnapshot {
   readonly mount: RigMountSnapshot
   readonly preview: RigPreviewSnapshot
   readonly capture: RigCaptureSnapshot
+  readonly telemetry?: RigDeviceTelemetry
   readonly warnings: readonly string[]
 }
 

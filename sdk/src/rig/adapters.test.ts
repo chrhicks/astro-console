@@ -17,6 +17,9 @@ interface AlpacaScenario {
   readonly optionalTracking?: 'invalid' | 'rejected' | 'transport'
   readonly slewing?: readonly boolean[]
   readonly rejectPark?: boolean
+  readonly cameraEndpoints?: boolean
+  readonly focuserEndpoints?: boolean
+  readonly filterWheelEndpoints?: boolean
 }
 
 const requests: Array<{ readonly method: string; readonly path: string }> = []
@@ -72,6 +75,14 @@ function alpacaValue(path: string): boolean | number | string | undefined {
   if (path.endsWith('/driverversion')) return '1.0'
   if (path.endsWith('/name')) return 'Test mount'
   if (path.endsWith('/slewing')) return slewing.shift() ?? false
+  if (path.endsWith('/camerastate')) return scenario.cameraEndpoints ? 0 : undefined
+  if (path.endsWith('/imageready'))
+    return scenario.cameraEndpoints ? false : undefined
+  if (path.endsWith('/canstopexposure'))
+    return scenario.cameraEndpoints ? true : undefined
+  if (path.endsWith('/ismoving')) return scenario.focuserEndpoints ? false : undefined
+  if (path.endsWith('/filterwheel/0/position'))
+    return scenario.filterWheelEndpoints ? 0 : undefined
   return undefined
 }
 
@@ -144,7 +155,14 @@ test.after(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()))
 })
 
-async function connect(next: AlpacaScenario) {
+async function connect(
+  next: AlpacaScenario,
+  components: {
+    readonly camera?: boolean
+    readonly focuser?: boolean
+    readonly filterWheel?: boolean
+  } = {},
+) {
   scenario = next
   atPark = [...next.atPark]
   slewing = [...(next.slewing ?? [])]
@@ -156,6 +174,9 @@ async function connect(next: AlpacaScenario) {
       port,
       displayName: 'Test mount',
       telescopeDeviceNumber: 0,
+      cameraDeviceNumber: components.camera ? 0 : undefined,
+      focuserDeviceNumber: components.focuser ? 0 : undefined,
+      filterWheelDeviceNumber: components.filterWheel ? 0 : undefined,
     }),
   )
   requests.length = 0
@@ -172,6 +193,34 @@ alpacaTest(
     assert.equal(rig.camera, undefined)
     assert.equal(rig.nativeCapture, undefined)
     await Effect.runPromise(rig.disconnect)
+  },
+)
+
+alpacaTest(
+  'Alpaca adapter omits optional components until their endpoints respond',
+  async () => {
+    const unsupported = await connect(
+      { atPark: [] },
+      { camera: true, focuser: true, filterWheel: true },
+    )
+    assert.equal(unsupported.camera, undefined)
+    assert.equal(unsupported.focuser, undefined)
+    assert.equal(unsupported.filterWheel, undefined)
+    await Effect.runPromise(unsupported.disconnect)
+
+    const supported = await connect(
+      {
+        atPark: [],
+        cameraEndpoints: true,
+        focuserEndpoints: true,
+        filterWheelEndpoints: true,
+      },
+      { camera: true, focuser: true, filterWheel: true },
+    )
+    assert.ok(supported.camera)
+    assert.ok(supported.focuser)
+    assert.ok(supported.filterWheel)
+    await Effect.runPromise(supported.disconnect)
   },
 )
 
@@ -335,6 +384,224 @@ test('Seestar adapter maps rejected commands to RigRejectedError', async () => {
       error instanceof RigRejectedError && error.operation === 'mount.park',
   )
   await Effect.runPromise(rig.disconnect)
+})
+
+test('Seestar adapter exposes unpark only as a closed-mount horizon move', async () => {
+  let closed = true
+  let moves = 0
+  let signal: AbortSignal | undefined
+  const rig = await Effect.runPromise(
+    createSeestarRig({
+      rigId: 'test',
+      host: '127.0.0.1',
+      displayName: 'Test Seestar',
+      pemPath: '/unused.pem',
+      deviceFactory: () => ({
+        ...createFakeSeestarDevice({
+          snapshot: () => ({
+            deviceState: { mount: { close: closed } },
+            viewState: null,
+          }),
+        }),
+        moveToHorizon: async (wait) => {
+          moves++
+          signal = wait.signal
+          closed = false
+          return true
+        },
+      }),
+    }),
+  )
+  const unpark = rig.mount?.unpark
+  const controller = new AbortController()
+
+  assert.ok(unpark)
+  await Effect.runPromise(unpark({ signal: controller.signal }))
+  await Effect.runPromise(unpark())
+
+  assert.equal(moves, 1)
+  assert.equal(signal, controller.signal)
+  await Effect.runPromise(rig.disconnect)
+})
+
+test('Seestar unpark maps a rejected horizon move to RigRejectedError', async () => {
+  const rig = await Effect.runPromise(
+    createSeestarRig({
+      rigId: 'test',
+      host: '127.0.0.1',
+      displayName: 'Test Seestar',
+      pemPath: '/unused.pem',
+      deviceFactory: () => ({
+        ...createFakeSeestarDevice({
+          snapshot: () => ({
+            deviceState: { mount: { close: true } },
+            viewState: null,
+          }),
+        }),
+        moveToHorizon: async () => false,
+      }),
+    }),
+  )
+  const unpark = rig.mount?.unpark
+
+  assert.ok(unpark)
+  await assert.rejects(
+    Effect.runPromise(unpark()),
+    (error: unknown) =>
+      error instanceof RigRejectedError && error.operation === 'mount.unpark',
+  )
+  await Effect.runPromise(rig.disconnect)
+})
+
+test('Seestar adapter preserves preflight telemetry in rig snapshots', async () => {
+  const rig = await Effect.runPromise(
+    createSeestarRig({
+      rigId: 'test',
+      host: '127.0.0.1',
+      displayName: 'Test Seestar',
+      pemPath: '/unused.pem',
+      deviceFactory: () => ({
+        ...createFakeSeestarDevice(),
+        preflightCheck: async () => ({
+          host: '127.0.0.1',
+          batteryPercent: 83,
+          deviceTempC: 32,
+          batteryTempC: 29,
+          storageFreeMb: 4096,
+          storageTotalMb: 8192,
+          deviceTime: { year: 1970, mon: 1, day: 1, hour: 0, min: 0, sec: 0 },
+          deviceTimeLooksStale: true,
+          raw: {
+            deviceState: null,
+            viewState: null,
+            setting: null,
+            diskVolume: null,
+            piInfo: null,
+            time: null,
+          },
+          warnings: ['Device clock appears stale at 1970-01-01 00:00:00'],
+        }),
+      }),
+    }),
+  )
+
+  assert.deepEqual(rig.snapshot.telemetry, {
+    batteryPercent: 83,
+    deviceTempC: 32,
+    batteryTempC: 29,
+    storageFreeMb: 4096,
+    storageTotalMb: 8192,
+    deviceTime: { year: 1970, mon: 1, day: 1, hour: 0, min: 0, sec: 0 },
+    deviceTimeLooksStale: true,
+  })
+  await Effect.runPromise(rig.disconnect)
+})
+
+test('Seestar prepare refreshes synchronized clock telemetry and warnings', async () => {
+  let preflightCalls = 0
+  const rig = await Effect.runPromise(
+    createSeestarRig({
+      rigId: 'test',
+      host: '127.0.0.1',
+      displayName: 'Test Seestar',
+      pemPath: '/unused.pem',
+      deviceFactory: () => ({
+        ...createFakeSeestarDevice(),
+        preflightCheck: async () => {
+          preflightCalls++
+          const stale = preflightCalls === 1
+          return {
+            host: '127.0.0.1',
+            deviceTime: stale
+              ? { year: 2020, mon: 6, day: 29, hour: 7, min: 36, sec: 53 }
+              : { year: 2026, mon: 7, day: 17, hour: 12, min: 0, sec: 0 },
+            deviceTimeLooksStale: stale,
+            raw: {
+              deviceState: null,
+              viewState: null,
+              setting: null,
+              diskVolume: null,
+              piInfo: null,
+              time: null,
+            },
+            warnings: stale ? ['Device clock appears stale'] : [],
+          }
+        },
+      }),
+    }),
+  )
+  const prepare = rig.pointing?.prepare
+
+  try {
+    assert.ok(prepare)
+    await Effect.runPromise(prepare({ lat: 39.755, lon: -74.2679 }))
+
+    assert.equal(preflightCalls, 2)
+    assert.equal(rig.snapshot.telemetry?.deviceTimeLooksStale, true)
+    const refreshed = await Effect.runPromise(rig.refresh)
+    assert.deepEqual(refreshed.telemetry?.deviceTime, {
+      year: 2026,
+      mon: 7,
+      day: 17,
+      hour: 12,
+      min: 0,
+      sec: 0,
+    })
+    assert.equal(refreshed.telemetry?.deviceTimeLooksStale, false)
+    assert.deepEqual(refreshed.warnings, [])
+  } finally {
+    await Effect.runPromise(rig.disconnect)
+  }
+})
+
+test('Seestar prepare preserves stale telemetry and warnings when location synchronization fails', async () => {
+  let preflightCalls = 0
+  const rig = await Effect.runPromise(
+    createSeestarRig({
+      rigId: 'test',
+      host: '127.0.0.1',
+      displayName: 'Test Seestar',
+      pemPath: '/unused.pem',
+      deviceFactory: () => ({
+        ...createFakeSeestarDevice(),
+        preflightCheck: async () => {
+          preflightCalls++
+          return {
+            host: '127.0.0.1',
+            deviceTime: { year: 2020, mon: 6, day: 29, hour: 7, min: 36, sec: 53 },
+            deviceTimeLooksStale: true,
+            raw: {
+              deviceState: null,
+              viewState: null,
+              setting: null,
+              diskVolume: null,
+              piInfo: null,
+              time: null,
+            },
+            warnings: ['Device clock appears stale'],
+          }
+        },
+        setUserLocation: async () => false,
+      }),
+    }),
+  )
+  const prepare = rig.pointing?.prepare
+
+  try {
+    assert.ok(prepare)
+    await assert.rejects(
+      Effect.runPromise(prepare({ lat: 39.755, lon: -74.2679 })),
+      (error: unknown) =>
+        error instanceof RigRejectedError && error.operation === 'pointing.prepare',
+    )
+
+    assert.equal(preflightCalls, 1)
+    const refreshed = await Effect.runPromise(rig.refresh)
+    assert.equal(refreshed.telemetry?.deviceTimeLooksStale, true)
+    assert.deepEqual(refreshed.warnings, ['Device clock appears stale'])
+  } finally {
+    await Effect.runPromise(rig.disconnect)
+  }
 })
 
 test('Seestar adapter maps malformed mount snapshots to RigProtocolError', async () => {

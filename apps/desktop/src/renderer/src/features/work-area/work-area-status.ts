@@ -48,3 +48,11 @@ export function decideWorkAreaStatus(
   }
   return STATUS_MESSAGES[workspace.state]
 }
+
+export function slewOverlayMessage(workspace: WorkspaceProjection): string {
+  return workspace.actions.some(
+    (action) => action.id === 'abort-slew' && action.enabled,
+  )
+    ? 'Use Abort slew to stop the mount.'
+    : 'This rig cannot abort a slew from the console.'
+}

@@ -5,6 +5,7 @@ import type {
   FakeRuntimeSnapshot,
   FakeScenarioSummary,
   LibraryProjection,
+  PointingProjection,
   PreviewProjection,
 } from '../../../shared/api-v2'
 import type { DeviceSessionRefresh } from './device-plugin'
@@ -70,6 +71,8 @@ export interface FakeScenario {
   // Projection state shown while connected before any slew. Defaults to no
   // preview, idle capture, empty library.
   readonly connected?: FakeScenarioAfterPoint
+  readonly connectedPointing?: PointingProjection
+  readonly supportsStopMotion?: boolean
   // Projection state applied after a successful pointToTarget on the fake
   // session. Omit for scenarios that only exercise connect/preflight.
   readonly afterPoint?: FakeScenarioAfterPoint
@@ -139,6 +142,42 @@ const CONNECTED_IDLE: FakeScenarioAfterPoint = {
 }
 
 const SCENARIOS: readonly FakeScenario[] = [
+  {
+    id: 'abort-slew-available',
+    label: 'Abort slew available',
+    description: 'Connects in a safe simulated slew with an available abort action.',
+    discover: [discovered()],
+    connect: {
+      delayMs: 500,
+      outcome: {
+        kind: 'success',
+        device: baseDevice({
+          location: { lat: 37.7749, lon: -122.4194 },
+          deviceTime: FRESH_DEVICE_TIME,
+          deviceTimeLooksStale: false,
+          activity: 'idle',
+          warnings: [],
+        }),
+        warnings: [],
+      },
+    },
+    point: { delayMs: 750, outcome: { kind: 'success' } },
+    connectedPointing: {
+      phase: 'slewing',
+      target: {
+        id: 'fake-m42',
+        short: 'M42',
+        name: 'Orion Nebula',
+        recommendedFilter: null,
+        type: 'dso',
+        availableActions: ['slew', 'stack', 'preview', 'filter'],
+      },
+      targetId: 'fake-m42',
+      startedAt: '2026-07-03T21:30:00.000Z',
+      step: 'Slewing to target',
+    },
+    supportsStopMotion: true,
+  },
   {
     id: 'clean-connect',
     label: 'Clean connect',

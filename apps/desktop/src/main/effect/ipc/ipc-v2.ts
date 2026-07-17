@@ -9,7 +9,7 @@ import {
   runDiscover,
   runDisconnect,
 } from '../workflows/session-workflows'
-import { runPointToTarget } from '../workflows/pointing-workflows'
+import { runAbortSlew, runPointToTarget } from '../workflows/pointing-workflows'
 import { runStartPreview, runStopPreview } from '../workflows/preview-workflows'
 import {
   runSetExposureDuration,
@@ -98,6 +98,10 @@ export function registerIpcV2Handlers(allowed: WebContents) {
         return yield* withProjectedStatus(runPointToTarget(decoded.targetId))
       }),
     ),
+  )
+
+  handle('seestar:v2:abort-slew', () =>
+    appRuntime.runPromise(withProjectedStatus(runAbortSlew)),
   )
 
   handle('seestar:v2:start-preview', () =>

@@ -57,6 +57,7 @@ export function createSeestarPlugin(): DevicePlugin {
         firmwareVersion: session.identity.firmwareVersion,
         tracking: snapshot.mount.tracking,
         mountClosed: snapshot.mount.parked,
+        ...snapshot.telemetry,
         connectedAt,
         location: session.observerLocation,
         locationSource: 'device',
