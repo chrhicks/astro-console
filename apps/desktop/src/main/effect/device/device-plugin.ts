@@ -8,6 +8,7 @@ import type {
 } from '../../../shared/api-v2'
 import type { ConnectedRig, RigSessionRefresh } from '../rig/rig-model'
 import { EventBus } from '../event/event-bus'
+import { GeoService } from '../geo/geo-service'
 
 // Re-exported for compatibility. The canonical definition lives in the rig
 // model; plugin adapters and workflows should migrate to RigSessionRefresh.
@@ -64,7 +65,7 @@ export interface DevicePlugin {
   readonly discoverWithSignal: (input: { signal: AbortSignal }) => Effect.Effect<DesktopDiscoveredDeviceV2[], unknown>
   readonly connect: (
     input: ConnectRequestV2,
-  ) => Effect.Effect<DeviceSession, unknown, EventBus>
+  ) => Effect.Effect<DeviceSession, unknown, EventBus | GeoService>
 }
 
 export const DevicePlugin = Context.Service<DevicePlugin>('DevicePlugin')

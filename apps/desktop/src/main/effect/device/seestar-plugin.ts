@@ -14,12 +14,19 @@ import type {
 } from '../../../shared/api-v2'
 import type { DevicePlugin, DeviceSession } from './device-plugin'
 import { EventBus } from '../event/event-bus.js'
+import { GeoService } from '../geo/geo-service'
 import { toDesktopRig } from './sdk-rig-bridge'
 
-export function createSeestarPlugin(): DevicePlugin {
+interface SeestarPluginOptions {
+  readonly createRig?: typeof createSeestarRig
+  readonly discover?: typeof discoverSeestars
+  readonly pemPath?: string
+}
+
+export function createSeestarPlugin(options: SeestarPluginOptions = {}): DevicePlugin {
   const discovered = Ref.makeUnsafe<Map<string, DesktopDiscoveredDeviceV2>>(new Map())
   const discover = (input: { readonly signal: AbortSignal }) =>
-    Effect.tryPromise(() => discoverSeestars({ timeoutMs: 2500, signal: input.signal })).pipe(
+    Effect.tryPromise(() => (options.discover ?? discoverSeestars)({ timeoutMs: 2500, signal: input.signal })).pipe(
       Effect.map((devices) => devices.map(toDiscoveredDevice)),
       Effect.tap((devices) => Ref.set(discovered, new Map(devices.map((device) => [device.deviceId, device])))),
     )
@@ -30,14 +37,15 @@ export function createSeestarPlugin(): DevicePlugin {
     discoverWithSignal: discover,
     connect: (input: ConnectRequestV2) => Effect.gen(function* () {
       const bus = yield* EventBus
+      const geo = yield* GeoService
       const target = (yield* Ref.get(discovered)).get(input.deviceId)
       if (!target?.host) return yield* Effect.fail(new Error(`Seestar device not found for deviceId ${input.deviceId}`))
-      const session = yield* createSeestarRig({
+      const session = yield* (options.createRig ?? createSeestarRig)({
         rigId: target.deviceId,
         host: target.host,
         displayName: target.displayName,
         serialNumber: target.serialNumber,
-        pemPath: resolveSeestarPemPath({
+        pemPath: options.pemPath ?? resolveSeestarPemPath({
           fallbackCandidates: [
             app.isPackaged
               ? `${process.resourcesPath}/seestar_3.1.2_fw_7.32_interop.pem`
@@ -45,7 +53,21 @@ export function createSeestarPlugin(): DevicePlugin {
           ],
         }),
       })
-      const snapshot = session.snapshot
+      const observer = yield* geo.resolveObserverLocation(session.observerLocation)
+      const synchronizeObserver = session.synchronizeObserver
+      if (!synchronizeObserver) {
+        yield* session.disconnect.pipe(Effect.ignore)
+        return yield* Effect.fail(new Error('Seestar rig does not support observer synchronization'))
+      }
+      const synchronized = yield* synchronizeObserver({ observerLocation: observer.location ?? undefined }).pipe(
+        Effect.onError(() => session.disconnect.pipe(Effect.ignore)),
+      )
+      const synchronizedSession = {
+        ...session,
+        observerLocation: synchronized.observerLocation,
+        snapshot: synchronized.snapshot,
+      }
+      const snapshot = synchronized.snapshot
       const connectedAt = new Date().toISOString()
       const device: DeviceProjection = {
         pluginKind: 'seestar',
@@ -59,8 +81,8 @@ export function createSeestarPlugin(): DevicePlugin {
         mountClosed: snapshot.mount.parked,
         ...snapshot.telemetry,
         connectedAt,
-        location: session.observerLocation,
-        locationSource: 'device',
+        location: synchronized.observerLocation,
+        locationSource: observer.source,
         warnings: [...snapshot.warnings],
       }
       const health: LiveSessionHealthState = { state: 'healthy', lastCheckedAt: connectedAt }
@@ -79,7 +101,7 @@ export function createSeestarPlugin(): DevicePlugin {
         disconnect: eventFiber
           ? session.disconnect.pipe(Effect.ensuring(Fiber.interrupt(eventFiber)))
           : session.disconnect,
-        rig: toDesktopRig(session, 'seestar', device),
+        rig: toDesktopRig(synchronizedSession, 'seestar', device),
       } satisfies DeviceSession
     }),
   }

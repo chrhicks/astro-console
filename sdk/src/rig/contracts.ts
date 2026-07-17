@@ -185,6 +185,20 @@ export interface RigPointingPrepareInput {
   readonly lon: number
 }
 
+export interface RigObserverLocation {
+  readonly lat: number
+  readonly lon: number
+}
+
+export interface RigObserverSynchronizationInput {
+  readonly observerLocation?: RigObserverLocation
+}
+
+export interface RigObserverSynchronization {
+  readonly observerLocation?: RigObserverLocation
+  readonly snapshot: RigSnapshot
+}
+
 export interface RigPointingInput extends RigCoordinates {
   readonly targetType: string
   readonly targetName?: string
@@ -213,10 +227,13 @@ export interface RigNativeCapture {
 
 export interface RigSession {
   readonly identity: RigIdentity
-  readonly observerLocation?: { readonly lat: number; readonly lon: number }
+  readonly observerLocation?: RigObserverLocation
   readonly snapshot: RigSnapshot
   readonly refresh: Effect.Effect<RigSnapshot, RigError>
   readonly disconnect: Effect.Effect<void, RigError>
+  readonly synchronizeObserver?: (
+    input: RigObserverSynchronizationInput,
+  ) => Effect.Effect<RigObserverSynchronization, RigError>
   readonly events?: Stream.Stream<RigEvent, RigError>
   readonly mount?: RigMount
   readonly preview?: RigPreview

@@ -554,6 +554,194 @@ test('Seestar prepare refreshes synchronized clock telemetry and warnings', asyn
   }
 })
 
+test('Seestar observer synchronization refreshes telemetry without issuing movement commands', async () => {
+  let preflightCalls = 0
+  let synchronizedLocation: { lat: number; lon: number } | undefined
+  let synchronizedTime = 0
+  const movementCommands: string[] = []
+  const rig = await Effect.runPromise(
+    createSeestarRig({
+      rigId: 'test',
+      host: '127.0.0.1',
+      displayName: 'Test Seestar',
+      pemPath: '/unused.pem',
+      deviceFactory: () => ({
+        ...createFakeSeestarDevice(),
+        preflightCheck: async () => {
+          preflightCalls++
+          const stale = preflightCalls === 1
+          return {
+            host: '127.0.0.1',
+            location: { lat: 39.755, lon: -74.2679 },
+            deviceTime: stale
+              ? { year: 2020, mon: 6, day: 29, hour: 7, min: 36, sec: 53 }
+              : { year: 2026, mon: 7, day: 17, hour: 12, min: 0, sec: 0 },
+            deviceTimeLooksStale: stale,
+            raw: {
+              deviceState: null,
+              viewState: null,
+              setting: null,
+              diskVolume: null,
+              piInfo: null,
+              time: null,
+            },
+            warnings: stale ? ['Device clock appears stale'] : [],
+          }
+        },
+        setTime: async () => {
+          synchronizedTime++
+          return true
+        },
+        setUserLocation: async (lat, lon) => {
+          synchronizedLocation = { lat, lon }
+          return true
+        },
+        moveToHorizon: async () => {
+          movementCommands.push('moveToHorizon')
+          return true
+        },
+        park: async () => {
+          movementCommands.push('park')
+          return true
+        },
+        startView: async () => {
+          movementCommands.push('startView')
+          return true
+        },
+      }),
+    }),
+  )
+  const synchronizeObserver = rig.synchronizeObserver
+
+  try {
+    assert.ok(synchronizeObserver)
+    const synchronized = await Effect.runPromise(
+      synchronizeObserver({ observerLocation: rig.observerLocation }),
+    )
+
+    assert.equal(synchronizedTime, 1)
+    assert.deepEqual(synchronizedLocation, { lat: 39.755, lon: -74.2679 })
+    assert.equal(preflightCalls, 2)
+    assert.deepEqual(synchronized.snapshot.telemetry?.deviceTime, {
+      year: 2026,
+      mon: 7,
+      day: 17,
+      hour: 12,
+      min: 0,
+      sec: 0,
+    })
+    assert.equal(synchronized.snapshot.telemetry?.deviceTimeLooksStale, false)
+    assert.deepEqual(synchronized.snapshot.warnings, [])
+    assert.deepEqual(movementCommands, [])
+  } finally {
+    await Effect.runPromise(rig.disconnect)
+  }
+})
+
+test('Seestar observer synchronization syncs host time when no location is available', async () => {
+  let preflightCalls = 0
+  let synchronizedTime = 0
+  let synchronizedLocation = 0
+  const rig = await Effect.runPromise(
+    createSeestarRig({
+      rigId: 'test',
+      host: '127.0.0.1',
+      displayName: 'Test Seestar',
+      pemPath: '/unused.pem',
+      deviceFactory: () => ({
+        ...createFakeSeestarDevice(),
+        preflightCheck: async () => {
+          preflightCalls++
+          return {
+            host: '127.0.0.1',
+            raw: {
+              deviceState: null,
+              viewState: null,
+              setting: null,
+              diskVolume: null,
+              piInfo: null,
+              time: null,
+            },
+            warnings: ['User location is not available in device state'],
+          }
+        },
+        setTime: async () => {
+          synchronizedTime++
+          return true
+        },
+        setUserLocation: async () => {
+          synchronizedLocation++
+          return true
+        },
+      }),
+    }),
+  )
+  const synchronizeObserver = rig.synchronizeObserver
+
+  try {
+    assert.ok(synchronizeObserver)
+    const synchronized = await Effect.runPromise(synchronizeObserver({}))
+
+    assert.equal(synchronizedTime, 1)
+    assert.equal(synchronizedLocation, 0)
+    assert.equal(preflightCalls, 2)
+    assert.equal(synchronized.observerLocation, undefined)
+  } finally {
+    await Effect.runPromise(rig.disconnect)
+  }
+})
+
+test('Seestar observer synchronization maps rejected and failed host-time syncs', async () => {
+  const rejectedRig = await Effect.runPromise(
+    createSeestarRig({
+      rigId: 'test',
+      host: '127.0.0.1',
+      displayName: 'Test Seestar',
+      pemPath: '/unused.pem',
+      deviceFactory: () => ({ ...createFakeSeestarDevice(), setTime: async () => false }),
+    }),
+  )
+  const rejectedSync = rejectedRig.synchronizeObserver
+
+  try {
+    assert.ok(rejectedSync)
+    await assert.rejects(
+      Effect.runPromise(rejectedSync({})),
+      (error: unknown) =>
+        error instanceof RigRejectedError && error.operation === 'observer.synchronize',
+    )
+  } finally {
+    await Effect.runPromise(rejectedRig.disconnect)
+  }
+
+  const failedRig = await Effect.runPromise(
+    createSeestarRig({
+      rigId: 'test',
+      host: '127.0.0.1',
+      displayName: 'Test Seestar',
+      pemPath: '/unused.pem',
+      deviceFactory: () => ({
+        ...createFakeSeestarDevice(),
+        setTime: async () => {
+          throw new Error('connection closed')
+        },
+      }),
+    }),
+  )
+  const failedSync = failedRig.synchronizeObserver
+
+  try {
+    assert.ok(failedSync)
+    await assert.rejects(
+      Effect.runPromise(failedSync({})),
+      (error: unknown) =>
+        error instanceof RigTransportError && error.operation === 'observer.synchronize.setTime',
+    )
+  } finally {
+    await Effect.runPromise(failedRig.disconnect)
+  }
+})
+
 test('Seestar prepare preserves stale telemetry and warnings when location synchronization fails', async () => {
   let preflightCalls = 0
   const rig = await Effect.runPromise(

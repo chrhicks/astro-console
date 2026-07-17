@@ -10,6 +10,7 @@ import type {
   RigDeviceTelemetry,
   RigError,
   RigEvent,
+  RigObserverLocation,
   RigSession,
   RigSnapshot,
 } from './contracts.js'
@@ -151,21 +152,42 @@ export function createSeestarRig(input: SeestarRigConfig): Effect.Effect<RigSess
             device.preflightCheck(),
           )
           warnings = preflight.warnings
+          let observerLocation = toObserverLocation(preflight.location)
           events = yield* PubSub.dropping<RigEvent>(16)
           unsubscribe = device.subscribeToLifecycleEvents((event) => {
             if (event.type !== 'capture.failed') return
             publish({ type: event.type, message: event.error })
           })
           scheduleKeepalive()
-           let telemetry = toTelemetry(preflight)
-          const initialSnapshot = {
-            mount: { parked: preflight.mountClosed, tracking: preflight.tracking },
-            preview: { active: false, source: 'none' as const },
-            capture: { active: false },
-            telemetry,
-            warnings,
-          }
+          let telemetry = toTelemetry(preflight)
+          const initialSnapshot = toPreflightSnapshot(preflight, warnings, telemetry)
           const snapshot = () => snapshotEffect(device, warnings, telemetry)
+          const synchronizeObserver = (
+            operation: 'observer.synchronize' | 'pointing.prepare',
+            input: RigObserverLocation | undefined,
+          ) =>
+            Effect.gen(function* () {
+              if (!(yield* deviceEffect(`${operation}.setTime`, () => device.setTime()))) {
+                return yield* Effect.fail(rejected(operation, 'Device rejected set-time request'))
+              }
+              if (input && !(yield* deviceEffect(
+                `${operation}.setUserLocation`,
+                () => device.setUserLocation(input.lat, input.lon),
+              ))) {
+                return yield* Effect.fail(rejected(operation, 'Device rejected set-user-location request'))
+              }
+              const refreshedPreflight = yield* deviceEffect(
+                `${operation}.preflight`,
+                () => device.preflightCheck(),
+              )
+              warnings = refreshedPreflight.warnings
+              telemetry = toTelemetry(refreshedPreflight)
+              observerLocation = toObserverLocation(refreshedPreflight.location) ?? input
+              return {
+                observerLocation,
+                snapshot: toPreflightSnapshot(refreshedPreflight, warnings, telemetry),
+              }
+            })
 
           return {
             identity: {
@@ -177,10 +199,16 @@ export function createSeestarRig(input: SeestarRigConfig): Effect.Effect<RigSess
               serialNumber: preflight.serialNumber ?? input.serialNumber,
               firmwareVersion: preflight.firmwareVersion,
             },
-            observerLocation: preflight.location,
+            get observerLocation() {
+              return observerLocation
+            },
             snapshot: initialSnapshot,
             refresh: Effect.suspend(snapshot),
             disconnect: deviceEffect('disconnect', stop),
+            synchronizeObserver: (input) => action(
+              'observer.synchronize',
+              synchronizeObserver('observer.synchronize', input.observerLocation),
+            ),
             events: Stream.fromPubSub(events),
             mount: {
               park: (context) => action('mount.park', deviceEffect(
@@ -200,18 +228,7 @@ export function createSeestarRig(input: SeestarRigConfig): Effect.Effect<RigSess
             },
             pointing: {
               prepare: (pointing, context) => action('pointing.prepare', Effect.gen(function* () {
-                if (!(yield* deviceEffect('pointing.prepare.setTime', () => device.setTime()))) {
-                  return yield* Effect.fail(rejected('pointing.prepare', 'Device rejected set-time request'))
-                }
-                if (!(yield* deviceEffect('pointing.prepare.setUserLocation', () => device.setUserLocation(pointing.lat, pointing.lon)))) {
-                  return yield* Effect.fail(rejected('pointing.prepare', 'Device rejected set-user-location request'))
-                }
-                const refreshedPreflight = yield* deviceEffect(
-                  'pointing.prepare.preflight',
-                  () => device.preflightCheck(),
-                )
-                warnings = refreshedPreflight.warnings
-                telemetry = toTelemetry(refreshedPreflight)
+                yield* synchronizeObserver('pointing.prepare', pointing)
                 const current = yield* snapshotEffect(device, warnings, telemetry)
                 if (current.preview.active && !(yield* deviceEffect(
                   'pointing.prepare.stopView',
@@ -296,9 +313,9 @@ export function createSeestarRig(input: SeestarRigConfig): Effect.Effect<RigSess
     })()
 }
 
-function action(operation: string, run: Effect.Effect<void, RigError>) {
+function action<A>(operation: string, run: Effect.Effect<A, RigError>) {
   return Effect.fn(`SeestarRig.${operation}`)(function* () {
-    yield* run
+    return yield* run
   })()
 }
 
@@ -376,6 +393,31 @@ function toTelemetry(preflight: {
     deviceTime: preflight.deviceTime,
     deviceTimeLooksStale: preflight.deviceTimeLooksStale,
   }
+}
+
+function toPreflightSnapshot(
+  preflight: {
+    readonly mountClosed?: boolean
+    readonly tracking?: boolean
+  },
+  warnings: readonly string[],
+  telemetry: RigDeviceTelemetry,
+): RigSnapshot {
+  return {
+    mount: { parked: preflight.mountClosed, tracking: preflight.tracking },
+    preview: { active: false, source: 'none' },
+    capture: { active: false },
+    telemetry,
+    warnings,
+  }
+}
+
+function toObserverLocation(
+  location: { readonly lat: number; readonly lon: number } | undefined,
+): RigObserverLocation | undefined {
+  if (!location || !Number.isFinite(location.lat) || !Number.isFinite(location.lon)) return undefined
+  if (location.lat < -90 || location.lat > 90 || location.lon < -180 || location.lon > 180) return undefined
+  return location
 }
 
 function decodeMountState(value: unknown): Effect.Effect<typeof MountState.Type, RigProtocolError> {
