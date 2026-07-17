@@ -1,5 +1,20 @@
 import { Effect } from 'effect'
 import type {
+  RigAutofocus,
+  RigCamera,
+  RigCameraExposureInput,
+  RigCameraExposureState,
+  RigCoordinates,
+  RigFilterWheel,
+  RigFocuser,
+  RigFramePixelFormat,
+  RigFrameResult,
+  RigFrameTransfer,
+  RigMount,
+  RigOperationContext,
+  RigStorage,
+} from 'seestar-sdk'
+import type {
   CaptureProjection,
   DevicePluginKind,
   DeviceProjection,
@@ -8,7 +23,23 @@ import type {
   TargetType,
 } from '../../../shared/api-v2'
 
-export interface RigIdentity {
+export type {
+  RigAutofocus,
+  RigCamera,
+  RigCameraExposureInput,
+  RigCameraExposureState,
+  RigCoordinates,
+  RigFilterWheel,
+  RigFocuser,
+  RigFramePixelFormat,
+  RigFrameResult,
+  RigFrameTransfer,
+  RigMount,
+  RigOperationContext,
+  RigStorage,
+}
+
+export interface DesktopRigIdentity {
   readonly rigId: string
   readonly pluginKind: DevicePluginKind
   readonly displayName: string
@@ -30,128 +61,6 @@ export interface RigSessionRefresh {
   capture: CaptureProjection
 }
 
-export interface RigCoordinates {
-  readonly raHours: number
-  readonly decDeg: number
-}
-
-// Optional operation context passed to Rig surfaces so adapters can observe
-// cancellation. The signal is aborted when a recovery operation preempts
-// the current ordinary operation (stop/park/disconnect). Adapters that
-// support cancellation should pass the signal to vendor SDK waits.
-export interface RigOperationContext {
-  readonly signal?: AbortSignal
-}
-
-// Generic mount operations are independently optional. A rig may expose a
-// direct slew without parking, or parking without direct slew when pointing
-// is handled by RigPointingWorkflow orchestration.
-export interface RigMount {
-  readonly slewToCoordinates?: (
-    input: RigCoordinates,
-    context?: RigOperationContext,
-  ) => Effect.Effect<void, unknown>
-  readonly park?: (context?: RigOperationContext) => Effect.Effect<void, unknown>
-  readonly unpark?: (context?: RigOperationContext) => Effect.Effect<void, unknown>
-  readonly stopMotion?: (
-    context?: RigOperationContext,
-  ) => Effect.Effect<void, unknown>
-}
-
-export interface RigCameraExposureInput {
-  readonly durationSec: number
-  readonly light?: boolean
-}
-
-// Device-reported exposure state. Mirrors the Alpaca camera state lifecycle
-// (idle → exposing → reading → ready) with an explicit error state. `imageReady`
-// is the canonical completion signal: when true, the exposure is finished and
-// the image is available for download (a future slice).
-export interface RigCameraExposureState {
-  readonly state: 'idle' | 'exposing' | 'reading' | 'ready' | 'error'
-  readonly imageReady: boolean
-  readonly lastExposureDurationSec?: number
-  readonly lastError?: string
-}
-
-// Transport used to retrieve a finished frame. Alpaca should prefer
-// `image-bytes` via GET imagearray + Accept: application/imagebytes.
-export type RigFrameTransfer = 'image-bytes' | 'json-array' | 'vendor-file'
-
-export type RigFramePixelFormat =
-  | 'mono8'
-  | 'mono16'
-  | 'rgb24'
-  | 'rgb48'
-  | 'bayer16'
-  | 'unknown'
-
-// Result of retrieving a finished frame after an exposure completes. The
-// `data` field carries the raw pixel payload; callers that only need
-// library metadata (asset count/name/timestamp) can ignore it. Kept off the
-// public DesktopStatus so frame bytes do not bloat the renderer projection.
-export interface RigFrameResult {
-  readonly transfer: RigFrameTransfer
-  readonly width: number
-  readonly height: number
-  readonly pixelFormat: RigFramePixelFormat
-  readonly data: Uint8Array
-  // Parsed ImageBytes descriptor when transfer is 'image-bytes'. Carries the
-  // ASCOM numeric element type code and array rank needed to write a faithful
-  // FITS file; absent when the header could not be interpreted, in which case
-  // the storage layer fails honestly instead of writing a misleading file.
-  readonly imageBytes?: {
-    readonly imageElementType: number
-    readonly transmissionElementType: number
-    readonly rank: number
-    readonly planes?: number
-  }
-  readonly metadata?: {
-    readonly exposureDurationSec?: number
-    readonly cameraName?: string
-    readonly capturedAt?: string
-  }
-}
-
-// Generic camera exposure operations. Seestar does not expose this because
-// its imaging is stacking-based orchestration surfaced via RigCaptureWorkflow.
-export interface RigCamera {
-  readonly startExposure: (
-    input: RigCameraExposureInput,
-    context?: RigOperationContext,
-  ) => Effect.Effect<void, unknown>
-  // Optional because a generic camera cannot truthfully promise that its
-  // normal exposure command produces a dark frame.
-  readonly startDarkExposure?: (
-    input: RigCameraExposureInput,
-    context?: RigOperationContext,
-  ) => Effect.Effect<void, unknown>
-  readonly stopExposure: (
-    context?: RigOperationContext,
-  ) => Effect.Effect<void, unknown>
-  readonly getExposureState: (
-    context?: RigOperationContext,
-  ) => Effect.Effect<RigCameraExposureState, unknown>
-  readonly getLatestFrame: (
-    context?: RigOperationContext,
-  ) => Effect.Effect<RigFrameResult, unknown>
-}
-
-export interface RigFocuser {
-  readonly moveTo: (position: number) => Effect.Effect<void, unknown>
-}
-
-export interface RigAutofocus {
-  readonly run: (context?: RigOperationContext) => Effect.Effect<void, unknown>
-}
-
-export interface RigFilterWheel {
-  readonly setPosition: (position: number) => Effect.Effect<void, unknown>
-}
-
-export interface RigStorage {
-  readonly listImages: () => Effect.Effect<readonly string[], unknown>
-}
 
 export interface RigPointingPrepareInput {
   readonly lat: number
@@ -220,7 +129,7 @@ export interface RigConnectState {
 }
 
 interface ConnectedRigBase {
-  readonly identity: RigIdentity
+  readonly identity: DesktopRigIdentity
   readonly observerLocation?: { lat: number; lon: number }
   readonly connect: RigConnectState
   readonly refresh: Effect.Effect<RigSessionRefresh, unknown>

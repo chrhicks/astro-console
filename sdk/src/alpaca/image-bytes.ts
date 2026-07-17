@@ -1,4 +1,4 @@
-import type { RigFramePixelFormat, RigFrameResult } from '../../rig/rig-model'
+import type { RigFramePixelFormat, RigFrameResult } from '../rig/contracts.js'
 
 const MAX_IMAGE_PIXEL_BYTES = 256 * 1024 * 1024
 

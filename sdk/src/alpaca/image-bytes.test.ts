@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseAlpacaImageBytes } from './image-bytes'
+import { parseAlpacaImageBytes } from './image-bytes.js'
 
 test('parses a bounded mono16 ImageBytes frame', () => {
   const data = new Uint8Array(48)

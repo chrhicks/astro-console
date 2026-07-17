@@ -8,18 +8,24 @@ Renderer
   -> typed desktop API and status projections
   -> Electron IPC with schema decoding
   -> Effect workflows and lifecycle services
-  -> connected rig capabilities
-  -> Seestar, fake Seestar, or Alpaca adapters
-  -> vendor protocol and transport
+  -> desktop rig projection bridge
+  -> SDK rig procedures
+  -> Seestar or Alpaca vendor protocol and transport
 ```
 
 ## Boundaries
 
 ### SDK And Vendor Protocol
 
-The SDK owns Seestar transport, authentication, protocol parsing, and
-device-level command behavior. Alpaca transport helpers live below the desktop
-rig boundary as adapter infrastructure.
+The SDK owns the provider-neutral rig procedure contract plus Seestar and
+Alpaca transport, discovery, authentication, protocol parsing, capability
+probing, and device-level command behavior. Direct provider clients remain
+available to SDK consumers; desktop uses the normalized SDK rig session.
+
+The desktop bridge maps SDK snapshots and callable procedures to desktop
+projections. It owns Electron-specific configuration, session lifecycle,
+operation leases, aggregate state, storage, IPC, and user-facing workflows; it
+does not issue vendor endpoint calls.
 
 ### Rig Capabilities
 
