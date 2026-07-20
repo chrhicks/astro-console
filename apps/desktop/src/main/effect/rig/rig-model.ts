@@ -19,6 +19,7 @@ import type {
   DevicePluginKind,
   DeviceProjection,
   LibraryProjection,
+  RigControlsProjection,
   PointingProjection,
   PreviewProjection,
   TargetType,
@@ -134,6 +135,7 @@ interface ConnectedRigBase {
   readonly identity: DesktopRigIdentity
   readonly observerLocation?: { lat: number; lon: number }
   readonly connect: RigConnectState
+  readonly controls?: () => RigControlsProjection
   readonly refresh: Effect.Effect<RigSessionRefresh, unknown>
   readonly mount?: RigMount
   readonly focuser?: RigFocuser

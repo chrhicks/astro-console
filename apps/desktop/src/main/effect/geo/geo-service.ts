@@ -14,8 +14,17 @@ export interface GeoService {
     deviceLocation?: GeoLocation,
   ) => Effect.Effect<{
     readonly location: GeoLocation | null
-    readonly source: 'device' | 'geoip' | undefined
+    readonly source: 'configured' | 'device' | 'geoip' | undefined
   }>
 }
 
 export const GeoService = Context.Service<GeoService>('GeoService')
+
+export function resolveObserverAuthority(
+  configured: GeoLocation | null,
+  _device: GeoLocation | undefined,
+  geoip: GeoLocation | null,
+): { readonly location: GeoLocation | null; readonly source: 'configured' | 'device' | 'geoip' | undefined } {
+  if (configured) return { location: configured, source: 'configured' }
+  return { location: geoip, source: geoip ? 'geoip' : undefined }
+}

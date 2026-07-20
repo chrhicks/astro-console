@@ -1,7 +1,5 @@
 # Coding Standards
 
-Source: `anomalyco/opencode` `v2` branch, distilled from `.references/opencode-v2/AGENTS.md`, `.references/opencode-v2/CONTRIBUTING.md`, `.references/opencode-v2/.editorconfig`, `.references/opencode-v2/package.json`, `.references/opencode-v2/.husky/pre-push`, `.references/opencode-v2/.github/pull_request_template.md`, `.references/opencode-v2/.opencode/agent/*.md`, and `.references/opencode-v2/.opencode/skills/{effect,debug-opencode}/SKILL.md`.
-
 ## Effect
 
 Use the `effect` skill when implementing anything. Choose the references that apply to the task you're trying to implement or review.

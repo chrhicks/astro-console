@@ -1,4 +1,5 @@
 import { Effect } from 'effect'
+import { RigRejectedError } from 'seestar-sdk'
 import type {
   DesktopDiscoveredDeviceV2,
   ConnectRequestV2,
@@ -54,6 +55,13 @@ export function createFakeSeestarPlugin(): DevicePlugin {
         let previewActive = false
         let captureActive = false
         let parked = false
+        const configuredControls = scenario.controls
+        let focuser = configuredControls && { ...configuredControls.focuser }
+        let filterWheel = configuredControls && {
+          names: configuredControls.filterWheel.names,
+          focusOffsets: configuredControls.filterWheel.focusOffsets,
+          position: configuredControls.filterWheel.position,
+        }
 
         const disconnect = Effect.sleep('200 millis').pipe(Effect.asVoid)
 
@@ -124,6 +132,21 @@ export function createFakeSeestarPlugin(): DevicePlugin {
           fakeSeestarRuntime.refresh(previewActive, captureActive, parked),
         )
 
+        const controls = configuredControls
+          ? () => ({
+              focuser: focuser && {
+                position: focuser.position,
+                maxStep: focuser.maxStep,
+                moving: focuser.moving,
+              },
+              filterWheel: filterWheel && {
+                names: [...filterWheel.names],
+                focusOffsets: [...filterWheel.focusOffsets],
+                position: filterWheel.position,
+              },
+            })
+          : undefined
+
         const rig: ConnectedRig = {
           identity: {
             rigId: deviceId,
@@ -140,10 +163,51 @@ export function createFakeSeestarPlugin(): DevicePlugin {
             library: connected.library,
           },
           refresh,
+          controls,
           mount: {
             park: () => parkArm(),
             ...(scenario.supportsStopMotion ? { stopMotion: () => Effect.void } : {}),
           },
+          ...(configuredControls
+            ? {
+                focuser: {
+                  get state() {
+                    if (!focuser) throw new Error('Fake focuser is unavailable')
+                    return focuser
+                  },
+                  moveTo: (position: number) => {
+                    if (!Number.isInteger(position) || position < 0 || position > configuredControls.focuser.maxStep) {
+                      return Effect.fail(new RigRejectedError({
+                        provider: 'seestar',
+                        operation: 'focuser.moveTo',
+                        message: `Focuser position must be an integer from 0 to ${configuredControls.focuser.maxStep}`,
+                      }))
+                    }
+                    return Effect.sync(() => {
+                      focuser = { ...configuredControls.focuser, position }
+                    })
+                  },
+                },
+                filterWheel: {
+                  get state() {
+                    if (!filterWheel) throw new Error('Fake filter wheel is unavailable')
+                    return filterWheel
+                  },
+                  setPosition: (position: number) => {
+                    if (!Number.isInteger(position) || position < 0 || position >= configuredControls.filterWheel.names.length) {
+                      return Effect.fail(new RigRejectedError({
+                        provider: 'seestar',
+                        operation: 'filterWheel.setPosition',
+                        message: `Filter position must be an integer from 0 to ${configuredControls.filterWheel.names.length - 1}`,
+                      }))
+                    }
+                    return Effect.sync(() => {
+                      filterWheel = { ...configuredControls.filterWheel, position }
+                    })
+                  },
+                },
+              }
+            : {}),
           pointing: {
             // prepare owns all readiness steps before slewing: sync time
             // and location, stop any active view, and open the arm if the

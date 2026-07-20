@@ -109,7 +109,7 @@ export const DesktopStatusSchema = Schema.Struct({
     mountClosed: Schema.optional(Schema.Boolean),
     connectedAt: OptionalString,
     location: Schema.optional(Schema.Struct({ lat: Schema.Number, lon: Schema.Number })),
-    locationSource: Schema.optional(Schema.Literals(['device', 'geoip'])),
+    locationSource: Schema.optional(Schema.Literals(['configured', 'device', 'geoip'])),
     deviceTime: Schema.optional(
       Schema.Struct({
         year: Schema.Number, mon: Schema.Number, day: Schema.Number,
@@ -145,13 +145,14 @@ export const DesktopStatusSchema = Schema.Struct({
       darkExposure: Schema.Literals(['yes', 'no']),
       autofocus: Schema.Literals(['yes', 'no']),
       filterWheel: Schema.Literals(['yes', 'no']),
+      focuser: Schema.optional(Schema.Literals(['yes', 'no'])),
       storage: Schema.Literals(['yes', 'no']),
     }),
     actions: Schema.Array(
       Schema.Struct({
         id: Schema.Literals([
           'connect', 'select-target', 'retry-slew', 'retry-preview',
-          'stop-preview', 'stop-capture', 'preview', 'capture', 'unpark', 'abort-slew',
+          'stop-preview', 'stop-capture', 'preview', 'capture', 'unpark', 'abort-slew', 'focus', 'filter',
         ]),
         label: Schema.String,
         enabled: Schema.Boolean,
@@ -160,6 +161,10 @@ export const DesktopStatusSchema = Schema.Struct({
     ),
   }),
   camera: Schema.optional(Schema.Struct({ exposureSec: Schema.Number })),
+  controls: Schema.optional(Schema.Struct({
+    focuser: Schema.optional(Schema.Struct({ position: Schema.Number, maxStep: Schema.Number, moving: Schema.Boolean })),
+    filterWheel: Schema.optional(Schema.Struct({ names: Schema.Array(Schema.String), focusOffsets: Schema.Array(Schema.Number), position: Schema.Number })),
+  })),
   sequence: Schema.Struct({
     phase: Schema.Literals(['idle', 'lights', 'awaiting-darks', 'darks', 'complete', 'stopped', 'failed']),
     plan: Schema.optional(Schema.Struct({ lightCount: Schema.Number, durationSec: Schema.Number, darkCount: Schema.Number })),

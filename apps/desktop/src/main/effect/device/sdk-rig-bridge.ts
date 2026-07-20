@@ -32,6 +32,14 @@ export function toDesktopRig(
       port: session.identity.port,
     },
     observerLocation: session.observerLocation,
+    controls: () => ({
+      focuser: session.focuser
+        ? { position: session.focuser.state.position, maxStep: session.focuser.state.maxStep, moving: session.focuser.state.moving }
+        : undefined,
+      filterWheel: session.filterWheel
+        ? { names: [...session.filterWheel.state.names], focusOffsets: [...session.filterWheel.state.focusOffsets], position: session.filterWheel.state.position }
+        : undefined,
+    }),
     connect: {
       device,
       preview: toPreview(session.snapshot),

@@ -162,7 +162,18 @@ export interface RigCamera {
 }
 
 export interface RigFocuser {
-  readonly moveTo: (position: number) => Effect.Effect<void, RigError>
+  readonly state: RigFocuserState
+  readonly moveTo: (
+    position: number,
+    context?: RigOperationContext,
+  ) => Effect.Effect<void, RigError>
+}
+
+export interface RigFocuserState {
+  readonly absolute: true
+  readonly maxStep: number
+  readonly position: number
+  readonly moving: boolean
 }
 
 export interface RigAutofocus {
@@ -170,10 +181,17 @@ export interface RigAutofocus {
 }
 
 export interface RigFilterWheel {
+  readonly state: RigFilterWheelState
   readonly setPosition: (
     position: number,
     context?: RigOperationContext,
   ) => Effect.Effect<void, RigError>
+}
+
+export interface RigFilterWheelState {
+  readonly names: readonly string[]
+  readonly focusOffsets: readonly number[]
+  readonly position: number
 }
 
 export interface RigStorage {

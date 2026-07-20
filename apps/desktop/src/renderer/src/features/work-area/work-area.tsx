@@ -12,6 +12,8 @@ import {
   useStopCaptureMutation,
   useUnparkMountMutation,
   useAbortSlewMutation,
+  useMoveFocuserMutation,
+  useSetFilterPositionMutation,
 } from '../../mutations/use-workspace-mutations'
 import { electronApi } from '../../lib/electron-api'
 import { isCaptureInFlight } from '../../../../shared/lifecycle'
@@ -69,6 +71,7 @@ export default function WorkArea() {
     device,
     latestPreviewPath,
     latestPreviewUnavailable,
+    controls,
   } = useProjectionStore(selectWorkAreaModel)
   const selectedTarget = useSelectedTarget((state) => state.target)
   const pointMutation = usePointToTargetMutation()
@@ -78,6 +81,9 @@ export default function WorkArea() {
   const stopCaptureMutation = useStopCaptureMutation()
   const unparkMutation = useUnparkMountMutation()
   const abortSlewMutation = useAbortSlewMutation()
+  const moveFocuserMutation = useMoveFocuserMutation()
+  const setFilterPositionMutation = useSetFilterPositionMutation()
+  const [focusPosition, setFocusPosition] = useState('')
   const isCapturePending =
     startCaptureMutation.isPending || stopCaptureMutation.isPending
   const isSlewing = workspace.state === 'slewing'
@@ -124,6 +130,8 @@ export default function WorkArea() {
       : isExternalCapture && latestPreviewUrl && preview.phase === 'none'
       ? 'Latest frame'
       : PREVIEW_BADGE_LABELS[preview.phase]
+  const canFocus = workspace.actions.some((action) => action.id === 'focus' && action.enabled)
+  const canFilter = workspace.actions.some((action) => action.id === 'filter' && action.enabled)
 
   return (
     <div className="work-area">
@@ -276,6 +284,32 @@ export default function WorkArea() {
           </strong>
         </span>
       </div>
+
+      {controls?.focuser || controls?.filterWheel ? (
+        <div className="work-context-strip" aria-label="Manual optical controls">
+          {controls.focuser ? (
+            <form onSubmit={(event) => {
+              event.preventDefault()
+              const position = Number(focusPosition)
+              if (Number.isInteger(position)) moveFocuserMutation.mutate(position)
+            }}>
+              <label>
+                Focus 0–{controls.focuser.maxStep}
+                <input aria-label="Focus position" value={focusPosition} onChange={(event) => setFocusPosition(event.target.value)} disabled={!canFocus || controls.focuser.moving || moveFocuserMutation.isPending} />
+              </label>
+              <button type="submit" disabled={!canFocus || controls.focuser.moving || moveFocuserMutation.isPending}>Set focus</button>
+            </form>
+          ) : null}
+          {controls.filterWheel ? (
+            <label>
+              Filter
+              <select aria-label="Filter position" value={controls.filterWheel.position} disabled={!canFilter || setFilterPositionMutation.isPending} onChange={(event) => setFilterPositionMutation.mutate(Number(event.target.value))}>
+                {controls.filterWheel.names.map((name, index) => <option key={name} value={index}>{name}</option>)}
+              </select>
+            </label>
+          ) : null}
+        </div>
+      ) : null}
 
       {(capture.phase === 'failed' || capture.phase === 'partial') &&
       capture.lastError ? (

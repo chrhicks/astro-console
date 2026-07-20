@@ -18,6 +18,9 @@ import {
   MAX_EXPOSURE_DURATION_SEC,
 } from '../workflows/capture-workflows'
 import { runPark, runUnpark } from '../workflows/park-workflows'
+import { runMoveFocuser, runSetFilterPosition } from '../workflows/controls-workflows'
+import { ObserverProfile } from '../profile/observer-profile'
+import { ObserverLocationRequestSchema } from '../profile/observer-location-schema'
 import {
   runConfigureExternalSequence,
   runContinueExternalSequence,
@@ -126,6 +129,29 @@ export function registerIpcV2Handlers(allowed: WebContents) {
 
   handle('seestar:v2:unpark', () =>
     appRuntime.runPromise(withProjectedStatus(runUnpark)),
+  )
+
+  handle('seestar:v2:move-focuser', (_event, input) =>
+    appRuntime.runPromise(Effect.gen(function* () {
+      const decoded = yield* decodeIpc(ControlPositionSchema, input)
+      return yield* withProjectedStatus(runMoveFocuser(decoded.position))
+    })),
+  )
+
+  handle('seestar:v2:set-filter-position', (_event, input) =>
+    appRuntime.runPromise(Effect.gen(function* () {
+      const decoded = yield* decodeIpc(ControlPositionSchema, input)
+      return yield* withProjectedStatus(runSetFilterPosition(decoded.position))
+    })),
+  )
+
+  handle('seestar:v2:set-observer-location', (_event, input) =>
+    appRuntime.runPromise(Effect.gen(function* () {
+      const decoded = yield* decodeIpc(ObserverLocationRequestSchema, input)
+      const profile = yield* ObserverProfile
+      yield* profile.set(decoded.location)
+      return yield* getProjectedStatus()
+    })),
   )
 
   handle('seestar:v2:set-exposure-duration', (_event, input) =>
@@ -239,6 +265,10 @@ const ExternalSequencePlanSchema = Schema.Struct({
     Schema.isInt(),
     Schema.isBetween({ minimum: 0, maximum: MAX_SEQUENCE_DARKS }),
   ),
+})
+
+const ControlPositionSchema = Schema.Struct({
+  position: Schema.Number.check(Schema.isFinite(), Schema.isInt()),
 })
 
 function decodeIpc<S extends Schema.ConstraintDecoder<unknown>>(

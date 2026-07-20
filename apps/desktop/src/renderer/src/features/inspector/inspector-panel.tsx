@@ -1,3 +1,4 @@
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { DeviceProjection, PointingProjection, PreviewProjection, TargetDetails } from '../../../../shared/api-v2'
 import { useProjectionStore } from '../../state/projection-store'
 import { capturePhaseLabel, selectInspectorModel } from '../../state/projection-selectors'
@@ -7,7 +8,14 @@ import {
 } from '../../state/selected-target-store'
 import { useElapsedSeconds } from '../../hooks/use-elapsed-seconds'
 import { useTargetDetailsQuery } from './use-target-details-query'
-import { usePointToTargetMutation } from '../../mutations/use-workspace-mutations'
+import { useAbortSlewMutation, usePointToTargetMutation, useSetObserverLocationMutation } from '../../mutations/use-workspace-mutations'
+import {
+  createObserverLocationDraftLifecycle,
+  observerLocationDraft,
+  observerLocationSource,
+  validateObserverLocation,
+} from './observer-location'
+import { slewOverlayMessage } from '../work-area/work-area-status'
 import './inspector-panel.css'
 
 const POINTING_PHASE_LABELS: Record<PointingProjection['phase'], string> = {
@@ -47,6 +55,7 @@ export default function InspectorPanel() {
   } = useProjectionStore(selectInspectorModel)
   const details = useTargetDetailsQuery(target?.id ?? null)
   const pointMutation = usePointToTargetMutation()
+  const abortSlewMutation = useAbortSlewMutation()
   const startedElapsed = useElapsedSeconds(capture)
 
   if (!target) {
@@ -57,6 +66,7 @@ export default function InspectorPanel() {
         </div>
         <div className="panel-body inspector-panel-body">
           <p className="inspector-empty">Select a target to inspect.</p>
+          <ObserverLocationForm device={device} />
         </div>
       </div>
     )
@@ -78,6 +88,7 @@ export default function InspectorPanel() {
   const hasNativeCapture = captureCapability === 'native'
   const hasExternalCapture = captureCapability === 'external'
   const hasFilterWheel = workspace.capabilities.filterWheel === 'yes'
+  const abortSlewAction = workspace.actions.find((action) => action.id === 'abort-slew')
 
   return (
     <div>
@@ -125,9 +136,19 @@ export default function InspectorPanel() {
             </button>
           </div>
           {isSlewing ? (
-            <p className="help-line">
-              Slew cannot be cancelled from the console.
-            </p>
+            <>
+              <p className="help-line">{slewOverlayMessage(workspace)}</p>
+              {abortSlewAction ? (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  disabled={!abortSlewAction.enabled || abortSlewMutation.isPending}
+                  onClick={() => abortSlewMutation.mutate()}
+                >
+                  {abortSlewMutation.isPending ? 'Aborting...' : abortSlewAction.label}
+                </button>
+              ) : null}
+            </>
           ) : null}
           {device.mountClosed && !isSlewPending ? (
             <p className="inspector-pointing-error">
@@ -269,8 +290,97 @@ export default function InspectorPanel() {
             </div>
           </div>
         </details>
+        <ObserverLocationForm device={device} />
       </div>
     </div>
+  )
+}
+
+function ObserverLocationForm({ device }: { readonly device: DeviceProjection }) {
+  const [lat, setLat] = useState('')
+  const [lon, setLon] = useState('')
+  const [validationError, setValidationError] = useState<string | null>(null)
+  const mutation = useSetObserverLocationMutation()
+  const draftLifecycle = useRef(createObserverLocationDraftLifecycle()).current
+
+  const initializeDraft = useEffectEvent(() => {
+    if (!draftLifecycle.canInitialize()) return
+    const draft = device.location ? observerLocationDraft(device.location) : null
+    setLat(draft?.lat ?? '')
+    setLon(draft?.lon ?? '')
+  })
+
+  useEffect(() => {
+    initializeDraft()
+  }, [device.location])
+
+  const source = observerLocationSource(device.locationSource)
+
+  return (
+    <details className="inspector-acc">
+      <summary>Observer location</summary>
+      <form
+        className="acc-body observer-location-form"
+        onSubmit={(event) => {
+          event.preventDefault()
+          const location = validateObserverLocation(lat, lon)
+          if (!location) {
+            setValidationError('Latitude must be −90 to 90 and longitude −180 to 180.')
+            return
+          }
+          setValidationError(null)
+          mutation.mutate({ location }, {
+            onSuccess: () => {
+              const draft = observerLocationDraft(location)
+              setLat(draft.lat)
+              setLon(draft.lon)
+              draftLifecycle.markSaved()
+            },
+          })
+        }}
+      >
+        <div className="observer-location-fields">
+          <label>
+            Latitude
+            <input
+              aria-label="Observer latitude"
+              aria-describedby={validationError ? 'observer-location-error' : undefined}
+              aria-invalid={validationError ? true : undefined}
+              inputMode="decimal"
+              value={lat}
+              onChange={(event) => {
+                draftLifecycle.markEdited()
+                setValidationError(null)
+                setLat(event.currentTarget.value)
+              }}
+            />
+          </label>
+          <label>
+            Longitude
+            <input
+              aria-label="Observer longitude"
+              aria-describedby={validationError ? 'observer-location-error' : undefined}
+              aria-invalid={validationError ? true : undefined}
+              inputMode="decimal"
+              value={lon}
+              onChange={(event) => {
+                draftLifecycle.markEdited()
+                setValidationError(null)
+                setLon(event.currentTarget.value)
+              }}
+            />
+          </label>
+        </div>
+        <div className="btn-row">
+          <button type="submit" className="btn btn-sm" disabled={mutation.isPending}>
+            {mutation.isPending ? 'Saving…' : 'Save location'}
+          </button>
+          <span className="help-line">Source: {source}</span>
+        </div>
+        {validationError ? <p id="observer-location-error" className="inspector-pointing-error" role="alert">{validationError}</p> : null}
+        {mutation.isError ? <p className="inspector-pointing-error">Could not save observer location.</p> : null}
+      </form>
+    </details>
   )
 }
 

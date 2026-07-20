@@ -2,10 +2,6 @@
 
 Start your session by reading your memory summary in `continuum`. Keep your memory updated throughout this session.
 
-### Tooling
-
-- Prefer `ast-grep` / `sg` for structural, syntax-aware code search when possible instead of plain text grep-style search. It is usually better for searching through code because it matches language structure, not just raw text.
-
 ## Coding Delegation
 
 Use `glm-coder` as the default implementation path for coding tasks in this project.
@@ -110,7 +106,6 @@ All are JSON objects sent to port `4700` with an incrementing `id` and `\r\n` te
 - `AutoGoto`, `Stack`, `AutoFocus`, `ScopeHome`, `ScopeTrack`, `Client`
 
 ### Safety Notes
-- Verify the device is in a safe position before sending movement commands.
 - The mount is **alt-az**; RA/Dec coordinates may not reflect true sky pointing exactly.
 - Do not flash firmware or upload files unless explicitly asked.
 - The PEM is sensitive; do not commit it to public repositories.

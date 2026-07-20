@@ -13,6 +13,8 @@ import type {
   RigCameraExposureState,
   RigCoordinates,
   RigError,
+  RigFilterWheel,
+  RigFocuser,
   RigSession,
 } from './contracts.js'
 import {
@@ -55,8 +57,8 @@ interface TelescopeState {
 
 interface ComponentCapabilities {
   readonly camera: boolean
-  readonly focuser: boolean
-  readonly filterWheel: boolean
+  readonly focuser?: RigFocuser['state']
+  readonly filterWheel?: RigFilterWheel['state']
 }
 
 export function createAlpacaRig(
@@ -144,28 +146,10 @@ export function createAlpacaRig(
               : undefined,
             camera: rigCamera,
             focuser: focuser && components.focuser
-              ? {
-                  moveTo: (position) =>
-                    command(
-                      client,
-                      `${focuser}/move`,
-                      { Position: position },
-                      'focuser.move',
-                    ),
-                }
+              ? buildFocuser(client, focuser, components.focuser)
               : undefined,
             filterWheel: filterWheel && components.filterWheel
-              ? {
-                  setPosition: (position, context) =>
-                    command(
-                      client,
-                      `${filterWheel}/position`,
-                      { Position: position },
-                      'filterWheel.setPosition',
-                      COMMAND_TIMEOUT_MS,
-                      context?.signal,
-                    ),
-                }
+              ? buildFilterWheel(client, filterWheel, components.filterWheel)
               : undefined,
           } satisfies RigSession
         }),
@@ -202,13 +186,97 @@ function probeComponents(
         ]).pipe(Effect.map((results) => results.every(Boolean)))
       : false
     const focuser = bases.focuser
-      ? yield* endpointAvailable(client.get(`${bases.focuser}/ismoving`, Schema.Boolean))
-      : false
+      ? yield* optional(
+          Effect.all({
+            absolute: client.get(`${bases.focuser}/absolute`, Schema.Boolean),
+            maxStep: client.get(`${bases.focuser}/maxstep`, Schema.Number),
+            position: client.get(`${bases.focuser}/position`, Schema.Number),
+            moving: client.get(`${bases.focuser}/ismoving`, Schema.Boolean),
+          }).pipe(
+            Effect.flatMap((state) =>
+              state.absolute && Number.isInteger(state.maxStep) && state.maxStep > 0 &&
+              Number.isInteger(state.position) && state.position >= 0 && state.position <= state.maxStep
+                ? Effect.succeed({ ...state, absolute: true as const })
+                : Effect.fail(new AlpacaRejectedError({ operation: 'focuser.probe', message: 'Focuser is not an absolute position focuser' })),
+            ),
+          ),
+        )
+      : undefined
     const filterWheel = bases.filterWheel
-      ? yield* endpointAvailable(client.get(`${bases.filterWheel}/position`, Schema.Number))
-      : false
+      ? yield* optional(
+          Effect.all({
+            names: client.get(`${bases.filterWheel}/names`, Schema.Array(Schema.String)),
+            focusOffsets: client.get(`${bases.filterWheel}/focusoffsets`, Schema.Array(Schema.Number)),
+            position: client.get(`${bases.filterWheel}/position`, Schema.Number),
+          }).pipe(
+            Effect.flatMap((state) =>
+              state.names.length > 0 && state.names.length === state.focusOffsets.length &&
+              Number.isInteger(state.position) && state.position >= 0 && state.position < state.names.length
+                ? Effect.succeed(state)
+                : Effect.fail(new AlpacaRejectedError({ operation: 'filterWheel.probe', message: 'Filter wheel did not report a usable position map' })),
+            ),
+          ),
+        )
+      : undefined
     return { camera, focuser, filterWheel }
   })
+}
+
+function buildFocuser(
+  client: AlpacaClient,
+  base: string,
+  initial: RigFocuser['state'],
+): RigFocuser {
+  let state = initial
+  return {
+    get state() {
+      return state
+    },
+    moveTo: (position, context) =>
+      alpacaError('focuser.move')(
+        Effect.gen(function* () {
+          if (!Number.isInteger(position) || position < 0 || position > state.maxStep) {
+            return yield* Effect.fail(new AlpacaRejectedError({ operation: 'focuser.move', message: `Focuser position must be an integer from 0 to ${state.maxStep}` }))
+          }
+          yield* client.put(`${base}/move`, { Position: position }, COMMAND_TIMEOUT_MS, context?.signal)
+          state = {
+            ...state,
+            position: yield* client.get(`${base}/position`, Schema.Number, context?.signal),
+            moving: yield* client.get(`${base}/ismoving`, Schema.Boolean, context?.signal),
+          }
+        }),
+      ),
+  }
+}
+
+function buildFilterWheel(
+  client: AlpacaClient,
+  base: string,
+  initial: RigFilterWheel['state'],
+): RigFilterWheel {
+  let state = initial
+  return {
+    get state() {
+      return state
+    },
+    setPosition: (position, context) =>
+      alpacaError('filterWheel.setPosition')(
+        Effect.gen(function* () {
+          if (!Number.isInteger(position) || position < 0 || position >= state.names.length) {
+            return yield* Effect.fail(new AlpacaRejectedError({ operation: 'filterWheel.setPosition', message: `Filter position must be an integer from 0 to ${state.names.length - 1}` }))
+          }
+          yield* client.put(`${base}/position`, { Position: position }, COMMAND_TIMEOUT_MS, context?.signal)
+          const next = yield* poll(
+            () => client.get(`${base}/position`, Schema.Number, context?.signal),
+            (next) => next === position,
+            COMMAND_TIMEOUT_MS,
+            context?.signal,
+            'filterWheel.setPosition',
+          )
+          state = { ...state, position: next }
+        }),
+      ),
+  }
 }
 
 function endpointAvailable<A>(effect: Effect.Effect<A, AlpacaError>) {
@@ -347,6 +415,7 @@ function buildMount(
               yield* poll(
                 () =>
                   client.get(`${base}/atpark`, Schema.Boolean, context?.signal),
+                (atPark) => atPark,
                 SLEW_TIMEOUT_MS,
                 context?.signal,
                 'mount.park',
@@ -623,21 +692,23 @@ function pollMount(
   operation: string,
 ) {
   return poll(
-    () => readMount(client, base, signal).pipe(Effect.map(complete)),
+    () => readMount(client, base, signal),
+    complete,
     timeoutMs,
     signal,
     operation,
   )
 }
 
-function poll(
-  read: () => Effect.Effect<boolean, AlpacaError>,
+function poll<A>(
+  read: () => Effect.Effect<A, AlpacaError>,
+  complete: (value: A) => boolean,
   timeoutMs: number,
   signal: AbortSignal | undefined,
   operation: string,
-): Effect.Effect<void, AlpacaError> {
+): Effect.Effect<A, AlpacaError> {
   const deadline = Date.now() + timeoutMs
-  const loop = (): Effect.Effect<void, AlpacaError> =>
+  const loop = (): Effect.Effect<A, AlpacaError> =>
     Effect.gen(function* () {
       if (signal?.aborted) {
         return yield* Effect.fail(
@@ -656,7 +727,8 @@ function poll(
           }),
         )
       }
-      if (yield* read()) return
+      const next = yield* read()
+      if (complete(next)) return next
       yield* Effect.sleep(MOUNT_POLL_INTERVAL_MS)
       return yield* loop()
     })

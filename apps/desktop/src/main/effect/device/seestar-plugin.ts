@@ -1,9 +1,7 @@
-import { app } from 'electron'
 import { Effect, Fiber, Ref, Stream } from 'effect'
 import {
   createSeestarRig,
   discoverSeestars,
-  resolveSeestarPemPath,
   type RigEvent,
 } from 'seestar-sdk'
 import type {
@@ -40,18 +38,15 @@ export function createSeestarPlugin(options: SeestarPluginOptions = {}): DeviceP
       const geo = yield* GeoService
       const target = (yield* Ref.get(discovered)).get(input.deviceId)
       if (!target?.host) return yield* Effect.fail(new Error(`Seestar device not found for deviceId ${input.deviceId}`))
+      if (!options.pemPath && !options.createRig) {
+        return yield* Effect.fail(new Error('Native Seestar TCP requires an explicitly configured experimental PEM path'))
+      }
       const session = yield* (options.createRig ?? createSeestarRig)({
         rigId: target.deviceId,
         host: target.host,
         displayName: target.displayName,
         serialNumber: target.serialNumber,
-        pemPath: options.pemPath ?? resolveSeestarPemPath({
-          fallbackCandidates: [
-            app.isPackaged
-              ? `${process.resourcesPath}/seestar_3.1.2_fw_7.32_interop.pem`
-              : `${app.getAppPath()}/seestar_3.1.2_fw_7.32_interop.pem`,
-          ],
-        }),
+        pemPath: options.pemPath ?? '',
       })
       const observer = yield* geo.resolveObserverLocation(session.observerLocation)
       const synchronizeObserver = session.synchronizeObserver

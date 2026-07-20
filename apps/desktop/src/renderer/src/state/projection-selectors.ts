@@ -95,6 +95,7 @@ export function selectInspectorModel(state: ProjectionState) {
     capture: status?.capture ?? NO_CAPTURE,
     preview: status?.preview ?? NO_PREVIEW,
     device: status?.device ?? {},
+    controls: status?.controls,
     workspace: status?.workspace ?? DEFAULT_WORKSPACE,
     capturePresentation: selectCapturePresentation(status?.workspace),
   }
@@ -110,6 +111,7 @@ export function selectWorkAreaModel(state: ProjectionState) {
     preview: status?.preview ?? NO_PREVIEW,
     capture: status?.capture ?? NO_CAPTURE,
     device: status?.device ?? {},
+    controls: status?.controls,
     capturePresentation: selectCapturePresentation(status?.workspace),
     latestPreviewPath: latestAsset?.hasPreview ? latestAsset.id : null,
     latestPreviewUnavailable: latestAsset != null && !latestAsset.hasPreview,

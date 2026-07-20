@@ -7,6 +7,9 @@ import type {
   PointToTargetRequest,
   SeestarDesktopApiV2,
   SetExposureDurationRequest,
+  MoveFocuserRequest,
+  SetFilterPositionRequest,
+  SetObserverLocationRequest,
 } from '../../../shared/api-v2'
 
 function getApi(): SeestarDesktopApiV2 {
@@ -32,6 +35,9 @@ export const electronApi = {
   parkMount: () => getApi().parkMount(),
   unparkMount: () => getApi().unparkMount(),
   abortSlew: () => getApi().abortSlew(),
+  moveFocuser: (input: MoveFocuserRequest) => getApi().moveFocuser(input),
+  setFilterPosition: (input: SetFilterPositionRequest) => getApi().setFilterPosition(input),
+  setObserverLocation: (input: SetObserverLocationRequest) => getApi().setObserverLocation(input),
   setExposureDuration: (input: SetExposureDurationRequest) =>
     getApi().setExposureDuration(input),
   configureExternalSequence: (input: ConfigureExternalSequenceRequest) =>

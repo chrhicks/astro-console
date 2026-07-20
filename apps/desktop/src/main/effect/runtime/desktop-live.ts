@@ -2,6 +2,7 @@ import { Layer } from 'effect'
 import { CatalogStoreLive } from '../catalog/catalog-store.live'
 import { DeviceRegistryLive } from '../device/device-registry'
 import { GeoServiceLive } from '../geo/geo-service.live'
+import { ObserverProfileLive } from '../profile/observer-profile'
 import { RuntimeStateRefLive } from '../state/runtime-state-ref'
 import { AggregateStoreLive } from '../state/aggregate-store'
 import { EventBusLive } from '../event/event-bus'
@@ -38,7 +39,8 @@ const baseLayer = Layer.mergeAll(
   operationCoordinatorLayer,
   EventBusLive,
   DeviceRegistryLive,
-  GeoServiceLive,
+  ObserverProfileLive,
+  Layer.provide(GeoServiceLive, ObserverProfileLive),
   FrameStorageLive,
   HardwareWorkersLive,
 )

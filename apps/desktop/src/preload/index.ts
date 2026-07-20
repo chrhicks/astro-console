@@ -12,6 +12,9 @@ import type {
   SeestarDesktopApiV2,
   SeestarDevFakeApi,
   SetExposureDurationRequest,
+  SetObserverLocationRequest,
+  MoveFocuserRequest,
+  SetFilterPositionRequest,
   TargetDetails,
 } from '../shared/api-v2'
 import {
@@ -54,6 +57,9 @@ export const apiV2: SeestarDesktopApiV2 = {
     invokeStatus('seestar:v2:park'),
   unparkMount: () =>
     invokeStatus('seestar:v2:unpark'),
+  moveFocuser: (input: MoveFocuserRequest) => invokeStatus('seestar:v2:move-focuser', input),
+  setFilterPosition: (input: SetFilterPositionRequest) => invokeStatus('seestar:v2:set-filter-position', input),
+  setObserverLocation: (input: SetObserverLocationRequest) => invokeStatus('seestar:v2:set-observer-location', input),
   abortSlew: () =>
     invokeStatus('seestar:v2:abort-slew'),
   setExposureDuration: (input: SetExposureDurationRequest) =>

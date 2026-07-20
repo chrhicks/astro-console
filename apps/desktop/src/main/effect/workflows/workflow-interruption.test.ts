@@ -20,6 +20,7 @@ import { runConnect, runDisconnect } from './session-workflows'
 import { runStartCapture, runStopCapture } from './capture-workflows'
 import { runPark, runUnpark } from './park-workflows'
 import { runAbortSlew } from './pointing-workflows'
+import { runMoveFocuser, runSetFilterPosition } from './controls-workflows'
 import {
   runConfigureExternalSequence,
   runContinueExternalSequence,
@@ -1838,5 +1839,60 @@ describe('workflow interruption safety', () => {
     assert.equal(result.session.phase, 'disconnected')
     assert.equal(result.session.sessionId, undefined)
     assert.equal(displacedDisconnectCompleted, true)
+  })
+
+  it('rejects invalid optical control positions before commands and refreshes lease-owned controls', async () => {
+    let focusCommands = 0
+    let filterCommands = 0
+    let refreshes = 0
+    const focuser = {
+      state: { absolute: true as const, maxStep: 100, position: 20, moving: false },
+      moveTo: (position: number) => Effect.sync(() => {
+        focusCommands++
+        focuser.state = { ...focuser.state, position }
+      }),
+    }
+    const filterWheel = {
+      state: { names: ['Clear', 'LP'], focusOffsets: [0, 0], position: 0 },
+      setPosition: (position: number) => Effect.sync(() => {
+        filterCommands++
+        filterWheel.state = { ...filterWheel.state, position }
+      }),
+    }
+    const session = makeSession('controls')
+    session.rig = {
+      ...session.rig,
+      focuser,
+      filterWheel,
+      controls: () => ({
+        focuser: { position: focuser.state.position, maxStep: 100, moving: false },
+        filterWheel: { ...filterWheel.state },
+      }),
+      refresh: Effect.sync(() => {
+        refreshes++
+        return { device: {}, preview: { phase: 'none' as const, source: 'none' as const, active: false }, capture: { phase: 'idle' as const } }
+      }),
+    }
+    const layer = makeTestLayer(makeFakeRegistry(Effect.succeed(session)))
+    const result = await Effect.runPromise(Effect.gen(function* () {
+      const sessions = yield* SessionManager
+      const { intent } = yield* sessions.beginConnect
+      yield* sessions.install(intent, session, (current) => ({ ...current, session: { ...current.session, phase: 'connected', sessionId: session.sessionId } }))
+      yield* Effect.flip(runMoveFocuser(10.5))
+      yield* Effect.flip(runMoveFocuser(101))
+      yield* Effect.flip(runSetFilterPosition(2))
+      yield* runMoveFocuser(40)
+      yield* runSetFilterPosition(1)
+      const store = yield* AggregateStore
+      return yield* store.get
+    }).pipe(Effect.provide(layer)))
+
+    assert.equal(focusCommands, 1)
+    assert.equal(filterCommands, 1)
+    assert.equal(refreshes, 2)
+    assert.deepEqual(result.controls, {
+      focuser: { position: 40, maxStep: 100, moving: false },
+      filterWheel: { names: ['Clear', 'LP'], focusOffsets: [0, 0], position: 1 },
+    })
   })
 })

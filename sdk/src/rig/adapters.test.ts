@@ -18,14 +18,26 @@ interface AlpacaScenario {
   readonly slewing?: readonly boolean[]
   readonly rejectPark?: boolean
   readonly cameraEndpoints?: boolean
-  readonly focuserEndpoints?: boolean
-  readonly filterWheelEndpoints?: boolean
+  readonly focuser?: {
+    readonly absolute: boolean
+    readonly maxStep: number
+    readonly position: number
+    readonly moving: boolean
+  }
+  readonly filterWheel?: {
+    readonly names: readonly string[]
+    readonly focusOffsets: readonly number[]
+    readonly position: number
+    readonly positionResponses?: readonly (number | 'rejected')[]
+  }
 }
 
 const requests: Array<{ readonly method: string; readonly path: string }> = []
 let scenario: AlpacaScenario = { atPark: [] }
 let atPark: boolean[] = []
 let slewing: boolean[] = []
+let filterWheelPositionResponses: Array<number | 'rejected'> = []
+let filterWheelPositionSet = false
 
 const server = createServer((request, response) => {
   const path = new URL(request.url ?? '/', `http://${request.headers.host}`)
@@ -33,6 +45,7 @@ const server = createServer((request, response) => {
   const method = request.method ?? 'GET'
   requests.push({ method, path })
   if (method === 'PUT') {
+    if (path.endsWith('/filterwheel/0/position')) filterWheelPositionSet = true
     response.end(
       JSON.stringify({
         ErrorNumber: path.endsWith('/park') && scenario.rejectPark ? 1 : 0,
@@ -57,13 +70,24 @@ const server = createServer((request, response) => {
     response.end(JSON.stringify({ Value: undefined, ErrorNumber: 1 }))
     return
   }
+  if (path.endsWith('/filterwheel/0/position') && filterWheelPositionSet) {
+    const value = filterWheelPositionResponses.shift()
+    if (value === 'rejected') {
+      response.end(JSON.stringify({ ErrorNumber: 1 }))
+      return
+    }
+    if (value !== undefined) {
+      response.end(JSON.stringify({ Value: value, ErrorNumber: 0 }))
+      return
+    }
+  }
   const value = alpacaValue(path)
   response.end(
     JSON.stringify({ Value: value, ErrorNumber: value === undefined ? 1 : 0 }),
   )
 })
 
-function alpacaValue(path: string): boolean | number | string | undefined {
+function alpacaValue(path: string): boolean | number | string | readonly string[] | readonly number[] | undefined {
   if (path.endsWith('/connected')) return true
   if (path.endsWith('/atpark')) return atPark.shift() ?? false
   if (path.endsWith('/canpark')) return true
@@ -80,9 +104,14 @@ function alpacaValue(path: string): boolean | number | string | undefined {
     return scenario.cameraEndpoints ? false : undefined
   if (path.endsWith('/canstopexposure'))
     return scenario.cameraEndpoints ? true : undefined
-  if (path.endsWith('/ismoving')) return scenario.focuserEndpoints ? false : undefined
+  if (path.endsWith('/absolute')) return scenario.focuser?.absolute
+  if (path.endsWith('/maxstep')) return scenario.focuser?.maxStep
+  if (path.endsWith('/focuser/0/position')) return scenario.focuser?.position
+  if (path.endsWith('/ismoving')) return scenario.focuser?.moving
+  if (path.endsWith('/filterwheel/0/names')) return scenario.filterWheel?.names
+  if (path.endsWith('/filterwheel/0/focusoffsets')) return scenario.filterWheel?.focusOffsets
   if (path.endsWith('/filterwheel/0/position'))
-    return scenario.filterWheelEndpoints ? 0 : undefined
+    return scenario.filterWheel?.position
   return undefined
 }
 
@@ -166,6 +195,8 @@ async function connect(
   scenario = next
   atPark = [...next.atPark]
   slewing = [...(next.slewing ?? [])]
+  filterWheelPositionResponses = [...(next.filterWheel?.positionResponses ?? [])]
+  filterWheelPositionSet = false
   requests.length = 0
   const rig = await Effect.runPromise(
     createAlpacaRig({
@@ -212,15 +243,113 @@ alpacaTest(
       {
         atPark: [],
         cameraEndpoints: true,
-        focuserEndpoints: true,
-        filterWheelEndpoints: true,
+        focuser: { absolute: true, maxStep: 2600, position: 1300, moving: false },
+        filterWheel: {
+          names: ['Dark', 'IR', 'LP'],
+          focusOffsets: [0, 0, 0],
+          position: 0,
+        },
       },
       { camera: true, focuser: true, filterWheel: true },
     )
     assert.ok(supported.camera)
     assert.ok(supported.focuser)
     assert.ok(supported.filterWheel)
+    assert.deepEqual(supported.focuser.state, {
+      absolute: true,
+      maxStep: 2600,
+      position: 1300,
+      moving: false,
+    })
+    assert.deepEqual(supported.filterWheel.state, {
+      names: ['Dark', 'IR', 'LP'],
+      focusOffsets: [0, 0, 0],
+      position: 0,
+    })
     await Effect.runPromise(supported.disconnect)
+
+    const compact = await connect(
+      {
+        atPark: [],
+        focuser: { absolute: true, maxStep: 480, position: 17, moving: true },
+        filterWheel: {
+          names: ['Lum', 'Ha'],
+          focusOffsets: [0, -30],
+          position: 1,
+        },
+      },
+      { focuser: true, filterWheel: true },
+    )
+    assert.deepEqual(compact.focuser?.state, {
+      absolute: true,
+      maxStep: 480,
+      position: 17,
+      moving: true,
+    })
+    assert.deepEqual(compact.filterWheel?.state, {
+      names: ['Lum', 'Ha'],
+      focusOffsets: [0, -30],
+      position: 1,
+    })
+    await Effect.runPromise(compact.disconnect)
+  },
+)
+
+alpacaTest(
+  'Alpaca filter wheel waits for the requested position before committing state',
+  async () => {
+    const rig = await connect(
+      {
+        atPark: [],
+        filterWheel: {
+          names: ['Dark', 'IR', 'LP'],
+          focusOffsets: [0, 0, 0],
+          position: 0,
+          positionResponses: [-1, 2],
+        },
+      },
+      { filterWheel: true },
+    )
+    const filterWheel = rig.filterWheel
+
+    assert.ok(filterWheel)
+    await Effect.runPromise(filterWheel.setPosition(2))
+
+    assert.equal(filterWheel.state.position, 2)
+    assert.deepEqual(requests, [
+      { method: 'PUT', path: '/api/v1/filterwheel/0/position' },
+      { method: 'GET', path: '/api/v1/filterwheel/0/position' },
+      { method: 'GET', path: '/api/v1/filterwheel/0/position' },
+    ])
+    await Effect.runPromise(rig.disconnect)
+  },
+)
+
+alpacaTest(
+  'Alpaca filter wheel preserves state when position polling fails',
+  async () => {
+    const rig = await connect(
+      {
+        atPark: [],
+        filterWheel: {
+          names: ['Dark', 'IR', 'LP'],
+          focusOffsets: [0, 0, 0],
+          position: 0,
+          positionResponses: [-1, 'rejected'],
+        },
+      },
+      { filterWheel: true },
+    )
+    const filterWheel = rig.filterWheel
+
+    assert.ok(filterWheel)
+    await assert.rejects(
+      Effect.runPromise(filterWheel.setPosition(2)),
+      (error: unknown) =>
+        error instanceof RigRejectedError && error.operation === 'filterWheel.setPosition',
+    )
+    assert.equal(filterWheel.state.position, 0)
+    await Effect.runPromise(rig.disconnect)
   },
 )
 

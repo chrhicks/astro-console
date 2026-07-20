@@ -79,3 +79,49 @@ it('forwards abort slew to the preload API', async () => {
 
   assert.deepEqual(calls, ['abort-slew'])
 })
+
+it('forwards manual optical controls to the preload API', async () => {
+  const calls: unknown[] = []
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      seestarV2: {
+        moveFocuser: (input: unknown) => {
+          calls.push(['focus', input])
+          return Promise.resolve(undefined)
+        },
+        setFilterPosition: (input: unknown) => {
+          calls.push(['filter', input])
+          return Promise.resolve(undefined)
+        },
+      },
+    },
+  })
+
+  await electronApi.moveFocuser({ position: 1314 })
+  await electronApi.setFilterPosition({ position: 2 })
+
+  assert.deepEqual(calls, [
+    ['focus', { position: 1314 }],
+    ['filter', { position: 2 }],
+  ])
+})
+
+it('forwards a manual observer location to the preload API', async () => {
+  const calls: unknown[] = []
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      seestarV2: {
+        setObserverLocation: (input: unknown) => {
+          calls.push(input)
+          return Promise.resolve(undefined)
+        },
+      },
+    },
+  })
+
+  await electronApi.setObserverLocation({ location: { lat: 39.755, lon: -74.2679 } })
+
+  assert.deepEqual(calls, [{ location: { lat: 39.755, lon: -74.2679 } }])
+})

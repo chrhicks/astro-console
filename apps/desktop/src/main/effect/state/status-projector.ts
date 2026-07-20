@@ -37,6 +37,7 @@ interface RigSupport {
   darkExposure: boolean
   autofocus: boolean
   filterWheel: boolean
+  focuser: boolean
   storage: boolean
 }
 
@@ -51,6 +52,7 @@ export function projectRigSupport(rig: ConnectedRig): RigSupport {
     darkExposure: rig.camera?.startDarkExposure !== undefined,
     autofocus: rig.autofocus !== undefined,
     filterWheel: rig.filterWheel !== undefined,
+    focuser: rig.focuser !== undefined,
     storage: rig.storage !== undefined,
   }
 }
@@ -59,7 +61,7 @@ function project(
   aggregate: SessionAggregate,
   health: LiveSessionHealthState | null,
   effectiveLocation: { lat: number; lon: number } | null,
-  locationSource: 'device' | 'geoip' | undefined,
+  locationSource: 'configured' | 'device' | 'geoip' | undefined,
   rigSupport: RigSupport | null,
   sessionActive: boolean,
 ): DesktopStatus {
@@ -91,6 +93,7 @@ function project(
     preview: aggregate.preview,
     workspace: projectWorkspace(aggregate, rigSupport, sessionActive),
     camera: aggregate.camera ?? undefined,
+    controls: aggregate.controls ?? undefined,
     sequence: aggregate.sequence,
     currentTarget: aggregate.currentTarget,
     statusRevision: aggregate.statusRevision,
@@ -129,6 +132,7 @@ function projectCapabilities(
       darkExposure: 'no',
       autofocus: 'no',
       filterWheel: 'no',
+      focuser: 'no',
       storage: 'no',
     }
   }
@@ -138,6 +142,7 @@ function projectCapabilities(
     darkExposure: rigSupport.darkExposure ? 'yes' : 'no',
     autofocus: rigSupport.autofocus ? 'yes' : 'no',
     filterWheel: rigSupport.filterWheel ? 'yes' : 'no',
+    focuser: rigSupport.focuser ? 'yes' : 'no',
     storage: rigSupport.storage ? 'yes' : 'no',
   }
 }
@@ -248,6 +253,8 @@ export function projectWorkspaceActions(
     } else if (captureTier === 'external') {
       actions.push({ id: 'capture', label: 'Expose', enabled: true })
     }
+    if (rigSupport?.focuser) actions.push({ id: 'focus', label: 'Focus', enabled: true })
+    if (rigSupport?.filterWheel) actions.push({ id: 'filter', label: 'Filter', enabled: true })
     return actions
   }
   return []

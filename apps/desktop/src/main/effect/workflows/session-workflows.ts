@@ -82,6 +82,7 @@ function disconnectedReducer(message?: string) {
     capture: { phase: 'idle' as const },
     library: { scope: 'current_target' as const, assets: [], polling: false },
     camera: null,
+    controls: null,
     sequence: { phase: 'idle' as const, completed: 0, failed: 0 },
   })
 }
@@ -189,6 +190,7 @@ export const runConnect = (input: ConnectRequestV2) =>
               camera: connected.rig.camera
                 ? { exposureSec: DEFAULT_EXPOSURE_DURATION_SEC }
                 : null,
+              controls: connected.rig.controls?.() ?? null,
               sequence: { phase: 'idle', completed: 0, failed: 0 },
             }),
           )

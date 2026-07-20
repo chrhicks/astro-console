@@ -49,6 +49,7 @@ describe('Rig capability projection', () => {
       darkExposure: false,
       autofocus: false,
       filterWheel: false,
+      focuser: true,
       storage: false,
     })
   })
@@ -110,6 +111,29 @@ describe('Rig capability projection', () => {
 
     assert.equal(projectRigSupport(rig).darkExposure, true)
     assert.equal(projectRigSupport({ ...rig, camera }).darkExposure, false)
+  })
+
+  it('gates manual focus and filter actions to actionable live states', () => {
+    const support = {
+      canPark: false,
+      canUnpark: false,
+      canStopMotion: false,
+      canPoint: false,
+      preview: false,
+      capture: 'unsupported' as const,
+      darkExposure: false,
+      autofocus: false,
+      filterWheel: true,
+      focuser: true,
+      storage: false,
+    }
+    assert.deepEqual(projectWorkspaceActions('primed', support), [
+      { id: 'focus', label: 'Focus', enabled: true },
+      { id: 'filter', label: 'Filter', enabled: true },
+    ])
+    assert.deepEqual(projectWorkspaceActions('capturing', support), [
+      { id: 'stop-capture', label: 'Stop capture', enabled: true },
+    ])
   })
 })
 

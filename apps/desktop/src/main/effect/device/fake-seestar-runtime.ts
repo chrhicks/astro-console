@@ -55,6 +55,20 @@ export interface FakeScenarioAfterPoint {
   readonly library: LibraryProjection
 }
 
+export interface FakeScenarioControls {
+  readonly focuser: {
+    readonly absolute: true
+    readonly maxStep: number
+    readonly position: number
+    readonly moving: boolean
+  }
+  readonly filterWheel: {
+    readonly names: readonly string[]
+    readonly focusOffsets: readonly number[]
+    readonly position: number
+  }
+}
+
 export interface FakeScenario {
   readonly id: string
   readonly label: string
@@ -73,6 +87,7 @@ export interface FakeScenario {
   readonly connected?: FakeScenarioAfterPoint
   readonly connectedPointing?: PointingProjection
   readonly supportsStopMotion?: boolean
+  readonly controls?: FakeScenarioControls
   // Projection state applied after a successful pointToTarget on the fake
   // session. Omit for scenarios that only exercise connect/preflight.
   readonly afterPoint?: FakeScenarioAfterPoint
@@ -142,6 +157,35 @@ const CONNECTED_IDLE: FakeScenarioAfterPoint = {
 }
 
 const SCENARIOS: readonly FakeScenario[] = [
+  {
+    id: 'generic-controls',
+    label: 'Generic focuser and filter controls',
+    description: 'Connects with callable generic focuser and filter-wheel controls for UI smoke tests.',
+    discover: [discovered()],
+    connect: {
+      delayMs: 500,
+      outcome: {
+        kind: 'success',
+        device: baseDevice({
+          location: { lat: 37.7749, lon: -122.4194 },
+          deviceTime: FRESH_DEVICE_TIME,
+          deviceTimeLooksStale: false,
+          activity: 'idle',
+          warnings: [],
+        }),
+        warnings: [],
+      },
+    },
+    point: { delayMs: 750, outcome: { kind: 'success' } },
+    controls: {
+      focuser: { absolute: true, maxStep: 2600, position: 1300, moving: false },
+      filterWheel: {
+        names: ['Clear', 'IR', 'LP'],
+        focusOffsets: [0, 18, -12],
+        position: 0,
+      },
+    },
+  },
   {
     id: 'abort-slew-available',
     label: 'Abort slew available',

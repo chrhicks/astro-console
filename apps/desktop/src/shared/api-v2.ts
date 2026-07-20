@@ -169,7 +169,7 @@ export interface DeviceProjection {
   mountClosed?: boolean
   connectedAt?: string
   location?: { lat: number; lon: number }
-  locationSource?: 'device' | 'geoip'
+  locationSource?: 'configured' | 'device' | 'geoip'
   deviceTime?: DeviceTimeProjection
   deviceTimeLooksStale?: boolean
   // Rig-neutral device activity signal. Adapters derive this from their
@@ -179,6 +179,11 @@ export interface DeviceProjection {
   storageFreeMb?: number
   storageTotalMb?: number
   warnings?: readonly string[]
+}
+
+export interface RigControlsProjection {
+  focuser?: { position: number; maxStep: number; moving: boolean }
+  filterWheel?: { names: readonly string[]; focusOffsets: readonly number[]; position: number }
 }
 
 export type WorkspaceState =
@@ -203,6 +208,7 @@ export interface WorkspaceCapabilities {
   darkExposure: WorkspaceCapabilityFlag
   autofocus: WorkspaceCapabilityFlag
   filterWheel: WorkspaceCapabilityFlag
+  focuser?: WorkspaceCapabilityFlag
   storage: WorkspaceCapabilityFlag
 }
 
@@ -224,6 +230,8 @@ export type WorkspaceActionId =
   | 'capture'
   | 'unpark'
   | 'abort-slew'
+  | 'focus'
+  | 'filter'
 
 export interface WorkspaceAction {
   id: WorkspaceActionId
@@ -249,6 +257,7 @@ export interface DesktopStatus {
   library: LibraryProjection
   workspace: WorkspaceProjection
   camera?: CameraSettings
+  controls?: RigControlsProjection
   sequence: ExternalSequenceProjection
   currentTarget: TargetSummary | null
   statusRevision: number
@@ -314,6 +323,13 @@ export interface SetExposureDurationRequest {
 
 export interface ConfigureExternalSequenceRequest extends ExternalSequencePlan {}
 
+export interface SetObserverLocationRequest {
+  location: { lat: number; lon: number } | null
+}
+
+export interface MoveFocuserRequest { position: number }
+export interface SetFilterPositionRequest { position: number }
+
 export interface SeestarDesktopApiV2 {
   discover(): Promise<readonly DesktopDiscoveredDeviceV2[]>
   connect(input: ConnectRequestV2): Promise<DesktopStatus>
@@ -334,6 +350,9 @@ export interface SeestarDesktopApiV2 {
     input: SetExposureDurationRequest,
   ): Promise<DesktopStatus>
   configureExternalSequence(input: ConfigureExternalSequenceRequest): Promise<DesktopStatus>
+  setObserverLocation(input: SetObserverLocationRequest): Promise<DesktopStatus>
+  moveFocuser(input: MoveFocuserRequest): Promise<DesktopStatus>
+  setFilterPosition(input: SetFilterPositionRequest): Promise<DesktopStatus>
   startExternalSequence(): Promise<DesktopStatus>
   continueExternalSequence(): Promise<DesktopStatus>
   finishExternalSequence(): Promise<DesktopStatus>

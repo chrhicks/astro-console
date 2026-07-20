@@ -297,14 +297,7 @@ export function createSeestarRig(input: SeestarRigConfig): Effect.Effect<RigSess
                 started ? Effect.void : Effect.fail(rejected('autofocus.run', 'Device rejected autofocus request')),
               ))),
             },
-            filterWheel: {
-              setPosition: (position, context) => action('filterWheel.setPosition', deviceEffect(
-                'filterWheel.setPosition',
-                () => device.setWheelPosition(position, { ...WAIT, signal: context?.signal }),
-              ).pipe(Effect.flatMap((set) =>
-                set ? Effect.void : Effect.fail(rejected('filterWheel.setPosition', 'Device rejected filter wheel request')),
-              ))),
-            },
+            // Native TCP has no readable, truthful selected-filter state.
           } satisfies RigSession
         }),
         (_unused, exit) =>

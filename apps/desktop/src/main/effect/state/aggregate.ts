@@ -5,6 +5,7 @@ import {
   DeviceProjection,
   LibraryProjection,
   PointingProjection,
+  RigControlsProjection,
   PreviewProjection,
   TargetSummary,
 } from '../../../shared/api-v2'
@@ -37,6 +38,7 @@ export interface SessionAggregate {
   // Null when the connected rig has no generic RigCamera. Kept separate from
   // the volatile capture projection so rig refresh does not reset it.
   camera: CameraSettings | null
+  controls: RigControlsProjection | null
   sequence: ExternalSequenceProjection
   currentTarget: TargetSummary | null
   diagnostics: {}
@@ -56,6 +58,7 @@ export type OperationKind =
   | 'sequence'
   | 'sequence-continue'
   | 'unpark'
+  | 'controls'
   | 'stop-preview'
   | 'stop-capture'
   | 'abort-slew'
@@ -101,6 +104,7 @@ export function createInitialAggregate(): SessionAggregate {
     diagnostics: {},
     statusRevision: 0,
     camera: null,
+    controls: null,
     sequence: { phase: 'idle', completed: 0, failed: 0 },
     lastUpdatedAt: new Date().toISOString(),
   }

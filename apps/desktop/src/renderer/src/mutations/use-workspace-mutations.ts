@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query'
 import { electronApi } from '../lib/electron-api'
 import { applyDesktopStatusToProjectionStore } from '../state/projection-store'
+import type { SetObserverLocationRequest } from '../../../shared/api-v2'
 
 export function usePointToTargetMutation() {
   return useMutation({
@@ -63,6 +64,30 @@ export function useAbortSlewMutation() {
   return useMutation({
     mutationKey: ['pointing', 'abort-slew'],
     mutationFn: electronApi.abortSlew,
+    onSuccess: applyDesktopStatusToProjectionStore,
+  })
+}
+
+export function useMoveFocuserMutation() {
+  return useMutation({
+    mutationKey: ['focuser', 'move'],
+    mutationFn: (position: number) => electronApi.moveFocuser({ position }),
+    onSuccess: applyDesktopStatusToProjectionStore,
+  })
+}
+
+export function useSetFilterPositionMutation() {
+  return useMutation({
+    mutationKey: ['filter-wheel', 'set-position'],
+    mutationFn: (position: number) => electronApi.setFilterPosition({ position }),
+    onSuccess: applyDesktopStatusToProjectionStore,
+  })
+}
+
+export function useSetObserverLocationMutation() {
+  return useMutation({
+    mutationKey: ['observer', 'set-location'],
+    mutationFn: (input: SetObserverLocationRequest) => electronApi.setObserverLocation(input),
     onSuccess: applyDesktopStatusToProjectionStore,
   })
 }

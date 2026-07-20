@@ -1,5 +1,6 @@
 import { Effect, Layer, Schema } from 'effect'
-import { GeoService, type GeoLocation } from './geo-service'
+import { GeoService, resolveObserverAuthority, type GeoLocation } from './geo-service'
+import { ObserverProfile } from '../profile/observer-profile'
 
 const GEOJS_URL = 'https://get.geojs.io/v1/ip/geo.json'
 
@@ -12,17 +13,14 @@ export const GeoServiceLive = Layer.effect(
   GeoService,
   Effect.gen(function* () {
     const lookup = yield* Effect.cached(fetchGeoLocation())
+    const profile = yield* ObserverProfile
     return {
       lookup,
-      resolveObserverLocation: (deviceLocation) =>
-        deviceLocation
-          ? Effect.succeed({ location: deviceLocation, source: 'device' as const })
-          : lookup.pipe(
-              Effect.map((location) => ({
-                location,
-                source: location ? 'geoip' as const : undefined,
-              })),
-            ),
+      resolveObserverLocation: (deviceLocation) => Effect.gen(function* () {
+        const configured = yield* profile.get
+        const location = yield* lookup
+        return resolveObserverAuthority(configured, deviceLocation, location)
+      }),
     } satisfies GeoService
   }),
 )
