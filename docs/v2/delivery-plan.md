@@ -1,0 +1,242 @@
+# V2 Delivery Plan
+
+## 1. Delivery Strategy
+
+V2 should be built from the product model outward, not by reproducing the
+current Electron screen in a browser.
+
+The first implementation slices should establish:
+
+1. prototype evidence for the product's riskiest interaction and state-model
+   decisions;
+2. canonical product entities and ownership;
+3. a durable observatory service;
+4. a freely switchable workspace shell;
+5. one honest end-to-end observing path;
+6. evidence-driven review and processing;
+7. remote sharing only after the local service model is proven.
+
+The current application remains a source of validated hardware and workflow
+behavior during migration. It is not the visual template for V2.
+
+## 2. Phase 0: Product, Prototype, And Contract Definition
+
+### Outcomes
+
+- Confirm the workspace and run-phase model.
+- Run the scenario-based interaction, domain-model, and operational prototype
+  tracks in [the prototype plan](prototype-plan.md).
+- Define `Observatory`, `NightPlan`, `Sequence`, `ActiveRun`,
+  `AcquisitionAttempt`, `Frame`, `ProcessingJob`, and `ControlLease` ownership.
+- Decide what active-run state must persist across service restart.
+- Define command, snapshot, event, and error contracts with Effect Schema.
+- Separate domain decisions from transport-safe state and client-local
+  presentation state.
+- Create low-fidelity desktop and phone shell wireframes.
+- Compare materially different Plan and Observe interaction models rather than
+  polishing the first plausible layout.
+- Exercise prototypes against deterministic healthy, warning, failure,
+  recovery, long-running, and reconnect states.
+- Establish typography, control-size, warning, and responsive baselines.
+
+### Exit Criteria
+
+- Every stateful decision has one canonical owner.
+- Workspace navigation cannot own or interrupt a run.
+- The active-plan mutation impact model is defined.
+- The preferred workspace and run interactions are supported by scenario
+  walkthrough evidence, not taste alone.
+- Backend-relevant prototype state has been converted into named entities,
+  commands, events, invariants, and Effect Schema contract candidates.
+- The highest-risk operational unknowns have been retired, bounded, or carried
+  forward explicitly with an owner and later validation point.
+- The V2 shell can be evaluated without inheriting the current three-column
+  layout.
+
+## 3. Phase 1: Local Web Foundation
+
+### Outcomes
+
+- Run the existing reusable backend behavior in a service independent of
+  Electron.
+- Serve the web client and typed API locally.
+- Stream current observatory and run snapshots.
+- Reconnect a browser without losing run state.
+- Add Plan, Observe, Library, and Process workspace navigation.
+- Add the persistent activity surface.
+- Provide deterministic fake observatory states for UI development.
+
+### Exit Criteria
+
+- Closing and reopening the browser does not alter service activity.
+- Two local browsers observe the same state.
+- Only the control lease holder may mutate observing state.
+- The current catalog is queried through a bounded, virtualized, or paginated
+  surface.
+
+## 4. Phase 2: Plan And Managed Runs
+
+### Outcomes
+
+- Build multi-sequence night plans.
+- Show observing windows, altitude, horizon clearance, usable time, and storage
+  forecast.
+- Validate capability and readiness requirements.
+- Start an immutable active-run snapshot from an approved plan.
+- Execute a bounded sequence state machine.
+- Support pause, stop, skip, retry, and park policies.
+- Classify active-run edits by operational impact and explain consequences.
+
+### Exit Criteria
+
+- A multi-target fake plan can execute from preflight through completion.
+- Non-disruptive future edits do not alter active work unexpectedly.
+- Disruptive edits require explicit consequence-aware approval.
+- Refreshing or changing workspaces does not affect execution.
+
+## 5. Phase 3: Observe, Acquire, And Capture
+
+### Outcomes
+
+- Add decision-grade preflight.
+- Add guided polar-alignment measurement and frame overlay.
+- Add plate-solve-driven deep-sky slew and center.
+- Add a separate lunar centering path.
+- Verify mount corrections from successive images.
+- Show live capture progress, storage, drift, quality, and available actions.
+- Add bounded recovery and rollback behavior.
+
+### Exit Criteria
+
+- Acquire exposes the current correction, evidence, remaining bound, and abort
+  path.
+- Accepted driver writes are not reported as successful physical outcomes
+  until image evidence confirms them.
+- Capture answers whether useful evidence is accumulating.
+- A recovery path cannot be hidden by workspace navigation or responsive
+  layout.
+
+## 6. Phase 4: Library And Frame Review
+
+### Outcomes
+
+- Persist ImageBytes and FITS with durable metadata.
+- Generate debayered and stretched previews.
+- Organize frames by night, target, run, sequence, and derivation.
+- Expose clipping, framing, sharpness, shape, and drift metrics.
+- Explain automated acceptance or rejection.
+- Support compare, accept, reject, annotate, reveal, and download.
+- Add a compact live-review surface to Observe.
+
+### Exit Criteria
+
+- Every captured frame is inspectable and traceable.
+- Review decisions are durable and do not mutate original evidence.
+- Library remains usable with a large number of assets.
+
+## 7. Phase 5: Process Workspace
+
+### Outcomes
+
+- Create reproducible processing recipes and jobs.
+- Start with saved FITS inputs and app-owned derived outputs.
+- Integrate calibration, alignment, stacking, stretching, and comparison.
+- Add adapters for selected external tools, potentially including RCAstro
+  workflows where their invocation model fits.
+- Expose intermediate artifacts, parameters, tool versions, and provenance.
+- Schedule processing so it does not silently starve active observing work.
+
+### Exit Criteria
+
+- A processing result can be reproduced from its recorded sources and recipe.
+- Derived assets appear in Library without obscuring their originals.
+- Processing failure cannot affect active rig control.
+
+## 8. Phase 6: Remote Viewing And Shared Control
+
+### Outcomes
+
+- Publish the web entry point through the Linux server and a private outbound
+  tunnel from the observatory.
+- Add managed social, passwordless, or passkey authentication.
+- Implement viewer, controller, and owner behavior.
+- Ship the read-only phone experience.
+- Add control request, grant, release, and owner takeover.
+- Bound remote preview bandwidth and explicit original-frame downloads.
+
+### Exit Criteria
+
+- A trusted remote viewer can inspect an active run from the public URL.
+- A trusted friend can request and receive exclusive control.
+- The owner and all clients can see who controls the observatory.
+- Losing the public connection does not interrupt local work.
+- No user password is stored by Astro Console.
+
+## 9. Existing P50 Backlog Mapping
+
+| Existing task | V2 destination |
+| --- | --- |
+| Add observing readiness checks | Plan validation and Observe preflight |
+| Add managed capture sequences | Night plans, active runs, and Capture |
+| Add closed-loop slew and center | Target-level Acquire |
+| Verify mount corrections from images | Acquire Verify and Recover |
+| Build first-class frame feedback | Capture and Library |
+| Create post-processing workbench | Process |
+| Design supervised observatory MCP | Later agent interface over the same high-level plans, runs, evidence, approvals, and control lease |
+
+These tasks remain valuable product requirements. V2 changes where they belong
+and prevents them from becoming additional panels in the current shell.
+
+## 10. Deferred Decisions
+
+The following choices should remain open until their surrounding product model
+is sufficiently concrete:
+
+- final product and repository name;
+- web framework and HTTP server library;
+- hosted identity provider;
+- reverse-tunnel implementation;
+- whether a custom remote hub is ever necessary;
+- exact service installation and update mechanism;
+- processing adapter order and RCAstro integration boundary;
+- later phone control scope;
+- active controller disconnect timeout;
+- how much active-run state survives a service restart.
+
+Product naming should happen after the ideation phase. Candidate names should
+fit a personal observatory service spanning planning, observing, review,
+processing, remote access, and future agent assistance rather than implying a
+single desktop console.
+
+## 11. Explicitly Deferred Scope
+
+- Enterprise multi-tenancy or organization administration.
+- Broad commercial driver certification.
+- Full phone control in the first mobile experience.
+- Public unauthenticated access.
+- Automatic physical polar adjustment without supporting hardware.
+- A custom cloud relay before a reverse-tunnel deployment proves insufficient.
+- Solar automation without dedicated safety interlocks.
+- Arbitrary remote shell, process, or filesystem access.
+
+## 12. Planning Artifacts Before Implementation
+
+Before V2 implementation begins, create and review:
+
+- a workspace-level navigation map;
+- at least two competing desktop interaction prototypes for the most important
+  Plan and Observe workflows;
+- a read-only phone status prototype;
+- an active-run state and mutation-impact model;
+- an executable fake-observatory scenario catalog covering success, warning,
+  failure, recovery, disconnect, and stale-client behavior;
+- a prototype decision log recording what was tested, what changed, and what
+  remains uncertain;
+- the canonical V2 API contract outline;
+- the local and remote deployment diagrams;
+- a migration inventory classifying current modules as preserve, replace, or
+  re-evaluate.
+
+Implementation should begin only after those artifacts tell one consistent
+story. The goal is to avoid rediscovering the overall UX one feature panel at a
+time.

@@ -15,8 +15,16 @@ Keep those materials under the ignored `.local/` directory instead.
 - [Catalog maintenance](development/catalog-maintenance.md)
 - [Fake scenario testing](operations/fake-scenario-testing.md)
 
+## Future V2 Planning
+
+- [V2 plan](v2/README.md) describes the proposed web-first product and UI
+  direction. It is intentionally separate from the documents above and does
+  not describe current application behavior.
+
 ## Status
 
 Documents in this tree describe the current product and supported development
 workflow. Retire or rewrite a document when its claims no longer match the
-application; do not retain speculative plans as if they were current behavior.
+application. Documents under `v2/` are the explicit exception: they are
+future-facing plans and must remain clearly labeled as proposals until their
+behavior is implemented.

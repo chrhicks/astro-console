@@ -36,7 +36,9 @@ sdk/**/*.pyc
 
 dist/
 node_modules/
-prototype/
+prototype/*
+!prototype/v2-ui/
+!prototype/v2-ui/**
 .local/
 apps/desktop/*.tsbuildinfo
 .bak*

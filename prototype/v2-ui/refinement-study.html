@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A local pairwise refinement study for combining preferred Astro Console V2 interface patterns.">
+  <title>Study Two · UX Refinement · V2 Prototype</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to study</a>
+  <div class="prototype-flag"><strong>Non-operational refinement study</strong><span>Browser-only · no hardware or network access</span></div>
+  <header class="site-header">
+    <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true">✦</span><span>Observatory V2<small>Prototype hub</small></span></a>
+    <nav class="top-nav" aria-label="Study navigation"><a href="index.html">Hub</a><a href="preference-study.html">Study One</a><a aria-current="page" href="refinement-study.html">Study Two</a><a href="plan-timeline.html">Plan A</a><a href="observe-guided.html">Observe A</a></nav>
+    <div class="header-meta"><span class="pill ui">Preference study 02</span></div>
+  </header>
+
+  <main id="main" class="page study-page">
+    <header class="study-intro">
+      <div>
+        <p class="eyebrow">Study Two · Pattern refinement</p>
+        <h1>Decide how the preferred pieces should work together.</h1>
+        <p class="lede">Study One identified promising directions. This study compares narrower variations within those directions so a combined interface can become more specific.</p>
+      </div>
+      <aside class="hero-note">
+        <p class="eyebrow">Forced choice</p>
+        <p>Judge the operational model, not decorative polish. Use the buttons, <kbd>←</kbd>/<kbd>→</kbd>, or <kbd>1</kbd>/<kbd>2</kbd>. Progress is separate from Study One and stays in this browser.</p>
+        <p class="fine" data-resume-status aria-live="polite">Preparing a local refinement session…</p>
+      </aside>
+    </header>
+
+    <section data-study-view="comparison" aria-labelledby="comparison-title">
+      <div class="study-progress-row">
+        <div><span class="pill ui" data-dimension-label>Dimension</span><span class="count" data-progress-label>Comparison 1 of 11</span></div>
+        <button class="button ghost" type="button" data-reset-open>Restart Study Two</button>
+      </div>
+      <div class="progress-track study-progress" aria-label="Study progress"><span data-progress-bar></span></div>
+      <div class="study-question" aria-live="polite">
+        <p class="eyebrow">Which refinement would you prefer?</p>
+        <h2 id="comparison-title" data-question>Loading comparison…</h2>
+        <p class="muted" data-context></p>
+      </div>
+
+      <div class="compact-preview-control" aria-label="Compact comparison preview">
+        <p id="compact-preview-help">On compact screens, preview A and B in the same full-size viewport. Switching previews does not choose; press the visible card to choose it.</p>
+        <div class="compact-toggle" role="group" aria-label="Preview an option without choosing it">
+          <button type="button" data-preview-side="left" aria-pressed="true">Preview A</button>
+          <button type="button" data-preview-side="right" aria-pressed="false">Preview B</button>
+        </div>
+      </div>
+
+      <div class="preference-grid" role="group" aria-labelledby="comparison-title" aria-describedby="choice-hint compact-preview-help">
+        <button class="preference-choice" type="button" data-choice="left"><span class="choice-position"><kbd>1</kbd><span>Left option</span></span><span class="choice-title" data-left-title></span><span class="choice-summary" data-left-summary></span><span class="mini-ui" data-left-preview aria-hidden="true"></span><span class="choice-call">Choose left</span></button>
+        <button class="preference-choice" type="button" data-choice="right"><span class="choice-position"><kbd>2</kbd><span>Right option</span></span><span class="choice-title" data-right-title></span><span class="choice-summary" data-right-summary></span><span class="mini-ui" data-right-preview aria-hidden="true"></span><span class="choice-call">Choose right</span></button>
+      </div>
+      <p id="choice-hint" class="study-hint">Choose the refinement you would want in this situation. Selection advances immediately.</p>
+    </section>
+
+    <section data-study-view="results" hidden aria-labelledby="results-title">
+      <div class="results-hero"><div><p class="eyebrow">Study Two complete</p><h2 id="results-title">Your refinement signal</h2><p class="lede">Use this to shape a combined prototype, not as a final design verdict.</p></div><div class="button-row"><button class="button" type="button" data-export>Export Study Two JSON</button><button class="button danger" type="button" data-reset-open>Restart Study Two</button></div></div>
+      <div class="result-summary" data-result-summary></div>
+      <div class="section-heading" style="margin-top:34px"><div><p class="eyebrow">Refinement record</p><h2>Choices by dimension</h2></div><p>Repeated comparisons are revealed here only after completion.</p></div>
+      <div class="result-list" data-result-list></div>
+      <aside class="interpretation-note"><h3>Interpret carefully</h3><p>This is one person, one short session, and a small set of stylized interface fragments informed by Study One. Repeat consistency can expose unstable choices; left/right rate can flag possible positional bias. Neither measure establishes usability, statistical significance, or how the selected refinements will behave when combined. Validate the emerging composition through scenario walkthroughs.</p></aside>
+    </section>
+  </main>
+
+  <dialog id="reset-study-dialog" aria-labelledby="reset-study-title"><div class="dialog-body"><p class="eyebrow">Restart Study Two</p><h2 id="reset-study-title">Discard this refinement session?</h2><p class="muted">This clears only Study Two's saved choices and creates a new shuffled schedule. Study One remains untouched. Export first if you want the raw record.</p></div><div class="dialog-footer"><button class="button" type="button" data-reset-cancel>Keep session</button><button class="button danger" type="button" data-reset-confirm>Discard and restart</button></div></dialog>
+
+  <footer class="prototype-footer">Study Two data is isolated from Study One · No telemetry, account, device, or hardware connection</footer>
+  <script src="refinement-study.js"></script>
+</body>
+</html>

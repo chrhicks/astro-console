@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Entry point for Astro Console V2 product, interaction, model, and architecture prototypes.">
+  <title>V2 Prototype Observatory</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to prototypes</a>
+  <div class="prototype-flag"><strong>Prototype workspace</strong><span>Concepts only · no hardware access</span></div>
+  <header class="site-header">
+    <a class="brand" href="index.html" aria-current="page">
+      <span class="brand-mark" aria-hidden="true">✦</span>
+      <span>Observatory V2<small>Working product name</small></span>
+    </a>
+    <nav class="top-nav" aria-label="Prototype collections">
+      <a href="#interfaces">Interfaces</a>
+      <a href="#models">Models</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#prior-work">Prior work</a>
+    </nav>
+    <div class="header-meta"><span class="status-dot"></span>Prototype phase · July 2026</div>
+  </header>
+
+  <main id="main" class="page">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">V2 prototype observatory</p>
+        <h1>A place to test the product before hardening it.</h1>
+        <p class="lede">Use this hub to compare interaction models, interrogate backend ownership, and inspect architecture ideas. Every artifact is intentionally non-operational and isolated from the current Electron application.</p>
+      </div>
+      <aside class="hero-note" aria-label="How to use this prototype hub">
+        <p class="eyebrow">How to use this</p>
+        <p>Open competing models side by side. Change their scenario controls. Look for what becomes easier to understand—and what each model hides.</p>
+        <p class="fine">Current study set: 8 interactive studies · 3 content studies · 1 prior processing report</p>
+      </aside>
+    </section>
+
+    <section id="interfaces" class="section" aria-labelledby="interfaces-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">Interaction studies</p><h2 id="interfaces-title">Competing UI models</h2></div>
+        <p>Each pair uses the same realistic night and active-run data. The structure—not the color palette—is the hypothesis under test.</p>
+      </div>
+      <div class="card-grid">
+        <article class="card featured">
+          <div class="card-top"><span class="pill ui">UI prototype</span><span class="pill live">Interactive</span></div>
+          <h3>Plan A · Night timeline</h3>
+          <p>Make observing windows, sky transitions, target conflicts, and idle gaps the primary planning surface.</p>
+          <div class="meta-row"><span class="pill">Scenario A</span><span class="pill">Timeline-first</span><span class="pill">Wide + compact</span></div>
+          <a class="card-link" href="plan-timeline.html" aria-label="Open Plan A, night timeline"><span>Open study</span></a>
+        </article>
+        <article class="card featured">
+          <div class="card-top"><span class="pill ui">UI prototype</span><span class="pill live">Interactive</span></div>
+          <h3>Plan B · Sequence ledger</h3>
+          <p>Make explicit capture recipes, ordering, validation, and batch editing the center of night planning.</p>
+          <div class="meta-row"><span class="pill">Scenario A</span><span class="pill">Table-first</span><span class="pill">Dense editing</span></div>
+          <a class="card-link" href="plan-ledger.html" aria-label="Open Plan B, sequence ledger"><span>Open study</span></a>
+        </article>
+        <article class="card featured">
+          <div class="card-top"><span class="pill ui">UI prototype</span><span class="pill live">Interactive</span></div>
+          <h3>Observe A · Guided phase</h3>
+          <p>Keep attention on the current acquisition decision, image evidence, bounded attempts, and next safe action.</p>
+          <div class="meta-row"><span class="pill">Scenarios B + E</span><span class="pill">Phase-focused</span><span class="pill">Evidence-led</span></div>
+          <a class="card-link" href="observe-guided.html" aria-label="Open Observe A, guided phase"><span>Open study</span></a>
+        </article>
+        <article class="card featured">
+          <div class="card-top"><span class="pill ui">UI prototype</span><span class="pill live">Interactive</span></div>
+          <h3>Observe B · Activity canvas</h3>
+          <p>Keep stable telemetry cards visible while warnings and phase-specific actions arrive contextually.</p>
+          <div class="meta-row"><span class="pill">Scenarios B + E</span><span class="pill">Canvas-first</span><span class="pill">Scan density</span></div>
+          <a class="card-link" href="observe-canvas.html" aria-label="Open Observe B, activity canvas"><span>Open study</span></a>
+        </article>
+        <article class="card full">
+          <div class="card-top"><span class="pill ui">Study One · Foundation</span><span class="pill live">Interactive</span></div>
+          <h3>Foundational UX preferences</h3>
+          <p>Compare broad interface directions using realistic mini-UIs. This discovery study establishes which workspace, planning, observing, warning, density, and review patterns deserve refinement.</p>
+          <div class="meta-row"><span class="pill">8 broad dimensions</span><span class="pill">11 forced choices</span><span class="pill">Local-only results</span></div>
+          <a class="card-link" href="preference-study.html" aria-label="Open Study One, foundational UX preferences"><span>Start or resume Study One</span></a>
+        </article>
+        <article class="card full">
+          <div class="card-top"><span class="pill ui">Study Two · Refinement</span><span class="pill live">Interactive</span></div>
+          <h3>Refine the preferred patterns</h3>
+          <p>Compare narrower variations within Study One's preferred directions: rail behavior, timeline form, guided evidence composition, run depth, right-side organization, warning escalation, card comparison, and chronological review.</p>
+          <div class="meta-row"><span class="pill">8 refinement dimensions</span><span class="pill">Separate saved session</span><span class="pill">Study One informed</span></div>
+          <a class="card-link" href="refinement-study.html" aria-label="Open Study Two, UX pattern refinement"><span>Start or resume Study Two</span></a>
+        </article>
+        <article class="card full">
+          <div class="card-top"><span class="pill ui">Composite prototype · Iteration 2</span><span class="pill live">Interactive</span></div>
+          <h3>One coherent observatory workspace</h3>
+          <p>Combine the validated rail, global run context, opportunity-lane planning, sequential Observe path, chronological Library, shared Inspector/Alerts rail, and intentional read-only phone monitor.</p>
+          <div class="meta-row"><span class="pill">Study winners combined</span><span class="pill">4 workspaces</span><span class="pill">Desktop + phone monitor</span></div>
+          <a class="card-link" href="composite-prototype.html" aria-label="Open the combined observatory workspace prototype"><span>Open composite prototype</span></a>
+        </article>
+        <article class="card full">
+          <div class="card-top"><span class="pill live">Gate 02 · Accepted</span><span class="pill ui">Interactive reference</span></div>
+          <h3>Evidence-led acquisition decisions</h3>
+          <p>Test automatic target centering and solve retry, exhausted recovery, explicit approval, verified completion, and manual polar-alignment guidance across seven synthetic states.</p>
+          <div class="meta-row"><span class="pill">7 scenarios</span><span class="pill">Policy-derived decisions</span><span class="pill">Desktop + phone monitor</span></div>
+          <a class="card-link" href="acquire-prototype.html" aria-label="Open the Acquire gate prototype"><span>Open Acquire gate</span></a>
+        </article>
+      </div>
+    </section>
+
+    <section id="models" class="section" aria-labelledby="models-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">Domain studies</p><h2 id="models-title">The truth the UI needs</h2></div>
+        <p>Content prototypes are part of this hub too. They translate visible UI needs into canonical ownership, state, commands, and evidence.</p>
+      </div>
+      <div class="card-grid">
+        <article class="card featured">
+          <div class="card-top"><span class="pill model">Model study</span><span class="pill warning">Draft</span></div>
+          <h3>Run state &amp; ownership</h3>
+          <p>Candidate entity boundaries, state ownership, run phases, command intent, warning semantics, and active-plan mutation impact.</p>
+          <div class="meta-row"><span class="pill">All scenarios</span><span class="pill">Backend concerns</span></div>
+          <a class="card-link" href="domain-model.html" aria-label="Open run state and ownership model"><span>Read model</span></a>
+        </article>
+        <article class="card featured">
+          <div class="card-top"><span class="pill model">Convergence roadmap</span><span class="pill live">Bounded</span></div>
+          <h3>Finish prototyping on purpose</h3>
+          <p>Seven finite gates converge the work into one validated interaction specification and one backend-facing domain/contract model.</p>
+          <div class="meta-row"><span class="pill">Explicit stop criteria</span><span class="pill">3 technical spikes only</span><span class="pill">Promote or discard</span></div>
+          <a class="card-link" href="convergence-roadmap.html" aria-label="Open the finite prototype convergence roadmap"><span>Read roadmap</span></a>
+        </article>
+      </div>
+    </section>
+
+    <section id="architecture" class="section" aria-labelledby="architecture-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">System studies</p><h2 id="architecture-title">Local truth, remote reach</h2></div>
+        <p>The rig-local service stays authoritative. Browsers are freely replaceable clients, whether they are in the observatory or hours away.</p>
+      </div>
+      <div class="card-grid">
+        <article class="card featured">
+          <div class="card-top"><span class="pill arch">Architecture study</span><span class="pill warning">Draft</span></div>
+          <h3>Local and remote web topology</h3>
+          <p>Responsibility boundaries, transport shape, outbound tunnel, control lease, reconnect behavior, and proportionate security.</p>
+          <div class="meta-row"><span class="pill">Scenario G</span><span class="pill">No Electron</span><span class="pill">Service-owned runs</span></div>
+          <a class="card-link" href="architecture.html" aria-label="Open local and remote architecture study"><span>Read architecture</span></a>
+        </article>
+      </div>
+    </section>
+
+    <section id="prior-work" class="section" aria-labelledby="prior-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">Prior prototype evidence</p><h2 id="prior-title">Processing study</h2></div>
+        <p>Useful experiments from before this V2 hub remain linked as evidence. Their visual system and status may differ.</p>
+      </div>
+      <div class="card-grid">
+        <article class="card full">
+          <div class="card-top"><span class="pill">Existing report</span><span class="pill live">Completed study</span></div>
+          <h3>Seestar DSO processing candidate</h3>
+          <p>243 FIT frames through mesh background extraction, Siril PCC, and asinh stretch. Includes stage previews, comparisons, diagnostics, and the selected path.</p>
+          <div class="meta-row"><span class="pill">Scenario F</span><span class="pill">Processing</span><span class="pill">Real evidence</span></div>
+          <a class="card-link" href="../../.www/seestar-prototype/" aria-label="Open existing Seestar processing report"><span>Open prior report</span></a>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="prototype-footer">Astro Console V2 working materials · Non-operational · <a href="../../docs/v2/prototype-plan.md">Prototype plan</a></footer>
+</body>
+</html>

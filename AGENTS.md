@@ -2,15 +2,16 @@
 
 Start your session by reading your memory summary in `continuum`. Keep your memory updated throughout this session.
 
-## Coding Delegation
+## Working within this project
 
-Use `glm-coder` as the default implementation path for coding tasks in this project.
+### Subagents - delegation and context preservation
 
-- For code changes, start by delegating the implementation work to the `glm-coder` subagent.
-- Give `glm-coder` the concrete task, affected files or areas, and any verification expectations.
+Use the `coder` agent as the default implementation path for coding tasks in this project.
+
+- For code changes, start by delegating the implementation work to the `coder` subagent.
+- Give `coder` the concrete task, affected files or areas, and any verification expectations.
+- Objectively review their work and re-task them with feedback until you're satisfied with the work.
 - Treat `CODING_STANDARDS.md` as the style authority for that work.
-
-## UI Validation Delegation
 
 Use `ui-validator` as the default subagent for desktop UI smoke validation and screenshot-backed verification.
 
@@ -18,25 +19,24 @@ Use `ui-validator` as the default subagent for desktop UI smoke validation and s
 - Give `ui-validator` the exact scenarios or UI states to validate, the evidence you want captured, and any specific DOM assertions or screenshots needed.
 - Keep implementation in the primary agent or `glm-coder`; `ui-validator` is for validation only and should not be used as the coding path.
 
-## Primary Agent Role
+### Executor
 
-The primary agent remains responsible for the final result.
+We try to use what is available in the`executor`  MCP when possible, its a way for you to programmatically interact with tools giving you consistent and reliable usage over something like CLI commands.
 
-- Review `glm-coder` output before presenting it to the user.
-- Check that the change actually satisfies the request.
-- Check that the implementation follows `CODING_STANDARDS.md` and nearby project conventions.
-- Request a follow-up iteration from `glm-coder` when the first pass is incomplete, risky, or off-style.
-- Summarize review findings, remaining risks, and verification status clearly.
+### Continuum
 
-## When Not To Delegate
+The `continuum` mcp (thru executor) allows you to do
 
-Do not use `glm-coder` for:
+- manage memory - use this frequently. It's the only way for you to remember things in the future: decisions, learnings, gotchas, troublesheeting, changelogs, etc.
+- tasks - a way to keep track of your work. For capturing requirements for yourself or subagents you invoke. Think typical project management stuff like: Epics, Tasks, Plans, Checklists, etc.
 
-- purely informational questions
-- repo exploration with no implementation
-- simple non-code operations where a direct tool call is faster
+### LED Panel - Communicating current activity
 
-If `glm-coder` is unavailable or blocked, proceed directly only when necessary and still apply `CODING_STANDARDS.md` during implementation and review.
+The `led-panel` mcp (through executor) allows you communicate to an LED Panel (currently LaMetric TIME). Use this semi-regularly for major progress steps.
+- your current mood (permanent, default, dismissable)
+- what you are a subagent is currently working on (persistent, dismissable) - think planning -> executing -> step 1 -> step N -> finalizing -> alert user
+- to get the users attention (peristent, dismissible, audio)
+- otherwise use it for fun whenever you fancy you could do something creative/playful with it throughout your work
 
 ## Desktop Dev Inspection
 
@@ -51,67 +51,3 @@ Use `agent-browser` against the running Electron renderer like this:
 - `agent-browser snapshot -i` — get interactive elements with refs (`@e1`, `@e2`)
 - `agent-browser click @e1` / `fill @e2 "text"` — interact using refs
 - `agent-browser screenshot /tmp/astro-console.png` — capture visual evidence after UI changes
-
-## Seestar S30 Local API — Quick Reference
-
-### Device
-- **Model:** ZWO Seestar S30
-- **Firmware:** 7.32 (`version_int` = 2732)
-- **Network:** station mode on Wi-Fi `chicksdom`
-- **Current IP:** `192.168.4.29` (check app if it changes)
-- **mDNS:** `seestar.local` (may not resolve on all networks)
-
-### Authentication (Firmware 7.18+)
-The S30 requires a challenge-response handshake before accepting control commands.
-- **Algorithm:** RSA PKCS#1 v1.5 with SHA1
-- **PEM key:** `seestar_3.1.2_fw_7.32_interop.pem` (in this workspace root)
-- **Handshake:**
-  1. `get_verify_str` → receives challenge string
-  2. Sign challenge with the RSA PEM key
-  3. `verify_client` → send signature
-  4. `pi_is_verified` → confirm success
-- **Source of PEM:** extracted from official Seestar Android app APK v3.1.2 using `bguthro/seestar-tool`
-
-### Native Ports & Protocol
-- **Control:** TCP `4700` — JSON-RPC messages terminated with `\r\n`
-- **Imaging:** TCP `4800` — binary image/frame data
-- **UDP intro:** `4720` — send `{"id":1,"method":"scan_iscope","params":""}` for guest-mode handshake
-- **HTTP:** TCP `80` — album thumbnails and saved images
-- **RTSP:** TCP `4554` — active only when live view/scenery mode is running in the app
-- **SSH:** TCP `22` is open; credentials are unknown
-
-### Common Commands
-All are JSON objects sent to port `4700` with an incrementing `id` and `\r\n` terminator.
-
-#### Read-only / Safe
-- `scope_get_equ_coord`
-- `get_device_state`
-- `get_view_state`
-- `get_setting`
-- `test_connection`
-
-#### Control
-- `iscope_start_view` — start a viewing mode (`star`, `moon`, `scenery`, etc.)
-- `iscope_stop_view` — stop current view
-- `iscope_start_stack` — begin stacking
-- `scope_goto [ra, dec]` — slew to coordinates
-- `scope_speed_move` — manual slew (`speed`, `angle`, `dur_sec`)
-- `scope_sync [ra, dec]` — sync current position
-- `start_auto_focuse` — run autofocus
-- `set_wheel_position` — change filter (`0` clear, `1` IR, `2` LP)
-- `set_setting` / `set_user_location` / `pi_set_time`
-- `pi_shutdown` / `pi_reboot`
-
-#### Events (pushed by device)
-- `AutoGoto`, `Stack`, `AutoFocus`, `ScopeHome`, `ScopeTrack`, `Client`
-
-### Safety Notes
-- The mount is **alt-az**; RA/Dec coordinates may not reflect true sky pointing exactly.
-- Do not flash firmware or upload files unless explicitly asked.
-- The PEM is sensitive; do not commit it to public repositories.
-
-### Upstream Projects
-- `smart-underworld/seestar_alp` — full ASCOM Alpaca proxy with web UI
-- `bguthro/seestar-tool` — firmware manager and PEM extractor
-- `astrophotograph/scopinator-seestar` / `pyscopinator` — lightweight Rust/Python clients
-- `astrophotograph/seestar-proxy` — TCP proxy for multi-client access
