@@ -45,6 +45,12 @@ local server.
   polar-alignment scenarios, centrally derived policy decisions, immutable
   attempt evidence, and a read-only phone monitor. Acceptance covers the
   interaction model, not final visual polish.
+- `run-authority-prototype.html`: Gate 03 accepted on July 21, 2026; the
+  scenario-driven reference covers proportional active-run mutation, stale
+  revision rejection,
+  disconnect and snapshot-first reconstruction, presence, exclusive control,
+  controller grace, owner takeover, stale-controller rejection, and the same
+  canonical truth on a read-only phone.
 - `convergence-roadmap.html`: the finite remaining gates, stop criteria, and
   promotion/discard rules that end in one V2 interaction specification and one
   backend-facing domain/contract model.
@@ -65,6 +71,10 @@ either preference study's saved session.
 The Acquire prototype follows the same boundary in `acquire-prototype.js`.
 Its scenario, evidence selection, Inspector/Alerts context, policy, geometry,
 and recommended decision all come from one synthetic state and rule model.
+
+The Run Authority prototype centralizes each synthetic service truth and its
+derived decision in `run-authority-prototype.js`. Renderers consume that
+projection; they do not infer mutation impact, freshness, or control authority.
 
 ## Safety Boundary
 

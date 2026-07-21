@@ -22,6 +22,12 @@ claim about the current application.
 - [Acquire gate study](acquire-gate.md) defines the evidence, policy,
   backend-facing model, and exit criteria tested by the standalone target
   centering and polar-alignment prototype.
+- [Run authority gate study](run-authority-gate.md) is the accepted reference
+  for revision-aware plan mutation, reconnect reconstruction, presence,
+  exclusive control, and read-only phone behavior.
+- [Gate 3 session handoff](gate-3-handoff.md) is the durable continuation point
+  for accepted Gates 1–3 decisions, walkthrough lessons, repository state, and
+  the single next action.
 - [UI and workspace plan](ui-plan.md) defines the product model, global shell,
   workspaces, observing phases, responsive behavior, and interaction rules.
 - [Web architecture](web-architecture.md) defines the proposed local service,
