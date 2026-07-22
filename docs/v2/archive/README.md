@@ -15,6 +15,8 @@ to override `docs/v2/current/`, accepted gate records, or the UX guidance.
   in `current/convergence-plan.md`.
 - [Original web architecture](architecture/web-architecture.md) — exploratory
   architecture superseded by the current `infra/` plan.
+- [V1 shell review](research/v1-shell-review.md) — historical evidence for why
+  V2 moved to task-driven workspaces.
 
 Use these documents only to answer a specific question about earlier options,
 walkthroughs, or why a decision changed.

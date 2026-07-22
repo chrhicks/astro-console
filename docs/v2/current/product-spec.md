@@ -1,35 +1,51 @@
 # V2 Product Specification
 
-Status: **current product specification through Gate 4**
+Status: **living product specification — accepted through Gate 4**
+
+Last reconciled: July 21, 2026 against accepted Gates 1–4 and the user-visible
+infrastructure model.
 
 Read this only when workspace behavior or product-entity detail is needed. The
 default V2 context begins at [Start Here](../README.md).
 
-## 1. Why The Current Shell Should Not Be Extended
+## Document Role And Maintenance
 
-The current interface has a coherent dark instrument-console style and several
-good operational details, but its layout is organized around persistent
-component slots rather than the operator's current task.
+This document states **what V2 currently is**. It is updated when:
 
-The July 2026 visual review found structural problems that should inform V2:
+- an interaction gate closes;
+- an accepted decision changes a workspace or cross-workspace handoff;
+- infrastructure creates user-visible behavior or availability semantics; or
+- contract work exposes a conflict in the current product model.
 
-- The target catalog rendered all 12,590 target buttons while only a small
-  number were visible.
-- The empty preview dominated disconnected and idle states.
-- Empty Inspector and Library regions remained visible regardless of context.
-- The header clipped location and removed Simulator and Park at compact widths.
-- Common text and controls were too small for dark, cold, fatigued, or
-  at-a-distance operation.
-- Warnings exposed a count without a discoverable explanation or remedy.
-- Capture controls appeared in multiple places, including explicitly unwired
-  Inspector settings.
-- Capability labels such as `Preview yes` and `Storage no` read as adapter
-  diagnostics rather than operator guidance.
-- Active capture telemetry was useful, but blank previews and provenance-poor
-  asset tiles made frame feedback weak.
+It does not accumulate prototype experiments, rejected alternatives,
+walkthrough history, implementation plans, schema details, or copy polish.
+Those belong in accepted [gate records](../gates/README.md), the
+[documentation archive](../archive/README.md), the contract harness, or the
+[delivery plan](delivery-plan.md). The
+[UX and design guidance](../ux-design-guidance.md) remains the authority for
+how design decisions are made.
 
-V2 should not reproduce the same shell with cleaner spacing. It should replace
-the shell with task-driven workspaces and progressive disclosure.
+## 1. Product Definition
+
+V2 is a web-first personal observatory workspace over a durable rig-local
+service. It helps an operator decide what to observe, acquire it safely,
+evaluate the evidence, and develop useful results without requiring the
+browser to own long-running work.
+
+It is designed for one observatory shared with a few trusted people. It is not
+a commercial multi-tenant platform, a generic device dashboard, or an
+enterprise operations product. `Astro Console` remains a working name rather
+than an accepted V2 naming decision.
+
+The product should answer three questions in order:
+
+1. What is the observatory doing, and is it healthy?
+2. What decision or intervention is useful now?
+3. What evidence explains that recommendation?
+
+The historical shell review that motivated the V2 reset is preserved in the
+[archive](../archive/research/v1-shell-review.md); it is not part of current
+product truth.
 
 ## 2. Product Model
 
@@ -67,7 +83,7 @@ flowchart LR
 - `Preflight` validates the site, rig, plan, ownership, storage, and safe state.
 - `Acquire` prepares the session or target through alignment, slew, solve,
   center, focus, filter, and related setup.
-- `Capture` executes the approved recipe.
+- `Capture` executes the accepted sequence settings and stop conditions.
 - `Verify` judges physical outcome and frame quality before accepting progress.
 - `Recover` pauses ordinary work and guides retry, correction, skip, stop, or
   park decisions.
@@ -76,7 +92,7 @@ flowchart LR
 The Observe workspace changes with the phase. The phase is not a tab the user
 must select manually.
 
-## 3. Core Product Entities
+## 3. Core Product Entities And Authority
 
 The UI should be designed around durable domain concepts rather than component
 state.
@@ -86,15 +102,52 @@ state.
 | Observatory | Site, horizon, equipment, service health, and shared identity |
 | Rig | A connected set of callable mount, camera, focuser, filter, and storage capabilities |
 | Night Plan | Ordered and constrained work proposed for a site, rig, and observing window |
-| Sequence | One target's acquisition contract, capture recipe, stop conditions, and failure policy |
+| Sequence | One target's acquisition contract, capture settings, stop conditions, and failure policy |
 | Active Run | Immutable execution snapshot plus explicit approved runtime changes |
 | Acquisition Attempt | Evidence and corrections used to align, solve, center, and prepare a target |
 | Frame | Durable captured evidence with settings, metrics, provenance, and review status |
+| Asset | Stable identity, lineage, checksums, representations, availability, and authorization for original or derived evidence |
 | Processing Session | One current Build/Develop sequence, linear applied history, working output, checkpoints, and saved Library artifacts |
 | Control Lease | The single client currently authorized to issue observing commands |
+| Client Presence | Ephemeral authenticated viewer identity, device, freshness, and capability; never authority by itself |
 
-The active run belongs to the observatory service. It does not belong to a
-workspace, React tree, browser tab, or connected client.
+The Astro Console service owns accepted run execution, mutation impact,
+current rig and workflow state, processing sessions, asset identity, presence,
+and the exclusive control lease. These do not belong to a workspace, React
+tree, browser tab, or connected client.
+
+### Identity, Presence, And Control
+
+- An authenticated person has local `owner` or `viewer` membership.
+- `controller` is a temporary, exclusive service-owned lease, not a permanent
+  membership role.
+- Presence shows who is viewing but grants no authority.
+- A control request grants nothing until an explicit owner grant. Owner
+  takeover, release, grace expiry, and reconnect never silently transfer
+  control or stop accepted work.
+- The exact reconnect-grace duration remains a policy to validate. Grace
+  expiry releases the lease to no controller.
+- The first phone client is always read-only, including for the owner, and
+  cannot request or hold the control lease.
+
+### Revisions, Freshness, And Reconnect
+
+The product keeps source-plan revision, current run revision, complete snapshot
+version, incremental event cursor, control-lease revision, and processing
+revision conceptually distinct. Primary UI uses semantic state; raw identifiers
+remain secondary diagnostics.
+
+- Every consequential intent is checked against current service-owned truth.
+  Stale run, lease, or processing intent fails before physical or durable
+  action.
+- A disconnected client disables service mutations and shows last-confirmed
+  time or stale evidence honestly. The accepted run continues on the service.
+- Reconnect is snapshot-first: replace canonical projection from a fresh
+  snapshot, summarize durable changes while away, then accept newer events.
+- Browsers do not buffer observing commands or automatically replay them after
+  reconnect.
+- Client-local workspace, selection, and unsent edits may survive when useful,
+  but they never substitute for canonical state.
 
 ## 4. Global Application Shell
 
@@ -119,11 +172,19 @@ When a run is active, every workspace shows a compact activity surface with:
 - health or warning state;
 - current controller;
 - a clear `Return to Observe` action;
-- pause or stop when appropriate;
-- emergency safe action when supported.
+- service-level attention that remains relevant outside its owning workspace.
 
 Routine telemetry remains inside Observe. Only state that may change the
 operator's decision interrupts other workspaces.
+
+The shell does not duplicate Plan or Observe commands. Plan owns active-run
+edits. Observe owns pause, resume, skip, stop, and recovery interventions.
+`Return to Observe` takes the operator to the proper action surface.
+
+The UI distinguishes Astro Console service availability, rig connectivity,
+public-tunnel availability, processing availability, artifact publication, and
+storage pressure. A failed public tunnel means remote access is unavailable;
+it does not imply the observatory or accepted run stopped.
 
 ### Information Hierarchy
 
@@ -148,8 +209,9 @@ A warning must never be only a count. It should expose:
 - whether the run can continue;
 - the evidence that produced the warning.
 
-Warnings should be accessible globally and expanded contextually in the
-workspace that can resolve them.
+Warnings and informational notices are priority-sorted attention, not a
+permanent empty `Decision now` slot. They are accessible globally and expanded
+contextually in the workspace that can resolve them.
 
 ## 5. Plan Workspace
 
@@ -171,7 +233,7 @@ Each sequence may define:
 
 - target and framing;
 - acquisition requirements;
-- capture mode and exposure recipe;
+- capture mode and exposure settings;
 - filter and focus requirements;
 - earliest and latest start;
 - minimum altitude and horizon clearance;
@@ -207,23 +269,25 @@ Blocking state fails closed when the missing information is truly critical.
 Pressing `Run plan` creates a stable execution snapshot. Later edits to a draft
 or another night do not silently mutate the active run.
 
-Changes to the active run are explicit operations and are classified by
-impact.
+Changes to the active run are explicit, revision-guarded operations. The
+service classifies impact and supplies exact physical, evidence, schedule,
+time, and storage consequences. Clients explain that result; they do not infer
+impact from button names or phase.
 
-#### Apply Without Urgent Confirmation
+#### Non-disruptive
 
 - Add or reorder work after the active sequence.
 - Add notes.
 - Change a different draft plan.
 - Adjust future priorities without changing current behavior.
 
-#### Notice Before Application
+#### Notice
 
 - Modify the next sequence.
 - Change remaining duration or a later stop condition.
 - Remove queued work.
 
-#### High-Urgency Approval
+#### Disruptive
 
 - Abort the current exposure.
 - Change the active target.
@@ -232,6 +296,12 @@ impact.
 - Restart acquisition.
 - Discard current progress.
 - Disable a readiness or safety constraint.
+
+#### Ineligible
+
+An unsafe, stale, unauthorized, or impossible change is not offered as a
+generic failed action. The interface explains the blocking invariant and shows
+only valid alternatives. No partial state or hardware action occurs.
 
 The approval describes the concrete consequence, not merely `Are you sure?`.
 For example:
@@ -359,6 +429,10 @@ prior state when a provisional correction fails.
 
 Library is for judgment and evidence management, not image transformation.
 
+Library owns stable identity and durable lineage for original and saved assets.
+The UI works with asset IDs and user-facing metadata, never raw filesystem
+paths or R2 object keys. Original sources remain immutable evidence.
+
 ### Organization
 
 - observing night;
@@ -368,6 +442,9 @@ Library is for judgment and evidence management, not image transformation.
 - frame type and filter;
 - review status;
 - original and derived relationship.
+
+Related outputs from the same sources remain peers. Library does not require
+one artifact to be declared the only final result.
 
 ### Frame Review
 
@@ -383,8 +460,40 @@ Every frame should expose:
 - provenance and related processing outputs.
 
 Review supports compare, accept, reject, rate, annotate, reveal, download, and
-send-to-processing workflows. A compact live-review surface may appear in
-Observe, but historical browsing and detailed comparison belong here.
+`Open in Process` workflows. General comparison among several saved versions
+belongs here. A compact live-review surface may appear in Observe, but
+historical browsing and detailed comparison remain Library responsibilities.
+
+### Representations And Availability
+
+One asset may have permanent local evidence, disposable working data, and an
+expiring published representation. Processing health, publication state, and
+observatory health remain separate.
+
+Useful Library states include:
+
+- available locally;
+- preparing download;
+- published;
+- expiring;
+- expired;
+- republishing;
+- temporarily unavailable; and
+- failed publication.
+
+An expired published final can be republished from its permanent local copy.
+An expired intermediate may require regeneration. R2 publication is a delivery
+convenience, never the source of asset identity or the only copy of original
+evidence.
+
+### Downloads
+
+Authorized friends may download original FITS and camera files, selected
+intermediates, final FITS/TIFF/PNG/JPEG outputs, previews, and selected
+diagnostics. Published representations use short-lived grants. A local-only raw
+may stream through Astro Console or use an asynchronous `Prepare download`
+flow that stages a temporary copy, marks it ready, and later expires it while
+the local original survives.
 
 ## 8. Process Workspace
 
@@ -407,11 +516,14 @@ hierarchy, and language rules live in
   evaluated;
 - combine Operation, Assistant, and Inspector in one contextual rail so the
   image canvas remains dominant;
+- let Assistant announce unread findings without stealing focus; previewing a
+  suggestion loads its explained value changes into Operation while Apply
+  remains explicit;
 - reveal the linear reference through press-and-hold comparison while editing;
-- offer compatible tools per operation, including Siril and external adapters
-  where their invocation model fits;
-- make optional analysis explain its suggestions and require the operator to
-  preview and apply every change;
+- offer installed compatible tools per operation, including Siril, RCAstro,
+  and other adapters where their invocation model fits;
+- make optional analysis explain its evidence and never change the working
+  image by itself;
 - retry a failed operation from its latest valid checkpoint without rerunning
   unaffected Build steps;
 - expose bounded owner-safe tool output and retry scope without replacing the
@@ -474,7 +586,29 @@ desktop buttons at a smaller breakpoint.
 - Keep dense diagnostics available without placing them in the primary scan
   path.
 
-## 10. V2 UX Acceptance Outcomes
+## 10. Deferred And Explicitly Out Of Scope
+
+These items are not current product behavior. Some need later decisions;
+others are explicitly outside the accepted first model and should not be
+reintroduced without new evidence:
+
+- final product name, visual polish, and detailed copy;
+- the final controller reconnect-grace duration and control-request audience;
+- how several accepted active-run changes are summarized in durable history;
+- a future control-capable phone experience;
+- a first-class reusable processing recipe; presets remain deferred unless
+  real use demonstrates value;
+- user-visible processing branches or arbitrary edit-history navigation,
+  which are not part of the accepted one-current-history model;
+- the final inventory and invocation details for Siril, RCAstro, and other
+  processing adapters; and
+- production schemas, transports, and persistence layouts, which Gate 5 and
+  later implementation work must define without changing accepted semantics.
+
+These items remain in the relevant gate or planning record. They enter this
+living specification only when accepted as current product behavior.
+
+## 11. V2 UX Acceptance Outcomes
 
 The V2 interaction model is successful when:
 
