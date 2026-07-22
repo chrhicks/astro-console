@@ -1,5 +1,10 @@
 # V2 Delivery Plan
 
+Status: **current staged delivery direction**
+
+This is an implementation-planning reference, not default V2 context. Begin at
+[Start Here](../README.md).
+
 ## 1. Delivery Strategy
 
 V2 should be built from the product model outward, not by reproducing the
@@ -25,7 +30,7 @@ behavior during migration. It is not the visual template for V2.
 
 - Confirm the workspace and run-phase model.
 - Run the scenario-based interaction, domain-model, and operational prototype
-  tracks in [the prototype plan](prototype-plan.md).
+  tracks in [the convergence plan](convergence-plan.md).
 - Define `Observatory`, `NightPlan`, `Sequence`, `ActiveRun`,
   `AcquisitionAttempt`, `Frame`, `ProcessingSession`, and `ControlLease`
   ownership.
@@ -34,7 +39,7 @@ behavior during migration. It is not the visual template for V2.
 - Separate domain decisions from transport-safe state and client-local
   presentation state.
 - Create low-fidelity desktop and phone shell wireframes.
-- Maintain [V2 UX and design guidance](ux-design-guidance.md) as the concise
+- Maintain [V2 UX and design guidance](../ux-design-guidance.md) as the concise
   authority derived from accepted interaction gates.
 - Compare materially different Plan and Observe interaction models rather than
   polishing the first plausible layout.

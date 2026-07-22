@@ -1,5 +1,8 @@
 # Gate 3 Session Handoff
 
+> Archived historical handoff. Use
+> [the current handoff](../../current/handoff.md) for active work.
+
 Status: Gate 3 accepted and completed on July 21, 2026
 Next gate: Gate 4 — Process model
 
@@ -19,8 +22,8 @@ The seven-gate convergence plan now has three completed gates:
 Gate 4 is the existing Process model gate: select the recipe, job,
 intermediate-artifact, comparison, provenance, and observing-priority
 interactions needed for the first processing slice. Its scope comes from the
-[prototype plan](prototype-plan.md) and
-[convergence roadmap](../../prototype/v2-ui/convergence-roadmap.html); this
+[prototype plan](../plans/prototype-plan.md) and
+[convergence roadmap](../../../../prototype/v2-ui/convergence-roadmap.html); this
 handoff does not expand it.
 
 ## Accepted Context From Gates 1 And 2
@@ -86,7 +89,7 @@ reconnect, presence, and multi-client control:
 
 The accepted candidate records, commands, durable events, typed failures, and
 state-ownership table are in the
-[Run Authority gate reference](run-authority-gate.md). They are inputs to Gate
+[Run Authority gate reference](../../gates/gate-03-run-authority.md). They are inputs to Gate
 5 contract work, not production schemas yet.
 
 ## Walkthrough Lessons
@@ -130,29 +133,29 @@ and do not reopen Gate 3 acceptance.
 
 Repository plan and architecture:
 
-- [V2 plan index](README.md)
-- [Finite prototype plan](prototype-plan.md)
-- [UI and workspace plan](ui-plan.md)
-- [Web architecture](web-architecture.md)
-- [Delivery plan](delivery-plan.md)
+- [V2 plan index](../../README.md)
+- [Finite prototype plan](../plans/prototype-plan.md)
+- [UI and workspace plan](../../current/product-spec.md)
+- [Web architecture](../architecture/web-architecture.md)
+- [Delivery plan](../../current/delivery-plan.md)
 
 Accepted gate references:
 
-- Gate 1: [Composite prototype](../../prototype/v2-ui/composite-prototype.html)
-  and [Composite state model](../../prototype/v2-ui/composite-prototype.js)
-- Gate 2: [Acquire gate document](acquire-gate.md),
-  [Acquire prototype](../../prototype/v2-ui/acquire-prototype.html), and
-  [Acquire state model](../../prototype/v2-ui/acquire-prototype.js)
-- Gate 3: [Run Authority gate document](run-authority-gate.md),
-  [Run Authority prototype](../../prototype/v2-ui/run-authority-prototype.html),
-  and [Run Authority state model](../../prototype/v2-ui/run-authority-prototype.js)
+- Gate 1: [Composite prototype](../../../../prototype/v2-ui/composite-prototype.html)
+  and [Composite state model](../../../../prototype/v2-ui/composite-prototype.js)
+- Gate 2: [Acquire gate document](../../gates/gate-02-acquire.md),
+  [Acquire prototype](../../../../prototype/v2-ui/acquire-prototype.html), and
+  [Acquire state model](../../../../prototype/v2-ui/acquire-prototype.js)
+- Gate 3: [Run Authority gate document](../../gates/gate-03-run-authority.md),
+  [Run Authority prototype](../../../../prototype/v2-ui/run-authority-prototype.html),
+  and [Run Authority state model](../../../../prototype/v2-ui/run-authority-prototype.js)
 
 Shared prototype navigation and presentation:
 
-- [Prototype hub](../../prototype/v2-ui/index.html)
-- [Prototype inventory](../../prototype/v2-ui/README.md)
-- [Convergence roadmap](../../prototype/v2-ui/convergence-roadmap.html)
-- [Shared prototype styles](../../prototype/v2-ui/styles.css)
+- [Prototype hub](../../../../prototype/v2-ui/index.html)
+- [Prototype inventory](../../../../prototype/v2-ui/README.md)
+- [Convergence roadmap](../../../../prototype/v2-ui/convergence-roadmap.html)
+- [Shared prototype styles](../../../../prototype/v2-ui/styles.css)
 
 Durable project memory is tracked in Continuum. Task `tkt-2p2bhwgk` is
 completed with the scenario matrix, contract decisions, walkthrough evidence,

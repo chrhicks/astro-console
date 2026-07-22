@@ -1,5 +1,8 @@
 # V2 Prototype Plan
 
+> Archived discovery plan. Use the
+> [current convergence plan](../../current/convergence-plan.md) for active work.
+
 ## 1. Purpose
 
 Prototyping is a first-class V2 discovery phase. Its job is not to make an
@@ -19,7 +22,7 @@ candidate transport contracts, an executable scenario catalog, and an
 explicit record of unresolved risks.
 
 The working artifacts are inventoried in the
-[V2 prototype hub](../../prototype/v2-ui/index.html). The hub is the durable
+[V2 prototype hub](../../../../prototype/v2-ui/index.html). The hub is the durable
 entry point for interactive comparisons, content-only model studies,
 architecture ideas, and relevant earlier prototype reports; individual study
 URLs should not become an untracked parallel index.

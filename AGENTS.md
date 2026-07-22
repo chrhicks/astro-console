@@ -4,6 +4,20 @@ Start your session by reading your memory summary in `continuum`. Keep your memo
 
 ## Working within this project
 
+### V2 documentation context
+
+For V2 work, begin with `docs/v2/README.md` and follow its task-specific
+reading table. The default context is only `docs/v2/ux-design-guidance.md` and
+`docs/v2/current/handoff.md`.
+
+- Load `docs/v2/current/product-spec.md`, one accepted gate document, or one
+  infrastructure section only when the task requires that detail.
+- Do not broadly ingest `docs/v2/archive/` or `prototype/v2-ui/archive/`.
+  Archived material is non-authoritative and is used only to answer a specific
+  historical question.
+- Accepted prototypes remain at `prototype/v2-ui/`; rejected alternatives and
+  earlier studies live under its `archive/` directory.
+
 ### Subagents - delegation and context preservation
 
 Use the `coder` agent as the default implementation path for coding tasks in this project.

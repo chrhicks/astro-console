@@ -1,4 +1,9 @@
-# V2 UI And Workspace Plan
+# V2 Product Specification
+
+Status: **current product specification through Gate 4**
+
+Read this only when workspace behavior or product-entity detail is needed. The
+default V2 context begins at [Start Here](../README.md).
 
 ## 1. Why The Current Shell Should Not Be Extended
 
@@ -387,8 +392,9 @@ Process transforms selected evidence while remaining independent of live rig
 control.
 
 Its accepted interaction model is recorded in the
-[Gate 4 Process reference](process-gate.md). Shared placement, hierarchy, and
-language rules live in [V2 UX and design guidance](ux-design-guidance.md).
+[Gate 4 Process reference](../gates/gate-04-process.md). Shared placement,
+hierarchy, and language rules live in
+[V2 UX and design guidance](../ux-design-guidance.md).
 
 ### Responsibilities
 

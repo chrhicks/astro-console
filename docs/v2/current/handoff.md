@@ -60,10 +60,10 @@ accepted workspaces.
 
 Iteration 3 is the accepted Process reference:
 
-- [Gate 4 decision record](process-gate.md)
-- [Interactive Process reference](../../prototype/v2-ui/process-prototype.html)
-- [Synthetic Process state model](../../prototype/v2-ui/process-prototype.js)
-- [V2 UX and design guidance](ux-design-guidance.md)
+- [Gate 4 decision record](../gates/gate-04-process.md)
+- [Interactive Process reference](../../../prototype/v2-ui/process-prototype.html)
+- [Synthetic Process state model](../../../prototype/v2-ui/process-prototype.js)
+- [V2 UX and design guidance](../ux-design-guidance.md)
 
 Validation exercised the reference at 1600 px and 1000 px desktop widths and a
 390 px read-only phone width. It confirmed no page overflow or console errors,

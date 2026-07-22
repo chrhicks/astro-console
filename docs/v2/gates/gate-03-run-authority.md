@@ -2,7 +2,7 @@
 
 Status: accepted and completed on July 21, 2026
 
-Prototype: [Run authority gate](../../prototype/v2-ui/run-authority-prototype.html)
+Prototype: [Run authority gate](../../../prototype/v2-ui/run-authority-prototype.html)
 
 ## Gate Question
 

@@ -1,5 +1,8 @@
 # V2 Web Architecture
 
+> Archived exploratory architecture. The current infrastructure authority is
+> [the infrastructure plan](../../infra/README.md).
+
 ## 1. Architectural Direction
 
 V2 replaces Electron as the product architecture with a browser application

@@ -9,9 +9,9 @@ personal observatory service. It began after Gate 3 and now incorporates the
 infrastructure-facing decisions accepted in Gate 4 without making deployment
 mechanics the organizing model of the Process workspace.
 
-For deployment questions, this directory refines the earlier exploratory
-topology in `docs/v2/web-architecture.md` and is the current infrastructure
-reference.
+For deployment questions, this directory is the current infrastructure
+reference. The earlier exploratory topology is retained only in
+`docs/v2/archive/architecture/web-architecture.md`.
 
 The recommended starting point is:
 

@@ -7,7 +7,7 @@ approachable while execution, recovery, provenance, and storage stay honest.
 The primary interaction is developing an image, not administering jobs.
 
 The prototype is synthetic and non-operational:
-[`process-prototype.html`](../../prototype/v2-ui/process-prototype.html).
+[`process-prototype.html`](../../../prototype/v2-ui/process-prototype.html).
 
 ## Product Model
 
@@ -216,4 +216,4 @@ page overflow or console error; suggestion preview, failure diagnostics, and
 responsive context behavior matched the model above.
 
 The shared rules derived from Gates 1–4 now live in
-[V2 UX and design guidance](ux-design-guidance.md).
+[V2 UX and design guidance](../ux-design-guidance.md).
