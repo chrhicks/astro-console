@@ -25,14 +25,27 @@ claim about the current application.
 - [Run authority gate study](run-authority-gate.md) is the accepted reference
   for revision-aware plan mutation, reconnect reconstruction, presence,
   exclusive control, and read-only phone behavior.
+- [Process gate study](process-gate.md) is the accepted Gate 4 iteration 3
+  reference for
+  a visual Build/Develop workspace, one linear edit history, tool-specific
+  controls, reference comparison, stage-local recovery, and saving related
+  artifacts to Library.
+- [UX and design guidance](ux-design-guidance.md) is the concise accepted
+  Gates 1–4 authority for workspace boundaries, hierarchy, language, state,
+  responsive behavior, and prototype quality.
 - [Gate 3 session handoff](gate-3-handoff.md) is the durable continuation point
   for accepted Gates 1–3 decisions, walkthrough lessons, repository state, and
   the single next action.
+- [Gate 4 session handoff](gate-4-handoff.md) is the durable continuation point
+  for the accepted Process model and the bounded Gate 5 contract-harness start.
 - [UI and workspace plan](ui-plan.md) defines the product model, global shell,
   workspaces, observing phases, responsive behavior, and interaction rules.
 - [Web architecture](web-architecture.md) defines the proposed local service,
   browser clients, remote sharing topology, authentication, and Electron
   migration boundary.
+- [Infrastructure plan](infra/README.md) turns that topology into deployable
+  requirements, evaluates managed ingress options, and recommends an
+  operations and security baseline for the rig-local Linux host.
 - [Prototype plan](prototype-plan.md) defines how V2 will test competing UX
   ideas, converge on canonical frontend/backend models, and retire technical
   and operational unknowns before implementation hardens them.

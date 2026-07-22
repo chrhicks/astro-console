@@ -51,6 +51,14 @@ local server.
   disconnect and snapshot-first reconstruction, presence, exclusive control,
   controller grace, owner takeover, stale-controller rejection, and the same
   canonical truth on a read-only phone.
+- `process-prototype.html`: Gate 04 accepted on July 21, 2026; iteration 3 is
+  the focused visual editor reference with
+  Steps, a dominant synthetic image canvas, and one shared Operation,
+  Assistant, and Inspector context rail. It includes non-stealing unread
+  suggestions and explicit proposal previews, stage-local retry with bounded
+  owner-safe diagnostics, metadata-aware data switching, completion actions,
+  measured-pressure throttling, format-aware Save to Library, and a read-only
+  phone monitor across seven synthetic scenarios.
 - `convergence-roadmap.html`: the finite remaining gates, stop criteria, and
   promotion/discard rules that end in one V2 interaction specification and one
   backend-facing domain/contract model.
@@ -75,6 +83,13 @@ and recommended decision all come from one synthetic state and rule model.
 The Run Authority prototype centralizes each synthetic service truth and its
 derived decision in `run-authority-prototype.js`. Renderers consume that
 projection; they do not infer mutation impact, freshness, or control authority.
+
+The Process prototype keeps its synthetic session model in
+`process-prototype.js`. The service-facing model owns the current linear edit
+history, applied steps, checkpoints, and saved artifact lineage. Temporary
+controls demonstrate preview state, while explicit Apply, Undo, Redo, Save,
+and Discard actions make the lifecycle legible without exposing execution
+records as the primary experience.
 
 ## Safety Boundary
 

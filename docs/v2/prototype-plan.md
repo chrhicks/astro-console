@@ -326,8 +326,8 @@ Prototype discovery has a defined end. Its final artifact is **one validated
 V2 interaction specification plus one backend-facing domain and contract
 model**. It is not an indefinitely growing gallery of studies.
 
-The seven convergence gates are finite and ordered. Gates 1 through 3 are
-complete; Gate 4 is next:
+The seven convergence gates are finite and ordered. Gates 1 through 4 are
+complete; Gate 5 is next:
 
 1. **Composite V2 convergence — complete.** The reference interaction model
    now covers Plan, Observe, Library, global run context, warnings, the
@@ -342,10 +342,12 @@ complete; Gate 4 is next:
    semantic freshness and revision projection, snapshot-first reconnect,
    priority-sorted attention, multiple viewers, exclusive control, owner
    takeover, stale intent rejection, and a read-only phone.
-4. **Process model — next.** Select the recipe, job, intermediate-artifact,
-   comparison, provenance, and resource-priority interactions needed for the
-   first processing slice.
-5. **Executable domain contract harness.** Express the reference scenarios as
+4. **Process model — complete July 21, 2026.** The accepted reference covers
+   Build and Develop phases, one current edit history, a dominant image canvas,
+   compatible tool choice, optional assistance, stage-local recovery and
+   diagnostics, protected source switching, and saving related artifacts to
+   Library without a first-class recipe or branch model.
+5. **Executable domain contract harness — next.** Express the reference scenarios as
    canonical entities, Effect Schema command/snapshot/event/error candidates,
    deterministic transitions, and UI-driving traces.
 6. **Three bounded technical spikes only.** Measure catalog scale and bounded

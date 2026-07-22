@@ -27,12 +27,15 @@ behavior during migration. It is not the visual template for V2.
 - Run the scenario-based interaction, domain-model, and operational prototype
   tracks in [the prototype plan](prototype-plan.md).
 - Define `Observatory`, `NightPlan`, `Sequence`, `ActiveRun`,
-  `AcquisitionAttempt`, `Frame`, `ProcessingJob`, and `ControlLease` ownership.
+  `AcquisitionAttempt`, `Frame`, `ProcessingSession`, and `ControlLease`
+  ownership.
 - Decide what active-run state must persist across service restart.
 - Define command, snapshot, event, and error contracts with Effect Schema.
 - Separate domain decisions from transport-safe state and client-local
   presentation state.
 - Create low-fidelity desktop and phone shell wireframes.
+- Maintain [V2 UX and design guidance](ux-design-guidance.md) as the concise
+  authority derived from accepted interaction gates.
 - Compare materially different Plan and Observe interaction models rather than
   polishing the first plausible layout.
 - Exercise prototypes against deterministic healthy, warning, failure,
@@ -138,18 +141,35 @@ behavior during migration. It is not the visual template for V2.
 
 ### Outcomes
 
-- Create reproducible processing recipes and jobs.
-- Start with saved FITS inputs and app-owned derived outputs.
-- Integrate calibration, alignment, stacking, stretching, and comparison.
-- Add adapters for selected external tools, potentially including RCAstro
-  workflows where their invocation model fits.
-- Expose intermediate artifacts, parameters, tool versions, and provenance.
-- Schedule processing so it does not silently starve active observing work.
+- Start a service-owned processing session from saved FITS inputs.
+- Separate Build image operations from visual Develop image operations, with a
+  durable linear master between them.
+- Maintain one current linear edit history with preview, apply, undo, redo,
+  stage-local retry, and discard behavior.
+- Keep the image canvas visible while the operator adjusts parameters or
+  compares the current result against the linear reference.
+- Consolidate Operation, optional Assistant findings, and Inspector evidence
+  in one contextual rail that does not steal canvas space or focus.
+- Add compatible per-operation adapters for Siril and selected external tools;
+  expose only tools that actually implement the selected operation.
+- Record checkpoints, attempts, parameters, tool versions, and provenance
+  underneath the editing workflow.
+- Expose sanitized raw tool diagnostics and exact stage-local retry scope when
+  an operation fails.
+- Protect unsaved work while switching among raw sessions, unfinished Process
+  sessions, existing linear stacks, and Library sources.
+- Save selected processed FITS and display artifacts into Library.
+- Throttle processing only for measured host pressure that could threaten
+  observing, rather than treating active capture as an automatic pause.
 
 ### Exit Criteria
 
-- A processing result can be reproduced from its recorded sources and recipe.
-- Derived assets appear in Library without obscuring their originals.
+- A processing result can be reproduced from its recorded sources, ordered
+  operations, parameters, and tool facts.
+- Undo, redo, reset-preview, and stage-local retry visibly restore the expected
+  image and control state.
+- Selected derived assets appear in Library without obscuring their originals;
+  discarding unsaved work cannot remove source frames or saved artifacts.
 - Processing failure cannot affect active rig control.
 
 ## 8. Phase 6: Remote Viewing And Shared Control

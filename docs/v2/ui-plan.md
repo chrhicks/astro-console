@@ -85,7 +85,7 @@ state.
 | Active Run | Immutable execution snapshot plus explicit approved runtime changes |
 | Acquisition Attempt | Evidence and corrections used to align, solve, center, and prepare a target |
 | Frame | Durable captured evidence with settings, metrics, provenance, and review status |
-| Processing Job | Reproducible transformation from source assets to derived assets |
+| Processing Session | One current Build/Develop sequence, linear applied history, working output, checkpoints, and saved Library artifacts |
 | Control Lease | The single client currently authorized to issue observing commands |
 
 The active run belongs to the observatory service. It does not belong to a
@@ -386,21 +386,45 @@ Observe, but historical browsing and detailed comparison belong here.
 Process transforms selected evidence while remaining independent of live rig
 control.
 
+Its accepted interaction model is recorded in the
+[Gate 4 Process reference](process-gate.md). Shared placement, hierarchy, and
+language rules live in [V2 UX and design guidance](ux-design-guidance.md).
+
 ### Responsibilities
 
 - select source assets;
-- choose or construct a recipe;
-- run calibration, alignment, stacking, stretching, color work, denoising,
-  sharpening, and related steps;
-- expose intermediate artifacts;
-- compare versions and before/after results;
-- record tool versions and parameters;
-- preserve reproducibility;
-- write derived assets back into Library.
+- build a durable linear master through calibration, debayer, alignment, frame
+  evaluation, and stacking;
+- visually develop that master through one current, non-destructive edit
+  history with undo and redo;
+- keep a large image preview visible while tools and adjustable parameters are
+  evaluated;
+- combine Operation, Assistant, and Inspector in one contextual rail so the
+  image canvas remains dominant;
+- reveal the linear reference through press-and-hold comparison while editing;
+- offer compatible tools per operation, including Siril and external adapters
+  where their invocation model fits;
+- make optional analysis explain its suggestions and require the operator to
+  preview and apply every change;
+- retry a failed operation from its latest valid checkpoint without rerunning
+  unaffected Build steps;
+- expose bounded owner-safe tool output and retry scope without replacing the
+  visual editor;
+- switch among capture sessions, unfinished work, linear stacks, and Library
+  sources while protecting unsaved work;
+- record exact inputs, parameters, tool versions, and provenance underneath
+  the focused editing experience; and
+- save selected FITS and display artifacts into Library, or discard unsaved
+  derived work while preserving source frames.
 
-RCAstro and other external tools fit here as processing adapters. Processing
-jobs may run while observing continues, but processing resource use must not
-silently degrade time-critical acquisition.
+General comparison among saved outputs belongs to Library; Process may open
+that capability as a convenience. Internal attempts and diagnostics remain
+inspectable but do not become the primary workspace navigation.
+
+Processing may run while observing continues. Active capture alone does not
+pause it. The worker throttles only in response to measured memory, storage,
+thermal, or similar host pressure that could threaten acquisition or control,
+and the UI names that condition directly.
 
 Review and Process remain separate because they answer different questions:
 `Is this evidence good?` versus `How should it be transformed?`
