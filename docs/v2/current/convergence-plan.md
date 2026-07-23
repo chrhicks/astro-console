@@ -1,6 +1,6 @@
 # V2 Convergence Plan
 
-Status: **current — Gate 6 complete; Gate 7 next**
+Status: **complete — Gate 7 accepted; V2 reference frozen**
 
 Prototype discovery ends in one validated interaction specification and one
 backend-facing domain and contract model. It is not an indefinitely growing
@@ -16,7 +16,7 @@ gallery of studies.
 | 4. Process | Complete | Build/Develop editor, one current history, visual comparison, tool choice, assistance, stage-local recovery, and Library saving |
 | 5. Contract harness | Complete | Vocabulary, schemas, transitions, projections, and deterministic future-server proofs with explicit integration boundaries |
 | 6. Technical spikes | Complete | Catalog scale, image overlay/solve geometry, and streamed state/preview reconnect constraints recorded |
-| 7. Final reference | Next | Cross-surface walkthrough, trace reconciliation, decision log, and frozen V2 reference |
+| 7. Final reference | Complete | Cross-surface walkthrough, trace reconciliation, and decision log accepted; V2 reference frozen |
 
 The interactive [convergence roadmap](../../../prototype/v2-ui/convergence-roadmap.html)
 is the visual projection of this plan.

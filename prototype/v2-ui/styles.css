@@ -1184,15 +1184,7 @@ kbd { min-width: 24px; padding: 2px 6px; border: 1px solid var(--line-strong); b
   .composite-feedback { font-size: 11px; }
   .composite-evaluation { margin-top: 14px; }
   .acquire-question { display: none; }
-  .authority-question { display: grid; }
-  .authority-question > div:first-child { display: none; }
-  .authority-question .scenario-control { padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
-  .authority-question .scenario-control { align-items: stretch; flex-direction: column; }
-  .authority-question .scenario-control select { width: 100%; min-width: 0; min-height: 44px; }
-  .process-question { display: grid; }
-  .process-question > div:first-child { display: none; }
-  .process-question .scenario-control { align-items: stretch; flex-direction: column; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
-  .process-question .scenario-control select { width: 100%; min-width: 0; min-height: 44px; }
+  .authority-question, .process-question { display: none; }
   .desktop-runbar-view { display: none; }
   .phone-runbar-view { display: block; }
   .authority-run-facts { grid-template-columns: repeat(3, 1fr); }

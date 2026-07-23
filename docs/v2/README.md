@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **Gate 6 complete; Gate 7 next; not current application behavior**
+Status: **Gate 7 accepted; V2 reference frozen; not current application behavior**
 
 This directory is organized to keep normal working context small. Do not read
 the entire V2 tree by default.
@@ -35,7 +35,8 @@ requires its specific detail.
 
 ## Current Position
 
-Gates 1–5 are accepted and Gate 6 technical spikes are complete:
+Gates 1–5 are accepted, Gate 6 technical spikes are complete, and Gate 7 has
+frozen the V2 reference:
 
 1. Composite workspace model.
 2. Acquire evidence workflows.
@@ -46,8 +47,9 @@ Gates 1–5 are accepted and Gate 6 technical spikes are complete:
 Gate 5 was reopened and hardened after a future-server walkthrough found that
 several passing fixtures proved only schema shape or a partial workflow. The
 completed regrade is recorded in the
-[server-perspective audit](current/gate-05-server-audit.md). Gate 7 is the next
-active boundary.
+[server-perspective audit](current/gate-05-server-audit.md). The accepted
+[Gate 7 walkthrough and decision log](current/gate-07-walkthrough.md) freezes
+the selected V2 reference.
 
 ## Context Rules
 

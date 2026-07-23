@@ -1,12 +1,17 @@
 # Gate 7 Final-Reference Handoff
 
-Status: Gate 6 complete July 23, 2026; Gate 7 next
+Status: Gate 7 accepted July 23, 2026; V2 reference frozen
 
-Current work: Gate 7 — final reference walkthrough and decision log
+Current work: Gate 7 complete
 
 This is the durable continuation point for Gate 7. It preserves accepted Gates
 1–5 and Gate 6 constraints without requiring later work to ingest the full
 history.
+
+The accepted [Gate 7 trace and decision log](gate-07-walkthrough.md) freezes
+the reference at [the accepted prototype hub](../../../prototype/v2-ui/index.html).
+Its contract reconciliation and live wide, compact, and phone validation are
+complete.
 
 ## Current Position
 
@@ -140,9 +145,10 @@ conflict with an accepted product invariant.
 
 ## Single Next Action
 
-Run Gate 7's final cross-surface walkthrough, reconcile its trace evidence,
-record the decision log, and freeze the V2 reference. Do not reopen accepted
-interaction models unless the walkthrough exposes a product invariant conflict.
+Gate 7 is complete. Begin implementation from the accepted product, contract,
+and prototype references. Reopen an accepted interaction model only for a
+recorded product-invariant conflict—not implementation convenience, copy
+polish, or visual taste.
 
 ## Gate 7 Bootstrap
 
