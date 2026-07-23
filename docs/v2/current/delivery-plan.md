@@ -31,7 +31,7 @@ behavior during migration. It is not the visual template for V2.
 - Confirm the workspace and run-phase model.
 - Run the scenario-based interaction, domain-model, and operational prototype
   tracks in [the convergence plan](convergence-plan.md).
-- Define `Observatory`, `NightPlan`, `Sequence`, `ActiveRun`,
+- Define `Observatory`, `ObservingPlan`, `Sequence`, `ActiveRun`,
   `AcquisitionAttempt`, `Frame`, `ProcessingSession`, and `ControlLease`
   ownership.
 - Decide what active-run state must persist across service restart.
@@ -86,11 +86,11 @@ behavior during migration. It is not the visual template for V2.
 
 ### Outcomes
 
-- Build multi-sequence night plans.
+- Build multi-sequence observing plans.
 - Show observing windows, altitude, horizon clearance, usable time, and storage
   forecast.
 - Validate capability and readiness requirements.
-- Start an immutable active-run snapshot from an approved plan.
+- Start an immutable `RunDefinition` from an approved plan.
 - Execute a bounded sequence state machine.
 - Support pause, stop, skip, retry, and park policies.
 - Classify active-run edits by operational impact and explain consequences.

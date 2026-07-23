@@ -35,7 +35,7 @@ rules unless a later gate records why a rule must change.
 
 | Workspace | Owns the operator's task | Does not own | Primary handoff |
 | --- | --- | --- | --- |
-| **Plan** | Future observing intent, sequence design, readiness, and validation | Accepted run execution | `Run plan` creates a stable run snapshot for Observe |
+| **Plan** | Future observing intent, sequence design, readiness, and validation | Accepted run execution | `Run plan` creates a stable `RunDefinition` for Observe |
 | **Observe** | Current run evidence, intervention, acquisition, capture, verification, and recovery | Browser-local execution or historical asset management | Captured evidence becomes Library assets |
 | **Library** | Durable sources, saved results, review, related-artifact comparison, and downloads | Unsaved processing scratch | `Open in Process` supplies raws, a linear stack, or a saved result |
 | **Process** | One current Build/Develop editing session, preview, undo/redo, tool choice, and selected outputs | General history browsing, arbitrary saved-result comparison, or rig control | `Save to Library` creates durable artifacts; Discard preserves sources |
@@ -46,7 +46,7 @@ suggest that changing workspaces changes an accepted run or server job.
 
 ### Cross-workspace handoffs
 
-- Plan to Observe transfers an accepted, revisioned run snapshot—not a live
+- Plan to Observe transfers an accepted, revisioned `RunDefinition`—not a live
   pointer to an editable draft.
 - Observe to Library records immutable evidence and acquisition lineage.
 - Library to Process passes stable asset IDs. Raws begin in Build; an existing
@@ -57,6 +57,9 @@ suggest that changing workspaces changes an accepted run or server job.
   the canonical home for comparing several saved versions.
 - Leaving a workspace never cancels service-owned activity. Unsaved work is
   protected when switching Process data.
+- A Process session is a durable resumable working resource, not a Library
+  asset. Switching data may leave it unfinished, save selected outputs to
+  Library, discard it, or cancel the switch.
 
 ## Composition And Hierarchy
 
@@ -94,8 +97,14 @@ focus to the invoking control.
 
 - Reconnect begins with a fresh authoritative snapshot before incremental
   events. The refreshed page simply shows the current server state.
+- The web app holds no durable domain state. Refresh discards browser memory
+  and installs the server snapshot without merging an older local copy.
 - Browsers never buffer commands for later replay. Stale run, lease, or
   processing revisions fail before physical or durable action.
+- Process controls synchronize complete preview settings to the service after
+  a suitable debounce. Only a change still inside that debounce window may be
+  lost on refresh. Synchronized Preview, applied history, and saved Library
+  artifacts remain distinct states.
 - Distinguish service availability, rig connectivity, public tunnel status,
   processing availability, publication state, and storage pressure.
 - Retry the failed stage from its latest valid checkpoint. State the retry

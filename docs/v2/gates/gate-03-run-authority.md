@@ -145,7 +145,7 @@ production schemas, or implementation readiness.
 
 ## Canonical Revision Model
 
-`sourcePlanRevision` identifies the approved `NightPlan` revision used to start
+`sourcePlanRevision` identifies the approved `ObservingPlan` revision used to start
 the run. It never changes for that run.
 
 `runRevision` identifies the current service-owned execution contract. It

@@ -124,9 +124,19 @@ not itself a pause condition, and the worker cannot infer safety from UI state.
 
 Start with a local SQLite database for canonical metadata and durable events.
 This matches a single-site, single-authority product and avoids operating a
-database server before needed. Use transactions for revision, lease, command
-acceptance, and event writes. Keep image bytes and large intermediates in the
-filesystem; database rows reference checksummed app-owned assets.
+database server before needed. One command-acceptance transaction must commit
+the aggregate change, durable events, idempotency receipt and result, snapshot
+cursor/version, and queued outbox work together. Hardware, CLI, filesystem,
+R2, and other adapter work begins only after that commit. Worker completion or
+failure returns as correlated evidence in a later transaction.
+
+Public aggregate revisions express product freshness. They are not required to
+change for every internal write: for example, pending control requests and
+presence can change without changing the public control-ownership epoch. Use a
+separate internal row version or transaction lock to serialize those writes
+without overloading the public revision. Keep image bytes and large
+intermediates in the filesystem; database rows reference checksummed app-owned
+assets.
 
 Original sources remain on the Arch filesystem. Rebuildable scratch remains
 local and expires under policy. Selected previews, intermediates, finals, and
@@ -196,8 +206,10 @@ mechanism.
    path.
 2. Service authorizes observatory membership and representation scope.
 3. Service resolves the app-owned local path or private R2 key.
-4. For an R2 object it issues a short-lived presigned `GET`; for a local raw it
-   either streams once with bounded concurrency or stages a temporary R2 copy.
+4. For an R2 object it issues a short-lived presigned `GET`. For a local-only
+   original, a LAN request streams from Arch with bounded concurrency; a
+   remote request reuses a valid staged R2 copy or stages one before issuing
+   the grant.
 5. Every class may be downloaded deliberately and audited; no bucket listing
    or arbitrary filesystem/object-key access is exposed.
 

@@ -4,6 +4,10 @@
 
 Use the `effect` skill when implementing anything. Choose the references that apply to the task you're trying to implement or review.
 
+Apply the repository-specific rules in [Effect Guidance](EFFECT_GUIDANCE.md) in
+addition to the skill. In particular, do not use manual `_tag` string checks as
+the primary dispatch or recovery mechanism.
+
 ## Core Working Style
 
 - Make the smallest correct change.
@@ -91,6 +95,22 @@ Enforceable boundaries for this repo. For rationale and migration details see `d
 - Synchronize lifecycle and race tests with deterministic barriers, events, or controllable promises. Do not use fixed sleeps as proof that an asynchronous transition occurred.
 - Prefer named fixture configuration to growing optional positional arguments when a fixture has several independently meaningful settings.
 - For UI, CLI, or TUI changes, pair automated checks with a focused smoke test and capture screenshot evidence when the change is visible.
+- Use `*.proof.test.ts` only for deterministic server simulations that exercise
+  a consequential scenario across decoding, authority, idempotency,
+  transactional acceptance, domain decisions, durable evidence, outbox work,
+  and authoritative projection. A unit test that calls a pure transition does
+  not earn the proof suffix.
+- Use `*.integration.test.ts` when the test depends on a real implementation
+  boundary such as SQLite, filesystem behavior, a worker, CLI, or provider
+  adapter. Proof tests may use deterministic in-memory services but must fail
+  closed for behavior they do not configure.
+- Version idempotency hashes over canonical decoded semantic fields. Exclude
+  transport-only identity such as `commandId`; never treat caller JSON property
+  order as canonical input.
+- An in-memory proof may establish atomic outbox insertion and that adapters do
+  not run inside acceptance. Worker claim, acknowledgement, retry, lease
+  recovery, and crash behavior are integration concerns and must be tested
+  against the selected persistence and worker implementation.
 
 ## Contribution Hygiene
 

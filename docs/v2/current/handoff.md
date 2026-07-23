@@ -1,26 +1,58 @@
-# Gate 4 Session Handoff
+# Gate 5 Contract Handoff
 
-Status: Gate 4 accepted and completed on July 21, 2026
+Status: Gate 5 complete July 22, 2026
 
-Next gate: Gate 5 — executable scenario and contract harness
+Current work: Gate 6 — bounded technical spikes
 
-This is the durable continuation point for V2 work completed through Gate 4.
-It summarizes the accepted Process model and points to the shared design rules
-that later contracts and interfaces must preserve.
+This is the durable continuation point for product work accepted through Gate
+5. It preserves the Gate 4 Process decisions and the hardened future-server
+contracts without requiring later work to ingest the full audit history.
 
 ## Current Position
 
-Four of seven convergence gates are complete:
+Five of seven convergence gates are complete:
 
 1. Composite V2 workspace convergence.
 2. Acquire evidence workflows.
 3. Run mutation, reconnect, and control ownership.
 4. Process model.
+5. Contract harness — accepted vocabulary, schemas, transitions, and
+   future-server proofs.
 
-Gate 5 should translate these accepted interactions into canonical entities,
-Effect Schema contract candidates, deterministic transitions, typed failures,
-and UI-driving traces. It should discover contract details, not redesign the
-accepted workspaces.
+Gate 5 translated the accepted interactions into canonical entities, Effect
+Schema candidates, deterministic transitions, typed failures, UI-driving
+traces, and deterministic future-server proofs. A walkthrough exposed shallow
+fixtures and several real contract defects; the hardening pass corrected them
+without reopening accepted UX.
+
+The shared scenario set and state-ownership table are accepted in
+[the Gate 5 baseline](gate-05-scenarios.md). The browser is stateless for
+domain data; Process preview settings synchronize through a debounce; Process
+sessions are durable resumable working resources rather than Library assets;
+and local-original downloads stream on LAN or stage through private R2 for
+remote delivery.
+
+The accepted [consequential-action map](gate-05-action-map.md) assigns
+authorization, eligibility, freshness guards, named intents, deterministic
+results, durable evidence, and typed failures to every accepted scenario. It is
+a language-level contract and is not yet production schema.
+
+The accepted [canonical contract vocabulary](gate-05-contract-vocabulary.md)
+names the aggregate roots, commands, snapshots, durable events, projection
+events, failures, and service transitions shared by later schemas. It resolves
+the overloaded use of “snapshot”: `RunDefinition` is the immutable content
+accepted at run start, while `RunSnapshot` and `AppSnapshot` are current read
+projections.
+
+The standalone [V2 contracts package](../../../packages/v2-contracts/README.md)
+is the executable Gate 5 candidate. It compiles all 33 command variants,
+nine failure families, 38 typed durable events, branded freshness tokens,
+UI-driving snapshots, event-gap recovery, and the exhaustive shared command
+gate. Deterministic transitions cover shell/client state, Run, Control,
+Acquire, Process, and Library, and all 43 accepted scenarios execute as
+fixtures, with the completed regrade in the
+[server-perspective audit](gate-05-server-audit.md). The package passes 176
+tests across 21 suites and does not depend on the legacy Electron application.
 
 ## Gate 4 Decisions
 
@@ -71,9 +103,9 @@ the three-region hierarchy, responsive context reflow, no phone mutations,
 Assistant unread and proposal behavior, stage-local failure diagnostics, save,
 discard, and protected source switching.
 
-## Gate 5 Inputs
+## Gate 5 Outputs
 
-Gate 5 should make these service-facing concepts executable:
+Gate 5 made these service-facing concepts executable:
 
 - authoritative snapshots, revisions, and snapshot-first reconnect;
 - `ProcessingSession`, ordered applied operations, history position, sources,
@@ -106,7 +138,16 @@ conflict with an accepted product invariant.
 
 ## Single Next Action
 
-Define the Gate 5 shared scenario set and state ownership table from accepted
-Gates 1–4 before writing production schemas. Each visible consequential action
-must gain an eligibility rule, command, deterministic result, and typed failure
-without introducing browser-owned observatory truth.
+Run Gate 6's first bounded technical spike: measure catalog rendering at
+realistic Library scale and record the constraint and implementation decision.
+Do not begin production transport or persistence design unless the measurement
+requires a contract clarification.
+
+## Gate 6 Handoff
+
+Begin with the default V2 reading set, then load the Library portions of the
+product specification and contract package only as the catalog measurement
+needs them. Gate 5's 176 passing tests are a contract baseline, not a reason to
+expand its model during the spike. The outcome must be a measured rendering
+limit and a narrowly justified catalog strategy; it must not turn into general
+Library implementation or reopen accepted interaction semantics.

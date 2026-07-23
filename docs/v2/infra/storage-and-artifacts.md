@@ -85,13 +85,19 @@ rule delete the only raw source.
 
 ## 5. Publication Flow
 
-1. Processing job reads immutable local raws and writes local scratch.
-2. User or recipe marks selected intermediates and finals for publication.
-3. Publisher computes checksum, size, media type, provenance, and expiry class.
-4. Publisher uploads to private R2 using a least-privilege bucket token.
-5. Publisher verifies object metadata/checksum and records the R2 object key.
-6. UI exposes the representation as downloadable.
-7. Final outputs are also promoted into the permanent local archive.
+1. Processing reads immutable local raws and writes local scratch.
+2. The user selects one or more explicit output/format/role combinations.
+3. The service materializes and checksums every selected permanent local file.
+   No Library Asset may claim success while any selected file is incomplete.
+4. After every file is durable, one metadata transaction creates all selected
+   Asset roots, lineage/events, the recorded command result, and any publication
+   outbox work. A crash before this transaction may leave removable orphan
+   files, but never successful Asset metadata pointing to missing bytes.
+5. The publisher computes or verifies size, media type, provenance, and expiry
+   class, then uploads to private R2 using a least-privilege bucket token.
+6. The publisher verifies object metadata/checksum and records the correlated
+   R2 representation as ready.
+7. The UI exposes the representation as downloadable.
 8. Local scratch cleanup occurs independently according to retention policy.
 
 The processing worker may upload through a narrow publisher service so it does
@@ -115,16 +121,21 @@ receives it can download that one object until it expires. Use short expiries
 each deliberate download. Presigned URLs use the R2 S3 endpoint rather than a
 custom domain.
 
-### Local-Only Raw
+### Local-Only Original
 
-For a raw that exists only on Arch, offer two paths:
+One `Download` intent routes by the authorized request path:
 
-- direct one-time streaming through Astro Console/Tunnel; or
-- an asynchronous `Prepare download` action that stages the raw into
-  `staged-raws/`, then returns an R2 download when ready.
+- A LAN request streams directly from Astro Console on Arch with bounded
+  concurrency.
+- A remote request uses an existing valid staged R2 copy when present.
+- Otherwise, the remote request starts asynchronous preparation: Arch stages
+  the original into private `staged-raws/`, the asset reports `preparing`, and
+  the browser downloads directly from R2 through a short-lived grant when
+  ready.
 
-The second path is preferable for slow/retryable remote downloads and repeated
-friend access. The staging copy expires; the local original remains.
+The staging copy expires after the accepted 48-hour window. It is disposable
+delivery state, not a second source of truth; the stable asset identity and
+permanent local original remain on Arch.
 
 ### Later Path: Worker Download Gateway
 

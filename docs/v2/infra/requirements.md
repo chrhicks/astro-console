@@ -85,7 +85,7 @@ Separate four data classes:
 
 | Class | Examples | Durability |
 | --- | --- | --- |
-| Canonical metadata | plans, runs, revisions, leases, decisions, asset registry, recipes | Transactional local database; backed up frequently |
+| Canonical metadata | plans, runs, revisions, leases, decisions, processing sessions, asset registry, events, command receipts, outbox work | Transactional local database; backed up frequently |
 | Original evidence | FITS, ImageBytes-derived FITS, camera originals | Permanent Arch filesystem archive; never modified in place; owner cleanup only |
 | Derived/rebuildable | previews, thumbnails, metrics, processing intermediates | Local scratch; disposable unless explicitly promoted to private R2 |
 | Published artifacts | selected intermediates, finals, previews, staged raw downloads | Private R2 with class/prefix lifecycle expiration; finals also retained permanently on Arch |
@@ -129,8 +129,9 @@ volume, subject to simultaneous capture/processing benchmarks.
 
 All asset classes may be downloaded by authorized members. Requests use stable
 asset IDs, never arbitrary paths or R2 keys. R2 objects are delivered with
-short-lived grants; local-only raws can stream through the tunnel or be staged
-temporarily into R2 for resilient direct delivery.
+short-lived grants. Local-only originals stream directly from Arch on the LAN;
+remote requests reuse or create a temporary private R2 staging copy for
+resilient direct delivery from R2.
 
 ## 6. Availability And Recovery Requirements
 

@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **accepted product direction through Gate 4; not current application behavior**
+Status: **Gate 5 complete; not current application behavior**
 
 This directory is organized to keep normal working context small. Do not read
 the entire V2 tree by default.
@@ -23,6 +23,10 @@ requires its specific detail.
 | --- | --- |
 | Workspace behavior or product entities | [Current product specification](current/product-spec.md) |
 | Remaining prototype gates and stopping rules | [Current convergence plan](current/convergence-plan.md) |
+| Accepted Gate 5 scenarios and ownership | [Gate 5 baseline](current/gate-05-scenarios.md) |
+| Accepted Gate 5 consequential actions | [Gate 5 action map](current/gate-05-action-map.md) |
+| Accepted canonical Gate 5 contract language | [Gate 5 contract vocabulary](current/gate-05-contract-vocabulary.md) |
+| Executable Effect Schema candidates and fixtures | [V2 contracts package](../../packages/v2-contracts/README.md) |
 | Implementation phases and backlog mapping | [Current delivery plan](current/delivery-plan.md) |
 | Accepted interaction evidence or candidate contracts | The relevant document under [accepted gates](gates/README.md) |
 | Deployment, Cloudflare, storage, security, or operations | [Infrastructure plan](infra/README.md), then only its relevant section |
@@ -31,16 +35,19 @@ requires its specific detail.
 
 ## Current Position
 
-Gates 1–4 are accepted:
+Gates 1–5 are accepted:
 
 1. Composite workspace model.
 2. Acquire evidence workflows.
 3. Run mutation, reconnect, and control ownership.
 4. Process workspace.
+5. Contract harness and deterministic future-server proofs.
 
-Gate 5 is next: express accepted scenarios as canonical entities, Effect
-Schema contract candidates, deterministic transitions, typed failures, and
-UI-driving traces. Gate 5 should not redesign accepted workspace semantics.
+Gate 5 was reopened and hardened after a future-server walkthrough found that
+several passing fixtures proved only schema shape or a partial workflow. The
+completed regrade is recorded in the
+[server-perspective audit](current/gate-05-server-audit.md). Gate 6 is the next
+active boundary.
 
 ## Context Rules
 

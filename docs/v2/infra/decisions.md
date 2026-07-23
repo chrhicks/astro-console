@@ -47,7 +47,8 @@ spikes. They do not authorize implementation.
 - Final outputs also remain permanently on Arch after their R2 copies expire
   at 90 days.
 - Authorized friends may download originals/FITS, intermediates, finals, and
-  previews. Local-only raws may be staged temporarily into R2.
+  previews. Local-only originals stream directly on the LAN; remote requests
+  reuse or create temporary private R2 staging copies.
 - The MiniPC has a fixed DHCP reservation and is also expected to advertise as
   `ASTROPC` over mDNS. The fixed address should be the initial container config.
 - `chicks-arch` has a Ryzen 7 3800X, 62 GiB RAM, about 875 GiB free NVMe, and

@@ -1,6 +1,6 @@
 # V2 Product Specification
 
-Status: **living product specification — accepted through Gate 4**
+Status: **living product specification — product behavior accepted through Gate 4; Gate 5 contracts under hardening**
 
 Last reconciled: July 21, 2026 against accepted Gates 1–4 and the user-visible
 infrastructure model.
@@ -101,13 +101,13 @@ state.
 | --- | --- |
 | Observatory | Site, horizon, equipment, service health, and shared identity |
 | Rig | A connected set of callable mount, camera, focuser, filter, and storage capabilities |
-| Night Plan | Ordered and constrained work proposed for a site, rig, and observing window |
+| Observing Plan | Ordered and constrained work proposed for a site, rig, and observing window; it is not limited to nighttime targets |
 | Sequence | One target's acquisition contract, capture settings, stop conditions, and failure policy |
-| Active Run | Immutable execution snapshot plus explicit approved runtime changes |
+| Active Run | Immutable `RunDefinition` plus explicit approved runtime changes and current execution state |
 | Acquisition Attempt | Evidence and corrections used to align, solve, center, and prepare a target |
 | Frame | Durable captured evidence with settings, metrics, provenance, and review status |
 | Asset | Stable identity, lineage, checksums, representations, availability, and authorization for original or derived evidence |
-| Processing Session | One current Build/Develop sequence, linear applied history, working output, checkpoints, and saved Library artifacts |
+| Processing Session | A durable, resumable Build/Develop working resource with linear applied history, synchronized preview state, working outputs, checkpoints, and references to any saved Library artifacts; it is not itself a Library asset |
 | Control Lease | The single client currently authorized to issue observing commands |
 | Client Presence | Ephemeral authenticated viewer identity, device, freshness, and capability; never authority by itself |
 
@@ -146,8 +146,10 @@ remain secondary diagnostics.
   snapshot, summarize durable changes while away, then accept newer events.
 - Browsers do not buffer observing commands or automatically replay them after
   reconnect.
-- Client-local workspace, selection, and unsent edits may survive when useful,
-  but they never substitute for canonical state.
+- The web app holds no durable domain state. Refresh discards browser memory
+  and installs the server snapshot without merging an older local copy.
+  Workspace navigation and genuinely unsent interaction may exist only for the
+  current page lifetime.
 
 ## 4. Global Application Shell
 
@@ -264,10 +266,11 @@ Validation should identify conflicts before execution:
 Readiness should distinguish `ready`, `ready with limitations`, and `blocked`.
 Blocking state fails closed when the missing information is truly critical.
 
-### Running Plan Snapshot
+### Accepted Run Definition
 
-Pressing `Run plan` creates a stable execution snapshot. Later edits to a draft
-or another night do not silently mutate the active run.
+Pressing `Run plan` requires the current exclusive control lease and creates a
+stable `RunDefinition`. Later edits to a draft or another night do not
+silently mutate the active run.
 
 Changes to the active run are explicit, revision-guarded operations. The
 service classifies impact and supplies exact physical, evidence, schedule,
@@ -356,7 +359,13 @@ The workflow should:
 4. infer polar-axis error;
 5. translate error into altitude and azimuth adjustment;
 6. ask the user to adjust the mount;
-7. capture again and iterate to the selected tolerance.
+7. capture again and iterate to the selected tolerance; and
+8. wait for the operator to inspect the in-tolerance evidence and choose
+   `Accept and continue`.
+
+If the ordinary plate-solving budget is exhausted, a materially changed
+recovery parameter such as longer exposure begins a new, separately bounded
+attempt series. Changing parameters does not permit an indefinite retry loop.
 
 The latest solved frame becomes the visual surface. Its overlay shows:
 
@@ -490,10 +499,13 @@ evidence.
 
 Authorized friends may download original FITS and camera files, selected
 intermediates, final FITS/TIFF/PNG/JPEG outputs, previews, and selected
-diagnostics. Published representations use short-lived grants. A local-only raw
-may stream through Astro Console or use an asynchronous `Prepare download`
-flow that stages a temporary copy, marks it ready, and later expires it while
-the local original survives.
+diagnostics. Published representations use short-lived grants. A local-LAN
+request for a local-only original streams directly from Arch. A remote request
+uses an existing valid temporary R2 representation or begins an asynchronous
+`Prepare download` flow: Arch stages a private R2 copy, marks it ready, and the
+browser downloads from R2 through a short-lived grant. The staged copy expires
+after its delivery window while the stable asset identity and permanent local
+original survive.
 
 ## 8. Process Workspace
 
@@ -514,6 +526,11 @@ hierarchy, and language rules live in
   history with undo and redo;
 - keep a large image preview visible while tools and adjustable parameters are
   evaluated;
+- automatically synchronize complete preview settings to the service after a
+  suitable debounce, so refresh loses at most a control change that has not
+  yet reached the service;
+- keep synchronized Preview, explicitly applied edit history, and saved
+  Library artifacts as three distinct states;
 - combine Operation, Assistant, and Inspector in one contextual rail so the
   image canvas remains dominant;
 - let Assistant announce unread findings without stealing focus; previewing a
@@ -530,6 +547,8 @@ hierarchy, and language rules live in
   visual editor;
 - switch among capture sessions, unfinished work, linear stacks, and Library
   sources while protecting unsaved work;
+- leave a synchronized session unfinished and resumable when switching data,
+  without turning the session itself into a Library artifact;
 - record exact inputs, parameters, tool versions, and provenance underneath
   the focused editing experience; and
 - save selected FITS and display artifacts into Library, or discard unsaved
@@ -602,8 +621,9 @@ reintroduced without new evidence:
   which are not part of the accepted one-current-history model;
 - the final inventory and invocation details for Siril, RCAstro, and other
   processing adapters; and
-- production schemas, transports, and persistence layouts, which Gate 5 and
-  later implementation work must define without changing accepted semantics.
+- production transports, persistence layouts, and adapter payloads, which
+  later implementation work must define without changing the accepted Gate 5
+  command, failure, transition, and projection semantics.
 
 These items remain in the relevant gate or planning record. They enter this
 living specification only when accepted as current product behavior.

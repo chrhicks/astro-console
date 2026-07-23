@@ -1,6 +1,6 @@
 # V2 Convergence Plan
 
-Status: **current — Gate 5 next**
+Status: **current — Gate 5 complete; Gate 6 next**
 
 Prototype discovery ends in one validated interaction specification and one
 backend-facing domain and contract model. It is not an indefinitely growing
@@ -14,7 +14,7 @@ gallery of studies.
 | 2. Acquire evidence | Complete | Plate solving, bounded correction, recovery, polar guidance, uncertainty, tolerance, and image verification |
 | 3. Run authority | Complete | Proportional mutation, snapshot-first reconnect, stale rejection, presence, exclusive control, and takeover |
 | 4. Process | Complete | Build/Develop editor, one current history, visual comparison, tool choice, assistance, stage-local recovery, and Library saving |
-| 5. Contract harness | **Next** | Canonical entities, Effect Schema candidates, deterministic transitions, typed failures, and UI-driving traces |
+| 5. Contract harness | Complete | Vocabulary, schemas, transitions, projections, and deterministic future-server proofs with explicit integration boundaries |
 | 6. Technical spikes | Pending | Catalog scale, image overlay/solve geometry, and streamed state/preview reconnect measurements |
 | 7. Final reference | Pending | Cross-surface walkthrough, trace reconciliation, decision log, and frozen V2 reference |
 
