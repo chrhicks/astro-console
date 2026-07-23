@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Gate 6 synthetic Library catalog scale measurement harness.">
+  <title>Gate 6 · Library catalog scale lab · Astro Console</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .catalog-lab { --row-height: 76px; }
+    .catalog-lab .lab-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.42fr); gap:16px; align-items:start; }
+    .catalog-lab .lab-panel { min-width:0; padding:16px; border:1px solid var(--line); border-radius:10px; background:var(--surface); }
+    .catalog-lab .control-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+    .catalog-lab label { display:grid; gap:5px; color:var(--muted); font-size:12px; }
+    .catalog-lab select { width:100%; padding:8px 10px; border:1px solid var(--line-strong); border-radius:7px; color:var(--text); background:#0b1116; }
+    .catalog-lab .measurement-note { margin:13px 0 0; color:var(--muted); font-size:12px; }
+    .catalog-lab .metric-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:14px; }
+    .catalog-lab .metric { min-width:0; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--surface-soft); }
+    .catalog-lab .metric small, .catalog-lab .metric strong { display:block; }
+    .catalog-lab .metric small { color:var(--faint); font-size:10px; letter-spacing:.07em; text-transform:uppercase; }
+    .catalog-lab .metric strong { margin-top:4px; overflow-wrap:anywhere; font:600 13px var(--mono); }
+    .catalog-lab .catalog-toolbar { display:flex; flex-wrap:wrap; gap:9px; align-items:end; margin-bottom:12px; }
+    .catalog-lab .catalog-toolbar label { flex:1 1 145px; }
+    .catalog-lab .catalog-toolbar .button { flex:0 0 auto; }
+    .catalog-lab .catalog-status { display:flex; flex-wrap:wrap; gap:7px; margin:0 0 12px; color:var(--muted); font-size:12px; }
+    .catalog-lab .catalog-status strong { color:var(--text); }
+    .catalog-lab .catalog-viewport { height:456px; overflow:auto; border:1px solid var(--line); border-radius:9px; background:#090e12; }
+    .catalog-lab .catalog-spacer { position:relative; min-width:0; }
+    .catalog-lab .catalog-results { position:absolute; inset:0 0 auto; display:grid; }
+    .catalog-lab .asset-row { display:grid; grid-template-columns:30px 46px minmax(0,1.35fr) minmax(112px,.8fr) minmax(92px,.6fr) minmax(82px,.5fr); gap:10px; align-items:center; width:100%; min-height:var(--row-height); padding:9px 12px; border:0; border-bottom:1px solid var(--line); color:var(--text); background:transparent; text-align:left; cursor:pointer; }
+    .catalog-lab .asset-row:hover, .catalog-lab .asset-row[aria-pressed="true"] { background:var(--cyan-wash); }
+    .catalog-lab .preview { display:grid; width:42px; height:42px; place-items:center; border:1px solid rgba(103,213,223,.28); border-radius:6px; color:var(--cyan); background:radial-gradient(circle at 60% 42%, rgba(162,243,244,.48) 0 3%, transparent 4%), radial-gradient(circle at 38% 55%, rgba(103,213,223,.22), transparent 50%), #101b22; }
+    .catalog-lab .asset-row strong, .catalog-lab .asset-row small { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .catalog-lab .asset-row small { margin-top:3px; color:var(--muted); font-size:11px; }
+    .catalog-lab .row-chip { justify-self:start; padding:3px 6px; border:1px solid var(--line); border-radius:99px; color:var(--muted); font:10px var(--mono); }
+    .catalog-lab .row-chip.accepted { color:var(--green); border-color:rgba(125,211,167,.3); background:var(--green-wash); }
+    .catalog-lab .row-chip.marginal { color:var(--amber); border-color:rgba(243,187,98,.3); background:var(--amber-wash); }
+    .catalog-lab .row-chip.rejected { color:var(--red); border-color:rgba(255,124,121,.3); background:var(--red-wash); }
+    .catalog-lab .comparison-list { display:grid; gap:7px; margin:10px 0 14px; }
+    .catalog-lab .comparison-list button { display:grid; grid-template-columns:1fr auto; gap:8px; width:100%; padding:9px; border:1px solid var(--line); border-radius:7px; color:var(--text); background:var(--surface-soft); text-align:left; cursor:pointer; }
+    .catalog-lab .comparison-list button[aria-pressed="true"] { border-color:var(--cyan); background:var(--cyan-wash); }
+    .catalog-lab .detail-list { margin-bottom:0; }
+    .catalog-lab .detail-list > div { grid-template-columns:92px minmax(0,1fr); }
+    .catalog-lab .detail-list dt { color:var(--faint); }.catalog-lab .detail-list dd { min-width:0; margin:0; overflow-wrap:anywhere; font:11px var(--mono); }
+    .catalog-lab .paging { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:10px; }
+    .catalog-lab .paging[hidden] { display:none; }
+    .catalog-lab .phone-note { display:none; }
+    @media (max-width:780px) {
+      .catalog-lab .lab-grid, .catalog-lab .control-grid { grid-template-columns:1fr; }
+      .catalog-lab .lab-panel:last-child { display:none; }
+      .catalog-lab .phone-note { display:block; margin:12px 0 0; padding:11px; border-left:3px solid var(--blue); color:var(--muted); background:rgba(143,182,255,.09); }
+      .catalog-lab .catalog-viewport { height:390px; }
+      .catalog-lab .asset-row { grid-template-columns:30px 42px minmax(0,1fr) auto; gap:8px; }
+      .catalog-lab .asset-row > :nth-child(4), .catalog-lab .asset-row > :nth-child(5) { display:none; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#catalog">Skip to catalog measurement</a>
+  <div class="prototype-flag"><strong>Gate 6 research harness</strong><span>Synthetic data · not an accepted Library redesign</span></div>
+  <header class="site-header">
+    <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true">✦</span><span>Observatory V2<small>Catalog scale lab</small></span></a>
+    <nav class="top-nav" aria-label="Reference navigation"><a href="index.html">References</a><a href="convergence-roadmap.html">Roadmap</a></nav>
+    <div class="header-meta"><span class="pill warning">Measurement only</span></div>
+  </header>
+
+  <main class="page catalog-lab" id="main">
+    <section class="lab-header">
+      <div>
+        <p class="eyebrow">Library technical spike</p>
+        <h1>Measure catalog scale without redesigning Library.</h1>
+        <p class="lede">The same deterministic synthetic asset catalog drives three mounting strategies. It measures browser work only: no real images, network transport, persistence, or production snapshot claim is implied.</p>
+      </div>
+      <div class="hero-note"><p class="eyebrow">Read the result correctly</p><p>Rows contain representative review, lineage, and delivery-summary fields. Preview tiles are CSS placeholders, so image decoding is intentionally out of scope.</p></div>
+    </section>
+
+    <section class="lab-grid" aria-label="Catalog scale measurement">
+      <div class="lab-panel" id="catalog">
+        <div class="control-grid" aria-label="Measurement configuration">
+          <label>Catalog size<select data-size aria-label="Catalog size"><option value="1000">1,000 assets</option><option value="10000" selected>10,000 assets</option><option value="50000">50,000 assets</option><option value="100000">100,000 assets</option></select></label>
+          <label>Mount strategy<select data-strategy aria-label="Mount strategy"><option value="full">Full DOM render</option><option value="virtual" selected>Windowed results</option><option value="paged">Paged + windowed</option></select></label>
+          <label>Sort<select data-sort aria-label="Sort catalog"><option value="newest" selected>Newest capture</option><option value="sharpest">Sharpest first</option><option value="target">Target name</option></select></label>
+        </div>
+        <div class="button-row" style="margin-top: 12px"><button class="button primary" type="button" data-install>Install synthetic catalog</button><button class="button" type="button" data-run-scenario>Run interaction sample</button></div>
+        <p class="measurement-note" data-notice role="status">Default: 10,000 assets, windowed results. Installing replaces synthetic browser state only.</p>
+
+        <div class="catalog-toolbar" style="margin-top: 20px">
+          <label>Review status<select data-filter aria-label="Filter by review status"><option value="all">All review states</option><option value="accepted">Accepted</option><option value="marginal">Marginal</option><option value="rejected">Rejected</option></select></label>
+          <button class="button" type="button" data-clear-selection>Clear comparison</button>
+        </div>
+        <p class="catalog-status" data-catalog-status aria-live="polite"></p>
+        <div class="catalog-viewport" data-viewport aria-label="Synthetic Library assets"><div class="catalog-spacer" data-spacer><div class="catalog-results" data-results></div></div></div>
+        <div class="paging" data-paging hidden><button class="button" type="button" data-previous-page>Previous page</button><span class="fine mono" data-page-label></span><button class="button" type="button" data-next-page>Next page</button></div>
+        <p class="phone-note">Read-only phone view: catalog browsing is shown; measurement controls and asset mutations remain a desktop research activity.</p>
+      </div>
+
+      <aside class="lab-panel" aria-label="Selected asset and measurements">
+        <p class="eyebrow">Measurement</p>
+        <div class="metric-grid" data-metrics></div>
+        <p class="eyebrow" style="margin-top: 20px">Related comparison</p>
+        <p class="fine" data-comparison-hint>Select up to four assets from the same lineage group.</p>
+        <div class="comparison-list" data-comparison-list></div>
+        <p class="eyebrow">Selected evidence</p>
+        <dl class="detail-list" data-detail></dl>
+      </aside>
+    </section>
+  </main>
+  <footer class="prototype-footer">Gate 6 technical spike · <a href="../../docs/v2/current/handoff.md">Current handoff</a> · <a href="index.html">Accepted references</a></footer>
+  <script type="module" src="gate-06-catalog-scale.js"></script>
+</body>
+</html>

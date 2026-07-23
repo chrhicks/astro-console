@@ -1,16 +1,16 @@
-# Gate 5 Contract Handoff
+# Gate 7 Final-Reference Handoff
 
-Status: Gate 5 complete July 22, 2026
+Status: Gate 6 complete July 23, 2026; Gate 7 next
 
-Current work: Gate 6 — bounded technical spikes
+Current work: Gate 7 — final reference walkthrough and decision log
 
-This is the durable continuation point for product work accepted through Gate
-5. It preserves the Gate 4 Process decisions and the hardened future-server
-contracts without requiring later work to ingest the full audit history.
+This is the durable continuation point for Gate 7. It preserves accepted Gates
+1–5 and Gate 6 constraints without requiring later work to ingest the full
+history.
 
 ## Current Position
 
-Five of seven convergence gates are complete:
+Six of seven convergence gates are complete:
 
 1. Composite V2 workspace convergence.
 2. Acquire evidence workflows.
@@ -18,6 +18,8 @@ Five of seven convergence gates are complete:
 4. Process model.
 5. Contract harness — accepted vocabulary, schemas, transitions, and
    future-server proofs.
+6. Technical spikes — catalog scale, solve geometry, and reconnect/preview
+   constraints recorded.
 
 Gate 5 translated the accepted interactions into canonical entities, Effect
 Schema candidates, deterministic transitions, typed failures, UI-driving
@@ -138,16 +140,75 @@ conflict with an accepted product invariant.
 
 ## Single Next Action
 
-Run Gate 6's first bounded technical spike: measure catalog rendering at
-realistic Library scale and record the constraint and implementation decision.
-Do not begin production transport or persistence design unless the measurement
-requires a contract clarification.
+Run Gate 7's final cross-surface walkthrough, reconcile its trace evidence,
+record the decision log, and freeze the V2 reference. Do not reopen accepted
+interaction models unless the walkthrough exposes a product invariant conflict.
 
-## Gate 6 Handoff
+## Gate 7 Bootstrap
 
-Begin with the default V2 reading set, then load the Library portions of the
-product specification and contract package only as the catalog measurement
-needs them. Gate 5's 176 passing tests are a contract baseline, not a reason to
-expand its model during the spike. The outcome must be a measured rendering
-limit and a narrowly justified catalog strategy; it must not turn into general
-Library implementation or reopen accepted interaction semantics.
+### Read in this order
+
+1. [V2 Start Here](../README.md).
+2. [UX and design guidance](../ux-design-guidance.md).
+3. This handoff.
+4. [Convergence plan](convergence-plan.md).
+5. Load the authoritative artifacts below only as the walkthrough needs them;
+   do not broadly read archives.
+
+### Authoritative evidence
+
+- [Accepted prototype hub](../../../prototype/v2-ui/index.html) for the chosen
+  visual references.
+- [Gate 1 Composite](../gates/gate-01-composite.md), [Gate 2 Acquire](../gates/gate-02-acquire.md),
+  [Gate 3 Run authority](../gates/gate-03-run-authority.md), and
+  [Gate 4 Process](../gates/gate-04-process.md) for accepted interaction
+  decisions.
+- [Gate 5 baseline](gate-05-scenarios.md),
+  [action map](gate-05-action-map.md),
+  [contract vocabulary](gate-05-contract-vocabulary.md), and the
+  [executable contracts package](../../../packages/v2-contracts/README.md) for
+  scenario, ownership, and service-language reconciliation.
+- The three Gate 6 results linked below for implementation constraints.
+
+### Walkthrough and verification
+
+Walk one coherent operator story through Plan, Acquire, capture, a warning or
+recovery, Library review, Process, reconnect, and control transfer. Reconcile
+each consequential step to the Gate 5 scenario/action evidence and the
+corresponding accepted prototype state; distinguish service truth from browser
+presentation.
+
+Verify the final reference at wide desktop (1600 px), compact desktop (1000
+px), and read-only phone (390 px): no page overflow or console errors, keyboard
+paths and named controls on desktop, and no mutation controls on phone. Record
+the walkthrough trace, a decision log of accepted/deferred/rejected matters,
+and the frozen-reference location or revision.
+
+### Stop, reopen, and non-goals
+
+Stop when the walkthrough and trace reconciliation satisfy the convergence-plan
+criteria and no unresolved choice can change the first local-web foundation.
+Reopen an accepted model only when the walkthrough exposes a conflict with a
+product invariant; implementation convenience, copy polish, or visual taste is
+not enough.
+
+Gate 7 does not add production transport, persistence, hardware adapters,
+Library redesign, new workspace models, recipes, user-visible history branches,
+or phone mutation controls. It does not rerun Gate 6 benchmarks except to
+verify an actual conflict with their recorded constraints.
+
+## Gate 6 Results
+
+The completed [catalog-scale result](gate-06-catalog-scale.md) rejects full-DOM
+rendering and establishes the implementation boundary: a bounded server query
+with a virtualized viewport. Client-only paging does not solve the unbounded
+installation and sort cost. The completed
+[solve-geometry result](gate-06-solve-geometry.md) retains normalized direction
+plus numeric magnitude, records the small-offset label-clearance constraint,
+and preserves the phone summary-only projection. The completed
+[reconnect-trace result](gate-06-reconnect-trace.md) establishes snapshot-first
+replacement, cursor discipline, stale-intent suppression, preview
+supersession, and the read-only phone projection.
+
+Gate 7 should consume these three constraints as evidence, not reopen their
+accepted workspace or service-ownership decisions.

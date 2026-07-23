@@ -79,8 +79,8 @@ behavior during migration. It is not the visual template for V2.
 - Closing and reopening the browser does not alter service activity.
 - Two local browsers observe the same state.
 - Only the control lease holder may mutate observing state.
-- The current catalog is queried through a bounded, virtualized, or paginated
-  surface.
+- The current catalog is queried through a bounded server query/pagination
+  boundary and rendered through a virtualized viewport.
 
 ## 4. Phase 2: Plan And Managed Runs
 

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Gate 6 deterministic streamed-state and Process-preview reconnect harness.">
+  <title>Gate 6 · Reconnect trace lab · Astro Console</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .reconnect-lab .trace-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,.45fr); gap:16px; align-items:start; }
+    .reconnect-lab .trace-panel { min-width:0; padding:16px; border:1px solid var(--line); border-radius:10px; background:var(--surface); }
+    .reconnect-lab .trace-controls { display:flex; flex-wrap:wrap; gap:10px; align-items:end; margin-bottom:14px; }.reconnect-lab .trace-controls label { display:grid; gap:5px; min-width:min(100%,280px); color:var(--muted); font-size:12px; }.reconnect-lab select { min-height:38px; padding:8px 10px; border:1px solid var(--line-strong); border-radius:7px; color:var(--text); background:#0b1116; }
+    .reconnect-lab .process-surface { overflow:hidden; border:1px solid var(--line); border-radius:9px; background:#080d11; }.reconnect-lab .process-status { display:flex; flex-wrap:wrap; justify-content:space-between; gap:9px; padding:11px 13px; border-bottom:1px solid var(--line); background:#10171d; }.reconnect-lab .process-status strong { display:block; }.reconnect-lab .process-status small { color:var(--muted); }.reconnect-lab .connection-current { color:var(--green); }.reconnect-lab .connection-reconnecting { color:var(--amber); }.reconnect-lab .process-body { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(230px,.6fr); min-height:430px; }.reconnect-lab .process-image { position:relative; display:grid; min-height:430px; place-items:center; overflow:hidden; background:radial-gradient(ellipse at 50% 48%, rgba(88,185,195,.22), transparent 15%), radial-gradient(ellipse at 58% 52%, rgba(196,85,150,.16), transparent 24%), #030507; }.reconnect-lab .process-image::before { content:""; position:absolute; inset:0; opacity:.7; background-image:radial-gradient(circle at 8% 17%, #fff 0 1px, transparent 1.7px), radial-gradient(circle at 29% 31%, #fff 0 1.4px, transparent 2px), radial-gradient(circle at 57% 18%, #fff 0 1px, transparent 1.7px), radial-gradient(circle at 88% 25%, #fff 0 1px, transparent 1.7px); background-size:173px 149px; }.reconnect-lab .image-label { position:relative; z-index:1; padding:10px 12px; border:1px solid rgba(103,213,223,.3); border-radius:7px; background:rgba(3,7,10,.76); }.reconnect-lab .image-label strong, .reconnect-lab .image-label small { display:block; }.reconnect-lab .image-label small { margin-top:3px; color:var(--muted); font:10px var(--mono); }
+    .reconnect-lab .process-summary { display:grid; align-content:start; gap:10px; padding:14px; border-left:1px solid var(--line); background:#0b1116; }.reconnect-lab .summary-card { padding:11px; border:1px solid var(--line); border-radius:8px; background:var(--surface-soft); }.reconnect-lab .summary-card small, .reconnect-lab .summary-card strong { display:block; }.reconnect-lab .summary-card small { color:var(--faint); font-size:10px; letter-spacing:.07em; text-transform:uppercase; }.reconnect-lab .summary-card strong { margin-top:4px; font:600 12px var(--mono); overflow-wrap:anywhere; }
+    .reconnect-lab .trace-results { display:grid; gap:7px; margin:0; padding:0; list-style:none; }.reconnect-lab .trace-results li { display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px; padding:10px; border:1px solid var(--line); border-radius:7px; background:var(--surface-soft); }.reconnect-lab .trace-results li.pass { border-left:3px solid var(--green); }.reconnect-lab .trace-results li.fail { border-left:3px solid var(--red); }.reconnect-lab .trace-results small { display:block; margin-top:3px; color:var(--muted); font-size:11px; }.reconnect-lab .trace-log { max-height:300px; margin:12px 0 0; padding:11px; overflow:auto; border:1px solid var(--line); border-radius:8px; color:#c4d2d9; background:#080c10; font:11px/1.55 var(--mono); white-space:pre-wrap; }
+    .reconnect-lab .phone-trace { display:none; }.reconnect-lab .method-note { margin:14px 0 0; color:var(--muted); font-size:12px; }
+    @media (max-width:780px) { .reconnect-lab .trace-layout { grid-template-columns:1fr; }.reconnect-lab .trace-controls, .reconnect-lab .trace-layout > aside, .reconnect-lab .process-surface { display:none; }.reconnect-lab .phone-trace { display:block; }.reconnect-lab .phone-trace section { padding:14px; border:1px solid var(--line); border-radius:8px; background:var(--surface); }.reconnect-lab .phone-trace h2 { margin-bottom:5px; font-size:24px; } }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#trace">Skip to reconnect trace</a>
+  <div class="prototype-flag"><strong>Gate 6 research harness</strong><span>Deterministic browser state · not production transport</span></div>
+  <header class="site-header"><a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true">✦</span><span>Observatory V2<small>Reconnect trace lab</small></span></a><nav class="top-nav" aria-label="Reference navigation"><a href="index.html">References</a><a href="process-prototype.html">Process reference</a></nav><div class="header-meta"><span class="pill warning">Measurement only</span></div></header>
+  <main class="page reconnect-lab" id="main">
+    <section class="lab-header"><div><p class="eyebrow">Process technical spike</p><h1>Reconnect to the service truth; never reconstruct or replay.</h1><p class="lede">Each trace replaces or advances a synthetic authoritative snapshot, then checks the semantic Process projection separately from protocol diagnostics.</p></div><aside class="hero-note"><p class="eyebrow">Boundary</p><p>No WebSocket, timer, network, persistence, or worker is present. This is a deterministic research state machine only.</p></aside></section>
+    <section class="trace-layout" id="trace">
+      <div class="trace-panel">
+        <div class="trace-controls"><label for="trace-select">Trace<select id="trace-select" data-trace-select aria-label="Reconnect trace"></select></label><button class="button primary" type="button" data-run-trace>Run trace</button><button class="button" type="button" data-run-all>Run all traces</button></div>
+        <section class="process-surface" data-process-surface aria-label="Semantic Process projection"></section>
+        <section class="phone-trace" data-phone-trace aria-label="Read-only Process reconnect monitor"></section>
+        <p class="method-note" data-trace-status role="status"></p>
+      </div>
+      <aside class="trace-panel" aria-label="Trace diagnostics"><p class="eyebrow">Trace diagnostics</p><ul class="trace-results" data-trace-results></ul><pre class="trace-log" data-trace-log></pre></aside>
+    </section>
+  </main>
+  <footer class="prototype-footer">Gate 6 technical spike · <a href="../../docs/v2/gates/gate-03-run-authority.md">Accepted run authority</a> · <a href="../../docs/v2/gates/gate-04-process.md">Accepted Process model</a></footer>
+  <script type="module" src="gate-06-reconnect-trace.js"></script>
+</body>
+</html>

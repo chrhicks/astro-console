@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Gate 6 synthetic solve geometry and image-overlay measurement harness.">
+  <title>Gate 6 · Solve geometry lab · Astro Console</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .geometry-lab { --lab-line: #2b3944; }
+    .geometry-lab .geometry-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(290px,.4fr); gap:16px; align-items:start; }
+    .geometry-lab .geometry-panel { min-width:0; padding:16px; border:1px solid var(--line); border-radius:10px; background:var(--surface); }
+    .geometry-lab .geometry-controls { display:flex; flex-wrap:wrap; gap:10px; align-items:end; margin-bottom:14px; }
+    .geometry-lab .geometry-controls label { display:grid; gap:5px; min-width:min(100%,250px); color:var(--muted); font-size:12px; }
+    .geometry-lab .geometry-controls select { min-height:38px; padding:8px 10px; border:1px solid var(--line-strong); border-radius:7px; color:var(--text); background:#0b1116; }
+    .geometry-lab .geometry-canvas { overflow:hidden; border:1px solid var(--line); border-radius:9px; background:#05080a; }
+    .geometry-lab .geometry-canvas svg { display:block; width:100%; height:auto; aspect-ratio:8 / 5; min-height:320px; background:radial-gradient(circle at center, rgba(103,213,223,.06), transparent 46%); }
+    .geometry-lab .geometry-canvas .star { fill:#dfeef3; opacity:.72; }.geometry-lab .geometry-canvas .nebula { fill:rgba(103,213,223,.07); stroke:rgba(103,213,223,.13); stroke-width:2; }
+    .geometry-lab .geometry-canvas .desired circle, .geometry-lab .geometry-canvas .desired path { fill:none; stroke:var(--cyan); stroke-width:2; vector-effect:non-scaling-stroke; }
+    .geometry-lab .geometry-canvas .measured circle, .geometry-lab .geometry-canvas .measured path { fill:none; stroke:var(--amber); stroke-width:2; vector-effect:non-scaling-stroke; }
+    .geometry-lab .geometry-canvas .uncertainty { stroke-dasharray:4 5; opacity:.62; }.geometry-lab .geometry-canvas .vector { stroke:var(--amber); stroke-width:2.5; vector-effect:non-scaling-stroke; }
+    .geometry-lab .geometry-canvas text { fill:var(--text); font:11px var(--mono); text-anchor:middle; paint-order:stroke; stroke:#05080a; stroke-width:5px; stroke-linejoin:round; }
+    .geometry-lab .geometry-canvas .vector-label { fill:var(--amber); }.geometry-lab .geometry-canvas .failure { fill:var(--red); font-weight:700; font-size:18px; }.geometry-lab .geometry-canvas .failure-note { fill:var(--muted); font-size:11px; }
+    .geometry-lab .geometry-legend { display:flex; flex-wrap:wrap; gap:12px; padding:9px 11px; border-top:1px solid var(--line); color:var(--muted); background:#0b1014; font-size:10px; }
+    .geometry-lab .geometry-legend span { display:flex; align-items:center; gap:5px; }.geometry-lab .geometry-legend i { width:16px; height:2px; background:var(--amber); }.geometry-lab .geometry-legend i.desired { background:var(--cyan); }.geometry-lab .geometry-legend i.solved { border-top:2px dashed var(--amber); background:transparent; }
+    .geometry-lab .fact-grid, .geometry-lab .measurement-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px; }
+    .geometry-lab .fact, .geometry-lab .measurement { min-width:0; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--surface-soft); }
+    .geometry-lab .fact small, .geometry-lab .fact strong, .geometry-lab .measurement small, .geometry-lab .measurement strong { display:block; }.geometry-lab .fact small, .geometry-lab .measurement small { color:var(--faint); font-size:10px; letter-spacing:.07em; text-transform:uppercase; }.geometry-lab .fact strong, .geometry-lab .measurement strong { margin-top:4px; overflow-wrap:anywhere; font:600 12px var(--mono); }
+    .geometry-lab .measurement.pass strong { color:var(--green); }.geometry-lab .measurement.fail strong { color:var(--red); }.geometry-lab .measurement.na strong { color:var(--muted); }
+    .geometry-lab .physical-guidance { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px; }.geometry-lab .physical-guidance article { padding:12px; border:1px solid rgba(243,187,98,.42); border-radius:8px; background:#17140f; }.geometry-lab .physical-guidance small, .geometry-lab .physical-guidance strong { display:block; }.geometry-lab .physical-guidance small { color:var(--muted); font-size:10px; letter-spacing:.09em; text-transform:uppercase; }.geometry-lab .physical-guidance strong { margin-top:4px; color:#ffe0a8; font:700 18px var(--mono); }
+    .geometry-lab .method-note { margin:14px 0 0; color:var(--muted); font-size:12px; }.geometry-lab .phone-projection { display:none; }
+    @media (max-width:780px) { .geometry-lab .geometry-layout { grid-template-columns:1fr; }.geometry-lab .geometry-controls, .geometry-lab .geometry-desktop, .geometry-lab .geometry-layout > aside { display:none; }.geometry-lab .phone-projection { display:block; }.geometry-lab .phone-projection > section { margin-top:12px; padding:14px; border:1px solid var(--line); border-radius:8px; background:var(--surface); }.geometry-lab .phone-projection h2 { margin-bottom:5px; font-size:24px; }.geometry-lab .physical-guidance { grid-template-columns:1fr; }.geometry-lab .fact-grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#geometry">Skip to geometry measurement</a>
+  <div class="prototype-flag"><strong>Gate 6 research harness</strong><span>Synthetic geometry · not an Acquire redesign or solver</span></div>
+  <header class="site-header"><a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true">✦</span><span>Observatory V2<small>Solve geometry lab</small></span></a><nav class="top-nav" aria-label="Reference navigation"><a href="index.html">References</a><a href="acquire-prototype.html">Acquire reference</a></nav><div class="header-meta"><span class="pill warning">Measurement only</span></div></header>
+  <main class="page geometry-lab" id="main">
+    <section class="lab-header"><div><p class="eyebrow">Acquire technical spike</p><h1>Measure overlay fidelity separately from physical magnitude.</h1><p class="lede">The viewBox geometry validates anchors, vector direction, uncertainty, labels, and legend semantics. Numeric RA/Dec or Alt/Az facts carry magnitude because accepted overlays deliberately normalize vector length.</p></div><aside class="hero-note"><p class="eyebrow">Boundary</p><p>No solver, image bytes, mount, or network is involved. The lab checks synthetic DOM/SVG geometry only.</p></aside></section>
+    <section class="geometry-layout" id="geometry">
+      <div class="geometry-panel">
+        <div class="geometry-controls"><label for="fixture">Synthetic fixture<select id="fixture" data-fixture aria-label="Synthetic solve fixture"></select></label><button class="button" type="button" data-rerun>Re-run geometry checks</button></div>
+        <section class="geometry-desktop" aria-label="Desktop and compact solve overlay"><div class="geometry-canvas" data-canvas></div><div class="fact-grid" data-facts></div><div class="physical-guidance" data-guidance hidden></div></section>
+        <section class="phone-projection" aria-label="Read-only phone projection" data-phone></section>
+        <p class="method-note" data-status role="status"></p>
+      </div>
+      <aside class="geometry-panel" aria-label="Automated geometry checks"><p class="eyebrow">Automated checks</p><div class="measurement-grid" data-measurements></div><p class="method-note">Anchor residual uses SVG coordinates transformed by <code>getScreenCTM()</code>. Collision checks use live screen rectangles. A passing direction check proves the arrow is measured → desired; it does not validate a real solve.</p></aside>
+    </section>
+  </main>
+  <footer class="prototype-footer">Gate 6 technical spike · <a href="../../docs/v2/gates/gate-02-acquire.md">Accepted Acquire evidence</a> · <a href="index.html">Reference hub</a></footer>
+  <script type="module" src="gate-06-solve-geometry.js"></script>
+</body>
+</html>

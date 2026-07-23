@@ -1,6 +1,6 @@
 # V2 Convergence Plan
 
-Status: **current — Gate 5 complete; Gate 6 next**
+Status: **current — Gate 6 complete; Gate 7 next**
 
 Prototype discovery ends in one validated interaction specification and one
 backend-facing domain and contract model. It is not an indefinitely growing
@@ -15,8 +15,8 @@ gallery of studies.
 | 3. Run authority | Complete | Proportional mutation, snapshot-first reconnect, stale rejection, presence, exclusive control, and takeover |
 | 4. Process | Complete | Build/Develop editor, one current history, visual comparison, tool choice, assistance, stage-local recovery, and Library saving |
 | 5. Contract harness | Complete | Vocabulary, schemas, transitions, projections, and deterministic future-server proofs with explicit integration boundaries |
-| 6. Technical spikes | Pending | Catalog scale, image overlay/solve geometry, and streamed state/preview reconnect measurements |
-| 7. Final reference | Pending | Cross-surface walkthrough, trace reconciliation, decision log, and frozen V2 reference |
+| 6. Technical spikes | Complete | Catalog scale, image overlay/solve geometry, and streamed state/preview reconnect constraints recorded |
+| 7. Final reference | Next | Cross-surface walkthrough, trace reconciliation, decision log, and frozen V2 reference |
 
 The interactive [convergence roadmap](../../../prototype/v2-ui/convergence-roadmap.html)
 is the visual projection of this plan.
@@ -35,16 +35,16 @@ must map to:
 - snapshot and event projections sufficient to drive desktop and read-only
   phone views.
 
-## Remaining Technical Spikes
+## Completed Technical Spikes
 
-Only three bounded spikes remain:
+Three bounded spikes are complete:
 
 1. Catalog scale and bounded rendering.
 2. Image overlays and solve geometry.
 3. Streamed state and preview reconnect behavior.
 
-Each spike ends with a measurement and a decision. It must not grow into a
-parallel framework or reopen accepted interaction models.
+Each recorded a measurement and decision without growing into a parallel
+framework or reopening accepted interaction models.
 
 ## Stop Criteria
 
