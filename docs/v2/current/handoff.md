@@ -145,10 +145,14 @@ conflict with an accepted product invariant.
 
 ## Single Next Action
 
-Gate 7 is complete. Begin implementation from the accepted product, contract,
-and prototype references. Reopen an accepted interaction model only for a
-recorded product-invariant conflict—not implementation convenience, copy
-polish, or visual taste.
+Begin Phase 0.5: finalize the official V2 style and design guide from the
+accepted product, contract, and prototype references. Reopen an accepted
+interaction model only for a recorded product-invariant conflict—not
+implementation convenience, copy polish, or visual taste. Begin Phase 1 only
+after the user accepts that design authority.
+
+The [Phase 0.5 design-system brief](phase-0.5-design-system-brief.md) is the
+current method and deliverable boundary for that work.
 
 ## Gate 7 Bootstrap
 

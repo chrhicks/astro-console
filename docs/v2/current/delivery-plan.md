@@ -16,15 +16,21 @@ The first implementation slices should establish:
    decisions;
 2. canonical product entities and ownership;
 3. a durable observatory service;
-4. a freely switchable workspace shell;
-5. one honest end-to-end observing path;
-6. evidence-driven review and processing;
-7. remote sharing only after the local service model is proven.
+4. an official visual and interaction-design authority derived from the frozen
+   reference;
+5. a freely switchable workspace shell;
+6. one honest end-to-end observing path;
+7. evidence-driven review and processing;
+8. remote sharing only after the local service model is proven.
 
 The current application remains a source of validated hardware and workflow
 behavior during migration. It is not the visual template for V2.
 
-## 2. Phase 0: Product, Prototype, And Contract Definition
+## 2. Phase 0: Product, Prototype, And Contract Definition — Complete
+
+Gates 1–7 completed this phase. The accepted product, contract, technical
+constraints, walkthrough, and frozen references are the input to Phase 0.5;
+they are not reopened for implementation convenience or visual polish.
 
 ### Outcomes
 
@@ -61,7 +67,42 @@ behavior during migration. It is not the visual template for V2.
 - The V2 shell can be evaluated without inheriting the current three-column
   layout.
 
-## 3. Phase 1: Local Web Foundation
+## 3. Phase 0.5: Design-System Finalization
+
+Follow the [Phase 0.5 design-system brief](phase-0.5-design-system-brief.md)
+for its bounded review method, official-guide deliverable, and acceptance
+criteria.
+
+### Outcomes
+
+- Run one final design review of the accepted prototype references and their
+  healthy, warning, recovery, reconnect, and read-only-phone states.
+- Publish a concise official V2 style and design guide that complements—not
+  duplicates—the product/UX guidance and contract documents.
+- Establish the implementation visual language: typography, spacing, layout
+  hierarchy, semantic color and status treatment, controls, surfaces, focus,
+  motion, and data-density rules.
+- Define responsive composition for wide desktop, compact desktop, and the
+  deliberately read-only phone projection.
+- Capture component and state patterns from real V2 objects—active run,
+  evidence, decision, warning, processing canvas, context rail, and Library
+  item—rather than inventing a generic component catalog.
+- Define an implementation drift check: a feature is reviewed against the
+  frozen references, the style guide, semantic state, and real domain evidence.
+
+### Exit Criteria
+
+- The official guide names the visual and interaction rules an implementation
+  team needs without treating a screenshot as the API.
+- Each reusable pattern has a product role, state variants, accessibility
+  behavior, and responsive treatment.
+- Semantic states remain legible without color and controls retain visible
+  focus and named keyboard paths.
+- The guide makes it easy to identify generic or unrelated-product UI drift.
+- The user accepts the guide as the visual implementation authority; later
+  Phase 1 work may extend it only when a real product need exposes a gap.
+
+## 4. Phase 1: Local Web Foundation
 
 ### Outcomes
 
@@ -82,7 +123,7 @@ behavior during migration. It is not the visual template for V2.
 - The current catalog is queried through a bounded server query/pagination
   boundary and rendered through a virtualized viewport.
 
-## 4. Phase 2: Plan And Managed Runs
+## 5. Phase 2: Plan And Managed Runs
 
 ### Outcomes
 
@@ -102,7 +143,7 @@ behavior during migration. It is not the visual template for V2.
 - Disruptive edits require explicit consequence-aware approval.
 - Refreshing or changing workspaces does not affect execution.
 
-## 5. Phase 3: Observe, Acquire, And Capture
+## 6. Phase 3: Observe, Acquire, And Capture
 
 ### Outcomes
 
@@ -124,7 +165,7 @@ behavior during migration. It is not the visual template for V2.
 - A recovery path cannot be hidden by workspace navigation or responsive
   layout.
 
-## 6. Phase 4: Library And Frame Review
+## 7. Phase 4: Library And Frame Review
 
 ### Outcomes
 
@@ -142,7 +183,7 @@ behavior during migration. It is not the visual template for V2.
 - Review decisions are durable and do not mutate original evidence.
 - Library remains usable with a large number of assets.
 
-## 7. Phase 5: Process Workspace
+## 8. Phase 5: Process Workspace
 
 ### Outcomes
 
@@ -177,7 +218,7 @@ behavior during migration. It is not the visual template for V2.
   discarding unsaved work cannot remove source frames or saved artifacts.
 - Processing failure cannot affect active rig control.
 
-## 8. Phase 6: Remote Viewing And Shared Control
+## 9. Phase 6: Remote Viewing And Shared Control
 
 ### Outcomes
 
@@ -197,7 +238,7 @@ behavior during migration. It is not the visual template for V2.
 - Losing the public connection does not interrupt local work.
 - No user password is stored by Astro Console.
 
-## 9. Existing P50 Backlog Mapping
+## 10. Existing P50 Backlog Mapping
 
 | Existing task | V2 destination |
 | --- | --- |
@@ -212,7 +253,7 @@ behavior during migration. It is not the visual template for V2.
 These tasks remain valuable product requirements. V2 changes where they belong
 and prevents them from becoming additional panels in the current shell.
 
-## 10. Deferred Decisions
+## 11. Deferred Decisions
 
 The following choices should remain open until their surrounding product model
 is sufficiently concrete:
@@ -233,7 +274,7 @@ fit a personal observatory service spanning planning, observing, review,
 processing, remote access, and future agent assistance rather than implying a
 single desktop console.
 
-## 11. Explicitly Deferred Scope
+## 12. Explicitly Deferred Scope
 
 - Enterprise multi-tenancy or organization administration.
 - Broad commercial driver certification.
@@ -244,7 +285,7 @@ single desktop console.
 - Solar automation without dedicated safety interlocks.
 - Arbitrary remote shell, process, or filesystem access.
 
-## 12. Planning Artifacts Before Implementation
+## 13. Planning Artifacts Before Implementation
 
 Before V2 implementation begins, create and review:
 
@@ -261,6 +302,10 @@ Before V2 implementation begins, create and review:
 - the local and remote deployment diagrams;
 - a migration inventory classifying current modules as preserve, replace, or
   re-evaluate.
+
+The Gate 7 walkthrough and decision log now satisfies the prototype decision
+log requirement. Phase 0.5 adds the official V2 style and design guide before
+Phase 1 begins.
 
 Implementation should begin only after those artifacts tell one consistent
 story. The goal is to avoid rediscovering the overall UX one feature panel at a

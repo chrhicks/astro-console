@@ -28,6 +28,7 @@ requires its specific detail.
 | Accepted canonical Gate 5 contract language | [Gate 5 contract vocabulary](current/gate-05-contract-vocabulary.md) |
 | Executable Effect Schema candidates and fixtures | [V2 contracts package](../../packages/v2-contracts/README.md) |
 | Implementation phases and backlog mapping | [Current delivery plan](current/delivery-plan.md) |
+| Phase 0.5 official style/design guide work | [Phase 0.5 design-system brief](current/phase-0.5-design-system-brief.md) |
 | Accepted interaction evidence or candidate contracts | The relevant document under [accepted gates](gates/README.md) |
 | Deployment, Cloudflare, storage, security, or operations | [Infrastructure plan](infra/README.md), then only its relevant section |
 | Visual interaction evidence | [Accepted prototype references](../../prototype/v2-ui/index.html) |
