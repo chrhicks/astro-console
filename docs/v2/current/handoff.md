@@ -24,6 +24,13 @@ preflight. These are packaged prerequisites only: no image has been built on
 the target host, no secret has been supplied, and no database restore, tunnel,
 or rig validation has been activated.
 
+Cloudflare inventory on 2026-07-24 found active `chicks.dev` DNS but no
+Cloudflare Tunnel and no Access application. The account has only Cloudflare's
+default identity provider; neither the accepted Google nor email one-time-PIN
+provider is configured. Activation must first establish those providers and a
+named-identity, deny-by-default Access policy for `observatory.chicks.dev`,
+then create the tunnel route and verify the origin's Access JWT admission.
+
 The Arch-host preflight has now confirmed explicit live Alpaca endpoints for
 both rigs: ASI Mount plus Sony Mirrorless Camera at `192.168.4.104:11111`, and
 the Seestar S30 Camera/Focuser/FilterWheel/Telescope/Switch bridge at
