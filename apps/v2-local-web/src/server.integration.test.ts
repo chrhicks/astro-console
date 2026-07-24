@@ -39,6 +39,40 @@ test("accepted pause dispatches StopStack once through an injected worker", asyn
   await listener.close(); service.close()
 })
 
+test("SQLite worker claims prevent duplicate dispatch and retryable failures recover after restart", async (t) => {
+  const databasePath = join(mkdtempSync(join(tmpdir(), "astro-worker-")), "state.sqlite")
+  const service = createLocalWebService(databasePath); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => { await listener.close(); service.close() })
+  await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "claim-start" }) })
+  await fetch(`${base}/api/commands/pause-run`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, expectedRunRevision: 1, idempotencyKey: "claim-pause" }) })
+  let calls = 0
+  const adapter = { stopStack: async () => { calls += 1; await new Promise((done) => setTimeout(done, 15)); return true } }
+  assert.deepEqual(await Promise.all([service.dispatchPauseOutbox(adapter, "worker-a"), service.dispatchPauseOutbox(adapter, "worker-b")]), ["dispatched", "none"])
+  assert.equal(calls, 1)
+  const acknowledged = service.database.prepare("SELECT state,claimed_by,ack_at,attempts FROM outbox WHERE kind='StopStack'").get() as { state: string; claimed_by: string | null; ack_at: string | null; attempts: number }
+  assert.equal(acknowledged.state, "dispatched"); assert.equal(acknowledged.claimed_by, null); assert.notEqual(acknowledged.ack_at, null); assert.equal(acknowledged.attempts, 1)
+  service.database.prepare("UPDATE state SET value=? WHERE key='run'").run("null")
+  await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "stale-start" }) })
+  await fetch(`${base}/api/commands/pause-run`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, expectedRunRevision: 1, idempotencyKey: "stale-pause" }) })
+  let release!: () => void
+  const stale = service.dispatchPauseOutbox({ stopStack: async () => new Promise<boolean>((done) => { release = () => done(true) }) }, "stale-worker")
+  await new Promise((done) => setTimeout(done, 0))
+  service.database.prepare("UPDATE outbox SET claim_token='replacement-token' WHERE kind='StopStack' AND state='claimed'").run()
+  release()
+  assert.equal(await stale, "superseded")
+  service.database.prepare("UPDATE outbox SET state='dispatched',claim_token=NULL,claimed_by=NULL,claim_until=NULL WHERE kind='StopStack' AND claim_token='replacement-token'").run()
+  service.database.prepare("UPDATE state SET value=? WHERE key='run'").run("null")
+  await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "retry-start" }) })
+  await fetch(`${base}/api/commands/pause-run`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, expectedRunRevision: 1, idempotencyKey: "retry-pause" }) })
+  assert.equal(await service.dispatchPauseOutbox({ stopStack: async () => false }), "failed")
+  service.close()
+  const recovered = createLocalWebService(databasePath)
+  t.after(() => recovered.close())
+  assert.equal(await recovered.dispatchPauseOutbox({ stopStack: async () => true }, "recovered-worker"), "dispatched")
+  const retried = recovered.database.prepare("SELECT state,attempts,last_error FROM outbox WHERE kind='StopStack' ORDER BY rowid DESC LIMIT 1").get() as { state: string; attempts: number; last_error: string | null }
+  assert.equal(retried.state, "dispatched"); assert.equal(retried.attempts, 2); assert.equal(retried.last_error, null)
+})
+
 test("current controller resumes only the paused revision and replays idempotently", async (t) => {
   const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => { await listener.close(); service.close() })
@@ -67,10 +101,10 @@ test("resume preserves accepted capture when start-stack dispatch is unavailable
     return fetch(`${base}/api/commands/resume-run`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, expectedRunRevision: 2, idempotencyKey: `${key}-resume` }) })
   }
   await resume("resume-unavailable")
-  assert.equal(await service.dispatchResumeOutbox(undefined), "unavailable")
+  assert.equal(await service.dispatchResumeOutbox(undefined), "failed")
   let snapshot = await fetch(`${base}/api/snapshot`).then((response) => response.json())
   assert.equal(snapshot.run.phase, "capture")
-  assert.equal(snapshot.dispatch, "unavailable")
+  assert.equal(snapshot.dispatch, "failed")
   assert.equal(snapshot.dispatchAction, "resume")
   service.database.prepare("UPDATE state SET value=? WHERE key='run'").run("null")
   service.database.prepare("UPDATE state SET value=? WHERE key='snapshotVersion'").run("4")
@@ -80,7 +114,7 @@ test("resume preserves accepted capture when start-stack dispatch is unavailable
   assert.equal(snapshot.run.phase, "capture")
   assert.equal(snapshot.dispatch, "failed")
   assert.equal(snapshot.dispatchAction, "resume")
-  assert.equal(await service.dispatchResumeOutbox({ startStack: async () => true }), "none")
+  assert.equal(await service.dispatchResumeOutbox({ startStack: async () => true }), "dispatched")
 })
 
 test("current controller terminally stops an active run exactly once and preserves dispatch truth", async (t) => {
@@ -104,7 +138,7 @@ test("current controller terminally stops an active run exactly once and preserv
   assert.match(html, /Latest solve evidence is preserved\. This run is terminally stopped; no automatic correction or capture will continue\./)
   assert.match(html, /s\.run\?\.phase==='paused'/)
   assert.equal(html.includes("text(q('#correction-protection'),s.evidence.correction.protection)"), false)
-  assert.equal(await service.dispatchStopOutbox({ stopStack: async () => true }), "none")
+  assert.equal(await service.dispatchStopOutbox({ stopStack: async () => true }), "dispatched")
 })
 
 test("startup backfills shared-control state for a legacy local database without changing accepted work", async (t) => {

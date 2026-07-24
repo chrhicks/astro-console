@@ -72,6 +72,13 @@ or failed dispatch leaves accepted state intact and exposes a clear Observe
 trace. The next slice should establish the real rig lifecycle/worker
 coordination rather than adding browser-side recovery.
 
+That lifecycle coordination is now proven locally: a SQLite claim/lease guards
+each pause, resume, or terminal-stop dispatch, acknowledgements require the
+same claim token, and failed or expired claims are retryable after service
+restart. It proves one live claim, not physical exactly-once across an expired
+lease; provider calls are at-least-once until the production provider offers
+an idempotency contract. A scheduled worker process is also not yet installed.
+
 ## Historical Planning
 
 The completed multi-phase roadmap and Phase 0.5 closeout rationale are in

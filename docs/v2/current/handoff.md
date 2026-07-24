@@ -62,6 +62,13 @@ unavailable, or failed without undoing accepted service truth. Observe states
 the irreversible Stop consequence before action and never offers Resume after
 the run is terminal.
 
+The local worker coordination slice persists each outbox claim token, worker
+identity, lease expiry, attempt count, acknowledgement, and retryable failure
+in SQLite. It guarantees one live claim and token-matched durable
+acknowledgement; expired or failed work recovers after restart. Provider calls
+remain outside acceptance transactions, so physical delivery is at-least-once
+across lease expiry until a provider-native idempotency contract exists.
+
 ## Read First
 
 1. [V2 Start Here](../README.md).
