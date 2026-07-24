@@ -79,6 +79,14 @@ restart. It proves one live claim, not physical exactly-once across an expired
 lease; provider calls are at-least-once until the production provider offers
 an idempotency contract. A scheduled worker process is also not yet installed.
 
+The admission evidence now gates every local-web request behind a
+server-resolved identity. A concrete Cloudflare Access assertion adapter
+verifies RS256 signature, issuer, audience, and expiry before looking up the
+subject in SQLite owner/viewer membership; desktop and phone capability follow
+from that trusted mapping. It is an origin boundary, not tunnel deployment:
+JWKS/key rotation, revocation, Cloudflare configuration, and production LAN
+binding remain separate operations work.
+
 ## Historical Planning
 
 The completed multi-phase roadmap and Phase 0.5 closeout rationale are in

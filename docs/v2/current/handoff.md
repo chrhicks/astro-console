@@ -69,6 +69,18 @@ acknowledgement; expired or failed work recovers after restart. Provider calls
 remain outside acceptance transactions, so physical delivery is at-least-once
 across lease expiry until a provider-native idempotency contract exists.
 
+The admission slice now requires every local-web snapshot, stream, query, and
+command to receive a server-resolved identity. Its Cloudflare Access adapter
+verifies an RS256 assertion's signature, issuer, audience, and expiry, then
+maps only a verified subject to durable SQLite owner/viewer membership. Desktop
+owner and phone/viewer capability derive from that mapping; request bodies and
+headers cannot choose a role. The explicit local-fixture admission remains for
+development only. Cloudflare Tunnel deployment, Access key rotation/JWKS
+discovery, revocation, and production LAN binding remain later operations work.
+The local proof derives one client identity per verified subject; production
+device/session identity must precede treating a person's multiple browsers as
+distinct presence clients.
+
 ## Read First
 
 1. [V2 Start Here](../README.md).

@@ -4,9 +4,10 @@ import { mkdtempSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { DatabaseSync } from "node:sqlite"
+import { generateKeyPairSync, sign } from "node:crypto"
 import * as Schema from "effect/Schema"
 import { AcquireSnapshot, RunSnapshot } from "../../../packages/v2-contracts/src/snapshots.ts"
-import { createLocalWebService } from "./server.ts"
+import { createCloudflareAccessAdmission, createLocalWebService } from "./server.ts"
 
 test("SQLite acceptance atomically persists run, event, receipt, and outbox", async (t) => {
   const service = createLocalWebService(join(mkdtempSync(join(tmpdir(), "astro-local-")), "state.sqlite"))
@@ -24,6 +25,45 @@ test("SQLite acceptance atomically persists run, event, receipt, and outbox", as
   const replay = await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify(command) })
   assert.equal(replay.status, 200)
   await listener.close(); service.close()
+})
+
+test("request-context admission rejects before snapshot, stream, query, or mutation routing", async (t) => {
+  const service = createLocalWebService(":memory:", (request) => request?.headers.authorization === "Bearer verified-owner" ? { personId: "owner-chicks", clientId: "desktop-owner", capability: "controlCapable" } : undefined)
+  const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => { await listener.close(); service.close() })
+  for (const path of ["/api/snapshot", "/api/events", "/api/library"]) assert.equal((await fetch(`${base}${path}`)).status, 401)
+  assert.equal((await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ personId: "owner-chicks", capability: "controlCapable" }) })).status, 401)
+  const admitted = await fetch(`${base}/api/snapshot`, { headers: { authorization: "Bearer verified-owner", "x-client-capability": "readOnly" } }).then((response) => response.json())
+  assert.equal(admitted.identity.capability, "controlCapable")
+})
+
+test("verified Access assertions map durable memberships without trusting request authority", async (t) => {
+  const databasePath = join(mkdtempSync(join(tmpdir(), "astro-access-")), "state.sqlite")
+  const seeded = createLocalWebService(databasePath)
+  seeded.database.prepare("INSERT INTO memberships VALUES (?,?,?)").run("access-owner", "owner-chicks", "owner")
+  seeded.database.prepare("INSERT INTO memberships VALUES (?,?,?)").run("access-viewer", "maya", "viewer")
+  seeded.close()
+  const keys = generateKeyPairSync("rsa", { modulusLength: 2048 })
+  const issuer = "https://chicks.cloudflareaccess.com"
+  const audience = "access-audience"
+  const claim = (subject: string, overrides: Record<string, unknown> = {}) => {
+    const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url")
+    const payload = Buffer.from(JSON.stringify({ sub: subject, iss: issuer, aud: audience, exp: Math.floor(Date.now() / 1_000) + 60, ...overrides })).toString("base64url")
+    return `${header}.${payload}.${sign("RSA-SHA256", Buffer.from(`${header}.${payload}`), keys.privateKey).toString("base64url")}`
+  }
+  const admission = createCloudflareAccessAdmission({ issuer, audience, publicKeyPem: keys.publicKey.export({ type: "pkcs1", format: "pem" }).toString(), databasePath, clientContext: "desktop" })
+  const service = createLocalWebService(databasePath, admission)
+  const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => { await listener.close(); service.close() })
+  const authorized = (token: string) => ({ "cf-access-jwt-assertion": token, "x-client-capability": "controlCapable" })
+  const owner = await fetch(`${base}/api/snapshot`, { headers: authorized(claim("access-owner")) }).then((response) => response.json())
+  assert.equal(owner.identity.personId, "owner-chicks")
+  assert.equal(owner.identity.capability, "controlCapable")
+  const viewer = await fetch(`${base}/api/snapshot`, { headers: authorized(claim("access-viewer")) }).then((response) => response.json())
+  assert.equal(viewer.identity.capability, "readOnly")
+  assert.equal((await fetch(`${base}/api/commands/start-run`, { method: "POST", headers: authorized(claim("access-viewer")), body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "viewer-start" }) })).status, 403)
+  assert.equal((await fetch(`${base}/api/snapshot`, { headers: authorized(claim("unknown-subject")) })).status, 401)
+  for (const token of [claim("access-owner", { exp: Math.floor(Date.now() / 1_000) - 1 }), claim("access-owner", { iss: "https://forged.example" }), claim("access-owner", { aud: "wrong-audience" }), `${claim("access-owner").slice(0, -1)}A`]) assert.equal((await fetch(`${base}/api/snapshot`, { headers: authorized(token) })).status, 401)
 })
 
 test("accepted pause dispatches StopStack once through an injected worker", async () => {
