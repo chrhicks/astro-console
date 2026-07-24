@@ -39,6 +39,74 @@ test("accepted pause dispatches StopStack once through an injected worker", asyn
   await listener.close(); service.close()
 })
 
+test("current controller resumes only the paused revision and replays idempotently", async (t) => {
+  const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => { await listener.close(); service.close() })
+  await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "resume-start" }) })
+  const paused = await fetch(`${base}/api/commands/pause-run`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, expectedRunRevision: 1, idempotencyKey: "resume-pause" }) }).then((response) => response.json())
+  assert.equal(paused.snapshot.run.phase, "paused")
+  const command = { expectedLeaseRevision: 1, expectedRunRevision: 2, idempotencyKey: "resume-once" }
+  const resumed = await fetch(`${base}/api/commands/resume-run`, { method: "POST", body: JSON.stringify(command) })
+  assert.equal(resumed.status, 202)
+  assert.equal((await resumed.json()).snapshot.run.phase, "capture")
+  assert.equal((await fetch(`${base}/api/commands/resume-run`, { method: "POST", body: JSON.stringify(command) })).status, 200)
+  assert.equal((await fetch(`${base}/api/commands/resume-run`, { method: "POST", body: JSON.stringify({ ...command, expectedRunRevision: 2, idempotencyKey: "resume-stale" }) })).status, 409)
+  assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox WHERE kind='ResumeStack'").get() as { count: number }).count, 1)
+  let calls = 0
+  assert.equal(await service.dispatchResumeOutbox({ startStack: async () => { calls += 1; return true } }), "dispatched")
+  assert.equal(await service.dispatchResumeOutbox({ startStack: async () => { calls += 1; return true } }), "none")
+  assert.equal(calls, 1)
+})
+
+test("resume preserves accepted capture when start-stack dispatch is unavailable or fails", async (t) => {
+  const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => { await listener.close(); service.close() })
+  const resume = async (key: string) => {
+    await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: `${key}-start` }) })
+    await fetch(`${base}/api/commands/pause-run`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, expectedRunRevision: 1, idempotencyKey: `${key}-pause` }) })
+    return fetch(`${base}/api/commands/resume-run`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, expectedRunRevision: 2, idempotencyKey: `${key}-resume` }) })
+  }
+  await resume("resume-unavailable")
+  assert.equal(await service.dispatchResumeOutbox(undefined), "unavailable")
+  let snapshot = await fetch(`${base}/api/snapshot`).then((response) => response.json())
+  assert.equal(snapshot.run.phase, "capture")
+  assert.equal(snapshot.dispatch, "unavailable")
+  assert.equal(snapshot.dispatchAction, "resume")
+  service.database.prepare("UPDATE state SET value=? WHERE key='run'").run("null")
+  service.database.prepare("UPDATE state SET value=? WHERE key='snapshotVersion'").run("4")
+  await resume("resume-failed")
+  assert.equal(await service.dispatchResumeOutbox({ startStack: async () => { throw new Error("device unavailable") } }), "failed")
+  snapshot = await fetch(`${base}/api/snapshot`).then((response) => response.json())
+  assert.equal(snapshot.run.phase, "capture")
+  assert.equal(snapshot.dispatch, "failed")
+  assert.equal(snapshot.dispatchAction, "resume")
+  assert.equal(await service.dispatchResumeOutbox({ startStack: async () => true }), "none")
+})
+
+test("current controller terminally stops an active run exactly once and preserves dispatch truth", async (t) => {
+  const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => { await listener.close(); service.close() })
+  await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "stop-start" }) })
+  const command = { expectedLeaseRevision: 1, expectedRunRevision: 1, idempotencyKey: "stop-once" }
+  const stopped = await fetch(`${base}/api/commands/stop-run`, { method: "POST", body: JSON.stringify(command) })
+  assert.equal(stopped.status, 202)
+  assert.equal((await stopped.json()).eventType, "RunStopped")
+  assert.equal((await fetch(`${base}/api/commands/stop-run`, { method: "POST", body: JSON.stringify(command) })).status, 200)
+  assert.equal((await fetch(`${base}/api/commands/stop-run`, { method: "POST", body: JSON.stringify({ ...command, idempotencyKey: "stop-terminal", expectedRunRevision: 2 }) })).status, 409)
+  assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox WHERE kind='StopRun'").get() as { count: number }).count, 1)
+  assert.equal(await service.dispatchStopOutbox({ stopStack: async () => false }), "failed")
+  const snapshot = await fetch(`${base}/api/snapshot`).then((response) => response.json())
+  assert.equal(snapshot.run.phase, "stopped")
+  assert.equal(snapshot.dispatch, "failed")
+  assert.equal(snapshot.dispatchAction, "stop")
+  assert.match(snapshot.evidence.correction.protection, /accepted capture continues/)
+  const html = await fetch(`${base}/`).then((response) => response.text())
+  assert.match(html, /Latest solve evidence is preserved\. This run is terminally stopped; no automatic correction or capture will continue\./)
+  assert.match(html, /s\.run\?\.phase==='paused'/)
+  assert.equal(html.includes("text(q('#correction-protection'),s.evidence.correction.protection)"), false)
+  assert.equal(await service.dispatchStopOutbox({ stopStack: async () => true }), "none")
+})
+
 test("startup backfills shared-control state for a legacy local database without changing accepted work", async (t) => {
   const databasePath = join(mkdtempSync(join(tmpdir(), "astro-legacy-")), "state.sqlite")
   const legacy = new DatabaseSync(databasePath)
@@ -133,6 +201,12 @@ test("accepted paused local run faithfully decodes as the V2 RunSnapshot contrac
   assert.equal(contract.revision, 2)
 })
 
+test("accepted terminal local run faithfully decodes as the V2 RunSnapshot contract", () => {
+  const contract = Schema.decodeUnknownSync(RunSnapshot)({ runId: "run-m27-001", revision: 3, sourcePlanId: "plan-m27", phase: "stopped", completedSequenceCount: 0, acceptedMutations: [], warnings: [], lastConfirmedAt: "2026-07-24T02:00:00.000Z", actions: [] })
+  assert.equal(contract.phase, "stopped")
+  assert.equal(contract.revision, 3)
+})
+
 test("Library queries enforce bounded pages, cursor order, role filters, and allowed sorts", async (t) => {
   const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => { await listener.close(); service.close() })
@@ -171,11 +245,19 @@ test("Library detail uses stable identities and snapshot delivery remains catalo
   assert.match(html, /id="stack-source"/)
   assert.match(html, /id="stack-trace" role="status"/)
   assert.match(html, /Pause capture/)
+  assert.match(html, /Resume capture/)
+  assert.match(html, /Stop run/)
+  assert.match(html, /\/api\/commands\/stop-run/)
+  assert.match(html, /\/api\/commands\/resume-run/)
   assert.match(html, /expectedRunRevision:s\.run\.revision/)
   assert.match(html, /id="pause-dispatch" role="status"/)
   assert.match(html, /stop-stack dispatch failed/)
   assert.match(html, /id="pause-consequence" role="status"/)
   assert.match(html, /Pause accepts resumable capture and requests Seestar stop-stack/)
+  assert.match(html, /Resume restores capture and requests Seestar start-stack/)
+  assert.match(html, /start-stack dispatch failed/)
+  assert.match(html, /Stop is terminal: M27 cannot be resumed/)
+  assert.match(html, /terminal stop-stack dispatch completed/)
   assert.match(html, /Stack observed /)
   assert.match(html, /correction-protection/)
   assert.match(html, /id="library-prev" aria-label="Previous Library results window" disabled/)

@@ -61,8 +61,16 @@ observation source with availability and failure semantics.
 The read-only Seestar Stack adapter uses the built SDK push-event decoder and
 projects only valid Stack counters into evidence freshness and availability.
 It has no connection, polling, host, or command surface; failed Stack events
-retain the solved frame/geometry and leave accepted run state untouched. The
-next slice chooses one bounded concrete rig capability beyond observation input.
+retain the solved frame/geometry and leave accepted run state untouched.
+
+The PauseRun/ResumeRun/StopRun evidence now proves an owner-held,
+run-revision-guarded transition among `capture`, `paused`, and terminal
+`stopped`. `StopRun` is distinct from resumable `StopStack`: it records
+`RunStopped`, queues explicit stop work, and cannot be resumed. Explicit
+injected workers delegate to the Seestar stop/start-stack methods; unavailable
+or failed dispatch leaves accepted state intact and exposes a clear Observe
+trace. The next slice should establish the real rig lifecycle/worker
+coordination rather than adding browser-side recovery.
 
 ## Historical Planning
 

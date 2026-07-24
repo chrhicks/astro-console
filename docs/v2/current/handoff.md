@@ -5,7 +5,7 @@ Status: **active Phase 1 continuation packet**
 ## Single Next Action
 
 Build the next concrete rig integration beyond read-only observation input and
-the accepted Pause/StopStack boundary:
+the accepted Pause/Resume boundary:
 retain the rig-local service and Stack push projection, then choose one
 explicitly bounded adapter-owned capability with availability/failure semantics
 and no browser-owned recovery state.
@@ -53,10 +53,14 @@ without polling, connection setup, host configuration, or device commands;
 failed Stack events preserve solved evidence and never claim the accepted run
 stopped.
 
-The PauseRun slice accepts an owner-held, revision-guarded capture pause
-atomically, records a `StopStack` outbox item, and leaves physical dispatch to
-an explicitly injected adapter worker. Dispatch unavailability or failure does
-not undo the accepted paused run or cause browser retry.
+The PauseRun, ResumeRun, and StopRun slice accepts an owner-held,
+revision-guarded transition atomically. Pause and resume preserve their
+resumable phase through `StopStack` and `ResumeStack`; terminal stop enters
+`stopped`, records `RunStopped`, and queues distinct `StopRun` work. Explicit
+adapter workers make all physical dispatch visible as pending, complete,
+unavailable, or failed without undoing accepted service truth. Observe states
+the irreversible Stop consequence before action and never offers Resume after
+the run is terminal.
 
 ## Read First
 
