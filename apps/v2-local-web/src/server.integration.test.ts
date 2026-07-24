@@ -85,6 +85,25 @@ test("decoded adapter observation updates service evidence and malformed input f
   service.close()
 })
 
+test("Seestar Stack push adapter decodes SDK events, projects availability, and fails closed", async (t) => {
+  const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => { await listener.close(); service.close() })
+  const stream = await fetch(`${base}/api/events`); const reader = stream.body?.getReader(); await reader?.read()
+  const accepted = service.ingestSeestarStackPush({ Event: "Stack", stacked_frame: "43", percent: "62" }, "2026-07-24T02:10:00.000Z")
+  assert.equal(accepted?.evidence.stack.availability, "available")
+  assert.equal(accepted?.evidence.stack.frameCount, 43)
+  const projected = new TextDecoder().decode((await reader?.read()).value)
+  assert.match(projected, /Stack event received/)
+  const before = accepted?.evidence.frameId
+  assert.equal(service.ingestSeestarStackPush({ Event: "PlateSolve", stacked_frame: 44 }, "2026-07-24T02:11:00.000Z"), undefined)
+  const failed = service.ingestSeestarStackPush({ Event: "Stack", stacked_frame: 43, state: "fail", error: "camera transport lost" }, "2026-07-24T02:12:00.000Z")
+  assert.equal(failed?.evidence.frameId, before)
+  assert.equal(failed?.evidence.stack.availability, "unavailable")
+  assert.match(failed?.evidence.stack.message ?? "", /camera transport lost/)
+  assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox").get() as { count: number }).count, 0)
+  await reader?.cancel(); await listener.close(); service.close()
+})
+
 test("local solved-frame evidence faithfully decodes as the V2 AcquireSnapshot contract", () => {
   const service = createLocalWebService()
   const snapshot = service.ingestObservation({ frameId: "frame-contract-001", capturedAt: "2026-07-24T02:00:00.000Z", quality: "verified", desired: "M27 center", solved: "M27 center + 8 arcsec", uncertaintyArcsec: 2.5, correctionState: "automatic", correctionEvidence: "Adapter solve accepted.", correctionBound: "8 arcsec within 30 arcsec bound.", protection: "No operator action required." })
@@ -130,6 +149,9 @@ test("Library detail uses stable identities and snapshot delivery remains catalo
   const html = await fetch(`${base}/`).then((response) => response.text())
   assert.match(html, /id="library-results"/)
   assert.match(html, /id="evidence-surface"/)
+  assert.match(html, /id="stack-source"/)
+  assert.match(html, /id="stack-trace" role="status"/)
+  assert.match(html, /Stack observed /)
   assert.match(html, /correction-protection/)
   assert.match(html, /id="library-prev" aria-label="Previous Library results window" disabled/)
   assert.match(html, /id="library-next" aria-label="Next Library results window" disabled/)

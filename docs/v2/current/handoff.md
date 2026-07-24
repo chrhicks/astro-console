@@ -4,10 +4,10 @@ Status: **active Phase 1 continuation packet**
 
 ## Single Next Action
 
-Build the next real-adapter integration: retain the rig-local service and
-decoded observation boundary, then connect one concrete rig-owned observation
-source with explicit availability/failure semantics and no browser-owned
-recovery state.
+Build the next concrete rig integration beyond read-only observation input:
+retain the rig-local service and Stack push projection, then choose one
+explicitly bounded adapter-owned capability with availability/failure semantics
+and no browser-owned recovery state.
 
 The first narrow implementation slice now exists at `apps/v2-local-web`: a
 Node 22 rig-local Plan-to-Observe M27 fixture with SQLite WAL, one canonical
@@ -45,6 +45,12 @@ latest solved frame and proves its local projection decodes as the exported V2
 `tsx` runtime loader because that package's source imports `.js` specifiers
 from TypeScript sources; this is a test-runtime adjustment, not a new app
 dependency.
+
+The read-only Seestar Stack push slice uses the built SDK decoder for genuine
+Stack events only. It projects timestamped frame count and source availability
+without polling, connection setup, host configuration, or device commands;
+failed Stack events preserve solved evidence and never claim the accepted run
+stopped.
 
 ## Read First
 

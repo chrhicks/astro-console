@@ -58,6 +58,12 @@ the contracts package's `tsx` loader solely to execute its TypeScript source
 with `.js` internal specifiers. The next slice is a concrete rig-owned
 observation source with availability and failure semantics.
 
+The read-only Seestar Stack adapter uses the built SDK push-event decoder and
+projects only valid Stack counters into evidence freshness and availability.
+It has no connection, polling, host, or command surface; failed Stack events
+retain the solved frame/geometry and leave accepted run state untouched. The
+next slice chooses one bounded concrete rig capability beyond observation input.
+
 ## Historical Planning
 
 The completed multi-phase roadmap and Phase 0.5 closeout rationale are in
