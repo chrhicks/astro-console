@@ -4,11 +4,11 @@ Status: **active Phase 1 continuation packet**
 
 ## Single Next Action
 
-Build the next concrete rig integration beyond read-only observation input and
-the accepted Pause/Resume boundary:
-retain the rig-local service and Stack push projection, then choose one
-explicitly bounded adapter-owned capability with availability/failure semantics
-and no browser-owned recovery state.
+Complete workspace coverage behind the persistent activity shell: replace the
+remaining fixture-only Plan, Library, and Process surfaces with bounded,
+service-owned routes and projections. Preserve the accepted Observe behavior,
+snapshot-first reconnect, and no-browser-replay rule; this is not an excuse to
+reopen identity, rig, or production-operations scope.
 
 The first narrow implementation slice now exists at `apps/v2-local-web`: a
 Node 22 rig-local Plan-to-Observe M27 fixture with SQLite WAL, one canonical
@@ -80,6 +80,18 @@ discovery, revocation, and production LAN binding remain later operations work.
 The local proof derives one client identity per verified subject; production
 device/session identity must precede treating a person's multiple browsers as
 distinct presence clients.
+
+The reconnect and lease-recovery slice now makes browser loss explicit: the
+browser shows last-confirmed stale state with mutations disabled, and resumes
+only from a fresh SSE snapshot without replaying commands. Reconnect grace is
+durable; after expiry or a service restart it releases the lease to no
+controller, records `ControlGraceExpired`, and preserves accepted work. Only
+the current holder can report its disconnect or reconnect. Device/session
+identity remains unresolved for production presence, while migrations,
+deployment, health, and operational hardening remain production-operations
+work. The 600px phone monitoring-only shell is presentation enforcement over
+the server-resolved capability model, not a substitute for that deferred
+device/session identity.
 
 ## Read First
 

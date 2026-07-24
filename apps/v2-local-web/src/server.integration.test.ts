@@ -387,6 +387,9 @@ test("a request query cannot select phone or controller capability", async (t) =
   assert.match(html, /data-room="Library"/)
   assert.match(html, /data-room="Process"/)
   assert.match(html, /if\(s\.identity\.capability==='readOnly'\)return/)
+  assert.match(html, /if\(innerWidth<=600\)return/)
+  assert.match(html, /addEventListener\('resize',\(\)=>\{if\(projection\)render\(projection\)\}\)/)
+  assert.match(html, /addEventListener\('orientationchange',\(\)=>\{if\(projection\)render\(projection\)\}\)/)
   assert.match(html, /select\('Observe'\)/)
   assert.match(html, /SERVICE TRUTH<button id="return" hidden/)
   assert.match(html, /q\('#return'\)\.hidden=!s\.run/)
@@ -418,6 +421,42 @@ test("SSE sends a snapshot before durable cursor catch-up and never replays a co
   const next = new TextDecoder().decode((await reader?.read()).value)
   assert.match(next, /event: RunStarted/)
   await reader?.cancel(); await listener.close(); service.close()
+})
+
+test("browser reconnect installs a current snapshot and its stale shell offers no mutation replay", async (t) => {
+  const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => { await listener.close(); service.close() })
+  const firstStream = await fetch(`${base}/api/events`); const firstReader = firstStream.body?.getReader(); await firstReader?.read(); await firstReader?.cancel()
+  const started = await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "reconnect-start" }) })
+  assert.equal(started.status, 202)
+  const reconnectStream = await fetch(`${base}/api/events`); const reconnectReader = reconnectStream.body?.getReader(); const reconnect = new TextDecoder().decode((await reconnectReader?.read()).value)
+  assert.match(reconnect, /event: snapshot/); assert.match(reconnect, /"phase":"capture"/)
+  assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox WHERE kind='StartM27Capture'").get() as { count: number }).count, 1)
+  const shell = await fetch(`${base}/`).then((response) => response.text())
+  assert.match(shell, /connection lost · last confirmed/); assert.match(shell, /no action will be replayed/); assert.match(shell, /s\.connection==='stale'/)
+  await reconnectReader?.cancel(); await listener.close(); service.close()
+})
+
+test("expired reconnect grace survives restart, releases control to nobody, and preserves accepted work", async (t) => {
+  const databasePath = join(mkdtempSync(join(tmpdir(), "astro-lease-recovery-")), "state.sqlite")
+  const owner = createLocalWebService(databasePath, () => ({ personId: "owner-chicks", clientId: "desktop-owner", capability: "controlCapable" }))
+  const friend = createLocalWebService(databasePath, () => ({ personId: "friend-ada", clientId: "desktop-ada", capability: "controlCapable" }))
+  const ownerListener = await owner.listen(); const friendListener = await friend.listen(); const ownerBase = `http://127.0.0.1:${ownerListener.port}`; const friendBase = `http://127.0.0.1:${friendListener.port}`
+  await fetch(`${ownerBase}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "lease-recovery-run" }) })
+  const impostor = await fetch(`${friendBase}/api/commands/controller-disconnected`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, idempotencyKey: "impostor-disconnect" }) }).then((response) => response.json())
+  assert.equal(impostor.reason, "ControlLeaseLost")
+  await fetch(`${friendBase}/api/commands/request-control`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, idempotencyKey: "lease-recovery-request" }) })
+  await fetch(`${ownerBase}/api/commands/grant-control`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, idempotencyKey: "lease-recovery-grant" }) })
+  const disconnected = await fetch(`${friendBase}/api/commands/controller-disconnected`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 2, idempotencyKey: "lease-recovery-disconnect" }) }).then((response) => response.json())
+  assert.equal(disconnected.eventType, "ControlReconnectGraceStarted")
+  await ownerListener.close(); await friendListener.close(); owner.close(); friend.close()
+  const persisted = new DatabaseSync(databasePath); persisted.prepare("UPDATE state SET value=? WHERE key='reconnectGraceUntil'").run(JSON.stringify("2000-01-01T00:00:00.000Z")); persisted.close()
+  const recovered = createLocalWebService(databasePath, () => ({ personId: "owner-chicks", clientId: "desktop-owner", capability: "controlCapable" })); const recoveredListener = await recovered.listen()
+  t.after(async () => { await recoveredListener.close(); recovered.close() })
+  const snapshot = await fetch(`http://127.0.0.1:${recoveredListener.port}/api/snapshot`).then((response) => response.json())
+  assert.equal(snapshot.control.holderClientId, null); assert.equal(snapshot.control.state, "unheld"); assert.equal(snapshot.control.revision, 4); assert.equal(snapshot.run.phase, "capture")
+  assert.equal((recovered.database.prepare("SELECT type FROM events ORDER BY cursor DESC LIMIT 1").get() as { type: string }).type, "ControlGraceExpired")
+  await recoveredListener.close(); recovered.close()
 })
 
 test("two server-configured desktops transfer control without stopping the accepted run", async (t) => {

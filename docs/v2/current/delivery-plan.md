@@ -87,6 +87,17 @@ from that trusted mapping. It is an origin boundary, not tunnel deployment:
 JWKS/key rotation, revocation, Cloudflare configuration, and production LAN
 binding remain separate operations work.
 
+The reconnect and lease-recovery evidence now records a durable grace period
+for the current holder. A browser disconnect renders last-confirmed state as
+stale and sends no queued command; a fresh SSE snapshot replaces that
+projection on reconnect. Grace expiry, including after service restart,
+releases control to nobody and records the transition without stopping
+accepted work. This remains a person-to-client fixture: production
+device/session identity and all migrations, deployment, health, and
+operational hardening are still deferred. The next narrow action is complete
+Plan, Library, and Process workspace coverage behind the persistent activity
+shell.
+
 ## Historical Planning
 
 The completed multi-phase roadmap and Phase 0.5 closeout rationale are in
