@@ -51,6 +51,13 @@ the authoritative projection. It proves exhausted recovery retains evidence,
 states consequence/protection, and does not dispatch adapter or outbox work.
 The next vertical slice is one decoded adapter-owned observation input.
 
+The decoded observation-input boundary now accepts one fail-closed latest
+solved-frame fixture, persists only decoded evidence, and proves a faithful
+mapping into the exported V2 `AcquireSnapshot` schema. The test command uses
+the contracts package's `tsx` loader solely to execute its TypeScript source
+with `.js` internal specifiers. The next slice is a concrete rig-owned
+observation source with availability and failure semantics.
+
 ## Historical Planning
 
 The completed multi-phase roadmap and Phase 0.5 closeout rationale are in

@@ -4,10 +4,10 @@ Status: **active Phase 1 continuation packet**
 
 ## Single Next Action
 
-Build the next real-adapter boundary: retain the rig-local service and local
-web client as the authoritative source of active run, current evidence, and
-protected correction state, then replace one deterministic observation input
-with a decoded adapter-owned source without browser-owned recovery state.
+Build the next real-adapter integration: retain the rig-local service and
+decoded observation boundary, then connect one concrete rig-owned observation
+source with explicit availability/failure semantics and no browser-owned
+recovery state.
 
 The first narrow implementation slice now exists at `apps/v2-local-web`: a
 Node 22 rig-local Plan-to-Observe M27 fixture with SQLite WAL, one canonical
@@ -38,6 +38,13 @@ desired/solved geometry, uncertainty, and bounded correction trace to the
 authoritative snapshot. It keeps evidence visible in automatic or exhausted
 fixture state and states the service-owned bound, protection, and action
 eligibility without issuing adapter work.
+
+The decoded observation-input slice adds a fail-closed adapter boundary for a
+latest solved frame and proves its local projection decodes as the exported V2
+`AcquireSnapshot` contract. The local test runner uses the contracts package's
+`tsx` runtime loader because that package's source imports `.js` specifiers
+from TypeScript sources; this is a test-runtime adjustment, not a new app
+dependency.
 
 ## Read First
 

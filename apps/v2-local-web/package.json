@@ -7,6 +7,6 @@
   "scripts": {
     "build": "node --experimental-strip-types --check src/server.ts",
     "dev": "node --experimental-strip-types src/server.ts",
-    "test": "node --experimental-strip-types --test src/server.integration.test.ts"
+    "test": "../../packages/v2-contracts/node_modules/.bin/tsx --test src/server.integration.test.ts"
   }
 }

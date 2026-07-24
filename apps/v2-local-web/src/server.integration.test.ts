@@ -4,6 +4,8 @@ import { mkdtempSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { DatabaseSync } from "node:sqlite"
+import * as Schema from "effect/Schema"
+import { AcquireSnapshot } from "../../../packages/v2-contracts/src/snapshots.ts"
 import { createLocalWebService } from "./server.ts"
 
 test("SQLite acceptance atomically persists run, event, receipt, and outbox", async (t) => {
@@ -68,6 +70,29 @@ test("persisted exhausted correction keeps evidence visible without issuing work
   assert.equal(snapshot.evidence.correction.action, "Review recovery in Observe before any new command.")
   assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox").get() as { count: number }).count, 0)
   await reader?.cancel(); await listener.close(); service.close()
+})
+
+test("decoded adapter observation updates service evidence and malformed input fails closed", () => {
+  const service = createLocalWebService()
+  const accepted = service.ingestObservation({ frameId: "frame-adapter-001", capturedAt: "2026-07-24T02:00:00.000Z", quality: "verified", desired: "M27 center", solved: "M27 center + 8 arcsec", uncertaintyArcsec: 2.5, correctionState: "automatic", correctionEvidence: "Adapter solve accepted.", correctionBound: "8 arcsec within 30 arcsec bound.", protection: "No operator action required." })
+  assert.equal(accepted?.evidence.frameId, "frame-adapter-001")
+  const before = JSON.stringify(accepted?.evidence)
+  assert.equal(service.ingestObservation({ frameId: "", correctionState: "automatic" }), undefined)
+  assert.equal(JSON.stringify(service.ingestObservation({ frameId: "", correctionState: "automatic" })?.evidence), undefined)
+  assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox").get() as { count: number }).count, 0)
+  assert.equal(JSON.stringify(service.database.prepare("SELECT value FROM state WHERE key='evidence'").get()).includes("frame-adapter-001"), true)
+  assert.equal(before.includes("frame-adapter-001"), true)
+  service.close()
+})
+
+test("local solved-frame evidence faithfully decodes as the V2 AcquireSnapshot contract", () => {
+  const service = createLocalWebService()
+  const snapshot = service.ingestObservation({ frameId: "frame-contract-001", capturedAt: "2026-07-24T02:00:00.000Z", quality: "verified", desired: "M27 center", solved: "M27 center + 8 arcsec", uncertaintyArcsec: 2.5, correctionState: "automatic", correctionEvidence: "Adapter solve accepted.", correctionBound: "8 arcsec within 30 arcsec bound.", protection: "No operator action required." })
+  const evidence = snapshot?.evidence
+  const contract = Schema.decodeUnknownSync(AcquireSnapshot)({ revision: 1, mode: "pointing", phase: "verifying", recoverySeries: 0, attemptCount: 1, latestEvidence: { _tag: "Solved", attemptId: "attempt-m27-001", sourceFrameAssetId: evidence?.frameId, correction: { rightAscensionArcsec: 8, declinationArcsec: 0, convention: "mountRaDec" }, magnitudeArcsec: 8, uncertaintyArcsec: evidence?.uncertaintyArcsec }, attention: evidence?.correction.protection, actions: [] })
+  assert.equal(contract.latestEvidence?._tag, "Solved")
+  assert.equal(contract.latestEvidence?.sourceFrameAssetId, "frame-contract-001")
+  service.close()
 })
 
 test("Library queries enforce bounded pages, cursor order, role filters, and allowed sorts", async (t) => {

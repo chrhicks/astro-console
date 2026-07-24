@@ -18,6 +18,7 @@ type LibraryRole = "original" | "linearMaster" | "intermediate" | "final" | "pre
 type LibrarySort = "capturedAtDescending" | "sharpestFirst" | "recentlyUpdated"
 
 const StoredEvidence = Schema.Struct({ frameId: Schema.String, capturedAt: Schema.String, quality: Schema.Literals(["verified", "warning"]), desired: Schema.String, solved: Schema.String, uncertaintyArcsec: Schema.Number, correction: Schema.Struct({ state: Schema.Literals(["automatic", "exhausted"]), evidence: Schema.String, bound: Schema.String, protection: Schema.String, action: Schema.String }) })
+const AdapterObservation = Schema.Struct({ frameId: Schema.NonEmptyString, capturedAt: Schema.NonEmptyString, quality: Schema.Literals(["verified", "warning"]), desired: Schema.NonEmptyString, solved: Schema.NonEmptyString, uncertaintyArcsec: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)), correctionState: Schema.Literals(["automatic", "exhausted"]), correctionEvidence: Schema.NonEmptyString, correctionBound: Schema.NonEmptyString, protection: Schema.NonEmptyString })
 const StoredState = Schema.Struct({ snapshotVersion: Schema.Int, eventCursor: Schema.Int, planRevision: Schema.Int, leaseRevision: Schema.Int, leaseHolder: Schema.String, leaseState: Schema.Literals(["held", "reconnecting"]), reconnectGraceUntil: Schema.NullOr(Schema.String), run: Schema.NullOr(Schema.Struct({ id: Schema.String, revision: Schema.Int, phase: Schema.Literal("capture"), target: Schema.String, progress: Schema.Number })), evidence: StoredEvidence })
 const StoredRequest = Schema.Struct({ client_id: Schema.String, person_id: Schema.String })
 const ControlRequestRow = Schema.Struct({ client_id: Schema.String })
@@ -75,7 +76,8 @@ export function createLocalWebService(databasePath = ":memory:", identityResolve
     })
   })
   const close = () => { if (closed) return; closed = true; clearInterval(poll); database.close() }
-  return { database, handler, listen, close }
+  const ingestObservation = (raw: unknown) => { try { const input = Schema.decodeUnknownSync(AdapterObservation)(raw); const current = state(database); const evidence: Evidence = { frameId: input.frameId, capturedAt: input.capturedAt, quality: input.quality, desired: input.desired, solved: input.solved, uncertaintyArcsec: input.uncertaintyArcsec, correction: { state: input.correctionState, evidence: input.correctionEvidence, bound: input.correctionBound, protection: input.protection, action: input.correctionState === "automatic" ? "none" : "Review recovery in Observe before any new command." } }; database.exec("BEGIN IMMEDIATE"); try { commit(database, { evidence, snapshotVersion: current.snapshotVersion + 1, eventCursor: current.eventCursor + 1 }); database.prepare("INSERT INTO events VALUES (?,?,?)").run(current.eventCursor + 1, "ObservationProjected", JSON.stringify(evidence)); database.exec("COMMIT"); return snapshot(database, identityResolver()) } catch (error) { database.exec("ROLLBACK"); throw error } } catch { return undefined } }
+  return { database, handler, listen, close, ingestObservation }
 }
 
 const controlPaths = new Set(["/api/commands/request-control", "/api/commands/grant-control", "/api/commands/take-control", "/api/commands/controller-disconnected", "/api/commands/controller-reconnected", "/api/commands/pause-run"])
