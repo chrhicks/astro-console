@@ -18,6 +18,13 @@ configuration, pinned images, secret injection, migration backup/restore,
 rig discovery, Cloudflare Access/tunnel validation, storage monitoring, and
 R2 integration remain required before deployment.
 
+The Arch-host preflight has now confirmed explicit live Alpaca endpoints for
+both rigs: ASI Mount plus Sony Mirrorless Camera at `192.168.4.104:11111`, and
+the Seestar S30 Camera/Focuser/FilterWheel/Telescope/Switch bridge at
+`192.168.4.63:32323`. UDP discovery did not respond, so initial production
+configuration should use those endpoints and verify their configured-device
+inventory again at activation.
+
 The first narrow implementation slice now exists at `apps/v2-local-web`: a
 Node 22 rig-local Plan-to-Observe M27 fixture with SQLite WAL, one canonical
 writer, decoded run acceptance, durable event/receipt/outbox records, and

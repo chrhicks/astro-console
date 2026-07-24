@@ -31,12 +31,13 @@ Keep Arch, Docker Engine/Compose, time synchronization, and SMART/NVMe
 monitoring current through ordinary owner maintenance. There is no need to
 turn the hobby host into an appliance distribution before deployment.
 
-Continuum records a previously validated ASCOM Remote endpoint at
-`192.168.4.104:11111`, with Telescope 0 “ASI Mount” and Camera 0 “Sony
-Mirrorless Camera.” A July 21 check from Arch could not resolve `ASTROPC` or
-reach that endpoint, likely because the MiniPC/service was off. Treat these as
-bootstrap hints and repeat UDP discovery plus `/management/v1/configureddevices`
-when the rig is powered before freezing deployment configuration.
+The July 24 host preflight confirmed two configured Alpaca endpoints from the
+Arch host. The ASCOM Remote rig is `192.168.4.104:11111`, with Telescope 0
+“ASI Mount” and Camera 0 “Sony Mirrorless Camera.” The Seestar S30 bridge is
+`192.168.4.63:32323`, with Camera, Focuser, FilterWheel, Telescope, and Switch
+at device number 0. Standard UDP Alpaca discovery did not answer during that
+check, so use these explicit endpoints for the first deployment and recheck
+`/management/v1/configureddevices` whenever the powered rig or network changes.
 
 ## 2. Compose Services
 
