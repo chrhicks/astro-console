@@ -4,10 +4,10 @@ Status: **active Phase 1 continuation packet**
 
 ## Single Next Action
 
-Build the Local Web Foundation: a rig-local service and local web client that
-preserve authoritative run state across browser reconnects. Start with one
-narrow observable vertical slice; application implementation does not yet
-exist.
+Build the next real-adapter boundary: retain the rig-local service and local
+web client as the authoritative source of active run, current evidence, and
+protected correction state, then replace one deterministic observation input
+with a decoded adapter-owned source without browser-owned recovery state.
 
 The first narrow implementation slice now exists at `apps/v2-local-web`: a
 Node 22 rig-local Plan-to-Observe M27 fixture with SQLite WAL, one canonical
@@ -25,6 +25,19 @@ desktop identities over one SQLite database, durable control-request/grant/
 takeover/reconnect-grace evidence, and a persistent workspace shell. Its
 focused proof confirms that an old controller loses guarded authority without
 stopping the accepted M27 run or adding adapter work.
+
+The bounded-Library slice adds a persisted deterministic asset fixture, a
+server-owned query boundary capped at 100 results with cursor, role, and
+allowed-sort validation, stable-ID detail delivery, and a fixed-window Library
+viewport. Snapshot and SSE projections remain catalog-summary-free. Its proof
+covers pagination, filtering, sort rejection, detail rejection, lineage and
+availability delivery, and no raw storage identifiers.
+
+The Observe evidence-and-decision slice adds persisted latest-frame quality,
+desired/solved geometry, uncertainty, and bounded correction trace to the
+authoritative snapshot. It keeps evidence visible in automatic or exhausted
+fixture state and states the service-owned bound, protection, and action
+eligibility without issuing adapter work.
 
 ## Read First
 

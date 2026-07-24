@@ -33,10 +33,23 @@ exit criteria, not completion of Phase 1. Catalog virtualization, workspace
 coverage, real adapters/workers, identity admission, recovery, and production
 operations remain separate slices.
 
-The next shared-control-shell evidence adds one persisted control lease across
+The shared-control-shell evidence adds one persisted control lease across
 two trusted desktop deployments. It proves transfer and stale-controller
 rejection while the active run continues; it does not yet establish managed
 identity, remote ingress, or a real hardware pause adapter.
+
+The bounded-Library evidence adds a deterministic persisted asset fixture with
+a server-owned capped query/cursor/filter/sort boundary, stable-ID detail
+delivery, and a fixed-window virtualized viewport. It proves Library lineage
+and representation availability can be inspected without placing the catalog
+in snapshot/SSE delivery or mounting the full page in the document. The next
+vertical slice is current Observe evidence and protected decision context.
+
+The Observe evidence-and-decision evidence now persists latest-frame quality,
+geometry, uncertainty, and bounded automatic or exhausted correction state in
+the authoritative projection. It proves exhausted recovery retains evidence,
+states consequence/protection, and does not dispatch adapter or outbox work.
+The next vertical slice is one decoded adapter-owned observation input.
 
 ## Historical Planning
 
