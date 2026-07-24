@@ -98,6 +98,14 @@ operational hardening are still deferred. The next narrow action is complete
 Plan, Library, and Process workspace coverage behind the persistent activity
 shell.
 
+That workspace slice now uses persisted read-only projections: viable future
+Plan intent and ordered sequence/window facts, bounded Library chronology and
+stable lineage detail, and a stable-asset-ID handoff into a linear Process
+session with synchronized preview and checkpoint protection. Workspace reads
+and switching do not alter an accepted run. Process Apply, Save, retry,
+discard, source switching, worker execution, and production recovery remain
+separate mutation and operations slices.
+
 ## Historical Planning
 
 The completed multi-phase roadmap and Phase 0.5 closeout rationale are in

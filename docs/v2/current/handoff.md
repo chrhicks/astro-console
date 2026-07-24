@@ -4,11 +4,11 @@ Status: **active Phase 1 continuation packet**
 
 ## Single Next Action
 
-Complete workspace coverage behind the persistent activity shell: replace the
-remaining fixture-only Plan, Library, and Process surfaces with bounded,
-service-owned routes and projections. Preserve the accepted Observe behavior,
-snapshot-first reconnect, and no-browser-replay rule; this is not an excuse to
-reopen identity, rig, or production-operations scope.
+Prepare the production-operations boundary: migrations, rig-local deployment
+and ingress, health/availability, and operational hardening. Preserve the
+accepted read-only workspace projections and do not fold deferred Process
+mutations, device/session identity, or worker recovery semantics into a
+deployment shortcut.
 
 The first narrow implementation slice now exists at `apps/v2-local-web`: a
 Node 22 rig-local Plan-to-Observe M27 fixture with SQLite WAL, one canonical
@@ -92,6 +92,14 @@ deployment, health, and operational hardening remain production-operations
 work. The 600px phone monitoring-only shell is presentation enforcement over
 the server-resolved capability model, not a substitute for that deferred
 device/session identity.
+
+Workspace coverage now has persisted, admitted read-only Plan and Process
+projections alongside the bounded Library query/detail route. Plan exposes the
+viable M27 future intent, window, clearance, ordered sequence, and existing
+revision/lease-guarded `Run plan`; Library opens a stable asset ID into a
+linear Process session with synchronized preview, checkpoint, and protection
+context. Apply, Save, retry, discard, source switching, Process workers, and
+their production mutation/recovery semantics remain deferred.
 
 ## Read First
 

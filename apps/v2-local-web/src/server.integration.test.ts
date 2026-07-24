@@ -63,7 +63,7 @@ test("verified Access assertions map durable memberships without trusting reques
   assert.equal(viewer.identity.capability, "readOnly")
   assert.equal((await fetch(`${base}/api/commands/start-run`, { method: "POST", headers: authorized(claim("access-viewer")), body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "viewer-start" }) })).status, 403)
   assert.equal((await fetch(`${base}/api/snapshot`, { headers: authorized(claim("unknown-subject")) })).status, 401)
-  for (const token of [claim("access-owner", { exp: Math.floor(Date.now() / 1_000) - 1 }), claim("access-owner", { iss: "https://forged.example" }), claim("access-owner", { aud: "wrong-audience" }), `${claim("access-owner").slice(0, -1)}A`]) assert.equal((await fetch(`${base}/api/snapshot`, { headers: authorized(token) })).status, 401)
+  for (const token of [claim("access-owner", { exp: Math.floor(Date.now() / 1_000) - 1 }), claim("access-owner", { iss: "https://forged.example" }), claim("access-owner", { aud: "wrong-audience" }), `${claim("access-owner")}.forged`]) assert.equal((await fetch(`${base}/api/snapshot`, { headers: authorized(token) })).status, 401)
 })
 
 test("accepted pause dispatches StopStack once through an injected worker", async () => {
@@ -370,6 +370,31 @@ test("HTTP boundary rejects stale and server-configured phone intents without st
   await listener.close(); service.close(); await phoneListener.close(); phoneService.close()
 })
 
+test("authenticated workspace projections preserve future intent, bounded Library evidence, and a stable Process handoff", async (t) => {
+  const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => { await listener.close(); service.close() })
+  const plan = await fetch(`${base}/api/workspaces/plan`).then((response) => response.json())
+  assert.equal(plan.planId, "plan-m27"); assert.equal(plan.readiness, "ready"); assert.equal(plan.sequences[0].capture, "24 × 180s · L"); assert.equal(plan.observingWindow.horizonClearanceDeg, 28); assert.equal(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(plan.observingWindow.startsAt)), "23:18"); assert.equal(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(plan.observingWindow.endsAt)), "01:02")
+  const library = await fetch(`${base}/api/library?queryId=workspace-coverage&pageSize=1&sort=capturedAtDescending`).then((response) => response.json())
+  assert.equal(library.results.length, 1); assert.equal(library.nextCursor, "1")
+  const assetId = library.results[0].assetId
+  const detail = await fetch(`${base}/api/library/assets/${assetId}`).then((response) => response.json())
+  assert.equal(detail.assetId, assetId); assert.equal(detail.lineage.runId, "run-m27-001")
+  const process = await fetch(`${base}/api/workspaces/process?sourceAssetId=${assetId}`).then((response) => response.json())
+  assert.equal(process.sourceAssetId, assetId); assert.equal(process.preview.state, "synchronized"); assert.equal(process.history.at(-1).state, "current"); assert.match(process.protection, /Apply, Save/)
+  const snapshot = await fetch(`${base}/api/snapshot`).then((response) => response.json())
+  assert.equal(snapshot.run, null); assert.equal((service.database.prepare("SELECT count(*) AS count FROM events").get() as { count: number }).count, 0)
+  assert.equal((await fetch(`${base}/api/workspaces/process?sourceAssetId=asset-other`)).status, 404)
+  const unavailable = await fetch(`${base}/api/workspaces/process?sourceAssetId=asset-m27-013`)
+  assert.equal(unavailable.status, 409); assert.deepEqual(await unavailable.json(), { outcome: "rejected", reason: "AssetUnavailable", message: "This asset is temporarily unavailable and cannot open in Process." })
+})
+
+test("workspace projections remain behind existing admission", async (t) => {
+  const service = createLocalWebService(":memory:", () => undefined); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => { await listener.close(); service.close() })
+  for (const path of ["/api/workspaces/plan", "/api/workspaces/process", "/api/library?queryId=workspace-coverage&sort=capturedAtDescending"]) assert.equal((await fetch(`${base}${path}`)).status, 401)
+})
+
 test("a request query cannot select phone or controller capability", async (t) => {
   const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
   const queried = await fetch(`${base}/api/snapshot?mode=phone`, { headers: { "x-client-capability": "readOnly" } }).then((response) => response.json())
@@ -390,6 +415,8 @@ test("a request query cannot select phone or controller capability", async (t) =
   assert.match(html, /if\(innerWidth<=600\)return/)
   assert.match(html, /addEventListener\('resize',\(\)=>\{if\(projection\)render\(projection\)\}\)/)
   assert.match(html, /addEventListener\('orientationchange',\(\)=>\{if\(projection\)render\(projection\)\}\)/)
+  assert.match(html, /detail\.availability==='availableLocally'/)
+  assert.match(html, /temporarily unavailable and cannot open in Process/)
   assert.match(html, /select\('Observe'\)/)
   assert.match(html, /SERVICE TRUTH<button id="return" hidden/)
   assert.match(html, /q\('#return'\)\.hidden=!s\.run/)
