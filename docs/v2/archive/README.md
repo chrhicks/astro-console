@@ -17,6 +17,9 @@ to override `docs/v2/current/`, accepted gate records, or the UX guidance.
   architecture superseded by the current `infra/` plan.
 - [V1 shell review](research/v1-shell-review.md) — historical evidence for why
   V2 moved to task-driven workspaces.
+- [Phase 0.5 design-system archive](phase-0.5/README.md) — completed visual
+  audits, bridge material, and closeout rationale; Phase 1 uses the current
+  visual implementation authorities instead.
 
 Use these documents only to answer a specific question about earlier options,
 walkthroughs, or why a decision changed.

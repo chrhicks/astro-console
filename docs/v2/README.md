@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **Gate 7 accepted; V2 reference frozen; not current application behavior**
+Status: **Gate 7 and Phase 0.5 accepted; V2 reference and Phase 1 visual implementation authority frozen; not current application behavior**
 
 This directory is organized to keep normal working context small. Do not read
 the entire V2 tree by default.
@@ -28,7 +28,8 @@ requires its specific detail.
 | Accepted canonical Gate 5 contract language | [Gate 5 contract vocabulary](current/gate-05-contract-vocabulary.md) |
 | Executable Effect Schema candidates and fixtures | [V2 contracts package](../../packages/v2-contracts/README.md) |
 | Implementation phases and backlog mapping | [Current delivery plan](current/delivery-plan.md) |
-| Phase 0.5 official style/design guide work | [Phase 0.5 design-system brief](current/phase-0.5-design-system-brief.md) |
+| Phase 1 production UI implementation | Accepted [visual style guide](current/visual-style-guide.md), [UI component library](current/ui-component-library.md), and [UI build contract](current/ui-build-contract.md) |
+| Why Phase 0.5 made a specific visual decision | [Phase 0.5 design-system archive](archive/phase-0.5/README.md) — historical only; do not use for active implementation authority |
 | Accepted interaction evidence or candidate contracts | The relevant document under [accepted gates](gates/README.md) |
 | Deployment, Cloudflare, storage, security, or operations | [Infrastructure plan](infra/README.md), then only its relevant section |
 | Visual interaction evidence | [Accepted prototype references](../../prototype/v2-ui/index.html) |
@@ -36,8 +37,9 @@ requires its specific detail.
 
 ## Current Position
 
-Gates 1–5 are accepted, Gate 6 technical spikes are complete, and Gate 7 has
-frozen the V2 reference:
+Gates 1–5 are accepted, Gate 6 technical spikes are complete, Gate 7 has
+frozen the V2 reference, and Phase 0.5 has issued the accepted Phase 1 visual
+implementation authorities:
 
 1. Composite workspace model.
 2. Acquire evidence workflows.

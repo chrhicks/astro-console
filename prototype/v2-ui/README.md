@@ -24,6 +24,19 @@ http://127.0.0.1:4173/prototype/v2-ui/
 - `run-authority-prototype.html` — Gate 3 run mutation, reconnect, and control.
 - `process-prototype.html` — Gate 4 visual Build/Develop workflow.
 - `convergence-roadmap.html` — the current seven-gate finish line.
+- `*-prototype-phase-0.5-preview.html` — clean, production-scale visual
+  previews used for Phase 1 implementation review. They are non-authoritative
+  comparison surfaces, not product builds.
+- `phase-0.5-component-library.html` — clean visual companion for the accepted
+  V2 component library; a reference showcase, not a dashboard.
+- `phase-0.5-brand-style-guide.html` — accepted brand foundation for palette,
+  type, material, voice, templates, and accessibility, now carrying the
+  selected Alignment Aperture V1 mark. It governs brand expression; the
+  current visual style guide, component library, and build contract govern
+  Phase 1 product implementation.
+- `archive/phase-0.5/` — completed Phase 0.5 studies, visual variants, and the
+  selected-mark comparison record. Historical only; use it for a specific past
+  decision, not active implementation guidance.
 
 The four prototypes centralize synthetic truth in their matching JavaScript
 models. Renderers consume those projections rather than inventing domain state.

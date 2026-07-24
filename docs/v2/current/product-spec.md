@@ -1,9 +1,10 @@
 # V2 Product Specification
 
-Status: **living product specification — product behavior accepted through Gate 4; Gate 5 contracts under hardening**
+Status: **living product specification — Gates 1–5 accepted; Gate 6 technical spikes complete; Gate 7 reference frozen**
 
-Last reconciled: July 21, 2026 against accepted Gates 1–4 and the user-visible
-infrastructure model.
+Last reconciled: July 23, 2026 against accepted Gates 1–5, completed Gate 6
+constraints, the frozen Gate 7 reference, and the user-visible infrastructure
+model.
 
 Read this only when workspace behavior or product-entity detail is needed. The
 default V2 context begins at [Start Here](../README.md).

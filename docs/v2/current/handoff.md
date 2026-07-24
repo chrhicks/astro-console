@@ -1,8 +1,8 @@
 # Gate 7 Final-Reference Handoff
 
-Status: Gate 7 accepted July 23, 2026; V2 reference frozen
+Status: Gate 7 and Phase 0.5 accepted July 23, 2026; V2 reference and visual implementation authority frozen
 
-Current work: Gate 7 complete
+Current work: Phase 1 Local Web Foundation
 
 This is the durable continuation point for Gate 7. It preserves accepted Gates
 1–5 and Gate 6 constraints without requiring later work to ingest the full
@@ -145,14 +145,14 @@ conflict with an accepted product invariant.
 
 ## Single Next Action
 
-Begin Phase 0.5: finalize the official V2 style and design guide from the
-accepted product, contract, and prototype references. Reopen an accepted
-interaction model only for a recorded product-invariant conflict—not
-implementation convenience, copy polish, or visual taste. Begin Phase 1 only
-after the user accepts that design authority.
-
-The [Phase 0.5 design-system brief](phase-0.5-design-system-brief.md) is the
-current method and deliverable boundary for that work.
+Begin **Phase 1: Local Web Foundation** using the accepted
+[visual style guide](visual-style-guide.md),
+[UI component library](ui-component-library.md), and
+[UI build contract](ui-build-contract.md), together with the frozen product,
+gate, and contract authorities. Phase 0.5 is complete; extend these visual
+authorities only when a real product need exposes a gap, never for
+implementation convenience, copy polish, or visual taste. This is a start of
+application implementation, not evidence that it already exists.
 
 ## Gate 7 Bootstrap
 

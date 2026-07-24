@@ -1,6 +1,6 @@
 # V2 Delivery Plan
 
-Status: **current staged delivery direction**
+Status: **Phase 0.5 complete; Phase 1 Local Web Foundation is the active next boundary**
 
 This is an implementation-planning reference, not default V2 context. Begin at
 [Start Here](../README.md).
@@ -67,11 +67,12 @@ they are not reopened for implementation convenience or visual polish.
 - The V2 shell can be evaluated without inheriting the current three-column
   layout.
 
-## 3. Phase 0.5: Design-System Finalization
+## 3. Phase 0.5: Design-System Finalization — Complete
 
-Follow the [Phase 0.5 design-system brief](phase-0.5-design-system-brief.md)
-for its bounded review method, official-guide deliverable, and acceptance
-criteria.
+Completed per the historical [Phase 0.5 closeout record](../archive/phase-0.5/phase-0.5-design-system-brief.md).
+The accepted [visual style guide](visual-style-guide.md),
+[UI component library](ui-component-library.md), and
+[UI build contract](ui-build-contract.md) are Phase 1 implementation authority.
 
 ### Outcomes
 
@@ -99,10 +100,11 @@ criteria.
 - Semantic states remain legible without color and controls retain visible
   focus and named keyboard paths.
 - The guide makes it easy to identify generic or unrelated-product UI drift.
-- The user accepts the guide as the visual implementation authority; later
-  Phase 1 work may extend it only when a real product need exposes a gap.
+- Accepted result: the guide, component library, and build contract are the
+  visual implementation authority; later Phase 1 work may extend them only
+  when a real product need exposes a gap.
 
-## 4. Phase 1: Local Web Foundation
+## 4. Phase 1: Local Web Foundation — Active Next Boundary
 
 ### Outcomes
 

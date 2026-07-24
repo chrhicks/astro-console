@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Phase 0.5 visual audit of frozen Astro Console V2 references.">
+  <title>Phase 0.5 Reference Audit · Astro Console</title>
+  <link rel="stylesheet" href="../../styles.css">
+  <style>
+    .audit-page { width:min(1540px,100%); }
+    .audit-page .audit-intro { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(280px,.55fr); gap:28px; align-items:end; padding:34px 0 40px; }
+    .audit-page .audit-intro h1 { max-width:940px; }
+    .audit-page .audit-intro p:last-child { margin-bottom:0; }
+    .audit-page .audit-callout { padding:18px; border-left:3px solid var(--amber); background:var(--amber-wash); }
+    .audit-page .audit-callout p { color:var(--muted); }
+    .audit-page .audit-callout strong { color:var(--text); }
+    .audit-page .audit-callout small { display:block; margin-top:7px; color:var(--faint); }
+    .audit-page .audit-question { display:grid; grid-template-columns:minmax(0,1fr) minmax(360px,.75fr); gap:18px; align-items:stretch; }
+    .audit-page .audit-question > div { padding:20px; border:1px solid var(--line); border-radius:12px; background:var(--surface); }
+    .audit-page .audit-question h2 { margin-bottom:8px; font-size:24px; }
+    .audit-page .audit-question p { color:var(--muted); }
+    .audit-page .audit-question p:last-child { margin-bottom:0; }
+    .audit-page .verdict { display:grid; align-content:center; border-color:rgba(125,211,167,.35) !important; background:var(--green-wash) !important; }
+    .audit-page .verdict strong { display:block; color:var(--green); font-size:20px; }
+    .audit-page .object-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-top:18px; }
+    .audit-page .object-card { min-width:0; padding:15px; border:1px solid var(--line); border-radius:10px; background:var(--surface); }
+    .audit-page .object-card h3 { margin:9px 0 5px; font-size:17px; }
+    .audit-page .object-card > p { min-height:58px; margin-bottom:12px; color:var(--muted); font-size:12px; }
+    .audit-page .object-card .audit-link { color:var(--cyan-strong); font-size:12px; }
+    .audit-page .artifact { position:relative; min-height:164px; overflow:hidden; border:1px solid var(--line); border-radius:8px; background:#090e12; }
+    .audit-page .artifact::after { content:""; position:absolute; inset:0; pointer-events:none; background:linear-gradient(180deg,transparent 60%,rgba(0,0,0,.22)); }
+    .audit-page .timeline-artifact { display:grid; grid-template-rows:repeat(4,1fr); gap:9px; padding:15px 10px; }
+    .audit-page .timeline-artifact span { position:relative; display:block; border-left:2px solid var(--cyan); background:rgba(103,213,223,.12); }
+    .audit-page .timeline-artifact span:nth-child(2) { width:68%; margin-left:22%; border-color:var(--violet); background:rgba(190,164,255,.13); }
+    .audit-page .timeline-artifact span:nth-child(3) { width:54%; margin-left:38%; border-color:var(--blue); background:rgba(143,182,255,.13); }
+    .audit-page .timeline-artifact span:nth-child(4) { width:36%; margin-left:58%; border-color:var(--green); background:var(--green-wash); }
+    .audit-page .solve-artifact { display:grid; place-items:center; }
+    .audit-page .solve-artifact .field { position:relative; width:118px; height:118px; border:1px solid rgba(103,213,223,.22); border-radius:50%; background:radial-gradient(circle at 35% 38%,rgba(103,213,223,.18),transparent 22%),radial-gradient(ellipse at center,rgba(103,213,223,.12),transparent 66%); }
+    .audit-page .solve-artifact .target, .audit-page .solve-artifact .solved { position:absolute; width:26px; height:26px; border:2px solid var(--cyan); border-radius:50%; }
+    .audit-page .solve-artifact .target { top:37px; left:35px; }
+    .audit-page .solve-artifact .solved { top:58px; left:58px; border-color:var(--amber); }
+    .audit-page .solve-artifact .vector { position:absolute; top:64px; left:48px; width:48px; height:2px; transform:rotate(43deg); transform-origin:left; background:var(--amber); }
+    .audit-page .authority-artifact { display:grid; grid-template-rows:auto 1fr auto; gap:10px; padding:13px; }
+    .audit-page .authority-artifact .fact-row { display:grid; grid-template-columns:1fr 1.25fr .8fr; border:1px solid var(--line); border-radius:6px; }
+    .audit-page .authority-artifact .fact-row span { min-width:0; padding:6px; border-right:1px solid var(--line); color:var(--faint); font:9px var(--mono); text-transform:uppercase; }
+    .audit-page .authority-artifact .fact-row span:last-child { border-right:0; }
+    .audit-page .authority-artifact .run-orbit { display:grid; grid-template-columns:48px 1fr; gap:11px; align-items:center; padding:12px; border:1px solid var(--line); border-radius:7px; background:var(--surface-soft); }
+    .audit-page .authority-artifact .orbit { width:42px; height:42px; border:3px solid var(--cyan); border-radius:50%; }
+    .audit-page .authority-artifact .run-orbit b, .audit-page .authority-artifact .run-orbit small { display:block; }
+    .audit-page .authority-artifact .run-orbit small { color:var(--muted); font-size:10px; }
+    .audit-page .authority-artifact .trace { display:grid; gap:5px; }
+    .audit-page .authority-artifact .trace span { padding:5px 0; border-bottom:1px solid var(--line); color:var(--muted); font-size:10px; }
+    .audit-page .process-artifact { display:grid; grid-template-columns:58px 1fr; gap:0; }
+    .audit-page .process-artifact .steps { display:grid; align-content:start; gap:9px; padding:12px 8px; border-right:1px solid var(--line); background:#0d1419; }
+    .audit-page .process-artifact .steps span { display:block; width:16px; height:16px; border:1px solid var(--line); border-radius:50%; }
+    .audit-page .process-artifact .steps span:nth-child(-n+3) { border-color:var(--green); background:var(--green-wash); }
+    .audit-page .process-artifact .steps span:nth-child(4) { border-color:var(--cyan); background:var(--cyan-wash); }
+    .audit-page .process-artifact .canvas { position:relative; overflow:hidden; background:radial-gradient(ellipse at 48% 58%,rgba(103,213,223,.78) 0 5%,rgba(103,213,223,.16) 10%,transparent 28%),radial-gradient(ellipse at 62% 54%,rgba(190,164,255,.25) 0 3%,transparent 28%),#030507; }
+    .audit-page .process-artifact .canvas::before { content:""; position:absolute; inset:0; opacity:.7; background-image:radial-gradient(circle at 12% 22%,#fff 0 1px,transparent 1.5px),radial-gradient(circle at 77% 15%,#fff 0 1px,transparent 1.5px),radial-gradient(circle at 35% 76%,#fff 0 1px,transparent 1.5px),radial-gradient(circle at 84% 80%,#fff 0 1px,transparent 1.5px),radial-gradient(circle at 54% 35%,#fff 0 1px,transparent 1.5px); }
+    .audit-page .audit-table-wrap { margin-top:18px; border:1px solid var(--line); border-radius:10px; overflow:auto; }
+    .audit-page .audit-table { width:100%; border-collapse:collapse; min-width:760px; }
+    .audit-page .audit-table th, .audit-page .audit-table td { padding:13px 15px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    .audit-page .audit-table th { color:var(--faint); background:var(--surface-soft); font-size:10px; letter-spacing:.08em; text-transform:uppercase; }
+    .audit-page .audit-table td { color:var(--muted); font-size:12px; }
+    .audit-page .audit-table td strong { color:var(--text); }
+    .audit-page .audit-table tr:last-child td { border-bottom:0; }
+    .audit-page .finding-kind { display:inline-flex; padding:3px 7px; border:1px solid var(--line); border-radius:99px; font-size:10px; white-space:nowrap; }
+    .audit-page .finding-kind.presentation { color:var(--cyan); border-color:rgba(103,213,223,.3); background:var(--cyan-wash); }
+    .audit-page .finding-kind.conflict { color:var(--red); border-color:rgba(255,124,121,.35); background:var(--red-wash); }
+    .audit-page .finding-kind.open { color:var(--amber); border-color:rgba(243,187,98,.3); background:var(--amber-wash); }
+    .audit-page .swap-test { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:18px; }
+    .audit-page .swap-test section { padding:18px; border:1px solid var(--line); border-radius:10px; background:var(--surface); }
+    .audit-page .swap-test section:first-child { border-left:3px solid var(--green); }
+    .audit-page .swap-test section:last-child { border-left:3px solid var(--amber); }
+    .audit-page .swap-test h3 { margin-bottom:8px; font-size:17px; }
+    .audit-page .swap-test p { margin-bottom:0; color:var(--muted); }
+    .audit-page .next-lane { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:18px; }
+    .audit-page .next-lane article { position:relative; min-height:130px; padding:16px 16px 16px 48px; border-top:1px solid var(--line); background:linear-gradient(90deg,var(--surface-soft),transparent); }
+    .audit-page .next-lane article > span { position:absolute; top:15px; left:15px; color:var(--cyan); font:13px var(--mono); }
+    .audit-page .next-lane h3 { margin-bottom:5px; font-size:15px; }
+    .audit-page .next-lane p { margin-bottom:0; color:var(--muted); font-size:12px; }
+    @media (max-width:1120px) { .audit-page .object-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+    @media (max-width:780px) { .audit-page { padding-right:16px; padding-left:16px; } .audit-page .audit-intro, .audit-page .audit-question, .audit-page .swap-test, .audit-page .next-lane { grid-template-columns:1fr; } .audit-page .audit-intro { padding-top:20px; } .audit-page .object-grid { grid-template-columns:1fr; } .audit-page .object-card > p { min-height:0; } }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#audit">Skip to reference audit</a>
+  <div class="prototype-flag"><strong>Phase 0.5 review instrument</strong><span>Findings · not a replacement interaction model</span></div>
+  <header class="site-header">
+    <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">✦</span><span>Observatory V2<small>Reference audit</small></span></a>
+    <nav class="top-nav" aria-label="Reference navigation"><a href="../index.html">Archive</a><a href="../../convergence-roadmap.html">Roadmap</a><a aria-current="page" href="phase-0.5-reference-audit.html">Audit</a></nav>
+    <div class="header-meta"><span class="pill warning">Review in progress</span></div>
+  </header>
+
+  <main id="main" class="page audit-page">
+    <section class="audit-intro">
+      <div>
+        <p class="eyebrow">Phase 0.5 · frozen references under review</p>
+        <h1>Does V2 read as one authored observatory product?</h1>
+        <p class="lede">A cross-slice critique of the accepted references through product evidence, consequential state, and the native objects operators use to judge real work.</p>
+      </div>
+      <aside class="audit-callout" aria-label="Audit boundary"><strong>Read the result correctly.</strong><p>The references remain accepted. This audit separates strengths, presentation issues, narrow language conflicts, and open questions before any design system becomes authority.</p><small>Evidence: wide, compact, phone, recovery, stale authority, and stage-local failure.</small></aside>
+    </section>
+
+    <section id="audit" class="audit-question" aria-label="Audit question and current result">
+      <div><p class="eyebrow">The test</p><h2>Hide the logo. What still makes the work attributable to V2?</h2><p>The product should remain recognizable through an observing window, image-derived correction, accepted-run authority, and a visual editing session—not through dark surfaces, cyan accents, or rounded containment.</p></div>
+      <div class="verdict"><p class="eyebrow">Current reading</p><strong>The consequential work is authored.</strong><p>The remaining risk is a generic outer shell that arrives before the native working object and gives too many facts equal material treatment.</p></div>
+    </section>
+
+    <section class="section" aria-labelledby="native-title">
+      <div class="section-heading"><div><p class="eyebrow">Evidence, not costume</p><h2 id="native-title">Four native working objects</h2></div><p>Each successful slice leads with the thing an operator must judge—not a generic status dashboard.</p></div>
+      <div class="object-grid">
+        <article class="object-card"><div class="artifact timeline-artifact" aria-label="Illustration of the Plan observing-window timeline"><span></span><span></span><span></span><span></span></div><p class="eyebrow">Composite / Plan</p><h3>Observing-window timeline</h3><p>Target fit, darkness, capture duration, storage, and an active run stay legible as one time-bound commitment.</p><a class="audit-link" href="../../composite-prototype.html">Open accepted reference →</a></article>
+        <article class="object-card"><div class="artifact solve-artifact" aria-label="Illustration of a solve correction vector"><div class="field"><span class="target"></span><span class="solved"></span><span class="vector"></span></div></div><p class="eyebrow">Acquire</p><h3>Image-derived correction</h3><p>Desired versus solved center, uncertainty, attempt bound, and verification make the decision evidence-led.</p><a class="audit-link" href="../../acquire-prototype.html">Open accepted reference →</a></article>
+        <article class="object-card"><div class="artifact authority-artifact" aria-label="Illustration of current run, controller, and freshness"><div class="fact-row"><span>run</span><span>controller</span><span>freshness</span></div><div class="run-orbit"><span class="orbit"></span><span><b>Exposure in progress</b><small>Service-confirmed state</small></span></div><div class="trace"><span>Run started</span><span>Control restored</span><span>Late command rejected</span></div></div><p class="eyebrow">Run Authority</p><h3>Accepted run and lease trace</h3><p>Presence is not authority; freshness, controller, and rejected late work explain whether action can happen.</p><a class="audit-link" href="../../run-authority-prototype.html">Open accepted reference →</a></article>
+        <article class="object-card"><div class="artifact process-artifact" aria-label="Illustration of Process steps and image canvas"><div class="steps"><span></span><span></span><span></span><span></span><span></span></div><div class="canvas"></div></div><p class="eyebrow">Process</p><h3>Image canvas and linear history</h3><p>Preview, applied history, checkpoint, and stage-local retry stay adjacent to the image being judged.</p><a class="audit-link" href="../../process-prototype.html">Open accepted reference →</a></article>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="findings-title">
+      <div class="section-heading"><div><p class="eyebrow">Classified findings</p><h2 id="findings-title">What the review changes—and what it does not</h2></div><p>Presentation issues are not permission to redesign an accepted workflow. Language conflicts are narrow and evidence-backed.</p></div>
+      <div class="audit-table-wrap"><table class="audit-table"><thead><tr><th>Finding</th><th>Classification</th><th>Question carried forward</th></tr></thead><tbody>
+        <tr><td><strong>Study chrome competes with product projection</strong><br>Non-operational strip, hub navigation, gate question, scenario control, and evaluation note consume first-view attention.</td><td><span class="finding-kind presentation">Presentation</span></td><td>Review the production projection without prototype scaffolding before deriving shell rules.</td></tr>
+        <tr><td><strong>Outer containment is partly noun-swappable</strong><br>Rail, run bar, tabs, pills, and equal bordered panels could host another operations product until domain evidence appears.</td><td><span class="finding-kind presentation">Presentation</span></td><td>Which persistent shell elements express a real run, evidence, or attention object—and which are generic containment?</td></tr>
+        <tr><td><strong>Reconnect says “reconstruction complete”</strong><br>The accepted contract says the stale browser projection is atomically replaced by current service truth.</td><td><span class="finding-kind conflict">Language conflict</span></td><td>Resolve wording without changing snapshot-first reconnect behavior.</td></tr>
+        <tr><td><strong>Composite Process placeholder names a “Recipe”</strong><br>The later accepted Process model explicitly defers a first-class recipe.</td><td><span class="finding-kind conflict">Language conflict</span></td><td>Remove or relabel legacy placeholder language; preserve the accepted Process model.</td></tr>
+        <tr><td><strong>Compact Process comprehension is unproven</strong><br>Navigator, canvas, and moved-below context remain structurally present, but recovery comprehension has not been tested as one scan.</td><td><span class="finding-kind open">Open question</span></td><td>Walk a compact failure/recovery story before turning the composition into a general responsive rule.</td></tr>
+      </tbody></table></div>
+    </section>
+
+    <section class="section" aria-labelledby="swap-title">
+      <div class="section-heading"><div><p class="eyebrow">Authorship check</p><h2 id="swap-title">The noun-swap test</h2></div><p>AI-slop is an accumulated failure of product evidence and state completeness, not a palette or typography verdict.</p></div>
+      <div class="swap-test"><section><p class="eyebrow">Replacement fails</p><h3>The inner work remains V2-specific.</h3><p>Swap in a deployment or incident and the observing window, solve vector, image verification, exposure evidence, linear image history, and checkpoint retry stop making sense.</p></section><section><p class="eyebrow">Replacement still works</p><h3>The outer shell needs stronger product evidence.</h3><p>A dark rail, activity bar, tabbed inspector, pills, and bordered panels remain broadly transferable before the native object enters. Improve meaning and priority—not decorative astronomy motifs.</p></section></div>
+    </section>
+
+    <section class="section" aria-labelledby="next-title">
+      <div class="section-heading"><div><p class="eyebrow">Next bounded inquiry</p><h2 id="next-title">One shared comprehension walkthrough</h2></div><p>Record comprehension before preference. Do not start a component catalog.</p></div>
+      <div class="next-lane"><article><span>01</span><h3>Production projection</h3><p>Strip prototype apparatus and ask what is happening, what is current, and what evidence supports it.</p></article><article><span>02</span><h3>Protected recovery</h3><p>Walk storage recovery, exhausted Acquire, stale authority, and failed Stretch across the same persistent run truth.</p></article><article><span>03</span><h3>Only then synthesize</h3><p>Use selected evidence, resolved language, and explicit exceptions to revise the guide into an implementation authority.</p></article></div>
+    </section>
+  </main>
+
+  <footer class="prototype-footer">Phase 0.5 audit · <a href="../../../../docs/v2/archive/phase-0.5/phase-0.5-reference-audit.md">Decision record</a> · <a href="../index.html">Prototype archive</a></footer>
+</body>
+</html>

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A composite Astro Console V2 interface prototype combining validated UX preferences.">
+  <title>Composite · Phase 0.5 Clean Preview</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="phase-0.5-variant-shell.css?v=2">
+  <link rel="stylesheet" href="phase-0.5-preview-inner.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to composite prototype</a>
+    <header class="phase-anchor"><a class="phase-brand" href="index.html"><span aria-hidden="true">✦</span>Astro <b>Console</b></a><div class="phase-register"><span><strong>M31</strong> · active observatory run</span><span>Controller <strong>Chris</strong></span><span>Evidence age <strong>2 sec</strong></span></div><div class="phase-truth">SERVICE TRUTH</div></header><nav class="phase-nav" aria-label="Phase 1 workspace navigation"><a href="composite-prototype-phase-0.5-preview.html">Plan</a><a href="acquire-prototype-phase-0.5-preview.html">Observe</a><a href="composite-prototype-phase-0.5-preview.html">Library</a><a href="process-prototype-phase-0.5-preview.html">Process</a><span aria-current="page">Composite</span></nav>
+
+  <main id="main" class="page composite-page phase-0-5-application">
+    
+    <section class="composite-shell" aria-label="Composite observatory application prototype">
+      <nav class="composite-rail desktop-only" aria-label="Workspaces" data-composite-rail>
+        <div class="composite-rail-brand" aria-hidden="true">✦</div>
+        <button type="button" data-workspace="plan" aria-label="Plan workspace"><span aria-hidden="true">◇</span><span class="rail-label">Plan</span></button>
+        <button type="button" data-workspace="observe" aria-label="Observe workspace; active run"><span aria-hidden="true">◉</span><span class="rail-label">Observe</span><span class="rail-signal" aria-hidden="true"></span></button>
+        <button type="button" data-workspace="library" aria-label="Library workspace"><span aria-hidden="true">▧</span><span class="rail-label">Library</span></button>
+        <button type="button" data-workspace="process" aria-label="Process workspace"><span aria-hidden="true">⌁</span><span class="rail-label">Process</span></button>
+        <button class="rail-collapse" type="button" data-rail-toggle><span aria-hidden="true" data-rail-icon>«</span><span class="rail-label">Collapse</span></button>
+      </nav>
+
+      <div class="composite-main">
+        <header class="composite-runbar">
+          <div class="composite-run-title"><span class="status-dot"></span><span><strong>M27 · OIII capture</strong><small data-run-subtitle>Frame 14 of 24 · healthy · owner controls</small></span></div>
+          <div class="composite-run-progress"><span><small>Sequence</small><b>58%</b></span><div class="progress-track"><span style="--progress:58%"></span></div></div>
+          <div class="composite-run-actions desktop-only"><button class="button" type="button" data-inspect-run>Inspect run</button><button class="button" type="button" data-sim-action="Pause after current frame">Pause after frame</button><button class="button danger" type="button" data-sim-action="Stop and park">Stop…</button></div>
+        </header>
+        <div class="composite-escalation desktop-only" data-contextual-escalation hidden></div>
+        <section class="desktop-experience" data-workspace-content aria-live="polite"></section>
+        <section class="phone-monitor" data-phone-monitor aria-label="Read-only phone monitor"></section>
+        <p class="composite-feedback" data-feedback hidden role="status"></p>
+      </div>
+
+      <aside class="composite-context desktop-only" aria-label="Contextual information">
+        <div class="context-tabs" role="tablist" aria-label="Context rail">
+          <button type="button" role="tab" aria-controls="context-panel" data-context-tab="inspector">Inspector</button>
+          <button type="button" role="tab" aria-controls="context-panel" data-context-tab="alerts">Alerts <span data-alert-count></span></button>
+        </div>
+        <div id="context-panel" class="context-content" role="tabpanel" data-context-content></div>
+      </aside>
+    </section>
+
+      </main>
+
+  <script src="composite-prototype.js"></script>
+</body>
+</html>
