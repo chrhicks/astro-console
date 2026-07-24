@@ -33,6 +33,13 @@ Use `ui-validator` as the default subagent for desktop UI smoke validation and s
 - Give `ui-validator` the exact scenarios or UI states to validate, the evidence you want captured, and any specific DOM assertions or screenshots needed.
 - Keep implementation in the primary agent or `glm-coder`; `ui-validator` is for validation only and should not be used as the coding path.
 
+Use the `designer` subagent after every UI-affecting change in V2 or the web implementation.
+
+- Treat Designer review as a required validation gate, not a final-polish pass. Batch only tightly coupled UI edits into one reviewable slice, then re-run the review after fixes.
+- Give `designer` the affected routes/components, change classification, source projection or fixture, canonical owner/freshness/action state, exact walkthrough, and known limitations.
+- Require screenshot-backed evidence at wide desktop, compact desktop, and 390 px phone where applicable. The review must cover semantic truth, hierarchy, awkward states, responsive behavior, keyboard/accessibility, overflow, and console health.
+- `designer` is validation-only: it must report prioritized findings and never implement the fixes. P0/P1 findings block UI completion.
+
 ### Executor
 
 We try to use what is available in the`executor`  MCP when possible, its a way for you to programmatically interact with tools giving you consistent and reliable usage over something like CLI commands.

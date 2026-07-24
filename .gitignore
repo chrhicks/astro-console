@@ -40,5 +40,6 @@ prototype/*
 !prototype/v2-ui/
 !prototype/v2-ui/**
 .local/
+apps/v2-local-web/.astro-local-web/
 apps/desktop/*.tsbuildinfo
 .bak*

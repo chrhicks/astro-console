@@ -1,0 +1,12 @@
+{
+  "name": "@astro-console/v2-local-web",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "dependencies": { "effect": "file:../../packages/v2-contracts/node_modules/effect" },
+  "scripts": {
+    "build": "node --experimental-strip-types --check src/server.ts",
+    "dev": "node --experimental-strip-types src/server.ts",
+    "test": "node --experimental-strip-types --test src/server.integration.test.ts"
+  }
+}

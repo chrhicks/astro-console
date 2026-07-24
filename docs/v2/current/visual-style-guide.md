@@ -143,10 +143,11 @@ accepted interaction semantics. Use the [clean Phase 0.5 previews](../../../prot
 and [visual component companion](../../../prototype/v2-ui/phase-0.5-component-library.html)
 for applied visual language. Neither replaces product or contract authority.
 The separate [accepted brand foundation](../../../prototype/v2-ui/phase-0.5-brand-style-guide.html)
-extends this language to marketing and collateral: palette, type, material,
-voice, templates, accessibility, and the selected Alignment Aperture V1 mark
-are accepted. Its versioned symbol release, exports, and governance note live
-in [`prototype/v2-ui/assets/brand/v1/README.md`](../../../prototype/v2-ui/assets/brand/v1/README.md).
-It is not a production UI authority and does not by itself close Phase 0.5.
+is direct visual implementation and review authority for palette, type,
+material, voice, accessibility, and the selected Alignment Aperture V1 mark.
+Its versioned symbol release, exports, and governance note live in
+[`prototype/v2-ui/assets/brand/v1/README.md`](../../../prototype/v2-ui/assets/brand/v1/README.md).
+It does not alter product or semantic authority and does not by itself close
+Phase 0.5.
 The wordmark is currently an approved reference composition pending an outlined
 lettering release; future mark changes require versioned brand governance.
