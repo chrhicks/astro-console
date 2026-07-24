@@ -10,6 +10,14 @@ accepted read-only workspace projections and do not fold deferred Process
 mutations, device/session identity, or worker recovery semantics into a
 deployment shortcut.
 
+The first operational foundation is complete in the local-web fixture: numbered
+SQLite migrations preserve legacy local state, and liveness, admitted readiness,
+and owner-only operational health distinguish service/database truth from
+unknown rig and tunnel state. The Compose starter is non-activating. Live host
+configuration, pinned images, secret injection, migration backup/restore,
+rig discovery, Cloudflare Access/tunnel validation, storage monitoring, and
+R2 integration remain required before deployment.
+
 The first narrow implementation slice now exists at `apps/v2-local-web`: a
 Node 22 rig-local Plan-to-Observe M27 fixture with SQLite WAL, one canonical
 writer, decoded run acceptance, durable event/receipt/outbox records, and

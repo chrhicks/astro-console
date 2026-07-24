@@ -1,0 +1,7 @@
+# Copy outside the repository and set only non-secret release configuration.
+ASTRO_LOCAL_WEB_DB=/var/lib/astro-console/state.sqlite
+ASTRO_LOCAL_WEB_PORT=8080
+# Compose uses 0.0.0.0 only inside its private network; host publishes no port.
+ASTRO_LOCAL_WEB_BIND=0.0.0.0
+ASTRO_RELEASE=REPLACE_WITH_RELEASE
+# Cloudflare tunnel credentials and Access signing material are host-managed secrets.

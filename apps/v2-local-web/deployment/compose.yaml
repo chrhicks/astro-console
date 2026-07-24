@@ -1,0 +1,29 @@
+services:
+  origin:
+    image: ghcr.io/chicks/astro-console:REPLACE_WITH_PINNED_RELEASE
+    command: ["node", "--experimental-strip-types", "src/server.ts"]
+    env_file: config.env
+    environment:
+      ASTRO_LOCAL_WEB_BIND: 0.0.0.0
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    expose: ["8080"]
+    volumes:
+      - type: volume
+        source: astro_console_state
+        target: /var/lib/astro-console
+  cloudflared:
+    image: cloudflare/cloudflared:REPLACE_WITH_PINNED_RELEASE
+    command: ["tunnel", "--no-autoupdate", "run"]
+    depends_on: [origin]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    # Supply the tunnel credential through a host-managed secret at activation.
+
+volumes:
+  astro_console_state: {}

@@ -106,6 +106,12 @@ and switching do not alter an accepted run. Process Apply, Save, retry,
 discard, source switching, worker execution, and production recovery remain
 separate mutation and operations slices.
 
+The operational foundation now supplies explicit numbered SQLite migrations,
+bounded liveness/readiness/owner-health projections, and a non-activating
+origin/control plus cloudflared Compose starter. It does not establish a live
+host, Access policy, tunnel, backup restore, rig discovery, disk monitor, or
+R2/publisher path; those remain activation and production-validation work.
+
 ## Historical Planning
 
 The completed multi-phase roadmap and Phase 0.5 closeout rationale are in

@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite"
 import { generateKeyPairSync, sign } from "node:crypto"
 import * as Schema from "effect/Schema"
 import { AcquireSnapshot, RunSnapshot } from "../../../packages/v2-contracts/src/snapshots.ts"
-import { createCloudflareAccessAdmission, createLocalWebService } from "./server.ts"
+import { configuredListenHost, configuredListenPort, createCloudflareAccessAdmission, createLocalWebService } from "./server.ts"
 
 test("SQLite acceptance atomically persists run, event, receipt, and outbox", async (t) => {
   const service = createLocalWebService(join(mkdtempSync(join(tmpdir(), "astro-local-")), "state.sqlite"))
@@ -25,6 +25,37 @@ test("SQLite acceptance atomically persists run, event, receipt, and outbox", as
   const replay = await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify(command) })
   assert.equal(replay.status, 200)
   await listener.close(); service.close()
+})
+
+test("numbered SQLite migrations upgrade a legacy database and reject a newer schema", () => {
+  const databasePath = join(mkdtempSync(join(tmpdir(), "astro-migrations-")), "state.sqlite")
+  const legacy = new DatabaseSync(databasePath); legacy.exec("CREATE TABLE state (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE events (cursor INTEGER PRIMARY KEY,type TEXT NOT NULL,snapshot TEXT NOT NULL); CREATE TABLE receipts (idempotency_key TEXT PRIMARY KEY,response TEXT NOT NULL); CREATE TABLE outbox (id TEXT PRIMARY KEY,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL); CREATE TABLE control_requests (client_id TEXT PRIMARY KEY,person_id TEXT NOT NULL); CREATE TABLE memberships (external_subject TEXT PRIMARY KEY,person_id TEXT NOT NULL,role TEXT NOT NULL); CREATE TABLE library_assets (asset_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,role TEXT NOT NULL,format TEXT NOT NULL,availability TEXT NOT NULL,comparison_group_id TEXT NOT NULL,captured_at TEXT NOT NULL,updated_at TEXT NOT NULL,sharpness REAL NOT NULL,detail TEXT NOT NULL);"); legacy.close()
+  const service = createLocalWebService(databasePath)
+  assert.equal((service.database.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 3); assert.equal((service.database.prepare("SELECT count(*) AS count FROM workspace_projections").get() as { count: number }).count, 2); assert.equal((service.database.prepare("SELECT count(*) AS count FROM pragma_table_info('outbox') WHERE name='claim_token'").get() as { count: number }).count, 1)
+  service.close()
+  const newer = new DatabaseSync(databasePath); newer.prepare("INSERT INTO schema_migrations VALUES (?,?)").run(99, "2026-07-24T00:00:00.000Z"); newer.close()
+  assert.throws(() => createLocalWebService(databasePath), /newer than this release/)
+})
+
+test("configured listener keeps ephemeral loopback defaults and bounds production values", async (t) => {
+  assert.equal(configuredListenPort(undefined), 0); assert.equal(configuredListenPort("8080"), 8080); assert.equal(configuredListenHost(undefined), "127.0.0.1"); assert.equal(configuredListenHost("0.0.0.0"), "0.0.0.0")
+  assert.throws(() => configuredListenPort("65536"), /integer/); assert.throws(() => configuredListenHost("192.168.1.2"), /must be/)
+  const service = createLocalWebService(); const listener = await service.listen(0)
+  t.after(async () => { await listener.close(); service.close() })
+  assert.ok(listener.port > 0)
+})
+
+test("operational endpoints expose bounded admitted health without internal detail", async (t) => {
+  const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => { await listener.close(); service.close() })
+  assert.deepEqual(await fetch(`${base}/health/live`).then((response) => response.json()), { status: "alive" })
+  const ready = await fetch(`${base}/api/health/ready`).then((response) => response.json())
+  assert.deepEqual(ready, { status: "ready", service: "ready", database: "ready", rig: "unknown", tunnel: "unknown", activeRun: "none", message: "Service and local database are ready; rig and tunnel are not connected in this fixture." })
+  const operations = await fetch(`${base}/api/health/operations`).then((response) => response.json())
+  assert.equal(operations.release, "local-web-fixture"); assert.equal(operations.schemaVersion, 3); assert.equal(operations.sqlite.journalMode, "wal"); assert.equal(operations.rig, "unknown"); assert.equal(JSON.stringify(operations).includes("/"), false)
+  const denied = createLocalWebService(":memory:", () => ({ personId: "viewer", clientId: "viewer", capability: "readOnly" })); const deniedListener = await denied.listen()
+  assert.equal((await fetch(`http://127.0.0.1:${deniedListener.port}/api/health/operations`)).status, 403); assert.equal((await fetch(`http://127.0.0.1:${deniedListener.port}/api/health/ready`)).status, 200)
+  await deniedListener.close(); denied.close()
 })
 
 test("request-context admission rejects before snapshot, stream, query, or mutation routing", async (t) => {
