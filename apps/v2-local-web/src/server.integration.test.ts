@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite"
 import { generateKeyPairSync, sign } from "node:crypto"
 import * as Schema from "effect/Schema"
 import { AcquireSnapshot, RunSnapshot } from "../../../packages/v2-contracts/src/snapshots.ts"
-import { configuredListenHost, configuredListenPort, createCloudflareAccessAdmission, createLocalWebService } from "./server.ts"
+import { configuredListenHost, configuredListenPort, configuredRuntime, createCloudflareAccessAdmission, createLocalWebService } from "./server.ts"
 
 test("SQLite acceptance atomically persists run, event, receipt, and outbox", async (t) => {
   const service = createLocalWebService(join(mkdtempSync(join(tmpdir(), "astro-local-")), "state.sqlite"))
@@ -40,6 +40,7 @@ test("numbered SQLite migrations upgrade a legacy database and reject a newer sc
 test("configured listener keeps ephemeral loopback defaults and bounds production values", async (t) => {
   assert.equal(configuredListenPort(undefined), 0); assert.equal(configuredListenPort("8080"), 8080); assert.equal(configuredListenHost(undefined), "127.0.0.1"); assert.equal(configuredListenHost("0.0.0.0"), "0.0.0.0")
   assert.throws(() => configuredListenPort("65536"), /integer/); assert.throws(() => configuredListenHost("192.168.1.2"), /must be/)
+  assert.deepEqual(configuredRuntime({ ASTRO_LOCAL_WEB_DB: "/var/lib/astro-console/state.sqlite", ASTRO_LOCAL_WEB_PORT: "8080", ASTRO_LOCAL_WEB_BIND: "0.0.0.0", ASTRO_RELEASE: "2026.07.24" }), { databasePath: "/var/lib/astro-console/state.sqlite", release: "2026.07.24", port: 8080, host: "0.0.0.0" }); assert.throws(() => configuredRuntime({ ASTRO_RELEASE: "bad\nrelease" }), /invalid/)
   const service = createLocalWebService(); const listener = await service.listen(0)
   t.after(async () => { await listener.close(); service.close() })
   assert.ok(listener.port > 0)

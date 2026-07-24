@@ -112,6 +112,11 @@ origin/control plus cloudflared Compose starter. It does not establish a live
 host, Access policy, tunnel, backup restore, rig discovery, disk monitor, or
 R2/publisher path; those remain activation and production-validation work.
 
+Release packaging now includes a pinned Node base Dockerfile, startup
+non-secret configuration validation, and SQLite-safe backup/restore-source
+preflight. Host image build/pinning, secret injection, backup restore drill,
+and all live ingress or rig validation remain explicitly unperformed.
+
 ## Historical Planning
 
 The completed multi-phase roadmap and Phase 0.5 closeout rationale are in

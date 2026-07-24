@@ -18,6 +18,12 @@ configuration, pinned images, secret injection, migration backup/restore,
 rig discovery, Cloudflare Access/tunnel validation, storage monitoring, and
 R2 integration remain required before deployment.
 
+The repository now packages a reproducible Node image build, fail-closed
+non-secret runtime configuration, and SQLite `VACUUM INTO` backup/integrity
+preflight. These are packaged prerequisites only: no image has been built on
+the target host, no secret has been supplied, and no database restore, tunnel,
+or rig validation has been activated.
+
 The Arch-host preflight has now confirmed explicit live Alpaca endpoints for
 both rigs: ASI Mount plus Sony Mirrorless Camera at `192.168.4.104:11111`, and
 the Seestar S30 Camera/Focuser/FilterWheel/Telescope/Switch bridge at

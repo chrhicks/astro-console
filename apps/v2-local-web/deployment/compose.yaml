@@ -1,7 +1,9 @@
 services:
   origin:
+    build:
+      context: ../../..
+      dockerfile: apps/v2-local-web/deployment/Dockerfile
     image: ghcr.io/chicks/astro-console:REPLACE_WITH_PINNED_RELEASE
-    command: ["node", "--experimental-strip-types", "src/server.ts"]
     env_file: config.env
     environment:
       ASTRO_LOCAL_WEB_BIND: 0.0.0.0
