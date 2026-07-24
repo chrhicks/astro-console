@@ -125,6 +125,16 @@ removed or reduced under `prefers-reduced-motion`.
 
 ## Canonical Visual Evidence
 
+The operational visual reference is
+[`phase-0.5-component-library.html`](../../../prototype/v2-ui/phase-0.5-component-library.html).
+Implementation and review must inspect it directly for the shared status
+register, fact treatment, evidence surfaces, and workspace-native structures.
+The accepted brand/type/palette foundation and Alignment Aperture V1 mark are
+[`phase-0.5-brand-style-guide.html`](../../../prototype/v2-ui/phase-0.5-brand-style-guide.html)
+and its versioned [`brand V1 package`](../../../prototype/v2-ui/assets/brand/v1/README.md).
+Use those exact references rather than treating their visual language as a
+generic dark dashboard.
+
 Use the [Composite](../../../prototype/v2-ui/composite-prototype.html),
 [Acquire](../../../prototype/v2-ui/acquire-prototype.html),
 [Run Authority](../../../prototype/v2-ui/run-authority-prototype.html), and

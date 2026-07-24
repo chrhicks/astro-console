@@ -174,7 +174,7 @@ Phase 0.5 is complete only when:
 
 - [V2 UX and design guidance](../../ux-design-guidance.md)
 - [Current product specification](../../current/product-spec.md)
-- [Gate 7 walkthrough and decision log](../../current/gate-07-walkthrough.md)
+- [Gate 7 walkthrough and decision log](../phase-1-foundation/gate-07-walkthrough.md)
 - [Current delivery plan](../../current/delivery-plan.md)
 - [Accepted prototype hub](../../../../prototype/v2-ui/index.html)
 

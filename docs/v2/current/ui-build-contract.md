@@ -17,6 +17,14 @@ semantic presentation, and reusable implementation.
 5. Validate keyboard, phone monitor, overflow, freshness, and stale-action
    rejection before component extraction.
 
+For visual implementation and review, inspect the operational
+[`phase-0.5 component companion`](../../../prototype/v2-ui/phase-0.5-component-library.html)
+and the accepted [`brand foundation`](../../../prototype/v2-ui/phase-0.5-brand-style-guide.html)
+with its versioned [Alignment Aperture V1 assets](../../../prototype/v2-ui/assets/brand/v1/README.md).
+The companion establishes the run/controller/evidence/service-truth register;
+the brand foundation establishes the mark, deep-night/field-ink material,
+evidence cyan, typography, and mono fact language.
+
 ## Data-To-UI Mapping
 
 | Domain data | UI projection | Required presentation boundary |

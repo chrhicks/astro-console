@@ -1,7 +1,7 @@
 # V2 Prototype Plan
 
 > Archived discovery plan. Use the
-> [current convergence plan](../../current/convergence-plan.md) for active work.
+> [completed convergence plan](../phase-1-foundation/convergence-plan.md) for historical context.
 
 ## 1. Purpose
 

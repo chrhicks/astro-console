@@ -5,6 +5,12 @@ export const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 export const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
 export const NonNegativeNumber = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
 export const PositiveNumber = Schema.Finite.check(Schema.isGreaterThan(0))
+export const EpochMillis = NonNegativeInt.pipe(Schema.brand("EpochMillis"))
+export const Timestamp = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/))
+export const OccurredAt = Timestamp
+export const ObservedAt = Timestamp
+export const GeneratedAt = Timestamp
+export const ExpiresAt = Timestamp
 const revision = <const Name extends string>(name: Name) => NonNegativeInt.pipe(Schema.brand(name))
 
 export const ObservatoryId = id("ObservatoryId")
@@ -22,6 +28,8 @@ export const CheckpointId = id("CheckpointId")
 export const FindingId = id("FindingId")
 export const ProcessingOutputId = id("ProcessingOutputId")
 export const RepresentationId = id("RepresentationId")
+export const LibraryQueryId = id("LibraryQueryId")
+export const LibraryCursor = id("LibraryCursor")
 export const OperationId = id("OperationId")
 export const CommandId = id("CommandId")
 export const IdempotencyKey = id("IdempotencyKey")

@@ -49,6 +49,12 @@ These are hard requirements.
   atomic writes, checksums, and stable identifiers.
 - Serve the version-matched web client, API, event stream, previews, and
   explicitly requested downloads from one logical origin.
+- Derive a stable `PersonId`, membership, `ClientId`, and server-controlled
+  capability on every local ingress. A query parameter or caller-supplied
+  header never chooses owner, phone, or controller identity.
+- The service is the one canonical SQLite writer. Hardware, processing, and R2
+  workers claim outbox work and return correlated evidence; they never update
+  authoritative aggregates independently.
 - Publish separate liveness, readiness, and operational-health signals. A
   process may be alive while the rig, storage, clock, or tunnel is degraded.
 - Remain directly accessible and administrable on the home LAN during an
@@ -68,9 +74,22 @@ These are hard requirements.
   acceptable policies.
 - Translate authenticated identity into service-owned `owner` or `viewer`
   membership. `controller` remains a temporary lease, not an identity role.
-- Keep browser application, commands, events, and assets same-origin.
+- Keep browser application, commands, events, and product asset requests
+  same-origin. An authorized delivery may redirect to a short-lived scoped R2
+  URL; that deliberately different origin is a temporary bearer grant, not a
+  second product API.
 - Support WebSocket or SSE interruption; correctness comes from a fresh
   snapshot and cursor, not from an immortal connection.
+- Subscribe without a snapshot/listener race: install a snapshot with its
+  durable cursor, then catch up strictly after that cursor. Support
+  `Last-Event-ID` (or its WebSocket equivalent), heartbeat/stale detection,
+  bounded per-client queues with snapshot fallback, cursor-gap detection, and
+  bounded event retention. A gap, incompatible contract version, or exhausted
+  client queue disables mutations and requires a fresh snapshot.
+- Keep Library catalog pages and selected asset details outside reconnect
+  snapshots. The API accepts a bounded query/page request, returns a stable
+  query/version identity and next cursor, and reports catalog change rather
+  than silently mixing pages from different catalog versions.
 - Send metadata, telemetry, thumbnails, and bounded previews by default.
   Every asset class, including original FITS, requires an explicit action and
   authorization check; large local raws may be staged asynchronously to R2.
@@ -81,7 +100,7 @@ These are hard requirements.
 
 ## 5. Data And Storage Requirements
 
-Separate four data classes:
+Separate five data classes:
 
 | Class | Examples | Durability |
 | --- | --- | --- |
@@ -133,6 +152,9 @@ short-lived grants. Local-only originals stream directly from Arch on the LAN;
 remote requests reuse or create a temporary private R2 staging copy for
 resilient direct delivery from R2.
 
+Multiple related saved outputs may have the `final` artifact role. That role
+does not crown a single canonical winner.
+
 ## 6. Availability And Recovery Requirements
 
 - A single Arch host and single MiniPC are intentional. There is no
@@ -181,6 +203,10 @@ resilient direct delivery from R2.
 - Alerts distinguish “remote view unavailable” from “local observing at risk.”
 - Configuration has a checked schema and startup validation.
 - Migrations are explicit, backed up, and rollback-aware.
+- Version deployed command, snapshot, durable-event, and normalized-hash
+  contracts explicitly. Retain enough decoder/migration support to recover
+  stored records and receipts during a compatible upgrade; reject an
+  incompatible client or stream before it can mutate.
 - Release artifacts are reproducible and checksummed.
 - Routine operation requires no public remote shell. Administration is direct
   on the home LAN or physically at the Arch host.
@@ -207,3 +233,9 @@ demonstrated:
 9. Revoke a remote viewer and prove new HTTP, stream, and asset access fails.
 10. Attempt path traversal, direct driver access, unauthorized asset IDs, and
     oversized/expensive requests; none escape typed bounded interfaces.
+11. Exercise SQLite migrations and concurrent acceptance against the real
+    database; prove atomic aggregate/event/result/outbox commit, worker claim,
+    acknowledgement, lease expiry, retry, and crash recovery.
+12. Exercise two-phase filesystem artifact save and orphan cleanup; prove
+    ASCOM/Alpaca uncertain-outcome handling, R2 upload verification/expiry/
+    grant issuance, and snapshot/stream ordering across real reconnects.

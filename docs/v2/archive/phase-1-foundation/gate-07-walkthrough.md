@@ -27,7 +27,7 @@ keyboard Process comparison control. The browser screenshots reviewed during
 validation confirmed the wide Composite hierarchy, compact Process failure
 surface, and read-only phone Process monitor.
 
-Owner acceptance freezes the reference at [the accepted prototype hub](../../../prototype/v2-ui/index.html).
+Owner acceptance freezes the reference at [the accepted prototype hub](../../../../prototype/v2-ui/index.html).
 
 ## Coherent Operator Trace
 

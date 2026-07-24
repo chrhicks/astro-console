@@ -20,6 +20,8 @@ to override `docs/v2/current/`, accepted gate records, or the UX guidance.
 - [Phase 0.5 design-system archive](phase-0.5/README.md) — completed visual
   audits, bridge material, and closeout rationale; Phase 1 uses the current
   visual implementation authorities instead.
+- [Phase 1 foundation archive](phase-1-foundation/README.md) — completed
+  convergence planning, walkthrough, and solve-geometry evidence.
 
 Use these documents only to answer a specific question about earlier options,
 walkthroughs, or why a decision changed.

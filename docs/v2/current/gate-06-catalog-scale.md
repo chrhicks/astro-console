@@ -21,7 +21,7 @@ on selection rather than installed as an unbounded catalog payload.
 
 ## Measurement
 
-The [Gate 6 harness](../../../prototype/v2-ui/gate-06-catalog-scale.html)
+The [Gate 6 harness](../../../prototype/v2-ui/archive/gate-06/gate-06-catalog-scale.html)
 generated deterministic assets with representative review status, lineage,
 availability, capture facts, and synthetic preview placeholders. It used a
 double-`requestAnimationFrame` install-to-paint boundary; filter, render, and

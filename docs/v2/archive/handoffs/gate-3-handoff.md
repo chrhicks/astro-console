@@ -23,7 +23,7 @@ Gate 4 is the existing Process model gate: select the recipe, job,
 intermediate-artifact, comparison, provenance, and observing-priority
 interactions needed for the first processing slice. Its scope comes from the
 [prototype plan](../plans/prototype-plan.md) and
-[convergence roadmap](../../../../prototype/v2-ui/convergence-roadmap.html); this
+[convergence roadmap](../../../../prototype/v2-ui/archive/gate-06/convergence-roadmap.html); this
 handoff does not expand it.
 
 ## Accepted Context From Gates 1 And 2
@@ -154,7 +154,7 @@ Shared prototype navigation and presentation:
 
 - [Prototype hub](../../../../prototype/v2-ui/index.html)
 - [Prototype inventory](../../../../prototype/v2-ui/README.md)
-- [Convergence roadmap](../../../../prototype/v2-ui/convergence-roadmap.html)
+- [Convergence roadmap](../../../../prototype/v2-ui/archive/gate-06/convergence-roadmap.html)
 - [Shared prototype styles](../../../../prototype/v2-ui/styles.css)
 
 Durable project memory is tracked in Continuum. Task `tkt-2p2bhwgk` is

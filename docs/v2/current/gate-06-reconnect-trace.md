@@ -39,7 +39,7 @@ error.
 
 ## Method And Limits
 
-The [Gate 6 reconnect harness](../../../prototype/v2-ui/gate-06-reconnect-trace.html)
+The [Gate 6 reconnect harness](../../../prototype/v2-ui/archive/gate-06/gate-06-reconnect-trace.html)
 runs fixed, synchronous trace inputs. It exposes semantic connection and
 Process state alongside secondary snapshot/cursor/sequence/send diagnostics;
 browser automation checks the corresponding stable data attributes.

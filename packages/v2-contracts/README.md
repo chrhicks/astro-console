@@ -18,9 +18,12 @@ the legacy Electron application, transports, persistence, adapters, or UI.
 - one exhaustive policy entry for every command and a shared gate for
   authentication, membership, client capability, owner/controller authority,
   aggregate-specific freshness, and preclassified idempotent replay;
-- authoritative app and domain snapshot candidates with independent health
-  facts;
-- closed typed durable-event and projection-event unions;
+- complete Plan, Run, and Control snapshot candidates with independent health
+  facts, typed action availability, and validated timestamp primitives;
+- a bounded Library query/page/detail contract: reconnect snapshots carry only
+  Library summary and selected assets, never an unbounded catalog;
+- closed typed durable-event and projection-event unions, including one
+  non-empty cross-domain projection batch applied under one cursor/version;
 - deterministic event-cursor decisions: apply the next event, ignore a
   duplicate, or fetch a fresh snapshot on a gap;
 - idempotency receipts bound to actor, command tag, and normalized-input hash,
@@ -101,9 +104,12 @@ This is a contract harness, not a production API package yet.
 - Idempotency storage, normalized-input hashing, and recorded-result retrieval
   belong to the service implementation; this package defines and tests their
   observable contract.
-- HTTP routes, event transport, database layout, retention, and adapter payloads
-  remain intentionally undecided until the bounded Gate 6 spikes and service
-  implementation.
+- HTTP route names, database layout, retention values, and adapter payloads
+  remain intentionally undecided. The service implementation must provide
+  snapshot-then-catch-up transport with durable cursor resume, bounded client
+  backpressure, and snapshot fallback; real SQLite/outbox/filesystem/R2 and
+  transport ordering proofs are integration work, not claims made by this
+  deterministic harness.
 
 At launch, every person admitted by the explicit observatory membership
 allowlist may review and download every Library asset; there is no second

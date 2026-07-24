@@ -177,9 +177,9 @@ const downloadDecision = (candidate: LibraryAsset, accessPath: "lan" | "remote")
 const appSnapshot = (snapshotVersion = 10, eventCursor = 40) => decode(AppSnapshot, {
   observatoryId: "observatory-1", snapshotVersion, eventCursor, generatedAt: "2026-07-22T20:00:00Z",
   membership: { personId: "person-1", role: "owner", clientId: "client-1", capability: "controlCapable" },
-  control: { leaseId: "lease-1", revision: 4, state: "held", holderClientId: "client-1", pendingRequestCount: 0, actions: [{ _tag: "Available", action: "ReleaseControl" }] },
-  run: { runId: "run-1", revision: 12, sourcePlanId: "plan-1", phase: "capture", actions: [{ _tag: "Available", action: "PauseRun" }] },
-  processingSessions: [], assets: [], health: [{ subsystem: "service", state: "healthy", observedAt: "2026-07-22T20:00:00Z" }],
+  control: { leaseId: "lease-1", revision: 4, state: "held", holderClientId: "client-1", holderPersonId: "person-1", holderDeviceLabel: "Observatory desktop", pendingRequestCount: 0, pendingRequests: [], presence: [{ personId: "person-1", clientId: "client-1", deviceLabel: "Observatory desktop", observedAt: "2026-07-22T20:00:00Z" }], actions: [{ _tag: "Available", action: "ReleaseControl" }] },
+  run: { runId: "run-1", revision: 12, sourcePlanId: "plan-1", phase: "capture", completedSequenceCount: 0, acceptedMutations: [], warnings: [], lastConfirmedAt: "2026-07-22T20:00:00Z", actions: [{ _tag: "Available", action: "PauseRun" }] },
+  processingSessions: [], library: { assetCount: 0, selectedAssetIds: [], activeOperationIds: [] }, selectedAssets: [], health: [{ subsystem: "service", state: "healthy", observedAt: "2026-07-22T20:00:00Z" }],
 })
 const client = () => decode(ClientProjectionState, {
   connection: { _tag: "Current", lastConfirmedAt: "2026-07-22T20:00:00Z" },

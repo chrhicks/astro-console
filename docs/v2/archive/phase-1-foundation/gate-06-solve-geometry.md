@@ -43,7 +43,7 @@ to raise altitude 11.2′ and move azimuth left 14.6′.
 
 ## Method And Limits
 
-The [Gate 6 geometry harness](../../../prototype/v2-ui/gate-06-solve-geometry.html)
+The [Gate 6 geometry harness](../../../../prototype/v2-ui/archive/gate-06/gate-06-solve-geometry.html)
 uses the accepted 800×500 SVG/viewBox language and deterministic fixtures. It
 transforms expected and live marker coordinates with `getScreenCTM()`, checks
 the vector direction from measured to desired, measures live screen-rectangle

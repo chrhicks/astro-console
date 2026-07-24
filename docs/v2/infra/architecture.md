@@ -34,12 +34,13 @@ flowchart LR
     M <-->|Alpaca and bounded LAN protocols| C
     LB -->|Direct private-LAN origin| O
     O --> C
-    O --> W
+    C -->|claimed work| W
     C --> DB
     C --> FS
-    W --> DB
     W --> FS
-    W --> P
+    W -->|correlated completion evidence| C
+    C -->|claimed publication work| P
+    P -->|correlated publication evidence| C
     P --> R2
     T <-->|Outbound tunnel| CF
     T --> O
@@ -115,6 +116,9 @@ Processing is a separate service/process with:
 - memory and concurrency limits; and
 - crash/failure semantics that preserve sources and completed intermediates.
 
+It claims work from the control plane and returns correlated completion or
+failure evidence to that plane. It has no canonical SQLite write path.
+
 The service-owned resource policy may throttle or exceptionally pause
 processing only when measured CPU, memory, storage I/O/capacity, or thermal
 pressure threatens observing or host stability. An active run or exposure is
@@ -126,9 +130,11 @@ Start with a local SQLite database for canonical metadata and durable events.
 This matches a single-site, single-authority product and avoids operating a
 database server before needed. One command-acceptance transaction must commit
 the aggregate change, durable events, idempotency receipt and result, snapshot
-cursor/version, and queued outbox work together. Hardware, CLI, filesystem,
-R2, and other adapter work begins only after that commit. Worker completion or
-failure returns as correlated evidence in a later transaction.
+cursor/version, and queued outbox work together. The control plane is the one
+canonical SQLite writer. Hardware, CLI, filesystem, R2, and other adapter work
+begins only after that commit. Worker completion or failure returns as
+correlated evidence in a later transaction; workers never mutate canonical
+tables directly.
 
 Public aggregate revisions express product freshness. They are not required to
 change for every internal write: for example, pending control requests and
@@ -195,7 +201,9 @@ No reverse proxy, Access group, or browser flag can skip steps 3–6.
 3. Service returns a complete snapshot with `snapshotVersion` and
    `eventCursor`.
 4. Client atomically replaces canonical projection.
-5. Newer incremental events begin after the cursor.
+5. The transport catches up only after that cursor, with durable resume
+   (`Last-Event-ID` or equivalent), heartbeat/stale detection, bounded client
+   queues, and snapshot fallback on a cursor gap or queue overflow.
 
 Tunnel connection churn is therefore an availability event, not a consistency
 mechanism.
@@ -246,8 +254,8 @@ maintenance depend on Cloudflare Access.
 Use Docker Compose on the Arch host. The minimum topology is:
 
 - `astro-console`: web origin and observing control plane;
-- `processor`: lower-priority processing worker with no rig authority;
-- `publisher`: least-privilege R2 upload and publication verification;
+- `processor`: lower-priority processing worker with no rig or canonical-write authority;
+- `publisher`: least-privilege R2 upload and publication verification with no canonical-write authority;
 - `cloudflared`: outbound public connector; and
 - optional one-shot/timer containers for database-aware backup and maintenance.
 

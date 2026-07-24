@@ -3,12 +3,15 @@ import { describe, it } from "node:test"
 import { Result, Schema } from "effect"
 import {
   AppSnapshot,
+  ActionAvailability,
   Command,
   CommandEnvelope,
   DomainEvent,
   DomainEventEnvelope,
   EventCursorDecision,
   IncrementalProjectionEvent,
+  LibraryPage,
+  LibraryQuery,
   ProjectionNoticeEnvelope,
   acceptedCommandTags,
   commandFailureFamilies,
@@ -139,10 +142,11 @@ describe("Gate 5 contract foundation", () => {
       eventCursor: 40,
       generatedAt: "2026-07-22T20:00:00Z",
       membership: { personId: "person-1", role: "owner", clientId: "client-1", capability: "controlCapable" },
-      control: { leaseId: "lease-1", revision: 2, state: "held", holderClientId: "client-1", pendingRequestCount: 0, actions: [] },
-      run: { runId: "run-1", revision: 4, sourcePlanId: "plan-1", phase: "capture", actions: [] },
+      control: { leaseId: "lease-1", revision: 2, state: "held", holderClientId: "client-1", holderPersonId: "person-1", holderDeviceLabel: "Observatory desktop", pendingRequestCount: 0, pendingRequests: [], presence: [{ personId: "person-1", clientId: "client-1", deviceLabel: "Observatory desktop", observedAt: "2026-07-22T20:00:00Z" }], actions: [] },
+      run: { runId: "run-1", revision: 4, sourcePlanId: "plan-1", phase: "capture", completedSequenceCount: 0, acceptedMutations: [], warnings: [], lastConfirmedAt: "2026-07-22T20:00:00Z", actions: [] },
       processingSessions: [],
-      assets: [],
+      library: { assetCount: 0, selectedAssetIds: [], activeOperationIds: [] },
+      selectedAssets: [],
       health: [
         { subsystem: "service", state: "healthy", observedAt: "2026-07-22T20:00:00Z" },
         { subsystem: "tunnel", state: "unavailable", observedAt: "2026-07-22T19:59:58Z", reason: "cloudflared disconnected" },
@@ -150,6 +154,44 @@ describe("Gate 5 contract foundation", () => {
     })
     assert.equal(snapshot.run?.phase, "capture")
     assert.equal(snapshot.health[1]?.subsystem, "tunnel")
+  })
+
+  it("keeps Library pages bounded and details outside the reconnect snapshot", () => {
+    const query = Schema.decodeUnknownSync(LibraryQuery)({
+      queryId: "library-query-1",
+      pageSize: 100,
+      sort: "recentlyUpdated",
+    })
+    const page = Schema.decodeUnknownSync(LibraryPage)({
+      queryId: query.queryId,
+      querySnapshotVersion: 10,
+      results: [{
+        assetId: "asset-1", revision: 2, role: "final", format: "fits",
+        availability: "published", comparisonGroupId: "m27",
+      }],
+      nextCursor: "cursor-2",
+      catalogChanged: false,
+    })
+    assert.equal(page.results[0]?.assetId, "asset-1")
+    assert.equal(Schema.decodeUnknownResult(LibraryQuery)({
+      queryId: "library-query-too-large", pageSize: 101, sort: "recentlyUpdated",
+    })._tag, "Failure")
+  })
+
+  it("keeps projected action explanations typed and actionable", () => {
+    const availability = Schema.decodeUnknownSync(ActionAvailability)({
+      _tag: "Unavailable",
+      action: "PauseRun",
+      reason: "SafetyInterlock",
+      safeNextActions: ["StopRun"],
+      blockingSubsystem: "rig",
+      refreshRequired: true,
+    })
+    assert.equal(ActionAvailability.guards.Unavailable(availability), true)
+    if (ActionAvailability.guards.Unavailable(availability)) assert.equal(availability.reason, "SafetyInterlock")
+    assert.equal(Schema.decodeUnknownResult(ActionAvailability)({
+      _tag: "Unavailable", action: "PauseRun", reason: "arbitrary", safeNextActions: [],
+    })._tag, "Failure")
   })
 
   it("applies only the next event cursor and refreshes on a gap", () => {

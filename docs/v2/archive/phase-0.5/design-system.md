@@ -656,7 +656,7 @@ limitation, visual trend, or desire for uniformity is not sufficient.
 
 - [V2 product specification](../../current/product-spec.md)
 - [V2 UX and design guidance](../../ux-design-guidance.md)
-- [Gate 7 walkthrough and decision log](../../current/gate-07-walkthrough.md)
+- [Gate 7 walkthrough and decision log](../phase-1-foundation/gate-07-walkthrough.md)
 - [Accepted prototype hub](../../../../prototype/v2-ui/index.html)
 - [Phase 0.5 brief](phase-0.5-design-system-brief.md)
 - [Phase 0.5 reference audit](phase-0.5-reference-audit.md)

@@ -18,16 +18,22 @@ import {
   AssetRevision,
   ClientCapability,
   ClientId,
+  ExpiresAt,
   EventCursor,
+  GeneratedAt,
   LeaseId,
   LeaseRevision,
+  LibraryCursor,
+  LibraryQueryId,
   MembershipRole,
   NonNegativeInt,
+  ObservedAt,
   ObservatoryId,
   OperationId,
   PersonId,
   PlanId,
   PlanRevision,
+  PositiveInt,
   ProcessingRevision,
   ProcessingSessionId,
   ProcessingOutputId,
@@ -38,10 +44,30 @@ import {
   SnapshotVersion,
 } from "./primitives.js"
 
+export const ActionAvailabilityReason = Schema.Literals([
+  "ApprovalRequired",
+  "ClientReadOnly",
+  "ConnectionStale",
+  "FreshnessConflict",
+  "LeaseRequired",
+  "OperationInProgress",
+  "PreconditionUnavailable",
+  "ResourceUnavailable",
+  "SafetyInterlock",
+])
+
+const ActionAvailabilityDetails = {
+  reason: ActionAvailabilityReason,
+  safeNextActions: Schema.Array(CommandTag),
+  blockingSubsystem: Schema.optionalKey(Schema.Literals(["service", "rig", "tunnel", "processing", "publication", "storage"])),
+  expiresAt: Schema.optionalKey(ExpiresAt),
+  refreshRequired: Schema.optionalKey(Schema.Boolean),
+}
+
 export const ActionAvailability = Schema.TaggedUnion({
   Available: { action: CommandTag },
-  Unavailable: { action: CommandTag, reason: Schema.NonEmptyString },
-  RequiresApproval: { action: CommandTag, reason: Schema.NonEmptyString },
+  Unavailable: { action: CommandTag, ...ActionAvailabilityDetails },
+  RequiresApproval: { action: CommandTag, ...ActionAvailabilityDetails },
 })
 
 export const MembershipSnapshot = Schema.Struct({
@@ -56,6 +82,13 @@ export const PlanSnapshot = Schema.Struct({
   revision: PlanRevision,
   sequenceCount: NonNegativeInt,
   validation: Schema.Literals(["unvalidated", "ready", "readyWithLimitations", "blocked"]),
+  sequences: Schema.Array(Schema.Struct({
+    sequenceId: Schema.NonEmptyString,
+    targetName: Schema.NonEmptyString,
+    state: Schema.Literals(["pending", "active", "completed", "skipped", "blocked"]),
+  })),
+  limitations: Schema.Array(Schema.NonEmptyString),
+  startConditions: Schema.Array(Schema.NonEmptyString),
   actions: Schema.Array(ActionAvailability),
 })
 
@@ -105,6 +138,15 @@ export const RunSnapshot = Schema.Struct({
   revision: RunRevision,
   sourcePlanId: PlanId,
   phase: Schema.Literals(["preflight", "acquire", "capture", "verify", "recover", "paused", "completed", "failed", "stopped"]),
+  currentTarget: Schema.optionalKey(Schema.NonEmptyString),
+  completedSequenceCount: NonNegativeInt,
+  estimatedCompletionAt: Schema.optionalKey(ExpiresAt),
+  acceptedMutations: Schema.Array(Schema.Struct({
+    mutationId: Schema.NonEmptyString,
+    summary: Schema.NonEmptyString,
+  })),
+  warnings: Schema.Array(Schema.NonEmptyString),
+  lastConfirmedAt: ObservedAt,
   acquire: Schema.optionalKey(AcquireSnapshot),
   actions: Schema.Array(ActionAvailability),
 })
@@ -114,8 +156,23 @@ export const ControlSnapshot = Schema.Struct({
   revision: LeaseRevision,
   state: Schema.Literals(["available", "held", "reconnecting"]),
   holderClientId: Schema.optionalKey(ClientId),
-  reconnectGraceDeadline: Schema.optionalKey(Schema.NonEmptyString),
+  holderPersonId: Schema.optionalKey(PersonId),
+  holderDeviceLabel: Schema.optionalKey(Schema.NonEmptyString),
+  reconnectGraceDeadline: Schema.optionalKey(ExpiresAt),
   pendingRequestCount: NonNegativeInt,
+  pendingRequests: Schema.Array(Schema.Struct({
+    requestId: Schema.NonEmptyString,
+    personId: PersonId,
+    clientId: ClientId,
+    deviceLabel: Schema.NonEmptyString,
+    requestedAt: ObservedAt,
+  })),
+  presence: Schema.Array(Schema.Struct({
+    personId: PersonId,
+    clientId: ClientId,
+    deviceLabel: Schema.NonEmptyString,
+    observedAt: ObservedAt,
+  })),
   actions: Schema.Array(ActionAvailability),
 })
 
@@ -151,7 +208,7 @@ export const AssetRepresentationSnapshot = Schema.Struct({
   format: Schema.Literals(["cameraRaw", "fits", "tiff", "png", "jpeg"]),
   operationId: Schema.optionalKey(OperationId),
   purpose: Schema.optionalKey(Schema.Literals(["remoteDownload", "republication"])),
-  expiresAt: Schema.optionalKey(Schema.NonEmptyString),
+  expiresAt: Schema.optionalKey(ExpiresAt),
   diagnosticRef: Schema.optionalKey(Schema.NonEmptyString),
 })
 
@@ -173,10 +230,37 @@ export const AssetSnapshot = Schema.Struct({
   actions: Schema.Array(ActionAvailability),
 })
 
+export const LibraryQuery = Schema.Struct({
+  queryId: LibraryQueryId,
+  cursor: Schema.optionalKey(LibraryCursor),
+  pageSize: PositiveInt.check(Schema.isLessThanOrEqualTo(100)),
+  role: Schema.optionalKey(AssetSnapshot.fields.role),
+  sort: Schema.Literals(["capturedAtDescending", "sharpestFirst", "recentlyUpdated"]),
+})
+
+export const LibraryAssetSummary = Schema.Struct({
+  assetId: AssetId,
+  revision: AssetRevision,
+  role: AssetSnapshot.fields.role,
+  format: AssetSnapshot.fields.format,
+  availability: AssetSnapshot.fields.availability,
+  comparisonGroupId: Schema.NonEmptyString,
+})
+
+export const LibraryPage = Schema.Struct({
+  queryId: LibraryQueryId,
+  querySnapshotVersion: SnapshotVersion,
+  results: Schema.Array(LibraryAssetSummary),
+  nextCursor: Schema.optionalKey(LibraryCursor),
+  catalogChanged: Schema.Boolean,
+})
+
+export const AssetDetail = AssetSnapshot
+
 export const SubsystemHealth = Schema.Struct({
   subsystem: Schema.Literals(["service", "rig", "tunnel", "processing", "publication", "storage"]),
   state: Schema.Literals(["healthy", "degraded", "unavailable", "stale"]),
-  observedAt: Schema.NonEmptyString,
+  observedAt: ObservedAt,
   reason: Schema.optionalKey(Schema.NonEmptyString),
 })
 
@@ -184,13 +268,18 @@ export const AppSnapshot = Schema.Struct({
   observatoryId: ObservatoryId,
   snapshotVersion: SnapshotVersion,
   eventCursor: EventCursor,
-  generatedAt: Schema.NonEmptyString,
+  generatedAt: GeneratedAt,
   membership: MembershipSnapshot,
   control: ControlSnapshot,
   plan: Schema.optionalKey(PlanSnapshot),
   run: Schema.optionalKey(RunSnapshot),
   processingSessions: Schema.Array(ProcessingSessionSnapshot),
-  assets: Schema.Array(AssetSnapshot),
+  library: Schema.Struct({
+    assetCount: NonNegativeInt,
+    selectedAssetIds: Schema.Array(AssetId),
+    activeOperationIds: Schema.Array(OperationId),
+  }),
+  selectedAssets: Schema.Array(AssetSnapshot),
   health: Schema.Array(SubsystemHealth),
 })
 

@@ -7,6 +7,7 @@ import {
   CommandId,
   EventCursor,
   FindingId,
+  GeneratedAt,
   NonNegativeInt,
   NonNegativeNumber,
   OperationId,
@@ -17,6 +18,7 @@ import {
   RepresentationId,
   RunId,
   SnapshotVersion,
+  ObservedAt,
 } from "./primitives.js"
 import {
   AssetSnapshot,
@@ -205,42 +207,54 @@ function aggregate(kind: typeof AggregateKind.Type, id?: string): ExpectedAggreg
   return id === undefined ? { kind } : { kind, id }
 }
 
+export const ProjectionChange = Schema.TaggedUnion({
+  ProcessingSessions: { processingSessions: Schema.Array(ProcessingSessionSnapshot) },
+  SelectedAssets: { selectedAssets: Schema.Array(AssetSnapshot) },
+  Health: { health: Schema.Array(SubsystemHealth) },
+})
+
 export const IncrementalProjectionEvent = Schema.TaggedUnion({
   ControlProjected: {
     eventCursor: EventCursor,
     snapshotVersion: SnapshotVersion,
-    generatedAt: Schema.NonEmptyString,
+    generatedAt: GeneratedAt,
     control: ControlSnapshot,
   },
   PlanProjected: {
     eventCursor: EventCursor,
     snapshotVersion: SnapshotVersion,
-    generatedAt: Schema.NonEmptyString,
+    generatedAt: GeneratedAt,
     plan: Schema.NullOr(PlanSnapshot),
   },
   RunProjected: {
     eventCursor: EventCursor,
     snapshotVersion: SnapshotVersion,
-    generatedAt: Schema.NonEmptyString,
+    generatedAt: GeneratedAt,
     run: Schema.NullOr(RunSnapshot),
   },
   ProcessingProjected: {
     eventCursor: EventCursor,
     snapshotVersion: SnapshotVersion,
-    generatedAt: Schema.NonEmptyString,
+    generatedAt: GeneratedAt,
     processingSessions: Schema.Array(ProcessingSessionSnapshot),
   },
   AssetsProjected: {
     eventCursor: EventCursor,
     snapshotVersion: SnapshotVersion,
-    generatedAt: Schema.NonEmptyString,
-    assets: Schema.Array(AssetSnapshot),
+    generatedAt: GeneratedAt,
+    selectedAssets: Schema.Array(AssetSnapshot),
   },
   HealthProjected: {
     eventCursor: EventCursor,
     snapshotVersion: SnapshotVersion,
-    generatedAt: Schema.NonEmptyString,
+    generatedAt: GeneratedAt,
     health: Schema.Array(SubsystemHealth),
+  },
+  ProjectionBatch: {
+    eventCursor: EventCursor,
+    snapshotVersion: SnapshotVersion,
+    generatedAt: GeneratedAt,
+    changes: Schema.NonEmptyArray(ProjectionChange),
   },
 })
 
@@ -260,7 +274,7 @@ export const ProjectionNotice = Schema.TaggedUnion({
 })
 
 export const ProjectionNoticeEnvelope = Schema.Struct({
-  observedAt: Schema.NonEmptyString,
+  observedAt: ObservedAt,
   notice: ProjectionNotice,
 })
 

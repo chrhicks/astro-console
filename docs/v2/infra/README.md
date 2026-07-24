@@ -1,12 +1,12 @@
 # V2 Infrastructure Plan
 
-Status: proposed infrastructure direction; no implementation has begun
+Status: selected infrastructure direction; Phase 1 local-web implementation is underway
 
 Captured: July 21, 2026
 
 This plan explains how the accepted V2 product model can run as a durable
 personal observatory service. It began after Gate 3 and now incorporates the
-infrastructure-facing decisions accepted in Gate 4 without making deployment
+infrastructure-facing decisions accepted through Gate 5 without making deployment
 mechanics the organizing model of the Process workspace.
 
 For deployment questions, this directory is the current infrastructure
@@ -66,7 +66,7 @@ nameservers.
 - [Research sources](research.md) records the current external documentation
   used for the service comparison.
 
-## Invariants Inherited From Gates 1–4
+## Invariants Inherited From Gates 1–5
 
 Infrastructure must preserve the accepted product semantics:
 
@@ -95,5 +95,5 @@ Infrastructure must preserve the accepted product semantics:
 The topology decision is strong enough to guide contract and deployment
 spikes. It is not yet an installation specification. Remaining measurements
 include MiniPC addresses and exposed Alpaca devices, container network behavior
-for discovery, storage performance, and validation of the proposed retention
+for discovery, storage performance, and validation of the selected retention
 windows.

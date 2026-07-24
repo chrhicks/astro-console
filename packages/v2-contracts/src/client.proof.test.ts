@@ -40,14 +40,18 @@ const snapshot = (
   membership: { personId: "owner-1", role: "owner", clientId: "desktop-1", capability: "controlCapable" },
   control: {
     leaseId: "lease-1", revision: 4, state: "held", holderClientId: "desktop-1", pendingRequestCount: 0,
+    holderPersonId: "owner-1", holderDeviceLabel: "Observatory desktop", pendingRequests: [],
+    presence: [{ personId: "owner-1", clientId: "desktop-1", deviceLabel: "Observatory desktop", observedAt: generatedAt }],
     actions: [{ _tag: "Available", action: "ReleaseControl" }],
   },
   plan: {
     planId: "plan-1", revision: 3, sequenceCount: 2, validation: "ready",
+    sequences: [{ sequenceId: "m27", targetName: "M27", state: "active" }], limitations: [], startConditions: [],
     actions: [{ _tag: "Available", action: "StartRunFromPlan" }],
   },
   run: {
     runId: "run-1", revision: 12, sourcePlanId: "plan-1", phase: "capture",
+    completedSequenceCount: 0, acceptedMutations: [], warnings: [], lastConfirmedAt: generatedAt,
     actions: [{ _tag: "Available", action: "PauseRun" }],
   },
   processingSessions: [{
@@ -57,7 +61,8 @@ const snapshot = (
     assistantFindings: [], savedAssetIds: [],
     actions: [{ _tag: "Available", action: "SaveProcessingArtifacts" }],
   }],
-  assets: [{
+  library: { assetCount: 1, selectedAssetIds: ["asset-source"], activeOperationIds: [] },
+  selectedAssets: [{
     assetId: "asset-source", revision: 2, role: "original", format: "cameraRaw", checksum: "sha256:source",
     localAvailable: true, comparisonGroupId: "capture-session-1", sourceAssetIds: ["asset-source"], operationIds: [],
     availability: "availableLocally", representationCount: 1,
@@ -85,6 +90,7 @@ const runProjected = (
   generatedAt: `2026-07-22T20:00:${eventCursor}Z`,
   run: {
     runId: RunId.make("run-1"), revision: RunRevision.make(snapshotVersion), sourcePlanId: decode(Schema.NonEmptyString.pipe(Schema.brand("PlanId")), "plan-1"), phase,
+    completedSequenceCount: 0, acceptedMutations: [], warnings: [], lastConfirmedAt: `2026-07-22T20:00:${eventCursor}Z`,
     actions: [{ _tag: "Available", action: "PauseRun" }],
   },
 })
@@ -123,9 +129,10 @@ describe("client and phone server proofs", () => {
     const disconnected = markClientDisconnected(client(), "2026-07-22T20:00:05Z")
     const fresh = decode(AppSnapshot, {
       ...snapshot(12, 52, "2026-07-22T20:05:00Z"),
-      run: { runId: "run-1", revision: 14, sourcePlanId: "plan-1", phase: "verify", actions: [] },
+      run: { runId: "run-1", revision: 14, sourcePlanId: "plan-1", phase: "verify", completedSequenceCount: 0, acceptedMutations: [], warnings: [], lastConfirmedAt: "2026-07-22T20:05:00Z", actions: [] },
       processingSessions: [],
-      assets: [],
+      library: { assetCount: 0, selectedAssetIds: [], activeOperationIds: [] },
+      selectedAssets: [],
       health: [{ subsystem: "service", state: "healthy", observedAt: "2026-07-22T20:05:00Z" }],
     })
     const reconnected = installAuthoritativeSnapshot(disconnected, fresh, [
@@ -137,7 +144,7 @@ describe("client and phone server proofs", () => {
     assert.deepEqual(reconnected.snapshot, fresh)
     assert.deepEqual(reconnected.changesWhileAway, ["Run entered Verify", "Processing session completed elsewhere"])
     assert.equal(reconnected.snapshot.processingSessions.length, 0)
-    assert.equal(reconnected.snapshot.assets.length, 0)
+    assert.equal(reconnected.snapshot.selectedAssets.length, 0)
 
     const next = IncrementalProjectionEvent.cases.HealthProjected.make({
       eventCursor: EventCursor.make(53),
@@ -200,6 +207,29 @@ describe("client and phone server proofs", () => {
     }
   })
 
+  it("applies a non-empty cross-domain projection batch as one cursor advance", () => {
+    const current = client()
+    const batch = IncrementalProjectionEvent.cases.ProjectionBatch.make({
+      eventCursor: EventCursor.make(41),
+      snapshotVersion: SnapshotVersion.make(11),
+      generatedAt: "2026-07-22T20:00:41Z",
+      changes: [
+        { _tag: "ProcessingSessions", processingSessions: [] },
+        { _tag: "SelectedAssets", selectedAssets: [] },
+      ],
+    })
+    const applied = receiveIncrementalEvent(current, batch)
+    assert.equal(IncrementalEventDecision.$is("Applied")(applied), true)
+    if (!IncrementalEventDecision.$is("Applied")(applied)) return
+    assert.equal(applied.state.snapshot.eventCursor, 41)
+    assert.deepEqual(applied.state.snapshot.processingSessions, [])
+    assert.deepEqual(applied.state.snapshot.selectedAssets, [])
+    assert.equal(Schema.decodeUnknownResult(IncrementalProjectionEvent)({
+      ...batch,
+      changes: [],
+    })._tag, "Failure")
+  })
+
   it("PHONE-01 shares canonical truth while server projection and authority disable each desktop-only action", () => {
     const canonical = snapshot()
     const desktop = projectSnapshotForClient(canonical, canonical.membership)
@@ -216,7 +246,7 @@ describe("client and phone server proofs", () => {
     assert.equal(phone.plan?.actions[0]?._tag, "Unavailable")
     assert.equal(phone.run?.actions[0]?._tag, "Unavailable")
     assert.equal(phone.processingSessions[0]?.actions[0]?._tag, "Unavailable")
-    assert.equal(phone.assets[0]?.actions[0]?._tag, "Available")
+    assert.equal(phone.selectedAssets[0]?.actions[0]?._tag, "Available")
 
     const phoneClient = client(phone)
     assert.equal(ClientCommandDecision.$is("DoNotSend")(decideClientCommand(phoneClient, "PauseRun")), true)

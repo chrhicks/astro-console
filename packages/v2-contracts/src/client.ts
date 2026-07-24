@@ -1,6 +1,6 @@
 import { Data, Schema } from "effect"
 import { CommandTag } from "./commands.js"
-import { IncrementalProjectionEvent, decideEventCursor, EventCursorDecision } from "./events.js"
+import { IncrementalProjectionEvent, ProjectionChange, decideEventCursor, EventCursorDecision } from "./events.js"
 import { commandPolicies } from "./gate.js"
 import { ClientCapability, RunId } from "./primitives.js"
 import {
@@ -126,7 +126,7 @@ export const projectSnapshotForClient = (
     ...session,
     actions: projectActions(session.actions, membership.capability),
   })),
-  assets: canonical.assets.map((asset) => AssetSnapshot.make({
+  selectedAssets: canonical.selectedAssets.map((asset) => AssetSnapshot.make({
     ...asset,
     actions: projectActions(asset.actions, membership.capability),
   })),
@@ -170,7 +170,14 @@ function applyIncrementalEvent(
       ? withoutRun(state.snapshot, common)
       : AppSnapshot.make({ ...state.snapshot, ...common, run }),
     ProcessingProjected: ({ processingSessions }) => AppSnapshot.make({ ...state.snapshot, ...common, processingSessions }),
-    AssetsProjected: ({ assets }) => AppSnapshot.make({ ...state.snapshot, ...common, assets }),
+    AssetsProjected: ({ selectedAssets }) => AppSnapshot.make({ ...state.snapshot, ...common, selectedAssets }),
+    ProjectionBatch: ({ changes }) => changes.reduce((snapshot, change) =>
+      ProjectionChange.match(change, {
+        ProcessingSessions: ({ processingSessions }) => AppSnapshot.make({ ...snapshot, processingSessions }),
+        SelectedAssets: ({ selectedAssets }) => AppSnapshot.make({ ...snapshot, selectedAssets }),
+        Health: ({ health }) => AppSnapshot.make({ ...snapshot, health }),
+      }),
+    AppSnapshot.make({ ...state.snapshot, ...common })),
     HealthProjected: ({ health }) => AppSnapshot.make({ ...state.snapshot, ...common, health }),
   })
   return ClientProjectionState.make({
@@ -201,10 +208,10 @@ function projectActions(
   if (capability === "controlCapable") return actions
   return actions.map((availability) => ActionAvailability.match(availability, {
     Available: ({ action }) => commandPolicies[action].requiresDesktop
-      ? ActionAvailability.cases.Unavailable.make({ action, reason: "ClientReadOnly" })
+      ? ActionAvailability.cases.Unavailable.make({ action, reason: "ClientReadOnly", safeNextActions: [] })
       : availability,
     RequiresApproval: ({ action }) => commandPolicies[action].requiresDesktop
-      ? ActionAvailability.cases.Unavailable.make({ action, reason: "ClientReadOnly" })
+      ? ActionAvailability.cases.Unavailable.make({ action, reason: "ClientReadOnly", safeNextActions: [] })
       : availability,
     Unavailable: (unavailable) => unavailable,
   }))
@@ -217,7 +224,7 @@ function allActions(snapshot: AppSnapshot) {
     ...(snapshot.run?.actions ?? []),
     ...(snapshot.run?.acquire?.actions ?? []),
     ...snapshot.processingSessions.flatMap(({ actions }) => actions),
-    ...snapshot.assets.flatMap(({ actions }) => actions),
+    ...snapshot.selectedAssets.flatMap(({ actions }) => actions),
   ]
 }
 

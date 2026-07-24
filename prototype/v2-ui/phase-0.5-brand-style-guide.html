@@ -2,31 +2,308 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="description" content="Astro Console accepted brand foundation and selected V1 mark." />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Astro Console brand foundation: an evidence-led visual language for clear nights and difficult decisions."
+    />
     <title>Astro Console · Brand Foundation</title>
     <style>
-      :root{--paper:#f3f0e9;--ink:#162126;--soft:#4f5d60;--night:#081014;--panel:#102027;--cyan:#41c3cf;--sky:#9de8ed;--amber:#e2a64e;--green:#75c597;--red:#c96a60;--line:#c9c3b7;--serif:Georgia,"Times New Roman",serif;--sans:Inter,ui-sans-serif,system-ui,sans-serif;--mono:"SFMono-Regular",Consolas,monospace}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 var(--sans)}a{color:inherit}.sheet{max-width:1440px;margin:auto}.mast{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 5.5vw;border-bottom:1px solid var(--line)}.brand{display:flex;align-items:center;gap:10px;font-weight:760;text-decoration:none;letter-spacing:-.03em}.brand img{width:29px;height:29px}.mast small,.ey{font:700 11px var(--mono);letter-spacing:.12em;text-transform:uppercase}.mast small,.section p{color:var(--soft)}.hero,.section{padding:7vw 5.5vw}.hero{background:radial-gradient(circle at 78% 20%,rgba(65,195,207,.23),transparent 16%),var(--paper)}.ey{margin:0 0 13px;color:#236b74}.hero h1{max-width:900px;margin:0;font:clamp(54px,9vw,132px)/.9 var(--serif);letter-spacing:-.065em}.hero h1 em{color:#236b74}.hero p{max-width:660px;font-size:20px}.section h2{max-width:800px;margin:0 0 20px;font:clamp(32px,4vw,54px)/1 var(--serif);letter-spacing:-.045em}.night{color:#e5f0f1;background:var(--night)}.night .ey{color:var(--sky)}.night p{color:#acc0c3}.split{display:grid;grid-template-columns:1.1fr .9fr;gap:9vw}.thesis{font:clamp(27px,3.4vw,46px)/1.1 var(--serif);letter-spacing:-.04em}.thesis strong{color:var(--cyan);font-weight:inherit}.swatches,.release{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.swatch{min-height:130px;padding:13px;display:flex;flex-direction:column;justify-content:end;border:1px solid var(--line);background:var(--c);color:var(--fg)}.swatch small{font:11px var(--mono)}.mark-field{display:grid;grid-template-columns:minmax(220px,1fr) 1fr;gap:28px;align-items:center;min-height:330px;padding:36px;background:linear-gradient(145deg,#071114,#15313a)}.mark-field img{width:min(100%,270px);justify-self:center}.mark-field p{color:#acc0c3}.mark-field h3{margin:0 0 10px;font:36px/1 var(--serif)}.mark-field b{color:var(--sky)}.rules{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}.rules span{padding:12px;border:1px solid #52666a;color:#adc1c3;font-size:12px}.release{background:#263940}.release div{padding:16px;background:var(--panel);color:#dcebed}.release small{display:block;margin-top:5px;color:#acc0c3}.foot{padding:28px 5.5vw;background:#0a1013;color:#9babad;font-size:12px}@media(max-width:760px){.mast,.hero,.section{padding-right:22px;padding-left:22px}.split,.mark-field,.swatches,.release,.rules{grid-template-columns:1fr}.mast small{display:none}}
+      :root {
+        --deep-night: #081014;
+        --field-ink: #162126;
+        --field-paper: #f3f0e9;
+        --evidence-cyan: #41c3cf;
+        --sky-highlight: #9de8ed;
+        --measured-amber: #e2a64e;
+        --verified-green: #75c597;
+        --protected-red: #c96a60;
+        --relationship-line: #c9c3b7;
+        --soft-ink: #58666a;
+        --serif: Georgia, "Times New Roman", serif;
+        --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body { margin: 0; background: var(--field-paper); color: var(--field-ink); font: 400 16px/1.5 var(--sans); }
+      a { color: inherit; }
+      :focus-visible { outline: 3px solid var(--evidence-cyan); outline-offset: 4px; }
+      .sheet { max-width: 1440px; margin: 0 auto; overflow: hidden; }
+      .mast { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 22px clamp(24px, 5vw, 80px); border-bottom: 1px solid var(--relationship-line); }
+      .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 750; letter-spacing: -.04em; text-decoration: none; }
+      .brand img { width: 30px; height: 30px; }
+      .mast-note, .eyebrow { font: 700 12px/1.35 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+      .mast-note { color: var(--soft-ink); text-align: right; }
+      .eyebrow { margin: 0 0 14px; color: #287983; }
+      .section { padding: clamp(72px, 9vw, 144px) clamp(24px, 5vw, 80px); }
+      .section-heading { max-width: 850px; margin: 0 0 30px; font: 400 clamp(42px, 5.25vw, 76px)/.97 var(--serif); letter-spacing: -.06em; }
+      .hero { min-height: min(900px, 80vh); display: flex; flex-direction: column; justify-content: center; background: radial-gradient(circle at 74% 17%, rgb(65 195 207 / .14), transparent 18%), var(--field-paper); }
+      .hero h1 { max-width: 900px; margin: 0; font: 400 clamp(72px, 10.5vw, 150px)/.86 var(--serif); letter-spacing: -.075em; }
+      .hero h1 em { color: #207681; font-style: italic; }
+      .hero-summary { max-width: 690px; margin: 42px 0 0; color: var(--soft-ink); font-size: clamp(19px, 1.7vw, 25px); }
+      .night { background: var(--deep-night); color: #e5f0f1; }
+      .night .eyebrow { color: var(--sky-highlight); }
+      .night .section-heading { color: #e5f0f1; }
+      .night p { color: #b6c6c8; }
+      .split { display: grid; grid-template-columns: 1.08fr .92fr; gap: clamp(40px, 9vw, 140px); align-items: start; }
+      .thesis { max-width: 720px; margin: 0; font: 400 clamp(36px, 4.2vw, 62px)/1.06 var(--serif); letter-spacing: -.055em; }
+      .thesis strong { color: var(--evidence-cyan); font-weight: inherit; }
+      .thesis-detail { max-width: 540px; font-size: 19px; }
+      .voice { margin-top: 32px; border: 1px solid #274248; background: #10252c; }
+      .voice div { padding: 19px 22px; }
+      .voice div + div { border-top: 1px solid #274248; }
+      .voice b { display: block; color: var(--sky-highlight); font: 700 12px var(--mono); letter-spacing: .12em; }
+      .voice q { color: #e5f0f1; font: 400 27px/1.15 var(--serif); }
+      .swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+      .swatch { min-height: 190px; display: flex; flex-direction: column; justify-content: end; padding: 18px; border: 1px solid var(--relationship-line); background: var(--color); color: var(--foreground); }
+      .swatch strong { font-size: 17px; }
+      .swatch code { font: 12px/1.5 var(--mono); }
+      .note { max-width: 760px; margin: 22px 0 0; padding: 14px 18px; border-left: 4px solid var(--evidence-cyan); background: #e1eeee; color: var(--soft-ink); }
+      table { width: 100%; margin-top: 24px; border-collapse: collapse; text-align: left; }
+      th, td { padding: 10px 7px; border-bottom: 1px solid var(--relationship-line); }
+      th { color: var(--soft-ink); font: 700 12px var(--mono); letter-spacing: .06em; }
+      td { font-size: 14px; }
+      .type-layout { display: grid; grid-template-columns: 1fr .88fr; gap: clamp(48px, 10vw, 150px); }
+      .type-samples { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+      .sample { min-height: 180px; padding: 18px 22px; border-top: 1px solid var(--field-ink); }
+      .sample small { color: var(--soft-ink); font: 12px var(--mono); }
+      .display-sample { font: 400 clamp(67px, 7vw, 104px)/.88 var(--serif); letter-spacing: -.07em; }
+      .headline-sample { margin-top: 5px; font: 400 clamp(32px, 3.1vw, 48px)/.95 var(--serif); letter-spacing: -.05em; }
+      .body-sample { margin-top: 7px; font-size: 18px; }
+      .data-sample { margin-top: 8px; font: 600 16px var(--mono); }
+      .layout-copy { color: var(--soft-ink); font-size: 18px; }
+      .grid-bars { display: grid; grid-template-columns: repeat(12, 1fr); gap: 10px; margin: 32px 0; }
+      .grid-bars span { height: 125px; background: #d3e5e5; }
+      .grid-bars span:nth-child(3n) { background: #b8d6d9; }
+      .shape-row { display: flex; align-items: center; flex-wrap: wrap; gap: 18px; font: 14px var(--mono); }
+      .line-example { width: 160px; height: 1px; background: var(--field-ink); }
+      .shape { min-width: 160px; padding: 38px 17px; border: 1px solid var(--field-ink); border-radius: 8px; text-align: center; }
+      .shape.modal { border-radius: 12px; }
+      .mark-stage { display: grid; place-items: center; min-height: 330px; padding: 48px 28px; background: linear-gradient(120deg, #071114, #153239); text-align: center; }
+      .mark-lockup { display: flex; align-items: center; justify-content: center; gap: 24px; }
+      .mark-lockup img { width: clamp(64px, 8vw, 98px); height: auto; }
+      .mark-lockup span { color: var(--field-paper); font-size: clamp(36px, 4.6vw, 68px); font-weight: 760; letter-spacing: -.06em; }
+      .clear-space { margin: 55px 0 0; color: #a9c0c4; font: 12px var(--mono); }
+      .rules { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+      .rules p { margin: 0; padding: 15px; border: 1px solid #50646a; color: #b4c5c7; font-size: 13px; }
+      .imagery-grid { display: grid; grid-template-columns: 1.35fr .72fr; gap: 14px; }
+      .evidence-frame { position: relative; min-height: 360px; overflow: hidden; background: radial-gradient(ellipse at 58% 48%, rgb(57 173 190 / .58) 0, rgb(18 71 79 / .42) 3%, transparent 14%), #061013; }
+      .evidence-frame::before, .evidence-frame::after { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: #e4f4f4; content: ""; }
+      .evidence-frame::before { top: 22%; left: 12%; box-shadow: 190px 214px 0 -1px #c3d9d9, 684px 150px 0 -1px #dce7e7; }
+      .evidence-frame::after { top: 82%; left: 84%; box-shadow: -500px -24px 0 -1px #c3d9d9; }
+      .art-direction { padding: 30px; background: #dceaea; color: var(--soft-ink); }
+      .art-direction h3 { margin: 0 0 18px; color: var(--field-ink); }
+      .art-direction li + li { margin-top: 13px; }
+      .expressions { display: grid; grid-template-columns: 1.1fr .9fr .9fr; gap: 14px; }
+      .expression { min-height: 330px; padding: 26px; border: 1px solid var(--relationship-line); }
+      .expression.dark { background: #08171c; color: #e5f0f1; }
+      .expression.light { background: #e1eeee; color: var(--field-ink); }
+      .expression.light .eyebrow { color: #236b74; }
+      .expression.red { background: #aa503e; color: #fff7ef; }
+      .expression .eyebrow { margin-bottom: 44px; }
+      .expression h3 { margin: 0; font: 400 clamp(37px, 3vw, 55px)/.92 var(--serif); letter-spacing: -.055em; }
+      .expression p { margin-top: 24px; font-size: 17px; }
+      .mini-evidence { height: 112px; margin-top: 27px; background: radial-gradient(circle, rgb(65 195 207 / .55), transparent 7%), #030b0d; }
+      .icon-copy { max-width: 670px; color: var(--soft-ink); font-size: 18px; }
+      .motion-copy { max-width: 600px; color: var(--soft-ink); font-size: 18px; }
+      .guardrails { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+      .guardrail { padding: 28px; border-top: 4px solid var(--verified-green); background: #e1eeee; }
+      .guardrail.dont { border-color: var(--protected-red); background: #eee0da; }
+      .guardrail h3 { margin: 0; }
+      .guardrail li + li { margin-top: 14px; }
+      footer { padding: 28px clamp(24px, 5vw, 80px); background: #0a1013; color: #9fb4b7; font-size: 12px; }
+      @media (max-width: 760px) {
+        .mast-note { display: none; }
+        .hero { min-height: 680px; }
+        .split, .type-layout, .imagery-grid, .guardrails { grid-template-columns: 1fr; }
+        .swatches { grid-template-columns: repeat(2, 1fr); }
+        .swatch { min-height: 145px; }
+        .type-samples { grid-template-columns: 1fr; }
+        .expressions, .rules { grid-template-columns: 1fr; }
+        .grid-bars { gap: 5px; }
+        .grid-bars span { height: 70px; }
+        .mark-lockup { flex-direction: column; }
+        .mark-lockup span { font-size: 42px; }
+        table { min-width: 570px; }
+        .table-wrap { overflow-x: auto; }
+      }
+      @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
     </style>
   </head>
   <body>
     <div class="sheet">
       <header class="mast">
-        <a class="brand" href="index.html"><img src="assets/brand/v1/astro-console-v1-symbol-ink.svg" alt="" />Astro Console</a>
-        <small>Accepted brand foundation · selected V1 mark</small>
+        <a class="brand" href="index.html" aria-label="Astro Console prototype hub">
+          <img src="assets/brand/v1/astro-console-v1-symbol-ink.svg" alt="" />
+          <span>Astro Console</span>
+        </a>
+        <span class="mast-note">Candidate brand foundation · pending owner acceptance</span>
       </header>
+
       <main>
-        <section class="hero">
-          <p class="ey">Brand foundation</p>
-          <h1>Evidence,<br /><em>made human.</em></h1>
-          <p>Astro Console is technically capable without performing technicality: observatory work expressed with calm, precise confidence and wonder earned by the sky itself.</p>
+        <section class="section hero" aria-labelledby="page-title">
+          <p class="eyebrow">A visual language for clear nights and difficult decisions</p>
+          <h1 id="page-title">Evidence,<br /><em>made human.</em></h1>
+          <p class="hero-summary">Astro Console is technically capable without performing technicality: observatory work expressed with calm, precise confidence and a little wonder earned by the sky itself.</p>
         </section>
-        <section class="section night"><div class="split"><div><p class="ey">Brand thesis</p><p class="thesis">A <strong>quiet instrument</strong> for people who care enough to look closely.</p></div><div><p>Practical, intimate, and evidence-led. Avoid command-center theatre, stock-nebula spectacle, and startup optimism. The personality is a trusted field notebook with a precise optical instrument inside it.</p><p><b>Say:</b> “The frame is preserved. One solve retry remains.”</p></div></div></section>
-        <section class="section"><p class="ey">Accepted palette</p><h2>Dark adaptation, paper daylight.</h2><div class="swatches"><div class="swatch" style="--c:#081014;--fg:#e5f0f1"><b>Deep night</b><small>#081014</small></div><div class="swatch" style="--c:#162126;--fg:#f3f0e9"><b>Field ink</b><small>#162126</small></div><div class="swatch" style="--c:#f3f0e9;--fg:#162126"><b>Field paper</b><small>#F3F0E9</small></div><div class="swatch" style="--c:#41c3cf;--fg:#081014"><b>Evidence cyan</b><small>#41C3CF</small></div><div class="swatch" style="--c:#9de8ed;--fg:#162126"><b>Sky highlight</b><small>#9DE8ED</small></div><div class="swatch" style="--c:#e2a64e;--fg:#162126"><b>Measured amber</b><small>#E2A64E</small></div><div class="swatch" style="--c:#75c597;--fg:#162126"><b>Verified green</b><small>#75C597</small></div><div class="swatch" style="--c:#c96a60;--fg:#081014"><b>Protected red</b><small>#C96A60</small></div><div class="swatch" style="--c:#c9c3b7;--fg:#162126"><b>Relationship line</b><small>#C9C3B7</small></div></div><p>Use ink/paper and paper/night for long-form text. Cyan, amber, and green carry evidence or state emphasis, not decorative density.</p></section>
-        <section class="section night"><p class="ey">Selected V1 mark · Alignment Aperture</p><h2>A field of view, not an ornament.</h2><div class="mark-field"><img src="assets/brand/v1/astro-console-v1-symbol-light.svg" alt="Astro Console Alignment Aperture symbol" /><div><h3>Desired meets solved.</h3><p>The V1 symbol links center to observation. A primary body is intentionally cropped by the reticle’s inner field while its companion remains separate.</p><p><b>Minimum:</b> 16px symbol. <b>Clear space:</b> one symbol radius. Use ink on paper, light on night, and mono only for one-color reproduction.</p></div></div><div class="rules"><span>Keep the field-of-view crop and companion separation intact.</span><span>Do not redraw, animate, or turn the trajectory into a generic orbit ring.</span><span>Use the versioned package; future mark changes require brand governance.</span></div></section>
-        <section class="section"><p class="ey">Release pack · V1.0.0</p><h2>Selected, packaged, governed.</h2><div class="release"><div><b>Authoritative vectors</b><small><a href="assets/brand/v1/astro-console-v1-symbol-ink.svg">Symbol SVGs</a> in ink, light, and mono. The selected symbol is the V1 production mark.</small></div><div><b>Exports and app assets</b><small>PNG symbol exports from 16–1024px, favicon SVG, and web manifest live in the versioned <a href="assets/brand/v1/README.md">asset package</a>.</small></div><div><b>Wordmark note</b><small>Horizontal wordmarks are layout references until their approved lettering is outlined; see the package <a href="assets/brand/v1/README.md">README</a>.</small></div></div><p>Palette, typography, material, voice, templates, and accessibility are accepted Phase 1 visual implementation authority. Future mark changes require versioned brand governance.</p><p><a href="archive/phase-0.5/phase-0.5-mark-exploration.html">View the archived selection record and rejected B/C exploration evidence →</a></p></section>
+
+        <section class="section night" aria-labelledby="thesis-title">
+          <div class="split">
+            <div>
+              <p class="eyebrow">Brand thesis</p>
+              <h2 id="thesis-title" class="thesis">A <strong>quiet instrument</strong> for people who care enough to look closely.</h2>
+            </div>
+            <div class="thesis-detail">
+              <p>We are practical, intimate, and evidence-led. We avoid command-center theatre, stock-nebula spectacle, and startup optimism. The personality is a trusted field notebook with a precise optical instrument inside it.</p>
+              <div class="voice">
+                <div><b>Say</b><q>The frame is preserved. One solve retry remains.</q></div>
+                <div><b>Not</b><q>Your workflow has encountered an issue.</q></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="color-title">
+          <p class="eyebrow">Color</p>
+          <h2 id="color-title" class="section-heading">Dark adaptation, paper daylight.</h2>
+          <div class="swatches" aria-label="Brand color palette">
+            <div class="swatch" style="--color:#081014;--foreground:#e5f0f1"><strong>Deep night</strong><code>#081014 · rgb(8 16 20)</code></div>
+            <div class="swatch" style="--color:#162126;--foreground:#f3f0e9"><strong>Field ink</strong><code>#162126 · rgb(22 33 38)</code></div>
+            <div class="swatch" style="--color:#f3f0e9;--foreground:#162126"><strong>Field paper</strong><code>#F3F0E9 · rgb(243 240 233)</code></div>
+            <div class="swatch" style="--color:#41c3cf;--foreground:#081014"><strong>Evidence cyan</strong><code>#41C3CF · rgb(65 195 207)</code></div>
+            <div class="swatch" style="--color:#9de8ed;--foreground:#162126"><strong>Sky highlight</strong><code>#9DE8ED · rgb(157 232 237)</code></div>
+            <div class="swatch" style="--color:#e2a64e;--foreground:#162126"><strong>Measured amber</strong><code>#E2A64E · rgb(226 166 78)</code></div>
+            <div class="swatch" style="--color:#75c597;--foreground:#162126"><strong>Verified green</strong><code>#75C597 · rgb(117 197 151)</code></div>
+            <div class="swatch" style="--color:#c96a60;--foreground:#081014"><strong>Protected red</strong><code>#C96A60 · rgb(201 106 96)</code></div>
+            <div class="swatch" style="--color:#c9c3b7;--foreground:#162126"><strong>Relationship line</strong><code>#C9C3B7 · rgb(201 195 183)</code></div>
+          </div>
+          <p class="note">Use deep night / paper and ink / paper for long-form contrast. Cyan, amber, and green carry emphasis only with text or shape; test final combinations to WCAG AA, especially small labels and print conversion.</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th scope="col">Text / background</th><th scope="col">Ratio</th><th scope="col">Qualification</th></tr></thead>
+              <tbody>
+                <tr><td>Ink / Field paper</td><td>14.42:1</td><td>AA normal</td></tr>
+                <tr><td>Brand teal / Field paper (mast, light labels)</td><td>5.38:1</td><td>AA normal</td></tr>
+                <tr><td>Soft ink / Field paper</td><td>6.02:1</td><td>AA normal</td></tr>
+                <tr><td>Paper / Deep night</td><td>16.51:1</td><td>AA normal</td></tr>
+                <tr><td>Cyan / Deep night</td><td>9.07:1</td><td>AA normal</td></tr>
+                <tr><td>Amber / Deep night</td><td>8.95:1</td><td>AA normal</td></tr>
+                <tr><td>Green / Deep night</td><td>9.31:1</td><td>AA normal</td></tr>
+                <tr><td>Ink / Light marketing</td><td>13.73:1</td><td>AA normal</td></tr>
+                <tr><td>Brand teal / Light marketing</td><td>5.13:1</td><td>AA normal</td></tr>
+                <tr><td>Paper / Campaign red</td><td>4.62:1</td><td>AA normal</td></tr>
+                <tr><td>White campaign label / Campaign red</td><td>5.48:1</td><td>AA normal</td></tr>
+                <tr><td>Deep night / Protected red swatch</td><td>5.22:1</td><td>AA normal</td></tr>
+                <tr><td>Footer gray / Footer night</td><td>5.78:1</td><td>AA normal</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="type-title">
+          <div class="type-layout">
+            <div>
+              <p class="eyebrow">Typography</p>
+              <h2 id="type-title" class="section-heading">Editorial warmth, operational clarity.</h2>
+              <div class="type-samples">
+                <div class="sample"><small>Display · Georgia</small><div class="display-sample">Look<br />closer.</div></div>
+                <div class="sample"><small>Headline · Georgia</small><div class="headline-sample">A clear window<br />opens at 22:11.</div></div>
+                <div class="sample"><small>Body · system sans</small><div class="body-sample">Use for product, marketing copy, and useful explanations.</div></div>
+                <div class="sample"><small>Data · system mono</small><div class="data-sample">M31 · 180 SEC · 2.0″ RMS</div></div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th scope="col">Role</th><th scope="col">Spec</th><th scope="col">Context</th></tr></thead>
+                  <tbody>
+                    <tr><td>Hero</td><td>96–132px / .90 / 400 Georgia</td><td>Campaign or opening claim</td></tr>
+                    <tr><td>Page</td><td>52–64px / .98 / 400 Georgia</td><td>Editorial page title</td></tr>
+                    <tr><td>Section</td><td>32–40px / 1.0 / 400 Georgia</td><td>Section claim</td></tr>
+                    <tr><td>Body</td><td>16px / 1.5 / 400 system sans</td><td>Explanation and collateral</td></tr>
+                    <tr><td>Meta/data</td><td>11–12px / 1.35 / 600 mono</td><td>Timestamp, evidence, labels</td></tr>
+                    <tr><td>Caption</td><td>12px / 1.4 / 400 system sans</td><td>Image or diagram support</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div>
+              <p class="eyebrow">Layout and shape</p>
+              <p class="layout-copy">Use an editorial 12-column grid, a 4px rhythm, and generous empty margin around a single claim. Radius is earned: 6px dense groups, 8px controls, 12px modals. Lines express relationship; shadows express a physical layered object.</p>
+              <div class="grid-bars" aria-label="Twelve-column layout grid"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+              <div class="shape-row"><span>relationship</span><span class="line-example"></span><span class="shape">dense fact</span><span class="shape">control</span><span class="shape modal">modal</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section night" aria-labelledby="mark-title">
+          <p class="eyebrow">Mark</p>
+          <h2 id="mark-title" class="section-heading">One observatory mark, with versioned authority.</h2>
+          <div class="mark-stage">
+            <div class="mark-lockup">
+              <img src="assets/brand/v1/astro-console-v1-symbol-light.svg" alt="Astro Console Alignment Aperture mark" />
+              <span>Astro Console</span>
+            </div>
+            <p class="clear-space">Clear space: at least one mark radius on every side · use ink/paper or paper/night only</p>
+          </div>
+          <div class="rules">
+            <p>Use the selected V1 Alignment Aperture package. Minimum symbol size: 16px.</p>
+            <p>Do not redraw, stretch, rotate, or animate the mark into a generic orbit, telescope, or star.</p>
+            <p>The symbol vectors are authoritative; wordmark references remain layout references until outlined in a future versioned release.</p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="imagery-title">
+          <p class="eyebrow">Imagery and illustration</p>
+          <h2 id="imagery-title" class="section-heading">Show evidence, not cosmic wallpaper.</h2>
+          <div class="imagery-grid">
+            <div class="evidence-frame" role="img" aria-label="Abstracted dark evidence frame with a small cyan astronomical signal and sparse field stars"></div>
+            <div class="art-direction">
+              <h3>Art direction</h3>
+              <ul>
+                <li>Favor real frames, instrument surfaces, field notes, horizon/weather texture, and annotated geometry.</li>
+                <li>Crop close; let darkness and empty space do work.</li>
+                <li>Use stars/nebula only when they are actual evidence or an abstracted explanation.</li>
+                <li>Avoid stock galaxies, astronauts, purple gradients, and decorative constellations.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section night" aria-labelledby="expression-title">
+          <p class="eyebrow">Expressions</p>
+          <h2 id="expression-title" class="section-heading">Same brand, different altitude.</h2>
+          <div class="expressions">
+            <article class="expression dark"><p class="eyebrow">M31 · Capture · Evidence 2 sec</p><h3>Dark product</h3><div class="mini-evidence" aria-hidden="true"></div></article>
+            <article class="expression light"><p class="eyebrow">A better night</p><h3>Light marketing</h3><p>Plan carefully. Observe with confidence. Keep the evidence.</p></article>
+            <article class="expression red"><p class="eyebrow" style="color:#fff7ef">Field note 04</p><h3>There is time to look again.</h3><p>Deck, campaign card, or social opener.</p></article>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="motion-title">
+          <div class="split">
+            <div>
+              <p class="eyebrow">Icon, illustration, motion</p>
+              <h2 id="motion-title" class="section-heading">Draw only what carries meaning.</h2>
+              <p class="icon-copy">Use simple geometric icons at 1.5–2px apparent stroke, rounded joins, and optical center. Icons support text for consequential state; illustration uses evidence geometry, field notation, and restrained star texture.</p>
+            </div>
+            <div class="motion-copy">
+              <p><strong>Motion:</strong> 120–180ms only for progress, state change, or spatial relationship. Do not animate decoration, status color, or completion. Respect <code>prefers-reduced-motion</code> by removing pulses, transforms, and parallax while retaining status text and shape.</p>
+              <p><strong>Never:</strong> generic rocket/telescope clip art, 3D glass icons, or looping cosmic particles.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="guardrails-title">
+          <p class="eyebrow">Guardrails</p>
+          <h2 id="guardrails-title" class="section-heading">Use specificity as the decoration.</h2>
+          <div class="guardrails">
+            <article class="guardrail"><h3>Do</h3><ul><li>Lead with a real observation, frame, time, or human decision.</li><li>Use warmth in editorial type and paper—not in false urgency.</li><li>Let a single image, instrument detail, or sentence own a page.</li></ul></article>
+            <article class="guardrail dont"><h3>Don’t</h3><ul><li>Build a generic neon sci-fi dashboard.</li><li>Use tiny technical type as texture or telemetry as decoration.</li><li>Make the sky an interchangeable background.</li></ul></article>
+          </div>
+        </section>
       </main>
-      <footer class="foot">Astro Console · Accepted brand foundation and selected V1 mark · versioned asset governance · system-safe typography and no external assets</footer>
+      <footer>Astro Console · Brand foundation reconstruction · current V1 Alignment Aperture mark retained · no external font or image dependency</footer>
     </div>
   </body>
 </html>

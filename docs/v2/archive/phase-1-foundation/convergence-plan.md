@@ -18,7 +18,7 @@ gallery of studies.
 | 6. Technical spikes | Complete | Catalog scale, image overlay/solve geometry, and streamed state/preview reconnect constraints recorded |
 | 7. Final reference | Complete | Cross-surface walkthrough, trace reconciliation, and decision log accepted; V2 reference frozen |
 
-The interactive [convergence roadmap](../../../prototype/v2-ui/convergence-roadmap.html)
+The interactive [convergence roadmap](../../../../prototype/v2-ui/archive/gate-06/convergence-roadmap.html)
 is the visual projection of this plan.
 
 ## Gate 5 Boundary

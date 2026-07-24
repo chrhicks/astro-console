@@ -212,7 +212,20 @@ export const makeProcessingServerSimulation = Effect.fn("ProcessingServerSimulat
           Rejected: ({ failure }) => Effect.fail(new ProcessingCommandRejected({ failure })),
           ReplayPending: ({ operationId }) => replayPending(current, operationId),
           ReplayRecorded: () => replay(current, receipt).pipe(Effect.map((result): AtomicCommit<ProcessingSimulationState, ProcessingResponse> => ({ state: current, result }))),
-          Accepted: () => current.pendingSaves.some((pending) => "sessionId" in command && pending.sessionId === command.sessionId)
+          Accepted: () => ProcessCommand.guards.MarkAssistantFindingViewed(command)
+            && current.viewedFindings.some((viewed) =>
+              viewed.findingId === command.findingId
+              && viewed.version === command.findingVersion
+              && viewed.personId === actor.personId)
+            ? Effect.succeed({
+              state: current,
+              result: ProcessingResponse.make({
+                replayed: true,
+                effect: "findingAlreadyViewed",
+                projection: project(current),
+              }),
+            } satisfies AtomicCommit<ProcessingSimulationState, ProcessingResponse>)
+            : current.pendingSaves.some((pending) => "sessionId" in command && pending.sessionId === command.sessionId)
             && !ProcessCommand.guards.ResumeProcessingSession(command)
             && !ProcessCommand.guards.MarkAssistantFindingViewed(command)
             ? Effect.fail(new ProcessingTransitionRejected({ reason: "ProcessingTransitionBusy" }))
