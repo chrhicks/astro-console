@@ -1,7 +1,9 @@
 # Local web inspection
 
-Run `npm run dev:inspect`. It starts only the local-web service plus a dedicated
-Chrome profile at `.astro-local-web/inspect-chrome-profile`, with CDP on 9223.
+Run `npm run dev:inspect` for owner, `npm run dev:inspect -- --client=friend`,
+or `npm run dev:inspect -- --client=phone`. It starts only the local-web
+service with that trusted server-side fixture identity plus a dedicated Chrome
+profile at `.astro-local-web/inspect-chrome-profile-<client>`, with CDP on 9223.
 It never attaches to or closes a user's normal Chrome profile.
 
 In another terminal:

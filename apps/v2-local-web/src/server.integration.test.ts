@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { DatabaseSync } from "node:sqlite"
 import * as Schema from "effect/Schema"
-import { AcquireSnapshot } from "../../../packages/v2-contracts/src/snapshots.ts"
+import { AcquireSnapshot, RunSnapshot } from "../../../packages/v2-contracts/src/snapshots.ts"
 import { createLocalWebService } from "./server.ts"
 
 test("SQLite acceptance atomically persists run, event, receipt, and outbox", async (t) => {
@@ -23,6 +23,19 @@ test("SQLite acceptance atomically persists run, event, receipt, and outbox", as
   assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox").get() as { count: number }).count, 1)
   const replay = await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify(command) })
   assert.equal(replay.status, 200)
+  await listener.close(); service.close()
+})
+
+test("accepted pause dispatches StopStack once through an injected worker", async () => {
+  const service = createLocalWebService()
+  const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+  const start = await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "pause-start" }) }).then((response) => response.json())
+  const paused = await fetch(`${base}/api/commands/pause-run`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, expectedRunRevision: start.run.revision, idempotencyKey: "pause-once" }) }).then((response) => response.json())
+  assert.equal(paused.snapshot.run.phase, "paused")
+  let calls = 0
+  assert.equal(await service.dispatchPauseOutbox({ stopStack: async () => { calls += 1; return true } }), "dispatched")
+  assert.equal(await service.dispatchPauseOutbox({ stopStack: async () => { calls += 1; return true } }), "none")
+  assert.equal(calls, 1)
   await listener.close(); service.close()
 })
 
@@ -114,6 +127,12 @@ test("local solved-frame evidence faithfully decodes as the V2 AcquireSnapshot c
   service.close()
 })
 
+test("accepted paused local run faithfully decodes as the V2 RunSnapshot contract", () => {
+  const contract = Schema.decodeUnknownSync(RunSnapshot)({ runId: "run-m27-001", revision: 2, sourcePlanId: "plan-m27", phase: "paused", completedSequenceCount: 0, acceptedMutations: [], warnings: [], lastConfirmedAt: "2026-07-24T02:00:00.000Z", actions: [] })
+  assert.equal(contract.phase, "paused")
+  assert.equal(contract.revision, 2)
+})
+
 test("Library queries enforce bounded pages, cursor order, role filters, and allowed sorts", async (t) => {
   const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => { await listener.close(); service.close() })
@@ -151,6 +170,12 @@ test("Library detail uses stable identities and snapshot delivery remains catalo
   assert.match(html, /id="evidence-surface"/)
   assert.match(html, /id="stack-source"/)
   assert.match(html, /id="stack-trace" role="status"/)
+  assert.match(html, /Pause capture/)
+  assert.match(html, /expectedRunRevision:s\.run\.revision/)
+  assert.match(html, /id="pause-dispatch" role="status"/)
+  assert.match(html, /stop-stack dispatch failed/)
+  assert.match(html, /id="pause-consequence" role="status"/)
+  assert.match(html, /Pause accepts resumable capture and requests Seestar stop-stack/)
   assert.match(html, /Stack observed /)
   assert.match(html, /correction-protection/)
   assert.match(html, /id="library-prev" aria-label="Previous Library results window" disabled/)
@@ -251,7 +276,7 @@ test("two server-configured desktops transfer control without stopping the accep
   await fetch(`${friendBase}/api/commands/request-control`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, idempotencyKey: "ada-request" }) })
   const granted = await fetch(`${ownerBase}/api/commands/grant-control`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, idempotencyKey: "owner-grant" }) })
   assert.equal(granted.status, 202)
-  const oldController = await fetch(`${ownerBase}/api/commands/pause-run`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 2, idempotencyKey: "old-pause" }) })
+  const oldController = await fetch(`${ownerBase}/api/commands/pause-run`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 2, expectedRunRevision: 1, idempotencyKey: "old-pause" }) })
   const oldResult = await oldController.json()
   assert.equal(oldResult.reason, "ControlLeaseLost")
   assert.equal(oldResult.message, "Control changed hands. Your command was not sent to the observatory; the accepted run continues.")

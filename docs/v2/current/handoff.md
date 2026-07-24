@@ -4,7 +4,8 @@ Status: **active Phase 1 continuation packet**
 
 ## Single Next Action
 
-Build the next concrete rig integration beyond read-only observation input:
+Build the next concrete rig integration beyond read-only observation input and
+the accepted Pause/StopStack boundary:
 retain the rig-local service and Stack push projection, then choose one
 explicitly bounded adapter-owned capability with availability/failure semantics
 and no browser-owned recovery state.
@@ -51,6 +52,11 @@ Stack events only. It projects timestamped frame count and source availability
 without polling, connection setup, host configuration, or device commands;
 failed Stack events preserve solved evidence and never claim the accepted run
 stopped.
+
+The PauseRun slice accepts an owner-held, revision-guarded capture pause
+atomically, records a `StopStack` outbox item, and leaves physical dispatch to
+an explicitly injected adapter worker. Dispatch unavailability or failure does
+not undo the accepted paused run or cause browser retry.
 
 ## Read First
 
