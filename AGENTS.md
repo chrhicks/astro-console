@@ -72,3 +72,18 @@ Use `agent-browser` against the running Electron renderer like this:
 - `agent-browser snapshot -i` — get interactive elements with refs (`@e1`, `@e2`)
 - `agent-browser click @e1` / `fill @e2 "text"` — interact using refs
 - `agent-browser screenshot /tmp/astro-console.png` — capture visual evidence after UI changes
+
+## Local Web Dev Inspection
+
+Run `npm run dev:inspect` from `apps/v2-local-web` for UI validation of the
+Phase 1 local-web slices. It starts only that service and a dedicated Chrome
+profile with CDP on port `9223`; it never attaches to or closes normal Chrome.
+
+- `agent-browser connect 9223`
+- `agent-browser snapshot`
+- `agent-browser screenshot /tmp/astro-local-web.png`
+
+Stop the originating runner with Ctrl-C. If port 9223 is occupied, stop the
+previous local-web inspect runner before starting another. Prefer this path for
+local-web screenshot, keyboard, overflow, and console evidence when the
+in-app browser has no claimable tab.

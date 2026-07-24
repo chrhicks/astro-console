@@ -43,3 +43,4 @@ prototype/*
 apps/v2-local-web/.astro-local-web/
 apps/desktop/*.tsbuildinfo
 .bak*
+.astro-local-web/
