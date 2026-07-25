@@ -14,14 +14,19 @@ Do not add router forwarding, home-directory mounts, device credentials, or
 tunnel tokens to this folder.
 
 Production admission is fail-closed: set `ASTRO_ADMISSION_MODE=production`,
-provide the verified Access issuer/audience, public-key path, bootstrap path,
-and a server-configured desktop or phone client context. The bootstrap file is
+provide the verified Access issuer/audience, HTTPS JWKS/certificate URL,
+bounded JWKS cache TTL, bootstrap path, and a server-configured desktop or
+phone client context. The bootstrap file is
 host-managed JSON, never committed: `[{"email":"...","personId":"...","role":"owner"|"viewer"}]`.
 On the first verified Access assertion for one of those emails, the service
 durably binds its Access subject to that membership; request bodies, queries,
 and headers never choose a role. Provision the confirmed owner and viewers in
 that host file. Development fixture admission is loopback-only and refuses a
-`0.0.0.0` bind.
+`0.0.0.0` bind. Each assertion must be RS256 and carry a `kid`; the service
+selects that current key from the HTTPS JWKS/certificate document. It caches
+only a validated document for the configured bounded TTL, refreshes once for
+an unfamiliar `kid`, and rejects an unknown key, malformed document, failed
+refresh, or expired cache without falling back to a file or stale key.
 
 Owner authority is the durable membership role, not a magic fixture person ID:
 an owner bootstrap entry may use any stable non-empty `personId`. A phone
@@ -54,7 +59,7 @@ node:22.22.2-bookworm-slim`. The root `.dockerignore` deliberately excludes
 local state, dependencies, Git history, archives, and unrelated apps from the
 release build context.
 
-Rig discovery, Access/JWKS rotation, tunnel routing, storage thresholds,
+Rig discovery, live Access/JWKS rotation validation, tunnel routing, storage thresholds,
 R2 publication, processor/publisher services, and backup restore validation
 remain activation work. Do not create placeholder workers that imply those
 boundaries are live.

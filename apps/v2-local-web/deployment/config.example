@@ -9,7 +9,9 @@ ASTRO_RELEASE=REPLACE_WITH_RELEASE
 ASTRO_ADMISSION_MODE=production
 CF_ACCESS_ISSUER=https://REPLACE.cloudflareaccess.com
 CF_ACCESS_AUDIENCE=REPLACE_WITH_ACCESS_AUDIENCE
-CF_ACCESS_PUBLIC_KEY_PATH=/run/config/cloudflare-access-public.pem
+CF_ACCESS_JWKS_URL=https://REPLACE.cloudflareaccess.com/cdn-cgi/access/certs
+# Bounded current-key cache in milliseconds (1000 through 3600000).
+CF_ACCESS_JWKS_CACHE_TTL_MS=300000
 ASTRO_MEMBERSHIP_BOOTSTRAP_PATH=/run/config/membership-bootstrap.json
 ASTRO_CLIENT_CONTEXT=desktop
 # Tunnel credentials and all policy membership emails remain host-managed.

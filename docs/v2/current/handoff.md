@@ -26,7 +26,7 @@ or rig validation has been activated.
 
 Production admission is now wired into executable startup rather than the
 development fixture: an external bind requires verified Cloudflare Access
-issuer/audience/key material, a host-managed membership bootstrap, and a
+issuer/audience/HTTPS JWKS endpoint, a host-managed membership bootstrap, and a
 server-configured client context. Every verified request is rechecked against
 the current normalized bootstrap policy, so removing an email revokes origin
 admission even if its subject was previously persisted. Durable `owner` and
@@ -113,8 +113,11 @@ verifies an RS256 assertion's signature, issuer, audience, and expiry, then
 maps only a verified subject to durable SQLite owner/viewer membership. Desktop
 owner and phone/viewer capability derive from that mapping; request bodies and
 headers cannot choose a role. The explicit local-fixture admission remains for
-development only. Cloudflare Tunnel deployment, Access key rotation/JWKS
-discovery, revocation, and production LAN binding remain later operations work.
+development only. Production admission requires an RS256 assertion `kid` and
+uses a bounded HTTPS JWKS/certificate cache; unknown keys force one refresh
+and malformed, unavailable, or expired key material fails closed. Cloudflare
+Tunnel deployment, live Access rotation validation, revocation, and production
+LAN binding remain later operations work.
 The local proof derives one client identity per verified subject; production
 device/session identity must precede treating a person's multiple browsers as
 distinct presence clients.

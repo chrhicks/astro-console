@@ -8,7 +8,7 @@ import type { IncomingMessage } from "node:http"
 import { generateKeyPairSync, sign } from "node:crypto"
 import * as Schema from "effect/Schema"
 import { AcquireSnapshot, RunSnapshot } from "../../../packages/v2-contracts/src/snapshots.ts"
-import { configuredAdmission, configuredListenHost, configuredListenPort, configuredRuntime, createCloudflareAccessAdmission, createLocalWebService, createProductionAccessAdmission } from "./server.ts"
+import { configuredAdmission, configuredListenHost, configuredListenPort, configuredRuntime, createJwksKeyResolver, createLocalWebService, createProductionAccessAdmission } from "./server.ts"
 
 test("SQLite acceptance atomically persists run, event, receipt, and outbox", async (t) => {
   const service = createLocalWebService(join(mkdtempSync(join(tmpdir(), "astro-local-")), "state.sqlite"))
@@ -81,11 +81,13 @@ test("verified Access assertions map durable memberships without trusting reques
   const issuer = "https://chicks.cloudflareaccess.com"
   const audience = "access-audience"
   const claim = (subject: string, overrides: Record<string, unknown> = {}) => {
-    const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url")
-    const payload = Buffer.from(JSON.stringify({ sub: subject, iss: issuer, aud: audience, exp: Math.floor(Date.now() / 1_000) + 60, ...overrides })).toString("base64url")
+    const header = Buffer.from(JSON.stringify({ alg: "RS256", kid: "fixture-key", typ: "JWT" })).toString("base64url")
+    const email = subject === "access-owner" ? "owner@example.com" : subject === "access-viewer" ? "viewer@example.com" : "unknown@example.com"
+    const payload = Buffer.from(JSON.stringify({ sub: subject, email, iss: issuer, aud: audience, exp: Math.floor(Date.now() / 1_000) + 60, ...overrides })).toString("base64url")
     return `${header}.${payload}.${sign("RSA-SHA256", Buffer.from(`${header}.${payload}`), keys.privateKey).toString("base64url")}`
   }
-  const admission = createCloudflareAccessAdmission({ issuer, audience, publicKeyPem: keys.publicKey.export({ type: "pkcs1", format: "pem" }).toString(), databasePath, clientContext: "desktop" })
+  const keyResolver = createJwksKeyResolver({ url: "https://chicks.cloudflareaccess.com/cdn-cgi/access/certs", fetcher: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ keys: [{ ...keys.publicKey.export({ format: "jwk" }), kid: "fixture-key", use: "sig" }] }) }) })
+  const admission = createProductionAccessAdmission({ issuer, audience, keyResolver, databasePath, clientContext: "desktop", bootstrap: [{ email: "owner@example.com", personId: "owner-chicks", role: "owner" }, { email: "viewer@example.com", personId: "maya", role: "viewer" }] })
   const service = createLocalWebService(databasePath, admission)
   const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => { await listener.close(); service.close() })
@@ -102,18 +104,20 @@ test("verified Access assertions map durable memberships without trusting reques
 
 test("production admission rechecks normalized bootstrap policy and revokes removed viewer subjects", async (t) => {
   const databasePath = join(mkdtempSync(join(tmpdir(), "astro-production-access-")), "state.sqlite"); const seeded = createLocalWebService(databasePath); seeded.close()
-  const keys = generateKeyPairSync("rsa", { modulusLength: 2048 }); const issuer = "https://access.example"; const audience = "audience"; const claim = (email: string) => { const header = Buffer.from(JSON.stringify({ alg: "RS256" })).toString("base64url"); const payload = Buffer.from(JSON.stringify({ sub: "viewer-subject", email, iss: issuer, aud: audience, exp: Math.floor(Date.now() / 1_000) + 60 })).toString("base64url"); return `${header}.${payload}.${sign("RSA-SHA256", Buffer.from(`${header}.${payload}`), keys.privateKey).toString("base64url")}` }
-  const config = { issuer, audience, publicKeyPem: keys.publicKey.export({ type: "pkcs1", format: "pem" }).toString(), databasePath, clientContext: "desktop" as const, bootstrap: [{ email: " Viewer@Example.com ", personId: "viewer", role: "viewer" as const }] }
+  const keys = generateKeyPairSync("rsa", { modulusLength: 2048 }); const issuer = "https://access.example"; const audience = "audience"; const claim = (email: string) => { const header = Buffer.from(JSON.stringify({ alg: "RS256", kid: "viewer-key" })).toString("base64url"); const payload = Buffer.from(JSON.stringify({ sub: "viewer-subject", email, iss: issuer, aud: audience, exp: Math.floor(Date.now() / 1_000) + 60 })).toString("base64url"); return `${header}.${payload}.${sign("RSA-SHA256", Buffer.from(`${header}.${payload}`), keys.privateKey).toString("base64url")}` }
+  const keyResolver = createJwksKeyResolver({ url: "https://access.example/certs", fetcher: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ keys: [{ ...keys.publicKey.export({ format: "jwk" }), kid: "viewer-key", use: "sig" }] }) }) })
+  const config = { issuer, audience, keyResolver, databasePath, clientContext: "desktop" as const, bootstrap: [{ email: " Viewer@Example.com ", personId: "viewer", role: "viewer" as const }] }
   const admitted = createProductionAccessAdmission(config); const request = { headers: { "cf-access-jwt-assertion": claim("viewer@example.com") } } as IncomingMessage
-  assert.deepEqual(admitted(request), { personId: "viewer", clientId: "access:viewer-subject", capability: "readOnly", role: "viewer" }); assert.equal(((new DatabaseSync(databasePath)).prepare("SELECT count(*) AS count FROM memberships WHERE external_subject='viewer-subject'").get() as { count: number }).count, 1)
-  const revoked = createProductionAccessAdmission({ ...config, bootstrap: [] }); assert.equal(revoked(request), undefined); assert.throws(() => createProductionAccessAdmission({ ...config, bootstrap: [{ ...config.bootstrap[0] }, { ...config.bootstrap[0], email: "viewer@example.com" }] }), /unique/)
+  assert.deepEqual(await admitted(request), { personId: "viewer", clientId: "access:viewer-subject", capability: "readOnly", role: "viewer" }); assert.equal(((new DatabaseSync(databasePath)).prepare("SELECT count(*) AS count FROM memberships WHERE external_subject='viewer-subject'").get() as { count: number }).count, 1)
+  const revoked = createProductionAccessAdmission({ ...config, bootstrap: [] }); assert.equal(await revoked(request), undefined); assert.throws(() => createProductionAccessAdmission({ ...config, bootstrap: [{ ...config.bootstrap[0] }, { ...config.bootstrap[0], email: "viewer@example.com" }] }), /unique/)
 })
 
 test("a configured non-fixture owner has role-based operations and grant authority while viewers and phones remain read-only", async (t) => {
   const databasePath = join(mkdtempSync(join(tmpdir(), "astro-role-owner-")), "state.sqlite"); const seeded = createLocalWebService(databasePath); seeded.close()
   const keys = generateKeyPairSync("rsa", { modulusLength: 2048 }); const issuer = "https://access.example"; const audience = "role-audience"
-  const claim = (subject: string, email: string) => { const header = Buffer.from(JSON.stringify({ alg: "RS256" })).toString("base64url"); const payload = Buffer.from(JSON.stringify({ sub: subject, email, iss: issuer, aud: audience, exp: Math.floor(Date.now() / 1_000) + 60 })).toString("base64url"); return `${header}.${payload}.${sign("RSA-SHA256", Buffer.from(`${header}.${payload}`), keys.privateKey).toString("base64url")}` }
-  const config = { issuer, audience, publicKeyPem: keys.publicKey.export({ type: "pkcs1", format: "pem" }).toString(), databasePath, clientContext: "desktop" as const, bootstrap: [{ email: "owner@example.com", personId: "observatory-primary", role: "owner" as const }, { email: "viewer@example.com", personId: "guest-observer", role: "viewer" as const }] }
+  const claim = (subject: string, email: string) => { const header = Buffer.from(JSON.stringify({ alg: "RS256", kid: "owner-key" })).toString("base64url"); const payload = Buffer.from(JSON.stringify({ sub: subject, email, iss: issuer, aud: audience, exp: Math.floor(Date.now() / 1_000) + 60 })).toString("base64url"); return `${header}.${payload}.${sign("RSA-SHA256", Buffer.from(`${header}.${payload}`), keys.privateKey).toString("base64url")}` }
+  const keyResolver = createJwksKeyResolver({ url: "https://access.example/certs", fetcher: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ keys: [{ ...keys.publicKey.export({ format: "jwk" }), kid: "owner-key", use: "sig" }] }) }) })
+  const config = { issuer, audience, keyResolver, databasePath, clientContext: "desktop" as const, bootstrap: [{ email: "owner@example.com", personId: "observatory-primary", role: "owner" as const }, { email: "viewer@example.com", personId: "guest-observer", role: "viewer" as const }] }
   const service = createLocalWebService(databasePath, createProductionAccessAdmission(config)); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => { await listener.close(); service.close() })
   const ownerHeaders = { "cf-access-jwt-assertion": claim("owner-subject", "owner@example.com") }; const viewerHeaders = { "cf-access-jwt-assertion": claim("viewer-subject", "viewer@example.com") }
@@ -125,8 +129,28 @@ test("a configured non-fixture owner has role-based operations and grant authori
   assert.equal((await fetch(`${base}/api/commands/request-control`, { method: "POST", headers: ownerHeaders, body: JSON.stringify({ expectedLeaseRevision: 1, idempotencyKey: "owner-request" }) })).status, 202)
   assert.equal((await fetch(`${base}/api/commands/grant-control`, { method: "POST", headers: ownerHeaders, body: JSON.stringify({ expectedLeaseRevision: 1, idempotencyKey: "owner-grant" }) })).status, 202)
   const phoneAdmission = createProductionAccessAdmission({ ...config, clientContext: "phone" })
-  const phoneIdentity = phoneAdmission({ headers: { "cf-access-jwt-assertion": claim("owner-phone-subject", "owner@example.com") } } as IncomingMessage)
+  const phoneIdentity = await phoneAdmission({ headers: { "cf-access-jwt-assertion": claim("owner-phone-subject", "owner@example.com") } } as IncomingMessage)
   assert.deepEqual(phoneIdentity, { personId: "observatory-primary", clientId: "access:owner-phone-subject", role: "owner", capability: "readOnly" })
+})
+
+test("production Access JWKS admission refreshes by kid, bounds cache use, and fails closed", async () => {
+  const databasePath = join(mkdtempSync(join(tmpdir(), "astro-jwks-")), "state.sqlite"); const seeded = createLocalWebService(databasePath); seeded.close()
+  const oldKeys = generateKeyPairSync("rsa", { modulusLength: 2048 }); const newKeys = generateKeyPairSync("rsa", { modulusLength: 2048 }); const issuer = "https://access.example"; const audience = "jwks-audience"; let now = 1_000; let calls = 0
+  let document = { keys: [{ ...oldKeys.publicKey.export({ format: "jwk" }), kid: "old-kid", use: "sig" }] }
+  const resolver = createJwksKeyResolver({ url: "https://access.example/cdn-cgi/access/certs", cacheTtlMs: 1_000, now: () => now, fetcher: async () => { calls += 1; return { ok: true, status: 200, text: async () => JSON.stringify(document) } } })
+  const claim = (kid: string, keys: ReturnType<typeof generateKeyPairSync>) => { const header = Buffer.from(JSON.stringify({ alg: "RS256", kid })).toString("base64url"); const payload = Buffer.from(JSON.stringify({ sub: "rotation-subject", email: "owner@example.com", iss: issuer, aud: audience, exp: Math.floor(Date.now() / 1_000) + 60 })).toString("base64url"); return `${header}.${payload}.${sign("RSA-SHA256", Buffer.from(`${header}.${payload}`), keys.privateKey).toString("base64url")}` }
+  const admission = createProductionAccessAdmission({ issuer, audience, keyResolver: resolver, databasePath, clientContext: "desktop", bootstrap: [{ email: "owner@example.com", personId: "rotating-owner", role: "owner" }] })
+  const request = (token: string) => ({ headers: { "cf-access-jwt-assertion": token } } as IncomingMessage)
+  assert.equal((await admission(request(claim("old-kid", oldKeys))))?.personId, "rotating-owner"); assert.equal(calls, 1)
+  document = { keys: [{ ...newKeys.publicKey.export({ format: "jwk" }), kid: "new-kid", use: "sig" }] }
+  assert.equal((await admission(request(claim("new-kid", newKeys))))?.personId, "rotating-owner"); assert.equal(calls, 2)
+  assert.equal(await admission(request(claim("old-kid", oldKeys))), undefined); assert.equal(calls, 3)
+  assert.equal(await admission(request(claim("unknown-kid", newKeys))), undefined); assert.equal(calls, 4)
+  assert.equal(await admission(request(claim("unknown-kid", newKeys))), undefined); assert.equal(calls, 4)
+  now += 1_000; document = { keys: [] }
+  assert.equal(await admission(request(claim("new-kid", newKeys))), undefined); assert.equal(calls, 5)
+  const missingKid = claim("new-kid", newKeys).replace(/eyJhbGciOiJSUzI1NiIsImtpZCI6Im5ldy1raWQifQ/, Buffer.from(JSON.stringify({ alg: "RS256" })).toString("base64url"))
+  assert.equal(await admission(request(missingKid)), undefined); assert.equal(calls, 5)
 })
 
 test("accepted pause dispatches StopStack once through an injected worker", async () => {
