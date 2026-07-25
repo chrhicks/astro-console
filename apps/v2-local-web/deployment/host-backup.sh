@@ -12,7 +12,7 @@ readonly staged_target_path="${target_path}.partial"
 readonly staged_checksum_path="${target_path}.sha256.partial"
 
 cleanup() {
-  docker exec -u 0 "${origin_container}" rm -f "${stage_path}" || true
+  docker exec "${origin_container}" rm -f "${stage_path}" || true
 }
 trap cleanup EXIT
 
