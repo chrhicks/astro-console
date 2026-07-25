@@ -4,4 +4,12 @@ ASTRO_LOCAL_WEB_PORT=8080
 # Compose uses 0.0.0.0 only inside its private network; host publishes no port.
 ASTRO_LOCAL_WEB_BIND=0.0.0.0
 ASTRO_RELEASE=REPLACE_WITH_RELEASE
-# Cloudflare tunnel credentials and Access signing material are host-managed secrets.
+# Development fixture admission is loopback-only. Production requires the
+# following non-secret identifiers and host-managed file paths.
+ASTRO_ADMISSION_MODE=production
+CF_ACCESS_ISSUER=https://REPLACE.cloudflareaccess.com
+CF_ACCESS_AUDIENCE=REPLACE_WITH_ACCESS_AUDIENCE
+CF_ACCESS_PUBLIC_KEY_PATH=/run/config/cloudflare-access-public.pem
+ASTRO_MEMBERSHIP_BOOTSTRAP_PATH=/run/config/membership-bootstrap.json
+ASTRO_CLIENT_CONTEXT=desktop
+# Tunnel credentials and all policy membership emails remain host-managed.

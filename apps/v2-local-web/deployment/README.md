@@ -13,6 +13,24 @@ from this file.
 Do not add router forwarding, home-directory mounts, device credentials, or
 tunnel tokens to this folder.
 
+Production admission is fail-closed: set `ASTRO_ADMISSION_MODE=production`,
+provide the verified Access issuer/audience, public-key path, bootstrap path,
+and a server-configured desktop or phone client context. The bootstrap file is
+host-managed JSON, never committed: `[{"email":"...","personId":"...","role":"owner"|"viewer"}]`.
+On the first verified Access assertion for one of those emails, the service
+durably binds its Access subject to that membership; request bodies, queries,
+and headers never choose a role. Provision the confirmed owner and viewers in
+that host file. Development fixture admission is loopback-only and refuses a
+`0.0.0.0` bind.
+
+Owner authority is the durable membership role, not a magic fixture person ID:
+an owner bootstrap entry may use any stable non-empty `personId`. A phone
+client context remains read-only even for an owner membership. Bootstrap email
+comparison is trimmed and case-normalized, rejects duplicates after
+normalization, and is rechecked on every verified request, so removing an
+email revokes origin admission even if its prior Access subject remains in
+SQLite.
+
 Build from the repository root with `docker build -f
 apps/v2-local-web/deployment/Dockerfile .`; activation must use a reviewed
 immutable image digest rather than the starter tag. Before activation: supply

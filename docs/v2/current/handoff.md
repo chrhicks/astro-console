@@ -24,12 +24,22 @@ preflight. These are packaged prerequisites only: no image has been built on
 the target host, no secret has been supplied, and no database restore, tunnel,
 or rig validation has been activated.
 
+Production admission is now wired into executable startup rather than the
+development fixture: an external bind requires verified Cloudflare Access
+issuer/audience/key material, a host-managed membership bootstrap, and a
+server-configured client context. Every verified request is rechecked against
+the current normalized bootstrap policy, so removing an email revokes origin
+admission even if its subject was previously persisted. Durable `owner` and
+`viewer` roles own authorization; owner phone contexts remain read-only. The
+approved initial policy is a 24-hour, deny-by-default
+`observatory.chicks.dev` Access application using email one-time PIN; actual
+email membership remains host-managed and has not been provisioned.
+
 Cloudflare inventory on 2026-07-24 found active `chicks.dev` DNS but no
 Cloudflare Tunnel and no Access application. The account has only Cloudflare's
-default identity provider; neither the accepted Google nor email one-time-PIN
-provider is configured. Activation must first establish those providers and a
-named-identity, deny-by-default Access policy for `observatory.chicks.dev`,
-then create the tunnel route and verify the origin's Access JWT admission.
+default identity provider. Activation must provision the approved
+named-identity, deny-by-default email-OTP Access policy, create the tunnel
+route, and verify the origin's Access JWT admission.
 
 The Arch-host preflight has now confirmed explicit live Alpaca endpoints for
 both rigs: ASI Mount plus Sony Mirrorless Camera at `192.168.4.104:11111`, and

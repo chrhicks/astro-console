@@ -4,10 +4,11 @@ import { mkdtempSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { DatabaseSync } from "node:sqlite"
+import type { IncomingMessage } from "node:http"
 import { generateKeyPairSync, sign } from "node:crypto"
 import * as Schema from "effect/Schema"
 import { AcquireSnapshot, RunSnapshot } from "../../../packages/v2-contracts/src/snapshots.ts"
-import { configuredListenHost, configuredListenPort, configuredRuntime, createCloudflareAccessAdmission, createLocalWebService } from "./server.ts"
+import { configuredAdmission, configuredListenHost, configuredListenPort, configuredRuntime, createCloudflareAccessAdmission, createLocalWebService, createProductionAccessAdmission } from "./server.ts"
 
 test("SQLite acceptance atomically persists run, event, receipt, and outbox", async (t) => {
   const service = createLocalWebService(join(mkdtempSync(join(tmpdir(), "astro-local-")), "state.sqlite"))
@@ -41,6 +42,7 @@ test("configured listener keeps ephemeral loopback defaults and bounds productio
   assert.equal(configuredListenPort(undefined), 0); assert.equal(configuredListenPort("8080"), 8080); assert.equal(configuredListenHost(undefined), "127.0.0.1"); assert.equal(configuredListenHost("0.0.0.0"), "0.0.0.0")
   assert.throws(() => configuredListenPort("65536"), /integer/); assert.throws(() => configuredListenHost("192.168.1.2"), /must be/)
   assert.deepEqual(configuredRuntime({ ASTRO_LOCAL_WEB_DB: "/var/lib/astro-console/state.sqlite", ASTRO_LOCAL_WEB_PORT: "8080", ASTRO_LOCAL_WEB_BIND: "0.0.0.0", ASTRO_RELEASE: "2026.07.24" }), { databasePath: "/var/lib/astro-console/state.sqlite", release: "2026.07.24", port: 8080, host: "0.0.0.0" }); assert.throws(() => configuredRuntime({ ASTRO_RELEASE: "bad\nrelease" }), /invalid/)
+  assert.throws(() => configuredAdmission({ ASTRO_ADMISSION_MODE: "development", ASTRO_LOCAL_WEB_BIND: "0.0.0.0" }, ":memory:"), /loopback/); assert.throws(() => configuredAdmission({ ASTRO_ADMISSION_MODE: "production" }, ":memory:"), /requires/)
   const service = createLocalWebService(); const listener = await service.listen(0)
   t.after(async () => { await listener.close(); service.close() })
   assert.ok(listener.port > 0)
@@ -60,7 +62,7 @@ test("operational endpoints expose bounded admitted health without internal deta
 })
 
 test("request-context admission rejects before snapshot, stream, query, or mutation routing", async (t) => {
-  const service = createLocalWebService(":memory:", (request) => request?.headers.authorization === "Bearer verified-owner" ? { personId: "owner-chicks", clientId: "desktop-owner", capability: "controlCapable" } : undefined)
+  const service = createLocalWebService(":memory:", (request) => request?.headers.authorization === "Bearer verified-owner" ? { personId: "owner-chicks", clientId: "desktop-owner", capability: "controlCapable", role: "owner" } : undefined)
   const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => { await listener.close(); service.close() })
   for (const path of ["/api/snapshot", "/api/events", "/api/library"]) assert.equal((await fetch(`${base}${path}`)).status, 401)
@@ -96,6 +98,35 @@ test("verified Access assertions map durable memberships without trusting reques
   assert.equal((await fetch(`${base}/api/commands/start-run`, { method: "POST", headers: authorized(claim("access-viewer")), body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "viewer-start" }) })).status, 403)
   assert.equal((await fetch(`${base}/api/snapshot`, { headers: authorized(claim("unknown-subject")) })).status, 401)
   for (const token of [claim("access-owner", { exp: Math.floor(Date.now() / 1_000) - 1 }), claim("access-owner", { iss: "https://forged.example" }), claim("access-owner", { aud: "wrong-audience" }), `${claim("access-owner")}.forged`]) assert.equal((await fetch(`${base}/api/snapshot`, { headers: authorized(token) })).status, 401)
+})
+
+test("production admission rechecks normalized bootstrap policy and revokes removed viewer subjects", async (t) => {
+  const databasePath = join(mkdtempSync(join(tmpdir(), "astro-production-access-")), "state.sqlite"); const seeded = createLocalWebService(databasePath); seeded.close()
+  const keys = generateKeyPairSync("rsa", { modulusLength: 2048 }); const issuer = "https://access.example"; const audience = "audience"; const claim = (email: string) => { const header = Buffer.from(JSON.stringify({ alg: "RS256" })).toString("base64url"); const payload = Buffer.from(JSON.stringify({ sub: "viewer-subject", email, iss: issuer, aud: audience, exp: Math.floor(Date.now() / 1_000) + 60 })).toString("base64url"); return `${header}.${payload}.${sign("RSA-SHA256", Buffer.from(`${header}.${payload}`), keys.privateKey).toString("base64url")}` }
+  const config = { issuer, audience, publicKeyPem: keys.publicKey.export({ type: "pkcs1", format: "pem" }).toString(), databasePath, clientContext: "desktop" as const, bootstrap: [{ email: " Viewer@Example.com ", personId: "viewer", role: "viewer" as const }] }
+  const admitted = createProductionAccessAdmission(config); const request = { headers: { "cf-access-jwt-assertion": claim("viewer@example.com") } } as IncomingMessage
+  assert.deepEqual(admitted(request), { personId: "viewer", clientId: "access:viewer-subject", capability: "readOnly", role: "viewer" }); assert.equal(((new DatabaseSync(databasePath)).prepare("SELECT count(*) AS count FROM memberships WHERE external_subject='viewer-subject'").get() as { count: number }).count, 1)
+  const revoked = createProductionAccessAdmission({ ...config, bootstrap: [] }); assert.equal(revoked(request), undefined); assert.throws(() => createProductionAccessAdmission({ ...config, bootstrap: [{ ...config.bootstrap[0] }, { ...config.bootstrap[0], email: "viewer@example.com" }] }), /unique/)
+})
+
+test("a configured non-fixture owner has role-based operations and grant authority while viewers and phones remain read-only", async (t) => {
+  const databasePath = join(mkdtempSync(join(tmpdir(), "astro-role-owner-")), "state.sqlite"); const seeded = createLocalWebService(databasePath); seeded.close()
+  const keys = generateKeyPairSync("rsa", { modulusLength: 2048 }); const issuer = "https://access.example"; const audience = "role-audience"
+  const claim = (subject: string, email: string) => { const header = Buffer.from(JSON.stringify({ alg: "RS256" })).toString("base64url"); const payload = Buffer.from(JSON.stringify({ sub: subject, email, iss: issuer, aud: audience, exp: Math.floor(Date.now() / 1_000) + 60 })).toString("base64url"); return `${header}.${payload}.${sign("RSA-SHA256", Buffer.from(`${header}.${payload}`), keys.privateKey).toString("base64url")}` }
+  const config = { issuer, audience, publicKeyPem: keys.publicKey.export({ type: "pkcs1", format: "pem" }).toString(), databasePath, clientContext: "desktop" as const, bootstrap: [{ email: "owner@example.com", personId: "observatory-primary", role: "owner" as const }, { email: "viewer@example.com", personId: "guest-observer", role: "viewer" as const }] }
+  const service = createLocalWebService(databasePath, createProductionAccessAdmission(config)); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => { await listener.close(); service.close() })
+  const ownerHeaders = { "cf-access-jwt-assertion": claim("owner-subject", "owner@example.com") }; const viewerHeaders = { "cf-access-jwt-assertion": claim("viewer-subject", "viewer@example.com") }
+  const ownerSnapshot = await fetch(`${base}/api/snapshot`, { headers: ownerHeaders }).then((response) => response.json())
+  assert.equal(ownerSnapshot.identity.personId, "observatory-primary"); assert.equal(ownerSnapshot.identity.role, "owner"); assert.equal(ownerSnapshot.identity.capability, "controlCapable")
+  assert.equal((await fetch(`${base}/api/health/operations`, { headers: ownerHeaders })).status, 200)
+  assert.equal((await fetch(`${base}/api/health/operations`, { headers: viewerHeaders })).status, 403)
+  assert.equal((await fetch(`${base}/api/commands/grant-control`, { method: "POST", headers: viewerHeaders, body: JSON.stringify({ expectedLeaseRevision: 1, idempotencyKey: "viewer-may-not-grant" }) })).status, 403)
+  assert.equal((await fetch(`${base}/api/commands/request-control`, { method: "POST", headers: ownerHeaders, body: JSON.stringify({ expectedLeaseRevision: 1, idempotencyKey: "owner-request" }) })).status, 202)
+  assert.equal((await fetch(`${base}/api/commands/grant-control`, { method: "POST", headers: ownerHeaders, body: JSON.stringify({ expectedLeaseRevision: 1, idempotencyKey: "owner-grant" }) })).status, 202)
+  const phoneAdmission = createProductionAccessAdmission({ ...config, clientContext: "phone" })
+  const phoneIdentity = phoneAdmission({ headers: { "cf-access-jwt-assertion": claim("owner-phone-subject", "owner@example.com") } } as IncomingMessage)
+  assert.deepEqual(phoneIdentity, { personId: "observatory-primary", clientId: "access:owner-phone-subject", role: "owner", capability: "readOnly" })
 })
 
 test("accepted pause dispatches StopStack once through an injected worker", async () => {
@@ -498,7 +529,7 @@ test("browser reconnect installs a current snapshot and its stale shell offers n
 
 test("expired reconnect grace survives restart, releases control to nobody, and preserves accepted work", async (t) => {
   const databasePath = join(mkdtempSync(join(tmpdir(), "astro-lease-recovery-")), "state.sqlite")
-  const owner = createLocalWebService(databasePath, () => ({ personId: "owner-chicks", clientId: "desktop-owner", capability: "controlCapable" }))
+  const owner = createLocalWebService(databasePath, () => ({ personId: "owner-chicks", clientId: "desktop-owner", capability: "controlCapable", role: "owner" }))
   const friend = createLocalWebService(databasePath, () => ({ personId: "friend-ada", clientId: "desktop-ada", capability: "controlCapable" }))
   const ownerListener = await owner.listen(); const friendListener = await friend.listen(); const ownerBase = `http://127.0.0.1:${ownerListener.port}`; const friendBase = `http://127.0.0.1:${friendListener.port}`
   await fetch(`${ownerBase}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "lease-recovery-run" }) })
@@ -510,7 +541,7 @@ test("expired reconnect grace survives restart, releases control to nobody, and 
   assert.equal(disconnected.eventType, "ControlReconnectGraceStarted")
   await ownerListener.close(); await friendListener.close(); owner.close(); friend.close()
   const persisted = new DatabaseSync(databasePath); persisted.prepare("UPDATE state SET value=? WHERE key='reconnectGraceUntil'").run(JSON.stringify("2000-01-01T00:00:00.000Z")); persisted.close()
-  const recovered = createLocalWebService(databasePath, () => ({ personId: "owner-chicks", clientId: "desktop-owner", capability: "controlCapable" })); const recoveredListener = await recovered.listen()
+  const recovered = createLocalWebService(databasePath, () => ({ personId: "owner-chicks", clientId: "desktop-owner", capability: "controlCapable", role: "owner" })); const recoveredListener = await recovered.listen()
   t.after(async () => { await recoveredListener.close(); recovered.close() })
   const snapshot = await fetch(`http://127.0.0.1:${recoveredListener.port}/api/snapshot`).then((response) => response.json())
   assert.equal(snapshot.control.holderClientId, null); assert.equal(snapshot.control.state, "unheld"); assert.equal(snapshot.control.revision, 4); assert.equal(snapshot.run.phase, "capture")
@@ -520,7 +551,7 @@ test("expired reconnect grace survives restart, releases control to nobody, and 
 
 test("two server-configured desktops transfer control without stopping the accepted run", async (t) => {
   const databasePath = join(mkdtempSync(join(tmpdir(), "astro-control-")), "state.sqlite")
-  const owner = createLocalWebService(databasePath, () => ({ personId: "owner-chicks", clientId: "desktop-owner", capability: "controlCapable" }))
+  const owner = createLocalWebService(databasePath, () => ({ personId: "owner-chicks", clientId: "desktop-owner", capability: "controlCapable", role: "owner" }))
   const friend = createLocalWebService(databasePath, () => ({ personId: "friend-ada", clientId: "desktop-ada", capability: "controlCapable" }))
   const ownerListener = await owner.listen(); const friendListener = await friend.listen()
   t.after(async () => { await ownerListener.close(); await friendListener.close(); owner.close(); friend.close() })
@@ -543,7 +574,7 @@ test("two server-configured desktops transfer control without stopping the accep
 
 test("an owner SSE projection advances when a friend writes the shared SQLite database", async (t) => {
   const databasePath = join(mkdtempSync(join(tmpdir(), "astro-projection-")), "state.sqlite")
-  const owner = createLocalWebService(databasePath, () => ({ personId: "owner-chicks", clientId: "desktop-owner", capability: "controlCapable" }))
+  const owner = createLocalWebService(databasePath, () => ({ personId: "owner-chicks", clientId: "desktop-owner", capability: "controlCapable", role: "owner" }))
   const friend = createLocalWebService(databasePath, () => ({ personId: "friend-ada", clientId: "desktop-ada", capability: "controlCapable" }))
   const ownerListener = await owner.listen(); const friendListener = await friend.listen()
   t.after(async () => { await ownerListener.close(); await friendListener.close(); owner.close(); friend.close() })
