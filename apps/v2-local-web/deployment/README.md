@@ -51,6 +51,15 @@ For a repository-side preflight, use `npm run backup:preflight -- backup
 `npm run backup:preflight -- verify <backup>` before a restore drill. This
 does not perform a host restore.
 
+For the current Docker deployment, `host-backup.sh` plus the adjacent systemd
+service/timer are the host-managed daily backup reference. Install those files
+outside the repository, preserve root-only permissions on
+`/var/backups/astro-console`, and retain the timer's journal as the run log.
+The script backs up through the running origin, verifies the staged copy,
+copies it outside the state volume, records SHA-256, and retains fourteen days
+of local backup/checksum pairs. It is not off-host disaster recovery; move
+verified backups to independent storage before claiming that protection.
+
 The Dockerfile pins the verified multi-architecture digest for
 `node:22.22.2-bookworm-slim`:
 `sha256:9f6d5975c7dca860947d3915877f85607946403fc55349f39b4bc3688448bb6e`.

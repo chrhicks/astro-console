@@ -1,0 +1,8 @@
+[Unit]
+Description=Create a consistent Astro Console SQLite backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/astro-console/host-backup.sh
