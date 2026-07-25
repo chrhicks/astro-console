@@ -620,6 +620,13 @@ test("serves the accepted V1 light symbol from the local application origin", as
   t.after(async () => { await listener.close(); service.close() })
   const response = await fetch(`http://127.0.0.1:${listener.port}/assets/brand/alignment-aperture-light.svg`)
   assert.equal(response.headers.get("content-type"), "image/svg+xml")
-  assert.match(await response.text(), /svg/)
+  assert.match(await response.text(), /Astro Console V1 symbol/)
   await listener.close(); service.close()
+})
+
+test("a missing packaged brand asset is a bounded 404 rather than a server failure", async (t) => {
+  const service = createLocalWebService(":memory:", undefined, new URL("file:///tmp/astro-console-missing-brand.svg")); const listener = await service.listen()
+  t.after(async () => { await listener.close(); service.close() })
+  const response = await fetch(`http://127.0.0.1:${listener.port}/assets/brand/alignment-aperture-light.svg`)
+  assert.equal(response.status, 404); assert.equal(await response.text(), "Brand asset unavailable")
 })
