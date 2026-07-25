@@ -16,16 +16,15 @@ SQLite migrations preserve legacy local state, and liveness, admitted readiness,
 and owner-only operational health distinguish service/database truth from
 unknown rig and tunnel state. The Compose starter is non-activating, but a
 live protected fixture is now active; see [the activation ledger](activation-ledger.md)
-for the actual boundary and remaining gaps. Recurring backup/restore, health
-monitoring, storage monitoring, R2 integration, and real rig work remain
-required.
+for the actual boundary and remaining gaps. Off-host backup/restore, storage
+monitoring, R2 integration, and real rig work remain required.
 
 The repository now packages a reproducible Node image build, fail-closed
 non-secret runtime configuration, and SQLite `VACUUM INTO` backup/integrity
 preflight. The prerequisites have now been activated for the public fixture:
 the target host runs the packaged image behind Access and Tunnel admission,
 and one online backup/restore drill has passed. This does not establish a
-scheduled backup service, a physical rig adapter, or R2 publishing.
+off-host backup replication, a physical rig adapter, or R2 publishing.
 
 Production admission is now wired into executable startup rather than the
 development fixture: an external bind requires verified Cloudflare Access

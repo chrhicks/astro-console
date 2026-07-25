@@ -111,16 +111,16 @@ bounded liveness/readiness/owner-health projections, and a non-activating
 origin/control plus cloudflared Compose starter. A protected public fixture is
 now live behind Cloudflare Access and Tunnel, with an online SQLite
 backup/restore drill completed. The authoritative live record is the
-[activation ledger](activation-ledger.md). Recurring backups, health
-monitoring, device/session authority, rig adapters, disk monitoring, and
-R2/publisher paths remain production-validation work.
+[activation ledger](activation-ledger.md). Off-host backup replication,
+device/session authority, rig adapters, disk monitoring, and R2/publisher
+paths remain production-validation work.
 
 Release packaging now includes a pinned Node base Dockerfile, startup
 non-secret configuration validation, and SQLite-safe backup/restore-source
 preflight. Host image deployment, secret injection, public ingress, and a
 one-time backup/restore drill are completed for the fixture. Real rig
-validation, scheduled backups, and ongoing operational monitoring remain
-unperformed.
+validation, off-host backup replication, and ongoing operational monitoring
+remain unperformed.
 
 ## Historical Planning
 

@@ -33,12 +33,15 @@ claim that a browser command controls either physical rig.
   copied to a root-only host backup directory outside the live Docker volume,
   checksum-recorded, restored as a disposable database, and served through a
   disposable local service with `GET /api/snapshot` returning HTTP 200.
+- A persistent systemd timer now runs the same verified online backup daily
+  with a small randomized delay and retains fourteen days of local
+  backup/checksum pairs. Two timer-service executions have passed.
 
 ## Still required
 
-- Add a recurring backup schedule, retention policy, and a repeatable
-  restore-runbook; one verified backup/restore drill is not ongoing backup
-  coverage.
+- Copy verified backups to independent storage and maintain a repeatable
+  restore-runbook. The current schedule is local host protection, not off-host
+  disaster recovery.
 - Add container health checks or an equivalent monitored liveness/restart
   mechanism. Restart policy alone does not detect a stuck process.
 - Make remote client/device authority real. The current deployed desktop
