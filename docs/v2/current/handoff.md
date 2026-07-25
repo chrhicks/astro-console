@@ -4,12 +4,72 @@ Status: **active Phase 1 continuation packet**
 
 ## Single Next Action
 
-Continue the production-operations boundary from the live protected fixture:
-recurring backup/restore operations, health monitoring, device/session
-authority, and truthful revocation behavior. Preserve the
-accepted read-only workspace projections and do not fold deferred Process
-mutations, device/session identity, or worker recovery semantics into a
-deployment shortcut.
+Complete the Seestar worker path to a deliberate, real solar observation.
+Preserve service-owned work, durable worker evidence, and the distinction
+between provider acknowledgement and observed capture evidence. Do not turn
+the public fixture's `Run plan` into hardware control until the explicit
+worker process and Seestar adapter are deployed and verified.
+
+## Seestar Solar Observation Continuation
+
+### Current verified physical state
+
+- The Seestar S30 is outside in direct sunlight with its solar filter fitted.
+- Its arm is open at the horizon position. A bounded Solar System live-preview
+  smoke test connected/authenticated, started Solar view, verified it active,
+  and then stopped it cleanly; no stack or capture sequence was started.
+- The last read-only preflight reported firmware 7.32, battery 97%, roughly
+  36 GB free storage, and an elevated 59°C device temperature without an
+  over-temperature state. Recheck preflight immediately before a real test.
+- The known native SDK endpoint is `192.168.4.63:4700`; its Alpaca bridge is
+  `192.168.4.63:32323`. On the current Mac, Tailscale installs a more-specific
+  route that wins over Wi-Fi. Direct commands must temporarily route only that
+  exact host through `en0`, then remove the route afterward. Do not alter a
+  broad route or leave a persistent route behind.
+
+### Completed app foundation
+
+- `d445d22` adds durable, worker-owned `StartM27Capture` claim/ack/retry
+  behavior using a fakeable adapter. It is not a running worker process and
+  has no physical adapter configured.
+- `b314776` adds disabled-by-default, fail-closed Seestar worker configuration.
+  `ASTRO_RIG_WORKER_MODE=seestar` requires the local-web database path, the
+  known Seestar host, and a host-managed PEM path; absent configuration is
+  `disabled`.
+- The full local-web integration suite passes 39 tests. The public deployment
+  remains fixture-only; do not claim browser `Run plan` reaches hardware.
+
+### Exact next implementation and test sequence
+
+1. Add a separate rig-worker executable/service. It opens the canonical SQLite
+   database, claims `StartM27Capture` work outside browser requests, runs a
+   bounded polling loop, exposes worker liveness/last-heartbeat, and exits
+   cleanly when disabled. Prove once/retry/lease-expiry behavior with SQLite
+   integration tests.
+2. Add the explicit Seestar adapter behind `ASTRO_RIG_WORKER_MODE=seestar`.
+   For the first real contract, it must start the specified Solar view and
+   then start/stop the appropriate acquisition stage; it must decode actual
+   Seestar state/Stack evidence before the service presents capture as active.
+   Provider calls remain at-least-once after an ambiguous timeout; do not
+   automatically retry an uncertain physical start.
+3. Add host deployment wiring for the separate worker: read-only container,
+   host-managed PEM mount, precise Seestar config, restart/health behavior,
+   and an explicit disabled default. Do not reuse the public origin's browser
+   process as the worker.
+4. Run a real daytime solar test only after 1–3 pass: recheck the fitted solar
+   filter and device preflight; submit one named Solar test intent; observe
+   worker claim/provider acknowledgement/actual device evidence; issue a
+   distinct stop; verify durable service evidence and recovery after a worker
+   restart. Do not begin a long unattended stack for this first test.
+
+### Authority decision
+
+Cloudflare Access verified identity plus durable service role is the intended
+control boundary for this personal, physically supervised observatory. Do not
+add device enrollment, WARP posture, certificates, or fingerprint authority.
+Mobile/compact hiding is UI convenience only, not an authorization claim;
+admitted control-capable identities may issue commands from mobile. Preserve
+server role and control-lease checks.
 
 The first operational foundation is complete in the local-web fixture: numbered
 SQLite migrations preserve legacy local state, and liveness, admitted readiness,
