@@ -10,6 +10,7 @@ import * as Schema from "effect/Schema"
 import { AcquireSnapshot, RunSnapshot } from "../../../packages/v2-contracts/src/snapshots.ts"
 import { configuredAdmission, configuredListenHost, configuredListenPort, configuredRuntime, createJwksKeyResolver, createLocalWebService, createMembershipBootstrapResolver, createProductionAccessAdmission } from "./server.ts"
 import { createRigWorker } from "./rig-worker.ts"
+import { rigWorkerConfig } from "./rig-worker-config.ts"
 
 test("SQLite acceptance atomically persists run, event, receipt, and outbox", async (t) => {
   const service = createLocalWebService(join(mkdtempSync(join(tmpdir(), "astro-local-")), "state.sqlite"))
@@ -47,6 +48,13 @@ test("configured listener keeps ephemeral loopback defaults and bounds productio
   const service = createLocalWebService(); const listener = await service.listen(0)
   t.after(async () => { await listener.close(); service.close() })
   assert.ok(listener.port > 0)
+})
+
+test("rig worker configuration is disabled by default and fails closed for Seestar", () => {
+  assert.deepEqual(rigWorkerConfig({ ASTRO_LOCAL_WEB_DB: "/state.sqlite" }), { mode: "disabled", databasePath: "/state.sqlite" })
+  assert.deepEqual(rigWorkerConfig({ ASTRO_LOCAL_WEB_DB: "/state.sqlite", ASTRO_RIG_WORKER_MODE: "seestar", ASTRO_SEESTAR_HOST: "192.168.4.63", ASTRO_SEESTAR_PEM_PATH: "/run/secrets/seestar.pem" }), { mode: "seestar", databasePath: "/state.sqlite", rigId: "seestar-s30", host: "192.168.4.63", pemPath: "/run/secrets/seestar.pem" })
+  assert.throws(() => rigWorkerConfig({ ASTRO_LOCAL_WEB_DB: "/state.sqlite", ASTRO_RIG_WORKER_MODE: "seestar" }), /ASTRO_SEESTAR_HOST/)
+  assert.throws(() => rigWorkerConfig({ ASTRO_LOCAL_WEB_DB: "/state.sqlite", ASTRO_RIG_WORKER_MODE: "alpaca" }), /disabled or seestar/)
 })
 
 test("operational endpoints expose bounded admitted health without internal detail", async (t) => {
