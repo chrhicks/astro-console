@@ -9,6 +9,7 @@ import { generateKeyPairSync, sign } from "node:crypto"
 import * as Schema from "effect/Schema"
 import { AcquireSnapshot, RunSnapshot } from "../../../packages/v2-contracts/src/snapshots.ts"
 import { configuredAdmission, configuredListenHost, configuredListenPort, configuredRuntime, createJwksKeyResolver, createLocalWebService, createMembershipBootstrapResolver, createProductionAccessAdmission } from "./server.ts"
+import { createRigWorker } from "./rig-worker.ts"
 
 test("SQLite acceptance atomically persists run, event, receipt, and outbox", async (t) => {
   const service = createLocalWebService(join(mkdtempSync(join(tmpdir(), "astro-local-")), "state.sqlite"))
@@ -210,6 +211,25 @@ test("SQLite worker claims prevent duplicate dispatch and retryable failures rec
   assert.equal(await recovered.dispatchPauseOutbox({ stopStack: async () => true }, "recovered-worker"), "dispatched")
   const retried = recovered.database.prepare("SELECT state,attempts,last_error FROM outbox WHERE kind='StopStack' ORDER BY rowid DESC LIMIT 1").get() as { state: string; attempts: number; last_error: string | null }
   assert.equal(retried.state, "dispatched"); assert.equal(retried.attempts, 2); assert.equal(retried.last_error, null)
+})
+
+test("a rig worker dispatches accepted StartM27Capture once and recovers failed or expired claims", async (t) => {
+  const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => { await listener.close(); service.close() })
+  assert.equal((await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "rig-worker-start" }) })).status, 202)
+  let calls = 0
+  const worker = createRigWorker(service, { startM27Capture: async (work) => { calls += 1; assert.equal(work.runId, "run-m27-001"); await new Promise((done) => setTimeout(done, 10)); return true } })
+  assert.deepEqual(await Promise.all([worker.runOnce(), worker.runOnce()]), ["dispatched", "none"])
+  assert.equal(calls, 1)
+  let row = service.database.prepare("SELECT id,state,claim_token,ack_at,attempts FROM outbox WHERE kind='StartM27Capture'").get() as { id: string; state: string; claim_token: string | null; ack_at: string | null; attempts: number }
+  assert.equal(row.state, "dispatched"); assert.equal(row.claim_token, null); assert.notEqual(row.ack_at, null); assert.equal(row.attempts, 1)
+  service.database.prepare("INSERT INTO outbox (id,kind,payload,state) VALUES (?,?,?,?)").run("start-failure", "StartM27Capture", JSON.stringify({ runId: "run-m27-001" }), "pending")
+  assert.equal(await createRigWorker(service, { startM27Capture: async () => false }).runOnce(), "failed")
+  assert.equal(await worker.runOnce(), "dispatched")
+  service.database.prepare("UPDATE outbox SET state='claimed',claim_token='expired',claim_until=?,ack_at=NULL WHERE id=?").run("2000-01-01T00:00:00.000Z", row.id)
+  assert.equal(await worker.runOnce(), "dispatched")
+  row = service.database.prepare("SELECT id,state,claim_token,ack_at,attempts FROM outbox WHERE id=?").get(row.id) as typeof row
+  assert.equal(calls, 3); assert.equal(row.state, "dispatched"); assert.equal(row.claim_token, null); assert.notEqual(row.ack_at, null); assert.equal(row.attempts, 2)
 })
 
 test("current controller resumes only the paused revision and replays idempotently", async (t) => {
