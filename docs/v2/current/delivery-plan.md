@@ -108,14 +108,19 @@ separate mutation and operations slices.
 
 The operational foundation now supplies explicit numbered SQLite migrations,
 bounded liveness/readiness/owner-health projections, and a non-activating
-origin/control plus cloudflared Compose starter. It does not establish a live
-host, Access policy, tunnel, backup restore, rig discovery, disk monitor, or
-R2/publisher path; those remain activation and production-validation work.
+origin/control plus cloudflared Compose starter. A protected public fixture is
+now live behind Cloudflare Access and Tunnel, with an online SQLite
+backup/restore drill completed. The authoritative live record is the
+[activation ledger](activation-ledger.md). Recurring backups, health
+monitoring, device/session authority, rig adapters, disk monitoring, and
+R2/publisher paths remain production-validation work.
 
 Release packaging now includes a pinned Node base Dockerfile, startup
 non-secret configuration validation, and SQLite-safe backup/restore-source
-preflight. Host image build/pinning, secret injection, backup restore drill,
-and all live ingress or rig validation remain explicitly unperformed.
+preflight. Host image deployment, secret injection, public ingress, and a
+one-time backup/restore drill are completed for the fixture. Real rig
+validation, scheduled backups, and ongoing operational monitoring remain
+unperformed.
 
 ## Historical Planning
 

@@ -4,8 +4,9 @@ Status: **active Phase 1 continuation packet**
 
 ## Single Next Action
 
-Prepare the production-operations boundary: migrations, rig-local deployment
-and ingress, health/availability, and operational hardening. Preserve the
+Continue the production-operations boundary from the live protected fixture:
+recurring backup/restore operations, health monitoring, device/session
+authority, and truthful revocation behavior. Preserve the
 accepted read-only workspace projections and do not fold deferred Process
 mutations, device/session identity, or worker recovery semantics into a
 deployment shortcut.
@@ -13,16 +14,18 @@ deployment shortcut.
 The first operational foundation is complete in the local-web fixture: numbered
 SQLite migrations preserve legacy local state, and liveness, admitted readiness,
 and owner-only operational health distinguish service/database truth from
-unknown rig and tunnel state. The Compose starter is non-activating. Live host
-configuration, pinned images, secret injection, migration backup/restore,
-rig discovery, Cloudflare Access/tunnel validation, storage monitoring, and
-R2 integration remain required before deployment.
+unknown rig and tunnel state. The Compose starter is non-activating, but a
+live protected fixture is now active; see [the activation ledger](activation-ledger.md)
+for the actual boundary and remaining gaps. Recurring backup/restore, health
+monitoring, storage monitoring, R2 integration, and real rig work remain
+required.
 
 The repository now packages a reproducible Node image build, fail-closed
 non-secret runtime configuration, and SQLite `VACUUM INTO` backup/integrity
-preflight. These are packaged prerequisites only: no image has been built on
-the target host, no secret has been supplied, and no database restore, tunnel,
-or rig validation has been activated.
+preflight. The prerequisites have now been activated for the public fixture:
+the target host runs the packaged image behind Access and Tunnel admission,
+and one online backup/restore drill has passed. This does not establish a
+scheduled backup service, a physical rig adapter, or R2 publishing.
 
 Production admission is now wired into executable startup rather than the
 development fixture: an external bind requires verified Cloudflare Access
@@ -33,13 +36,13 @@ admission even if its subject was previously persisted. Durable `owner` and
 `viewer` roles own authorization; owner phone contexts remain read-only. The
 approved initial policy is a 24-hour, deny-by-default
 `observatory.chicks.dev` Access application using email one-time PIN; actual
-email membership remains host-managed and has not been provisioned.
+email membership is host-managed and provisioned for the approved initial
+group. Do not record those addresses in this document.
 
-Cloudflare inventory on 2026-07-24 found active `chicks.dev` DNS but no
-Cloudflare Tunnel and no Access application. The account has only Cloudflare's
-default identity provider. Activation must provision the approved
-named-identity, deny-by-default email-OTP Access policy, create the tunnel
-route, and verify the origin's Access JWT admission.
+Cloudflare activation is complete for the fixture: the approved named-identity
+email-OTP policy, tunnel route, and origin Access-JWT admission were verified
+end-to-end. See the activation ledger for the precise live boundary and
+remaining operational gaps.
 
 The Arch-host preflight has now confirmed explicit live Alpaca endpoints for
 both rigs: ASI Mount plus Sony Mirrorless Camera at `192.168.4.104:11111`, and

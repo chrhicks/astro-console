@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { mkdtempSync } from "node:fs"
+import { mkdtempSync, unlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { DatabaseSync } from "node:sqlite"
@@ -8,7 +8,7 @@ import type { IncomingMessage } from "node:http"
 import { generateKeyPairSync, sign } from "node:crypto"
 import * as Schema from "effect/Schema"
 import { AcquireSnapshot, RunSnapshot } from "../../../packages/v2-contracts/src/snapshots.ts"
-import { configuredAdmission, configuredListenHost, configuredListenPort, configuredRuntime, createJwksKeyResolver, createLocalWebService, createProductionAccessAdmission } from "./server.ts"
+import { configuredAdmission, configuredListenHost, configuredListenPort, configuredRuntime, createJwksKeyResolver, createLocalWebService, createMembershipBootstrapResolver, createProductionAccessAdmission } from "./server.ts"
 
 test("SQLite acceptance atomically persists run, event, receipt, and outbox", async (t) => {
   const service = createLocalWebService(join(mkdtempSync(join(tmpdir(), "astro-local-")), "state.sqlite"))
@@ -110,6 +110,18 @@ test("production admission rechecks normalized bootstrap policy and revokes remo
   const admitted = createProductionAccessAdmission(config); const request = { headers: { "cf-access-jwt-assertion": claim("viewer@example.com") } } as IncomingMessage
   assert.deepEqual(await admitted(request), { personId: "viewer", clientId: "access:viewer-subject", capability: "readOnly", role: "viewer" }); assert.equal(((new DatabaseSync(databasePath)).prepare("SELECT count(*) AS count FROM memberships WHERE external_subject='viewer-subject'").get() as { count: number }).count, 1)
   const revoked = createProductionAccessAdmission({ ...config, bootstrap: [] }); assert.equal(await revoked(request), undefined); assert.throws(() => createProductionAccessAdmission({ ...config, bootstrap: [{ ...config.bootstrap[0] }, { ...config.bootstrap[0], email: "viewer@example.com" }] }), /unique/)
+})
+
+test("production admission reloads a removed membership bootstrap file before the next interval", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "astro-bootstrap-reload-")); const databasePath = join(directory, "state.sqlite"); const bootstrapPath = join(directory, "membership.json"); const seeded = createLocalWebService(databasePath); seeded.close()
+  const keys = generateKeyPairSync("rsa", { modulusLength: 2048 }); const issuer = "https://access.example"; const audience = "bootstrap-audience"; let now = 1_000
+  writeFileSync(bootstrapPath, JSON.stringify([{ email: "owner@example.com", personId: "reload-owner", role: "owner" }]))
+  const keyResolver = createJwksKeyResolver({ url: "https://access.example/certs", fetcher: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ keys: [{ ...keys.publicKey.export({ format: "jwk" }), kid: "reload-key", use: "sig" }] }) }) })
+  const admission = createProductionAccessAdmission({ issuer, audience, keyResolver, databasePath, clientContext: "desktop", bootstrapResolver: createMembershipBootstrapResolver({ path: bootstrapPath, now: () => now }) })
+  const header = Buffer.from(JSON.stringify({ alg: "RS256", kid: "reload-key" })).toString("base64url"); const payload = Buffer.from(JSON.stringify({ sub: "reload-subject", email: "owner@example.com", iss: issuer, aud: audience, exp: Math.floor(Date.now() / 1_000) + 60 })).toString("base64url"); const token = `${header}.${payload}.${sign("RSA-SHA256", Buffer.from(`${header}.${payload}`), keys.privateKey).toString("base64url")}`; const request = { headers: { "cf-access-jwt-assertion": token } } as IncomingMessage
+  assert.equal((await admission(request))?.personId, "reload-owner")
+  unlinkSync(bootstrapPath); now += 1_000
+  assert.equal(await admission(request), undefined)
 })
 
 test("a configured non-fixture owner has role-based operations and grant authority while viewers and phones remain read-only", async (t) => {
@@ -518,8 +530,17 @@ test("malformed and oversized bodies become bounded InvalidInput rejections", as
   const malformed = await fetch(`${base}/api/commands/start-run`, { method: "POST", body: "{" })
   assert.deepEqual(await malformed.json(), { outcome: "rejected", reason: "InvalidInput", message: "The service could not read that action." })
   const oversized = await fetch(`${base}/api/commands/start-run`, { method: "POST", body: "x".repeat(16_385) })
-  assert.deepEqual(await oversized.json(), { outcome: "rejected", reason: "InvalidInput", message: "The service could not read that action." })
+  assert.equal(oversized.status, 413); assert.deepEqual(await oversized.json(), { outcome: "rejected", reason: "InvalidInput", message: "The service could not read that action." })
   await listener.close(); service.close()
+})
+
+test("protected responses install browser security headers without caching service truth", async (t) => {
+  const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => { await listener.close(); service.close() })
+  const response = await fetch(`${base}/api/snapshot`)
+  assert.equal(response.headers.get("cache-control"), "no-store"); assert.equal(response.headers.get("x-content-type-options"), "nosniff"); assert.equal(response.headers.get("x-frame-options"), "DENY"); assert.equal(response.headers.get("referrer-policy"), "no-referrer"); assert.match(response.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/)
+  const asset = await fetch(`${base}/assets/brand/alignment-aperture-light.svg`)
+  assert.equal(asset.headers.get("cache-control"), "public, max-age=3600"); assert.equal(asset.headers.get("content-security-policy"), response.headers.get("content-security-policy"))
 })
 
 test("SSE sends a snapshot before durable cursor catch-up and never replays a command", async (t) => {
