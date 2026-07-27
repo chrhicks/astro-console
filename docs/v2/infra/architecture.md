@@ -230,6 +230,10 @@ mechanism.
   explicitly configured vendor/catalog services.
 - MiniPC/rig LAN: only required Alpaca/device addresses, ports, and discovery
   scopes.
+- Field owner-management link: an isolated, powered wired switch may connect a
+  maintenance laptop to the MiniPC with preconfigured static Ethernet
+  addresses. It requires no WAN, router, DHCP, or Wi-Fi and is distinct from
+  product-client access.
 - Product clients: never receive network routes to the rig.
 
 The first firewall policy can be host-based and simple: allow the home LAN to

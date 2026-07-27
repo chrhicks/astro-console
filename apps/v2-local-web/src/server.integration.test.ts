@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { mkdtempSync, unlinkSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { DatabaseSync } from "node:sqlite"
@@ -9,8 +9,9 @@ import { generateKeyPairSync, sign } from "node:crypto"
 import * as Schema from "effect/Schema"
 import { AcquireSnapshot, RunSnapshot } from "../../../packages/v2-contracts/src/snapshots.ts"
 import { configuredAdmission, configuredListenHost, configuredListenPort, configuredRuntime, createJwksKeyResolver, createLocalWebService, createMembershipBootstrapResolver, createProductionAccessAdmission } from "./server.ts"
-import { createRigWorker } from "./rig-worker.ts"
+import { createRigWorkerService, runRigWorkerFromEnvironment } from "./rig-worker.ts"
 import { rigWorkerConfig } from "./rig-worker-config.ts"
+import { runSolarTestIntentFromEnvironment } from "./solar-test.ts"
 
 test("SQLite acceptance atomically persists run, event, receipt, and outbox", async (t) => {
   const service = createLocalWebService(join(mkdtempSync(join(tmpdir(), "astro-local-")), "state.sqlite"))
@@ -34,7 +35,7 @@ test("numbered SQLite migrations upgrade a legacy database and reject a newer sc
   const databasePath = join(mkdtempSync(join(tmpdir(), "astro-migrations-")), "state.sqlite")
   const legacy = new DatabaseSync(databasePath); legacy.exec("CREATE TABLE state (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE events (cursor INTEGER PRIMARY KEY,type TEXT NOT NULL,snapshot TEXT NOT NULL); CREATE TABLE receipts (idempotency_key TEXT PRIMARY KEY,response TEXT NOT NULL); CREATE TABLE outbox (id TEXT PRIMARY KEY,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL); CREATE TABLE control_requests (client_id TEXT PRIMARY KEY,person_id TEXT NOT NULL); CREATE TABLE memberships (external_subject TEXT PRIMARY KEY,person_id TEXT NOT NULL,role TEXT NOT NULL); CREATE TABLE library_assets (asset_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,role TEXT NOT NULL,format TEXT NOT NULL,availability TEXT NOT NULL,comparison_group_id TEXT NOT NULL,captured_at TEXT NOT NULL,updated_at TEXT NOT NULL,sharpness REAL NOT NULL,detail TEXT NOT NULL);"); legacy.close()
   const service = createLocalWebService(databasePath)
-  assert.equal((service.database.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 3); assert.equal((service.database.prepare("SELECT count(*) AS count FROM workspace_projections").get() as { count: number }).count, 2); assert.equal((service.database.prepare("SELECT count(*) AS count FROM pragma_table_info('outbox') WHERE name='claim_token'").get() as { count: number }).count, 1)
+  assert.equal((service.database.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 5); assert.equal((service.database.prepare("SELECT count(*) AS count FROM workspace_projections").get() as { count: number }).count, 2); assert.equal((service.database.prepare("SELECT count(*) AS count FROM pragma_table_info('outbox') WHERE name='claim_token'").get() as { count: number }).count, 1)
   service.close()
   const newer = new DatabaseSync(databasePath); newer.prepare("INSERT INTO schema_migrations VALUES (?,?)").run(99, "2026-07-24T00:00:00.000Z"); newer.close()
   assert.throws(() => createLocalWebService(databasePath), /newer than this release/)
@@ -57,6 +58,61 @@ test("rig worker configuration is disabled by default and fails closed for Seest
   assert.throws(() => rigWorkerConfig({ ASTRO_LOCAL_WEB_DB: "/state.sqlite", ASTRO_RIG_WORKER_MODE: "alpaca" }), /disabled or seestar/)
 })
 
+test("disabled rig worker exits without creating or mutating its database", async () => {
+  const databasePath = join(mkdtempSync(join(tmpdir(), "astro-worker-disabled-")), "state.sqlite")
+  const worker = createRigWorkerService(rigWorkerConfig({ ASTRO_LOCAL_WEB_DB: databasePath }), { startM27Capture: async () => true })
+  assert.equal(await worker.runOnce(), "disabled")
+  assert.deepEqual(await worker.run(), { passes: 0, health: { mode: "disabled", status: "disabled", databasePath } })
+  assert.deepEqual(await runRigWorkerFromEnvironment({ ASTRO_LOCAL_WEB_DB: databasePath }), { passes: 0, health: { mode: "disabled", status: "disabled", databasePath } })
+  assert.equal(existsSync(databasePath), false)
+})
+
+test("owner-only Solar test intent persists separate pending work and Stack-evidence boundary", () => {
+  const databasePath = join(mkdtempSync(join(tmpdir(), "astro-solar-intent-")), "state.sqlite")
+  const service = createLocalWebService(databasePath)
+  const input = { name: "Solar filter verification", idempotencyKey: "solar-test-001" }
+  assert.deepEqual(service.submitSolarTestIntent(input, { personId: "viewer", clientId: "viewer", role: "viewer", capability: "controlCapable" }), { outcome: "rejected", reason: "OwnerRequired" })
+  assert.deepEqual(service.submitSolarTestIntent(input, { personId: "owner", clientId: "phone", role: "owner", capability: "readOnly" }), { outcome: "rejected", reason: "ClientReadOnly" })
+  assert.deepEqual(service.submitSolarTestIntent({ name: "x", idempotencyKey: "bad" }, { personId: "owner", clientId: "desktop", role: "owner", capability: "controlCapable" }), { outcome: "rejected", reason: "InvalidInput" })
+  assert.equal((service.database.prepare("SELECT count(*) AS count FROM solar_test_intents").get() as { count: number }).count, 0)
+  assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox").get() as { count: number }).count, 0)
+  const accepted = service.submitSolarTestIntent(input, { personId: "owner", clientId: "desktop", role: "owner", capability: "controlCapable" })
+  assert.equal(accepted.outcome, "accepted")
+  if (accepted.outcome !== "accepted") throw new Error("Expected Solar test intent acceptance")
+  assert.equal(accepted.state, "awaitingAdapter"); assert.equal(accepted.evidence, "awaitingStackEvidence")
+  const intent = service.database.prepare("SELECT name,owner_person_id,owner_client_id,state FROM solar_test_intents WHERE intent_id=?").get(accepted.intentId) as { name: string; owner_person_id: string; owner_client_id: string; state: string }
+  assert.equal(intent.name, input.name); assert.equal(intent.owner_person_id, "owner"); assert.equal(intent.owner_client_id, "desktop"); assert.equal(intent.state, "awaitingAdapter")
+  const evidence = service.database.prepare("SELECT state,message FROM solar_test_evidence WHERE intent_id=?").get(accepted.intentId) as { state: string; message: string }
+  assert.equal(evidence.state, "awaitingStackEvidence"); assert.match(evidence.message, /Stack evidence/)
+  const outbox = service.database.prepare("SELECT kind,payload,state,attempts FROM outbox WHERE kind='StartSolarTestObservation'").get() as { kind: string; payload: string; state: string; attempts: number }
+  assert.equal(outbox.kind, "StartSolarTestObservation"); assert.equal(outbox.state, "pending"); assert.equal(outbox.attempts, 0); assert.deepEqual(JSON.parse(outbox.payload), { intentId: accepted.intentId, name: input.name, target: "Sun", requiredEvidence: "Stack" })
+  assert.deepEqual(service.submitSolarTestIntent(input, { personId: "owner", clientId: "desktop", role: "owner", capability: "controlCapable" }), accepted)
+  assert.deepEqual(service.submitSolarTestIntent({ name: "Solar filter verification retry changed", idempotencyKey: input.idempotencyKey }, { personId: "owner", clientId: "desktop", role: "owner", capability: "controlCapable" }), { outcome: "rejected", reason: "InvalidInput" })
+  assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox WHERE kind='StartSolarTestObservation'").get() as { count: number }).count, 1)
+  assert.deepEqual(service.submitSolarTestIntent({ name: "Second Solar test", idempotencyKey: "solar-test-002" }, { personId: "owner", clientId: "desktop", role: "owner", capability: "controlCapable" }), { outcome: "rejected", reason: "SolarTestPending" })
+  service.close()
+  const recovered = createLocalWebService(databasePath)
+  assert.deepEqual(recovered.submitSolarTestIntent(input, { personId: "owner", clientId: "desktop", role: "owner", capability: "controlCapable" }), accepted)
+  const recoveredOutbox = recovered.database.prepare("SELECT state,attempts FROM outbox WHERE kind='StartSolarTestObservation'").get() as { state: string; attempts: number }
+  assert.equal(recoveredOutbox.state, "pending"); assert.equal(recoveredOutbox.attempts, 0)
+  recovered.close()
+})
+
+test("Solar test CLI requires explicit confirmation before opening the database", () => {
+  const databasePath = join(mkdtempSync(join(tmpdir(), "astro-solar-cli-")), "state.sqlite")
+  assert.throws(() => runSolarTestIntentFromEnvironment({ ASTRO_LOCAL_WEB_DB: databasePath }), /ASTRO_SOLAR_TEST_CONFIRM/)
+  assert.equal(existsSync(databasePath), false)
+  const seeded = createLocalWebService(databasePath)
+  seeded.database.prepare("INSERT INTO memberships VALUES (?,?,?)").run("solar-owner-subject", "owner", "owner")
+  seeded.database.prepare("INSERT INTO memberships VALUES (?,?,?)").run("solar-viewer-subject", "viewer", "viewer")
+  seeded.close()
+  const base = { ASTRO_LOCAL_WEB_DB: databasePath, ASTRO_SOLAR_TEST_CONFIRM: "submit-solar-test", ASTRO_SOLAR_TEST_NAME: "Solar filter verification", ASTRO_SOLAR_TEST_IDEMPOTENCY_KEY: "solar-cli-001" }
+  assert.deepEqual(runSolarTestIntentFromEnvironment({ ...base, ASTRO_SOLAR_TEST_SUBJECT: "unknown-subject" }), { outcome: "rejected", reason: "OwnerRequired" })
+  assert.deepEqual(runSolarTestIntentFromEnvironment({ ...base, ASTRO_SOLAR_TEST_SUBJECT: "solar-viewer-subject" }), { outcome: "rejected", reason: "OwnerRequired" })
+  const result = runSolarTestIntentFromEnvironment({ ...base, ASTRO_SOLAR_TEST_SUBJECT: "solar-owner-subject" })
+  assert.equal(result.outcome, "accepted")
+})
+
 test("operational endpoints expose bounded admitted health without internal detail", async (t) => {
   const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => { await listener.close(); service.close() })
@@ -64,7 +120,7 @@ test("operational endpoints expose bounded admitted health without internal deta
   const ready = await fetch(`${base}/api/health/ready`).then((response) => response.json())
   assert.deepEqual(ready, { status: "ready", service: "ready", database: "ready", rig: "unknown", tunnel: "unknown", activeRun: "none", message: "Service and local database are ready; rig and tunnel are not connected in this fixture." })
   const operations = await fetch(`${base}/api/health/operations`).then((response) => response.json())
-  assert.equal(operations.release, "local-web-fixture"); assert.equal(operations.schemaVersion, 3); assert.equal(operations.sqlite.journalMode, "wal"); assert.equal(operations.rig, "unknown"); assert.equal(JSON.stringify(operations).includes("/"), false)
+  assert.equal(operations.release, "local-web-fixture"); assert.equal(operations.schemaVersion, 5); assert.equal(operations.sqlite.journalMode, "wal"); assert.equal(operations.rig, "unknown"); assert.equal(JSON.stringify(operations).includes("/"), false)
   const denied = createLocalWebService(":memory:", () => ({ personId: "viewer", clientId: "viewer", capability: "readOnly" })); const deniedListener = await denied.listen()
   assert.equal((await fetch(`http://127.0.0.1:${deniedListener.port}/api/health/operations`)).status, 403); assert.equal((await fetch(`http://127.0.0.1:${deniedListener.port}/api/health/ready`)).status, 200)
   await deniedListener.close(); denied.close()
@@ -222,22 +278,43 @@ test("SQLite worker claims prevent duplicate dispatch and retryable failures rec
 })
 
 test("a rig worker dispatches accepted StartM27Capture once and recovers failed or expired claims", async (t) => {
-  const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+  const databasePath = join(mkdtempSync(join(tmpdir(), "astro-rig-worker-")), "state.sqlite")
+  const service = createLocalWebService(databasePath); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => { await listener.close(); service.close() })
   assert.equal((await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "rig-worker-start" }) })).status, 202)
   let calls = 0
-  const worker = createRigWorker(service, { startM27Capture: async (work) => { calls += 1; assert.equal(work.runId, "run-m27-001"); await new Promise((done) => setTimeout(done, 10)); return true } })
+  const config = rigWorkerConfig({ ASTRO_LOCAL_WEB_DB: databasePath, ASTRO_RIG_WORKER_MODE: "seestar", ASTRO_SEESTAR_HOST: "192.168.4.63", ASTRO_SEESTAR_PEM_PATH: "/run/secrets/seestar.pem" })
+  const worker = createRigWorkerService(config, { startM27Capture: async (work) => { calls += 1; assert.equal(work.runId, "run-m27-001"); await new Promise((done) => setTimeout(done, 10)); return true } })
   assert.deepEqual(await Promise.all([worker.runOnce(), worker.runOnce()]), ["dispatched", "none"])
   assert.equal(calls, 1)
   let row = service.database.prepare("SELECT id,state,claim_token,ack_at,attempts FROM outbox WHERE kind='StartM27Capture'").get() as { id: string; state: string; claim_token: string | null; ack_at: string | null; attempts: number }
   assert.equal(row.state, "dispatched"); assert.equal(row.claim_token, null); assert.notEqual(row.ack_at, null); assert.equal(row.attempts, 1)
   service.database.prepare("INSERT INTO outbox (id,kind,payload,state) VALUES (?,?,?,?)").run("start-failure", "StartM27Capture", JSON.stringify({ runId: "run-m27-001" }), "pending")
-  assert.equal(await createRigWorker(service, { startM27Capture: async () => false }).runOnce(), "failed")
+  const failedWorker = createRigWorkerService(config, { startM27Capture: async () => false }, { workerId: "failed-worker" })
+  assert.equal(await failedWorker.runOnce(), "failed")
+  failedWorker.close()
   assert.equal(await worker.runOnce(), "dispatched")
   service.database.prepare("UPDATE outbox SET state='claimed',claim_token='expired',claim_until=?,ack_at=NULL WHERE id=?").run("2000-01-01T00:00:00.000Z", row.id)
   assert.equal(await worker.runOnce(), "dispatched")
   row = service.database.prepare("SELECT id,state,claim_token,ack_at,attempts FROM outbox WHERE id=?").get(row.id) as typeof row
   assert.equal(calls, 3); assert.equal(row.state, "dispatched"); assert.equal(row.claim_token, null); assert.notEqual(row.ack_at, null); assert.equal(row.attempts, 2)
+  worker.close()
+})
+
+test("enabled worker without an adapter reports liveness and retains pending capture work", async (t) => {
+  const databasePath = join(mkdtempSync(join(tmpdir(), "astro-rig-unconfigured-")), "state.sqlite")
+  const service = createLocalWebService(databasePath); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => { await listener.close(); service.close() })
+  await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "rig-unconfigured-start" }) })
+  const config = rigWorkerConfig({ ASTRO_LOCAL_WEB_DB: databasePath, ASTRO_RIG_WORKER_MODE: "seestar", ASTRO_SEESTAR_HOST: "192.168.4.63", ASTRO_SEESTAR_PEM_PATH: "/run/secrets/seestar.pem" })
+  const worker = createRigWorkerService(config, undefined, { now: () => new Date("2026-07-25T12:00:00.000Z") })
+  assert.equal(await worker.runOnce(), "unavailable")
+  assert.deepEqual(worker.health(), { mode: "seestar", status: "alive", adapter: "unconfigured", lastHeartbeat: "2026-07-25T12:00:00.000Z" })
+  const pending = service.database.prepare("SELECT state,attempts FROM outbox WHERE kind='StartM27Capture'").get() as { state: string; attempts: number }
+  assert.equal(pending.state, "pending"); assert.equal(pending.attempts, 0)
+  const operations = await fetch(`${base}/api/health/operations`).then((response) => response.json())
+  assert.deepEqual(operations.worker, { status: "alive", adapter: "unconfigured", lastHeartbeat: "2026-07-25T12:00:00.000Z" })
+  assert.deepEqual(await worker.run({ maxPasses: 1 }), { passes: 1, health: { mode: "seestar", status: "stopped", adapter: "unconfigured", lastHeartbeat: "2026-07-25T12:00:00.000Z" } })
 })
 
 test("current controller resumes only the paused revision and replays idempotently", async (t) => {
@@ -662,6 +739,14 @@ test("an owner SSE projection advances when a friend writes the shared SQLite da
   assert.match(text, /event: ProjectionChanged/)
   assert.match(text, /desktop-ada/)
   await reader?.cancel(); await ownerListener.close(); await friendListener.close(); owner.close(); friend.close()
+})
+
+test("listener shutdown closes a consumed keep-alive request", async (t) => {
+  const service = createLocalWebService(); const listener = await service.listen()
+  t.after(() => service.close())
+  const response = await fetch(`http://127.0.0.1:${listener.port}/api/health/ready`)
+  assert.equal(response.status, 200); await response.text()
+  await Promise.race([listener.close(), new Promise<never>((_, reject) => setTimeout(() => reject(new Error("listener shutdown timed out")), 1_000))])
 })
 
 test("serves the accepted V1 light symbol from the local application origin", async (t) => {
