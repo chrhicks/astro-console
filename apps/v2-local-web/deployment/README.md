@@ -75,3 +75,13 @@ Rig discovery, live Access/JWKS rotation validation, tunnel routing, storage thr
 R2 publication, processor/publisher services, and backup restore validation
 remain activation work. Do not create placeholder workers that imply those
 boundaries are live.
+
+The `publisher` Compose profile is a repository-side R2 deployment contract,
+not a live deployment. It alone reads host-managed `publisher.env` and the
+mounted R2 credential file; origin, rig worker, cloudflared, and browsers do
+not receive it. It has only the state volume, read-only promoted-output bind,
+and read-only secret bind, with a read-only root, dropped capabilities, and
+CPU/memory limits. The configured private Standard bucket is
+`astro-console-artifacts` in ENAM. Create no token from this repository: a
+later owner-supervised activation must supply a bucket-only object read/write
+credential, then verify private upload/head behavior and worker recovery.

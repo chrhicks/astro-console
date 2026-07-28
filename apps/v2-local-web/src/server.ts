@@ -202,6 +202,8 @@ export function createLocalWebService(databasePath = ":memory:", identityResolve
   return { database, handler, listen, close, ingestObservation, ingestSeestarStackPush, dispatchStartOutbox, dispatchSolarTestOutbox, requestSolarTestStop, dispatchSolarTestStopOutbox, recordSolarStackEvidence, dispatchPauseOutbox, dispatchResumeOutbox, dispatchStopOutbox, resolveSolarTestCliIdentity, submitSolarTestIntent, saveProcess, cleanupSavedOrphans, storageOperations }
 }
 
+export function openPublisherDatabase(databasePath: string) { if (!databasePath.startsWith("/var/lib/astro-console/") || /[\r\n]|(?:^|\/)\.\.(?:\/|$)/.test(databasePath)) throw new Error("Publisher database path must be app-owned"); mkdirSync(dirname(databasePath), { recursive: true }); const database = new DatabaseSync(databasePath); database.exec("PRAGMA journal_mode = WAL"); migrateDatabase(database); return database }
+
 const controlPaths = new Set(["/api/commands/request-control", "/api/commands/grant-control", "/api/commands/take-control", "/api/commands/controller-disconnected", "/api/commands/controller-reconnected", "/api/commands/pause-run", "/api/commands/resume-run", "/api/commands/stop-run"])
 const isOwner = (identity: LocalIdentity) => identity.role === "owner"
 

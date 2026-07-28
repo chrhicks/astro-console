@@ -131,7 +131,9 @@ whether skipping a frame is physically safe.
 - Keep R2 private. Resolve authorized asset IDs to object keys and issue
   short-lived presigned downloads; signed URLs are bearer credentials and must
   not appear in logs.
-- Mount the least-privilege R2 token only into the publisher; the browser and
+- Mount the least-privilege bucket-only R2 object read/write credential only
+  into the publisher; Cloudflare policy scopes this credential to the bucket,
+  while publisher code restricts keys to `published/`. The browser and
   processing tools never receive bucket credentials.
 - No arbitrary upload/execution feature in the initial product.
 - Processing tools receive allowlisted executables and structured arguments,

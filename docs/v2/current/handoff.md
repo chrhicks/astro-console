@@ -4,13 +4,14 @@ Status: **active Phase 1 backend/infrastructure handoff — 2026-07-27**
 
 ## Single Next Action
 
-Implement and supervise the real private R2 publisher deployment only after
-explicit owner authorization. Same-host resilience to the selected SSD backup
-destination is repository-proven; do not treat it as off-host disaster
-recovery.
+Perform an owner-supervised private R2 publisher deployment using the proven
+repository contract: create/inject the isolated bucket-only credential, start
+only the publisher profile, and verify upload/head/retry behavior against the
+existing private bucket. No Cloudflare credential or remote host deployment has
+been created in this repository work.
 
-Do not add external backup, R2 credentials/configuration, a download endpoint,
-or a UI control merely to make this local operations slice appear complete.
+Do not add external backup, R2 credentials, a download endpoint, or a UI
+control merely to make this Phase 1 boundary appear complete.
 
 ## Why This Is Next
 
@@ -58,7 +59,17 @@ Asset/file contract:
   claim or stale acknowledgement cannot overwrite later state. Provider or
   checksum failure projects a safe unavailable/failed representation. Object
   keys and credentials never enter Library detail. This proves no real R2
-  account, bucket, credential, network call, download grant, or deployment.
+  publisher credential, provider mutation, download grant, or deployment. The
+  local fake-provider test itself made no R2 network request.
+- A production S3-compatible R2 provider adapter and publisher-only Compose
+  profile now exist in the repository. Non-secret configuration is validated
+  for account `503286fc7e5e8545c172105f991efef1`, private Standard ENAM bucket
+  `astro-console-artifacts`, and its account endpoint; credential JSON is read
+  only from a publisher secret mount. Signed PUT/HEAD behavior is tested with a
+  fake transport; code accepts only `published/` keys and fails safely on bad
+  config/credentials/provider responses. Read-only Cloudflare R2 inventory and
+  detail checks have occurred; no Cloudflare credential, bucket mutation, or
+  host deployment has occurred.
 - The repository has a same-host SQLite resilience procedure: it uses `VACUUM
   INTO`, fails closed if live SQLite and `/mnt/storage/astro-console/backups`
   are on one filesystem, verifies the SSD-side copied bytes and SHA-256, runs a
@@ -91,7 +102,7 @@ long-running production workers currently work.
 | Boundary | Current state | Required proof |
 | --- | --- | --- |
 | Process Save and permanent local output | Local SQLite/filesystem vertical slice proven through the service API | Add a real Process worker/output manifest before exposing a command or UI; retain the same root, checksum, idempotency, and orphan invariants. |
-| Publication worker and private R2 | Local fake-provider SQLite/filesystem vertical slice proven | Real private R2 adapter, least-privilege secret injection only into a separately deployed publisher, provider metadata semantics, and supervised deployment proof. |
+| Publication worker and private R2 | Repository adapter/profile and fake-transport proof complete | Owner-supervised isolated credential injection and real private upload/head/retry deployment proof. |
 | Downloads | Not implemented | Asset-ID authorization, bounded local stream or short-lived R2 grant, no logged bearer URL, and representation state that does not overclaim object availability. |
 | Storage health and cleanup | Local filesystem/SQLite vertical slice proven | Host production thresholds, capture-load benchmarking, and operating runbook evidence. |
 | Same-host resilience | Repository-backed SSD procedure proven | Install/supervise it on the host and measure it under capture load; do not call it off-host disaster recovery. |
@@ -147,9 +158,9 @@ download authorization.
 ## Sequenced Follow-up
 
 1. **Real publisher/R2 deployment** — after explicit owner authorization,
-   implement the private R2 adapter and isolated credential/deployment proof.
-   Retain the proven local worker contract; do not add browser-held secrets or
-   object-key/signed-URL projection.
+   create/inject the bucket-only credential and supervise publisher-profile
+   upload/head/retry proof. Retain the proven local worker contract; do not add
+   browser-held secrets, object-key, or signed-URL projection.
 2. **Production presence/deployment** — establish device/session authority and
    add isolated processor/publisher Compose services with resource limits and
    operating runbooks.

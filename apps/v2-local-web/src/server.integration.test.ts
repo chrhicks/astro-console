@@ -16,6 +16,18 @@ import { createSeestarSolarAdapter } from "./seestar-solar-adapter.ts"
 import { createPublisherWorker } from "./publisher-worker.ts"
 import { createStorageOperations } from "./storage-operations.ts"
 import { assertSeparateFilesystems, createSqliteSnapshot, restoreDrill, verifySqlite } from "./sqlite-resilience.ts"
+import { publisherConfig } from "./publisher-config.ts"
+import { createR2Provider } from "./r2-provider.ts"
+
+test("R2 publisher configuration and signed fake transport fail closed without network", async () => {
+  const root = mkdtempSync(join(tmpdir(), "astro-r2-")); const credentialsPath = join(root, "credentials.json"); writeFileSync(credentialsPath, JSON.stringify({ accessKeyId: "key", secretAccessKey: "secret" }))
+  const env = { R2_ACCOUNT_ID: "503286fc7e5e8545c172105f991efef1", R2_BUCKET: "astro-console-artifacts", R2_ENDPOINT: "https://503286fc7e5e8545c172105f991efef1.r2.cloudflarestorage.com", R2_CREDENTIALS_PATH: "/run/secrets/r2-credentials.json", ASTRO_LOCAL_WEB_DB: "/var/lib/astro-console/state.sqlite", ASTRO_PUBLISHER_OUTPUTS_ROOT: "/var/lib/astro-console/outputs" }
+  assert.throws(() => publisherConfig({ ...env, R2_ENDPOINT: "https://elsewhere.example" }), /endpoint/); assert.throws(() => publisherConfig({ ...env, R2_CREDENTIALS_PATH: "/tmp/key" }), /mounted secret/); assert.throws(() => publisherConfig({ ...env, ASTRO_PUBLISHER_OUTPUTS_ROOT: "/tmp/outputs" }), /app-owned/); assert.equal(publisherConfig(env).bucket, "astro-console-artifacts")
+  const requests: Array<{ readonly url: string; readonly init: RequestInit }> = []; const provider = createR2Provider({ ...publisherConfig(env), credentialsPath }, async (url, init) => { requests.push({ url, init }); return init.method === "HEAD" ? new Response(undefined, { status: 200, headers: { "x-amz-meta-checksum": "abc", "content-length": "3" } }) : new Response(undefined, { status: 200 }) })
+  await provider.put("published/run/finals/asset.tiff", Buffer.from("abc"), { assetId: "asset", checksum: "abc" }); assert.deepEqual(await provider.head("published/run/finals/asset.tiff"), { checksum: "abc", bytes: 3 }); const putHeaders = requests[0]?.init.headers as Record<string, string>; assert.match(String(putHeaders.authorization), /^AWS4-HMAC-SHA256 /); assert.equal(putHeaders["x-amz-meta-asset-id"], "asset"); assert.equal(putHeaders["x-amz-meta-checksum"], "abc"); assert.equal(String(requests[0]?.url).includes("astro-console-artifacts/published/run/finals/asset.tiff"), true); await assert.rejects(() => provider.put("outside/key", Buffer.from("x"), { assetId: "asset", checksum: "x" }), /publisher prefix/)
+  const denied = createR2Provider({ ...publisherConfig(env), credentialsPath }, async () => new Response(undefined, { status: 403 })); await assert.rejects(() => denied.put("published/run/finals/asset.tiff", Buffer.from("abc"), { assetId: "asset", checksum: "abc" }), /R2 PUT failed/)
+  writeFileSync(credentialsPath, JSON.stringify({ accessKeyId: "key", secretAccessKey: "secret", extra: "no" })); assert.throws(() => createR2Provider({ ...publisherConfig(env), credentialsPath }), /credentials are invalid/)
+})
 
 test("SQLite resilience creates a checked snapshot and disposable restore drill while refusing one filesystem", () => {
   const root = mkdtempSync(join(tmpdir(), "astro-sqlite-resilience-")); const source = join(root, "state.sqlite"); const target = join(root, "ssd", "state.sqlite"); const drill = join(root, "drill.sqlite"); const database = new DatabaseSync(source); database.exec("CREATE TABLE evidence (value TEXT NOT NULL); INSERT INTO evidence VALUES ('durable');"); database.close()
