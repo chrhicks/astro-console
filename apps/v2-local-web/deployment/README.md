@@ -47,18 +47,21 @@ through an online/consistent backup procedure and perform a restore drill;
 never copy a live WAL file as a backup.
 
 For a repository-side preflight, use `npm run backup:preflight -- backup
-<database> <target>`; it uses SQLite `VACUUM INTO` and verifies integrity. Use
-`npm run backup:preflight -- verify <backup>` before a restore drill. This
-does not perform a host restore.
+<database> <target>`; it uses SQLite `VACUUM INTO` and prints bounded JSON
+evidence with integrity, bytes, and SHA-256. Use `verify <backup>` and
+`restore-drill <backup> <disposable-target>` to verify an isolated copy without
+overwriting the live database.
 
 For the current Docker deployment, `host-backup.sh` plus the adjacent systemd
-service/timer are the host-managed daily backup reference. Install those files
-outside the repository, preserve root-only permissions on
-`/var/backups/astro-console`, and retain the timer's journal as the run log.
-The script backs up through the running origin, verifies the staged copy,
-copies it outside the state volume, records SHA-256, and retains fourteen days
-of local backup/checksum pairs. It is not off-host disaster recovery; move
-verified backups to independent storage before claiming that protection.
+service/timer are the host-managed daily same-host resilience reference. Install
+those files outside the repository, preserve root-only permissions on
+`/mnt/storage/astro-console/backups`, and retain the timer's journal as the run
+log. The script fails closed unless live SQLite and that SSD destination have
+different filesystem IDs; it creates an online snapshot, verifies the copied
+SSD-side bytes and SHA-256, runs an isolated restore drill, and retains only
+fourteen days of backup/checksum pairs under that explicit application backup
+directory. It is not off-host disaster recovery and does not protect against
+host loss, fire, or theft.
 
 The Dockerfile pins the verified multi-architecture digest for
 `node:22.22.2-bookworm-slim`:

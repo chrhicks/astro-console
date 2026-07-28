@@ -123,7 +123,12 @@ Proportionate starting policy:
 
 Backup jobs must yield to capture I/O. A “successful” backup records the source
 snapshot, destination, bytes, checks, duration, and a subsequent restore-test
-status.
+status. The current selected local destination is the same-host SSD directory
+`/mnt/storage/astro-console/backups`; require it to be a different filesystem
+from the NVMe live SQLite volume, verify the copied bytes and SHA-256 there,
+and restore only into a disposable path. This is same-host resilience against a
+single-volume failure—not off-host disaster recovery, and it does not protect
+against host loss, fire, or theft.
 
 ## 5. Storage Policy
 

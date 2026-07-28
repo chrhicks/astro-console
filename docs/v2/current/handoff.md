@@ -4,9 +4,10 @@ Status: **active Phase 1 backend/infrastructure handoff — 2026-07-27**
 
 ## Single Next Action
 
-Implement an independent backup destination, copy verification, and a restore
-drill after an explicit owner decision. The local storage operations boundary is
-proven; do not treat local retention as disaster recovery.
+Implement and supervise the real private R2 publisher deployment only after
+explicit owner authorization. Same-host resilience to the selected SSD backup
+destination is repository-proven; do not treat it as off-host disaster
+recovery.
 
 Do not add external backup, R2 credentials/configuration, a download endpoint,
 or a UI control merely to make this local operations slice appear complete.
@@ -58,10 +59,14 @@ Asset/file contract:
   checksum failure projects a safe unavailable/failed representation. Object
   keys and credentials never enter Library detail. This proves no real R2
   account, bucket, credential, network call, download grant, or deployment.
-- The repository has a local, consistent SQLite backup primitive using
-  `VACUUM INTO`, integrity verification, SHA-256 recording, and a host-managed
-  fourteen-day local backup schedule. One online backup/restore drill is
-  recorded for the protected fixture.
+- The repository has a same-host SQLite resilience procedure: it uses `VACUUM
+  INTO`, fails closed if live SQLite and `/mnt/storage/astro-console/backups`
+  are on one filesystem, verifies the SSD-side copied bytes and SHA-256, runs a
+  disposable restore drill, and retains fourteen days only in that explicit
+  app backup directory. Its bounded evidence contains backup name, byte count,
+  SHA-256, restore-drill status, retention, and destination. This is not
+  off-host disaster recovery and does not protect against host loss, fire, or
+  theft; no real host installation/configuration was performed here.
 - The Compose starter has only origin, optional rig worker, and `cloudflared`.
   It intentionally has no processing or publisher service, no R2 secret, and
   no host port.
@@ -89,7 +94,8 @@ long-running production workers currently work.
 | Publication worker and private R2 | Local fake-provider SQLite/filesystem vertical slice proven | Real private R2 adapter, least-privilege secret injection only into a separately deployed publisher, provider metadata semantics, and supervised deployment proof. |
 | Downloads | Not implemented | Asset-ID authorization, bounded local stream or short-lived R2 grant, no logged bearer URL, and representation state that does not overclaim object availability. |
 | Storage health and cleanup | Local filesystem/SQLite vertical slice proven | Host production thresholds, capture-load benchmarking, and operating runbook evidence. |
-| Disaster recovery | Local backup only | Independent off-host destination, copy verification, and a restore drill from that destination. Do not call local retention disaster recovery. |
+| Same-host resilience | Repository-backed SSD procedure proven | Install/supervise it on the host and measure it under capture load; do not call it off-host disaster recovery. |
+| Disaster recovery | Not implemented | Independent off-host destination, copy verification, and a restore drill from that destination. |
 | Device/session presence | Person-to-client fixture | Stable production client/session authority before treating a person's browsers as distinct presence clients. |
 | Processing deployment | Compose placeholder absent by design | Separate least-privilege processor/publisher lifecycles, bounded resources, and no rig/tunnel credentials. |
 
@@ -140,14 +146,11 @@ download authorization.
 
 ## Sequenced Follow-up
 
-1. **Independent recovery** — after an explicit owner decision on destination,
-   add copy verification and a restore drill from that destination. Do not
-   call local retention disaster recovery.
-2. **Real publisher/R2 deployment** — after explicit owner authorization,
+1. **Real publisher/R2 deployment** — after explicit owner authorization,
    implement the private R2 adapter and isolated credential/deployment proof.
    Retain the proven local worker contract; do not add browser-held secrets or
    object-key/signed-URL projection.
-3. **Production presence/deployment** — establish device/session authority and
+2. **Production presence/deployment** — establish device/session authority and
    add isolated processor/publisher Compose services with resource limits and
    operating runbooks.
 

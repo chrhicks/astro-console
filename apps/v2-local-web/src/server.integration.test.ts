@@ -15,6 +15,15 @@ import { runSolarTestIntentFromEnvironment } from "./solar-test.ts"
 import { createSeestarSolarAdapter } from "./seestar-solar-adapter.ts"
 import { createPublisherWorker } from "./publisher-worker.ts"
 import { createStorageOperations } from "./storage-operations.ts"
+import { assertSeparateFilesystems, createSqliteSnapshot, restoreDrill, verifySqlite } from "./sqlite-resilience.ts"
+
+test("SQLite resilience creates a checked snapshot and disposable restore drill while refusing one filesystem", () => {
+  const root = mkdtempSync(join(tmpdir(), "astro-sqlite-resilience-")); const source = join(root, "state.sqlite"); const target = join(root, "ssd", "state.sqlite"); const drill = join(root, "drill.sqlite"); const database = new DatabaseSync(source); database.exec("CREATE TABLE evidence (value TEXT NOT NULL); INSERT INTO evidence VALUES ('durable');"); database.close()
+  assert.throws(() => assertSeparateFilesystems(source, join(root, "ssd"), () => 7), /different filesystem/); assert.doesNotThrow(() => assertSeparateFilesystems(source, join(root, "ssd"), (path) => path === source ? 7 : 8))
+  const snapshot = createSqliteSnapshot(source, target); assert.equal(snapshot.integrity, "ok"); assert.equal(snapshot.path, "state.sqlite"); assert.ok(snapshot.bytes > 0); assert.equal(snapshot.sha256, verifySqlite(target).sha256)
+  const restored = restoreDrill(target, drill); assert.equal(restored.source.integrity, "ok"); assert.equal(restored.restored.integrity, "ok"); assert.match(restored.restored.sha256, /^[0-9a-f]{64}$/); assert.equal(existsSync(drill), false); assert.throws(() => restoreDrill(target, target), /separate/)
+  const hostBackup = readFileSync(new URL("../deployment/host-backup.sh", import.meta.url), "utf8"); assert.match(hostBackup, /readonly backup_dir=\/mnt\/storage\/astro-console\/backups/); assert.match(hostBackup, /stat -c %d/); assert.match(hostBackup, /restore-drill/); assert.match(hostBackup, /retention_days=14/)
+})
 
 test("local storage operations measure thresholded capture safety and clean only bounded recorded scratch orphans", () => {
   const root = mkdtempSync(join(tmpdir(), "astro-storage-")); const scratch = join(root, "scratch"); const outputs = join(root, "outputs"); const originals = join(root, "originals"); const finals = join(root, "finals"); mkdirSync(scratch); mkdirSync(outputs); mkdirSync(originals); mkdirSync(finals)
