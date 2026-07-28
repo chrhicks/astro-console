@@ -96,5 +96,7 @@ The manifest processor is repository code only and remains disabled by default.
 It has no HTTP command or browser control. When a later owner-supervised
 deployment is authorized, it must mount only app-owned input/output roots and
 a read-only manifest under `/run/config`; the manifest names relative sources,
-and the worker delegates all containment, symlink, checksum, idempotency, and
-outbox rules to Process Save. It does not delete or rename the host manifest.
+can first materialize an immutable app-owned original with truthful lineage,
+and then delegates containment, symlink, checksum, idempotency, and outbox
+rules to Process Save. Originals are not published by that ingest step. It
+does not delete or rename the host manifest.

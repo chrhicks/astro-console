@@ -27,6 +27,7 @@ ASTRO_SEESTAR_PEM_HOST_PATH=/ABSOLUTE/HOST/PATH/seestar.pem
 # source/output binds and one read-only host-managed manifest under /run/config.
 ASTRO_PROCESSOR_MODE=disabled
 ASTRO_PROCESSOR_SOURCES_ROOT=/var/lib/astro-console/processor-sources
+ASTRO_PROCESSOR_ORIGINALS_ROOT=/var/lib/astro-console/originals
 ASTRO_PROCESSOR_OUTPUTS_ROOT=/var/lib/astro-console/outputs
 ASTRO_PROCESSOR_MANIFEST_PATH=/run/config/process-output-manifest.json
 ASTRO_PROCESSOR_OWNER_PERSON_ID=REPLACE_WITH_OWNER_PERSON_ID
