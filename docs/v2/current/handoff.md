@@ -4,23 +4,22 @@ Status: **active Phase 1 backend/infrastructure handoff — 2026-07-27**
 
 ## Single Next Action
 
-Implement and prove the publisher/R2 boundary as a separate, least-privilege
-worker. It must claim correlated `PublishAsset` outbox records, use stable
-object keys and checksum idempotency, verify the provider result, and project
-truthful representation availability without exposing R2 credentials, object
-keys, or signed URLs.
+Implement and prove measured local storage health and bounded cleanup. Surface
+free bytes, inode reserve, and write-latency thresholds; make only eligible
+scratch/orphan cleanup available; and prove that capture-safe throttling and
+published/local representation state remain honest. Do not select or configure
+an independent backup destination without an explicit owner decision.
 
-Do not add R2 credentials, external configuration, a download endpoint, or a
-UI control merely to make this worker slice appear complete. External bucket
-configuration still needs an explicit owner decision.
+Do not add external backup, R2 credentials/configuration, a download endpoint,
+or a UI control merely to make this local operations slice appear complete.
 
 ## Why This Is Next
 
 The local-web foundation already proves SQLite acceptance, durable outbox
 claim/ack/retry, server-derived Access admission, snapshot-first SSE, control
 lease recovery, bounded Library reads, and read-only Plan/Observe/Library/
-Process projections. The remaining production boundaries are publisher/R2
-verification, downloads, measured storage health/cleanup, and independent
+Process projections. The remaining production boundaries are real R2 adapter
+deployment, downloads, measured storage health/cleanup, and independent
 recovery. Process `Apply`, retry, discard, source switching, and worker
 execution remain later processing-workflow slices.
 
@@ -30,21 +29,22 @@ Asset/file contract:
 1. the processing worker can materialize selected outputs safely;
 2. the service can atomically publish metadata only after those bytes are
    durable and checksummed;
-3. the publisher can claim a correlated outbox record and upload the known
-   file to private R2; and
+3. a publisher can claim a correlated outbox record, reuse a stable key, and
+   verify the known file with an R2-shaped provider contract; and
 4. retention/cleanup can distinguish permanent sources from retryable scratch
    and removable orphan output.
 
 ## Verified Baseline
 
 - `apps/v2-local-web` type checks pass.
-- Its SQLite/HTTP/SSE/worker/filesystem integration suite passes **49/49**
+- Its SQLite/HTTP/SSE/worker/filesystem integration suite passes **52/52**
   tests. Those
   tests cover migrations, atomic acceptance and rollback, Access/JWKS
   admission and revocation, lease recovery, worker claims, bounded Library
   reads, HTTP input bounds, security headers, snapshot-first SSE, and shared
   SQLite projections, plus durable Process Save materialization, rollback,
-  replay, root/symlink rejection, orphan cleanup, and safe Library detail.
+  replay, root/symlink rejection, orphan cleanup, safe Library detail, and
+  publisher claim/lease/retry/provider-verification behavior.
 - Process Save is intentionally a service API only. Configured source IDs
   resolve under app-owned roots; caller paths, traversal, and symlinks fail
   closed. It copies to an app-owned temporary path, SHA-256 checksums bytes,
@@ -52,6 +52,14 @@ Asset/file contract:
   events, the idempotency receipt, and `PublishAsset` outbox records in one
   SQLite transaction. Failure cannot create a successful Asset; promoted
   bytes are separately recorded as bounded removable orphans.
+- The publisher is a separate local worker module using a fake verified
+  provider contract. It persists internal object keys derived from trusted
+  Asset lineage, checksums local bytes, verifies provider metadata, and only
+  then projects `published`. Retry/restart reuses the stored key; an expired
+  claim or stale acknowledgement cannot overwrite later state. Provider or
+  checksum failure projects a safe unavailable/failed representation. Object
+  keys and credentials never enter Library detail. This proves no real R2
+  account, bucket, credential, network call, download grant, or deployment.
 - The repository has a local, consistent SQLite backup primitive using
   `VACUUM INTO`, integrity verification, SHA-256 recording, and a host-managed
   fourteen-day local backup schedule. One online backup/restore drill is
@@ -68,14 +76,14 @@ long-running production workers currently work.
 | Boundary | Current state | Required proof |
 | --- | --- | --- |
 | Process Save and permanent local output | Local SQLite/filesystem vertical slice proven through the service API | Add a real Process worker/output manifest before exposing a command or UI; retain the same root, checksum, idempotency, and orphan invariants. |
-| Publication worker and private R2 | Not implemented | Claimed outbox work, stable object key/checksum idempotency, provider verification, typed retry/expiry state, and scoped credentials unavailable to browser/processing worker. |
+| Publication worker and private R2 | Local fake-provider SQLite/filesystem vertical slice proven | Real private R2 adapter, least-privilege secret injection only into a separately deployed publisher, provider metadata semantics, and supervised deployment proof. |
 | Downloads | Not implemented | Asset-ID authorization, bounded local stream or short-lived R2 grant, no logged bearer URL, and representation state that does not overclaim object availability. |
 | Storage health and cleanup | Policy only | Measured free bytes/inodes/write latency, threshold projection, safe scratch-only cleanup, and capture-safe throttling evidence. |
 | Disaster recovery | Local backup only | Independent off-host destination, copy verification, and a restore drill from that destination. Do not call local retention disaster recovery. |
 | Device/session presence | Person-to-client fixture | Stable production client/session authority before treating a person's browsers as distinct presence clients. |
 | Processing deployment | Compose placeholder absent by design | Separate least-privilege processor/publisher lifecycles, bounded resources, and no rig/tunnel credentials. |
 
-## Completed Vertical Slice: Local Filesystem-backed Save
+## Completed Vertical Slices: Local Save and Publisher Contract
 
 ### Contract
 
@@ -114,16 +122,22 @@ long-running production workers currently work.
 No UI work was added. The service API is the intentionally bounded seam for a
 future processing worker; it is not an HTTP command or browser control.
 
+The publisher proves durable outbox claim/ack/retry, stable private-style key
+derivation from trusted lineage, local checksum verification, fake-provider
+upload/head verification, safe representation projection, and stale-claim
+recovery. It does not prove an R2 adapter, credentials, object lifecycle, or
+download authorization.
+
 ## Sequenced Follow-up
 
-1. **Publisher/R2 boundary** — add a separate worker and adapter after the
-   local Asset/file contract is proven. Use a private bucket, stable keys,
-   narrow credentials, verification, and lifecycle state; do not expose bucket
-   keys or signed URLs.
-2. **Storage and recovery operations** — add measured health thresholds,
+1. **Storage and recovery operations** — add measured health thresholds,
    bounded cleanup, a selected independent backup destination, copy checks,
    and restore evidence. This requires an owner decision on the backup
    destination before any external configuration.
+2. **Real publisher/R2 deployment** — after explicit owner authorization,
+   implement the private R2 adapter and isolated credential/deployment proof.
+   Retain the proven local worker contract; do not add browser-held secrets or
+   object-key/signed-URL projection.
 3. **Production presence/deployment** — establish device/session authority and
    add isolated processor/publisher Compose services with resource limits and
    operating runbooks.

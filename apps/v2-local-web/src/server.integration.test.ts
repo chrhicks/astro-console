@@ -13,6 +13,7 @@ import { createRigWorkerService, runRigWorkerFromEnvironment } from "./rig-worke
 import { rigWorkerConfig } from "./rig-worker-config.ts"
 import { runSolarTestIntentFromEnvironment } from "./solar-test.ts"
 import { createSeestarSolarAdapter } from "./seestar-solar-adapter.ts"
+import { createPublisherWorker } from "./publisher-worker.ts"
 
 test("Process Save materializes configured sources before one Asset, lineage, receipt, and publication outbox transaction", () => {
   const root = mkdtempSync(join(tmpdir(), "astro-process-save-")); const sources = join(root, "sources"); const outputs = join(root, "outputs")
@@ -50,6 +51,43 @@ test("Process Save leaves no success metadata when later filesystem materializat
   service.close()
 })
 
+test("publisher worker verifies fake provider metadata, retries idempotently, and keeps Library detail safe", async () => {
+  const root = mkdtempSync(join(tmpdir(), "astro-publisher-")); const sources = join(root, "sources"); const outputs = join(root, "outputs"); mkdirSync(sources); writeFileSync(join(sources, "final.tiff"), "publication-bytes")
+  const service = createLocalWebService(join(root, "state.sqlite"), undefined, undefined, { sourcesRoot: sources, outputsRoot: outputs, sources: { final: "final.tiff" } })
+  const saved = service.saveProcess({ sessionId: "process-m27-001", expectedRevision: 4, idempotencyKey: "publisher-save", outputs: [{ sourceId: "final", representation: "final" }] })
+  if (saved.outcome !== "accepted") throw new Error("save did not accept")
+  const checksum = (service.database.prepare("SELECT checksum FROM process_asset_events WHERE asset_id=?").get(saved.assetIds[0]) as { checksum: string }).checksum
+  service.database.prepare("INSERT INTO asset_publications (asset_id,checksum,state,updated_at,object_key) VALUES (?,?,?,?,?)").run(saved.assetIds[0], checksum, "temporarilyUnavailable", new Date().toISOString(), "")
+  const objects = new Map<string, { readonly bytes: Uint8Array; readonly checksum: string }>(); let mismatch = true; let puts = 0
+  const worker = createPublisherWorker(service.database, { outputsRoot: outputs }, { put: async (key, bytes, metadata) => { puts += 1; objects.set(key, { bytes, checksum: metadata.checksum }) }, head: async (key) => { const object = objects.get(key); return object === undefined ? undefined : { checksum: mismatch ? "wrong-checksum" : object.checksum, bytes: object.bytes.byteLength } } })
+  assert.equal(await worker.pass(), "failed"); assert.equal(service.database.prepare("SELECT availability FROM library_assets WHERE asset_id=?").get(saved.assetIds[0]).availability, "failedPublication")
+  mismatch = false; assert.equal(await worker.pass(), "published"); assert.equal(await worker.pass(), "none"); assert.equal(puts, 2); assert.equal(objects.size, 1)
+  assert.equal(service.database.prepare("SELECT object_key FROM asset_publications WHERE asset_id=?").get(saved.assetIds[0]).object_key, [...objects.keys()][0]); assert.match([...objects.keys()][0] ?? "", /^published\/run-m27-001\/finals\//)
+  const detail = service.database.prepare("SELECT detail FROM library_assets WHERE asset_id=?").get(saved.assetIds[0]).detail as string
+  assert.match(detail, /published/); assert.doesNotMatch(detail, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))); assert.doesNotMatch(detail, /published\/run|checksum|credential|key/i)
+  service.close()
+})
+
+test("publisher worker fails closed on conflicting durable publication checksum", async () => {
+  const root = mkdtempSync(join(tmpdir(), "astro-publisher-conflict-")); const sources = join(root, "sources"); const outputs = join(root, "outputs"); mkdirSync(sources); writeFileSync(join(sources, "final.tiff"), "publication-bytes")
+  const service = createLocalWebService(join(root, "state.sqlite"), undefined, undefined, { sourcesRoot: sources, outputsRoot: outputs, sources: { final: "final.tiff" } }); const saved = service.saveProcess({ sessionId: "process-m27-001", expectedRevision: 4, idempotencyKey: "publisher-conflict-save", outputs: [{ sourceId: "final", representation: "final" }] })
+  if (saved.outcome !== "accepted") throw new Error("save did not accept")
+  service.database.prepare("INSERT INTO asset_publications (asset_id,checksum,state,updated_at,object_key) VALUES (?,?,?,?,?)").run(saved.assetIds[0], "conflicting-checksum", "temporarilyUnavailable", new Date().toISOString(), "published/run-m27-001/finals/old")
+  let puts = 0; const worker = createPublisherWorker(service.database, { outputsRoot: outputs }, { put: async () => { puts += 1 }, head: async () => undefined })
+  assert.equal(await worker.pass(), "failed"); assert.equal(puts, 0); assert.equal(service.database.prepare("SELECT state FROM asset_publications WHERE asset_id=?").get(saved.assetIds[0]).state, "failedPublication"); assert.equal(service.database.prepare("SELECT state FROM outbox WHERE kind='PublishAsset'").get().state, "failed")
+  service.close()
+})
+
+test("publisher worker lease expiry and stale acknowledgements cannot project stale provider work", async () => {
+  const root = mkdtempSync(join(tmpdir(), "astro-publisher-lease-")); const sources = join(root, "sources"); const outputs = join(root, "outputs"); mkdirSync(sources); writeFileSync(join(sources, "final.tiff"), "publication-bytes")
+  const service = createLocalWebService(join(root, "state.sqlite"), undefined, undefined, { sourcesRoot: sources, outputsRoot: outputs, sources: { final: "final.tiff" } }); const saved = service.saveProcess({ sessionId: "process-m27-001", expectedRevision: 4, idempotencyKey: "publisher-lease-save", outputs: [{ sourceId: "final", representation: "final" }] })
+  if (saved.outcome !== "accepted") throw new Error("save did not accept")
+  const keys: string[] = []; let stale = true
+  const worker = createPublisherWorker(service.database, { outputsRoot: outputs }, { put: async (key) => { keys.push(key); if (stale) { stale = false; service.database.prepare("UPDATE outbox SET claim_token='newer-worker',claim_until=? WHERE kind='PublishAsset'").run("2000-01-01T00:00:00.000Z") } }, head: async () => ({ checksum: createHash("sha256").update("publication-bytes").digest("hex"), bytes: 17 }) })
+  assert.equal(await worker.pass(), "superseded"); assert.equal(await worker.pass("replacement"), "published"); const row = service.database.prepare("SELECT state,attempts FROM outbox WHERE kind='PublishAsset'").get() as { state: string; attempts: number }; assert.equal(row.state, "dispatched"); assert.equal(row.attempts, 2); assert.equal(keys.length, 2); assert.equal(keys[0], keys[1]); assert.equal(service.database.prepare("SELECT availability FROM library_assets WHERE asset_id=?").get(saved.assetIds[0]).availability, "published")
+  service.close()
+})
+
 test("SQLite acceptance atomically persists run, event, receipt, and outbox", async (t) => {
   const service = createLocalWebService(join(mkdtempSync(join(tmpdir(), "astro-local-")), "state.sqlite"))
   const listener = await service.listen()
@@ -72,7 +110,7 @@ test("numbered SQLite migrations upgrade a legacy database and reject a newer sc
   const databasePath = join(mkdtempSync(join(tmpdir(), "astro-migrations-")), "state.sqlite")
   const legacy = new DatabaseSync(databasePath); legacy.exec("CREATE TABLE state (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE events (cursor INTEGER PRIMARY KEY,type TEXT NOT NULL,snapshot TEXT NOT NULL); CREATE TABLE receipts (idempotency_key TEXT PRIMARY KEY,response TEXT NOT NULL); CREATE TABLE outbox (id TEXT PRIMARY KEY,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL); CREATE TABLE control_requests (client_id TEXT PRIMARY KEY,person_id TEXT NOT NULL); CREATE TABLE memberships (external_subject TEXT PRIMARY KEY,person_id TEXT NOT NULL,role TEXT NOT NULL); CREATE TABLE library_assets (asset_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,role TEXT NOT NULL,format TEXT NOT NULL,availability TEXT NOT NULL,comparison_group_id TEXT NOT NULL,captured_at TEXT NOT NULL,updated_at TEXT NOT NULL,sharpness REAL NOT NULL,detail TEXT NOT NULL);"); legacy.close()
   const service = createLocalWebService(databasePath)
-  assert.equal((service.database.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 7); assert.equal((service.database.prepare("SELECT count(*) AS count FROM workspace_projections").get() as { count: number }).count, 2); assert.equal((service.database.prepare("SELECT count(*) AS count FROM pragma_table_info('outbox') WHERE name='claim_token'").get() as { count: number }).count, 1)
+  assert.equal((service.database.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 9); assert.equal((service.database.prepare("SELECT count(*) AS count FROM workspace_projections").get() as { count: number }).count, 2); assert.equal((service.database.prepare("SELECT count(*) AS count FROM pragma_table_info('outbox') WHERE name='claim_token'").get() as { count: number }).count, 1)
   service.close()
   const newer = new DatabaseSync(databasePath); newer.prepare("INSERT INTO schema_migrations VALUES (?,?)").run(99, "2026-07-24T00:00:00.000Z"); newer.close()
   assert.throws(() => createLocalWebService(databasePath), /newer than this release/)
@@ -171,7 +209,7 @@ test("operational endpoints expose bounded admitted health without internal deta
   const ready = await fetch(`${base}/api/health/ready`).then((response) => response.json())
   assert.deepEqual(ready, { status: "ready", service: "ready", database: "ready", rig: "unknown", tunnel: "unknown", activeRun: "none", message: "Service and local database are ready; rig and tunnel are not connected in this fixture." })
   const operations = await fetch(`${base}/api/health/operations`).then((response) => response.json())
-  assert.equal(operations.release, "local-web-fixture"); assert.equal(operations.schemaVersion, 7); assert.equal(operations.sqlite.journalMode, "wal"); assert.equal(operations.rig, "unknown"); assert.equal(JSON.stringify(operations).includes("/"), false)
+  assert.equal(operations.release, "local-web-fixture"); assert.equal(operations.schemaVersion, 9); assert.equal(operations.sqlite.journalMode, "wal"); assert.equal(operations.rig, "unknown"); assert.equal(JSON.stringify(operations).includes("/"), false)
   const denied = createLocalWebService(":memory:", () => ({ personId: "viewer", clientId: "viewer", capability: "readOnly" })); const deniedListener = await denied.listen()
   assert.equal((await fetch(`http://127.0.0.1:${deniedListener.port}/api/health/operations`)).status, 403); assert.equal((await fetch(`http://127.0.0.1:${deniedListener.port}/api/health/ready`)).status, 200)
   await deniedListener.close(); denied.close()
