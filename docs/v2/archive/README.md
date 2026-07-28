@@ -10,6 +10,9 @@ to override `docs/v2/current/`, accepted gate records, or the UX guidance.
 
 - [Gate 3 handoff](handoffs/gate-3-handoff.md) — superseded by the current
   Gate 4 handoff.
+- [Phase 1 local-web handoff, July 25](handoffs/phase-1-local-web-foundation-2026-07-25.md)
+  — superseded operational continuation narrative; use the current handoff for
+  Solar-worker status and run steps.
 - [Original prototype plan](plans/prototype-plan.md) — discovery methodology
   and historical scenario spine; the current remaining gates are summarized
   in `current/convergence-plan.md`.

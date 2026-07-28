@@ -1,6 +1,6 @@
 # Observatory Activation Ledger
 
-Status: **live protected fixture — 2026-07-25**
+Status: **live protected fixture and deployed Solar worker; physical trace unproven — 2026-07-27**
 
 This is the operational record for the public Phase 1 fixture. It is not a
 claim that a browser command controls either physical rig.
@@ -17,10 +17,21 @@ claim that a browser command controls either physical rig.
 - The origin container is loopback-only, non-root, read-only (apart from its
   state volume), and verifies the Access JWT issuer, audience, expiry, RS256
   signature, and bounded JWKS cache before serving protected state.
-- The application is currently release `bf8831e`. It contains deterministic
-  Plan, Observe, Library, and Process fixture projections. `Run plan` mutates
-  service-owned fixture state only; there is no deployed rig worker or Alpaca
-  command adapter.
+- `astro-console-origin` is verified running image
+  `astro-console-v2-local-web:c9afc65-solar`, healthy on loopback. Its visible
+  release label is stale; do not restart a healthy origin merely to change that
+  label. `Run plan` continues to mutate service-owned fixture state only.
+- `astro-console-rig-worker` is verified deployed and running with
+  `unless-stopped`, read-only root, no host port, canonical state volume, and
+  a read-only host-managed PEM mount. It is configured in `seestar` mode for
+  native host `192.168.4.63`.
+- Deployment verification does not establish physical control evidence: no
+  Solar intent has been submitted, no physical command has been issued, and no
+  provider acknowledgement, Stack evidence, stop trace, or restart recovery
+  has yet been observed.
+- `chicks-arch` is reachable for host administration directly over the Eero LAN
+  by SSH at `192.168.7.235`. This is the deployment path for rig-local checks;
+  do not infer a Tailscale route or public port is needed for the Seestar.
 
 ## Recovery evidence
 
@@ -50,8 +61,9 @@ claim that a browser command controls either physical rig.
 - Define a prompt revocation procedure. Access sessions last up to 24 hours;
   origin membership enforcement and host-policy update/reload behavior must
   be kept accurate in the runbook.
-- Install and prove a rig-owned worker/adapter lifecycle before any physical
-  capture, mount, or camera control is represented as live.
+- Execute and record one physically supervised Solar run before any physical
+  capture, mount, or camera control is represented as live. Deployment is
+  verified; the provider/Stack/stop/restart evidence is not.
 
 ## Operator checks
 
@@ -66,6 +78,10 @@ claim that a browser command controls either physical rig.
    and use the documented origin reload/restart procedure; also remove the
    user from the Access policy when immediate Cloudflare-side denial is
    needed.
+5. Before submitting a Solar intent, connect directly to `192.168.7.235` and
+   verify the running worker's pinned image, host-managed PEM mount, canonical
+   volume, `seestar` mode, and no-port boundary. Do not restart the healthy
+   origin merely because its visible release label is stale.
 
 Do not put Access tokens, tunnel tokens, membership email addresses, image
 build credentials, or host-private paths in this ledger.

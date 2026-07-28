@@ -2,7 +2,9 @@
 
 ## 1. Host Baseline
 
-The host was inspected read-only over Tailscale on July 21, 2026:
+The host was inspected read-only on July 21, 2026. Current host administration
+uses direct Eero-LAN SSH to `chicks-arch` at `192.168.7.235`; do not assume
+Tailscale is the deployment or Seestar route.
 
 | Item | Measured state |
 | --- | --- |
@@ -11,7 +13,7 @@ The host was inspected read-only over Tailscale on July 21, 2026:
 | Memory | 62 GiB RAM, 4 GiB swap |
 | System disk | Samsung 980 PRO 1 TB, Btrfs, about 875 GiB free |
 | Data disk | Samsung 860 EVO 2 TB, ext4 at `/mnt/storage`, about 1.7 TiB free |
-| LAN | Wi-Fi `192.168.7.235/22`; wired `eno1` was down during inspection and is the deployment target after basement relocation |
+| LAN | Wi-Fi `192.168.7.235/22`; direct SSH administration uses this address. Wired `eno1` was down during inspection and remains a future basement-relocation target. |
 | Docker | Engine `29.6.2`, enabled and active |
 | Compose | Plugin did not return a version; install/verify before deployment |
 
@@ -51,10 +53,19 @@ Keep lifecycles separate:
 | `cloudflared` | Public ingress only | May restart without any Astro Console restart |
 | Local/tunnel ingress routes | Separate LAN-owner and Access-authenticated paths | May restart without control-plane restart |
 | Backup job | Consistent snapshots and optional copy | Defers/throttles around critical capture I/O |
+| Solar rig worker | Deployed native Seestar SDK process; claims only named Solar start/stop work | `unless-stopped`, read-only root, canonical SQLite state volume, read-only PEM mount, no host port |
 
 Configure bounded restart backoff. A repeatedly crashing service must not spin,
 fill logs, or oscillate hardware. “Restart always” is not a recovery policy for
 an uncertain physical operation.
+
+The Solar worker is deployed by direct Docker run on `chicks-arch`, not proven
+by a Compose activation claim. It runs with `unless-stopped`, read-only root,
+canonical SQLite volume, read-only PEM mount, no host port, and native Seestar
+host `192.168.4.63`. Verify it from direct SSH on `192.168.7.235`. Deployment
+does not prove a physical start: no Solar intent or device command has been
+issued yet. If a Solar start becomes uncertain, the worker must leave durable
+manual-recovery evidence and must not restart the physical start automatically.
 
 Give processing Compose CPU/memory limits, bounded concurrency, and lower host
 I/O priority where practical. Measure under capture load; Docker CPU limits do
