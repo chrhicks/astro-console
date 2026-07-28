@@ -14,6 +14,32 @@ import { rigWorkerConfig } from "./rig-worker-config.ts"
 import { runSolarTestIntentFromEnvironment } from "./solar-test.ts"
 import { createSeestarSolarAdapter } from "./seestar-solar-adapter.ts"
 import { createPublisherWorker } from "./publisher-worker.ts"
+import { createStorageOperations } from "./storage-operations.ts"
+
+test("local storage operations measure thresholded capture safety and clean only bounded recorded scratch orphans", () => {
+  const root = mkdtempSync(join(tmpdir(), "astro-storage-")); const scratch = join(root, "scratch"); const outputs = join(root, "outputs"); const originals = join(root, "originals"); const finals = join(root, "finals"); mkdirSync(scratch); mkdirSync(outputs); mkdirSync(originals); mkdirSync(finals)
+  const databasePath = join(root, "state.sqlite"); const service = createLocalWebService(databasePath)
+  writeFileSync(join(scratch, "eligible.tmp"), "scratch"); writeFileSync(join(scratch, "later.tmp"), "later"); writeFileSync(join(outputs, "orphan.tiff"), "orphan"); writeFileSync(join(originals, "raw.fits"), "original"); writeFileSync(join(finals, "final.tiff"), "final")
+  symlinkSync(join(root, "outside"), join(scratch, "link.tmp")); writeFileSync(join(root, "outside"), "outside")
+  service.database.prepare("INSERT INTO storage_scratch_entries VALUES (?,?)").run(join(scratch, "eligible.tmp"), "2000-01-01T00:00:00.000Z"); service.database.prepare("INSERT INTO storage_scratch_entries VALUES (?,?)").run(join(scratch, "later.tmp"), "2999-01-01T00:00:00.000Z"); service.database.prepare("INSERT INTO storage_scratch_entries VALUES (?,?)").run(join(scratch, "link.tmp"), "2000-01-01T00:00:00.000Z"); service.database.prepare("INSERT INTO process_save_orphans VALUES (?,?,?)").run(join(outputs, "orphan.tiff"), "checksum", "2000-01-01T00:00:00.000Z")
+  let measurements = { freeBytes: 90, freeInodes: 90, writeLatencyMs: 4 }
+  const operations = createStorageOperations(service.database, { scratchRoot: scratch, outputsRoot: outputs, cleanupBatchSize: 8, thresholds: { noticeFreeBytes: 100, blockFreeBytes: 50, criticalFreeBytes: 10, noticeFreeInodes: 100, blockFreeInodes: 50, criticalFreeInodes: 10, noticeWriteLatencyMs: 5, blockWriteLatencyMs: 10, criticalWriteLatencyMs: 20 }, probe: { freeBytes: () => measurements.freeBytes, freeInodes: () => measurements.freeInodes, writeLatencyMs: () => measurements.writeLatencyMs } })
+  assert.deepEqual(operations.health(), { ...measurements, state: "notice", capture: "allow" })
+  measurements = { freeBytes: 40, freeInodes: 90, writeLatencyMs: 4 }; assert.equal(operations.health().capture, "blockNewLongWork")
+  measurements = { freeBytes: 90, freeInodes: 90, writeLatencyMs: 21 }; assert.equal(operations.health().capture, "throttleOptionalDerivedWrites")
+  assert.deepEqual(operations.cleanup(), { removed: 2, missing: 0, refused: 1 }); assert.equal(existsSync(join(scratch, "eligible.tmp")), false); assert.equal(existsSync(join(outputs, "orphan.tiff")), false); assert.equal(existsSync(join(scratch, "later.tmp")), true); assert.equal(existsSync(join(scratch, "link.tmp")), true); assert.equal(existsSync(join(root, "outside")), true); assert.equal(existsSync(join(originals, "raw.fits")), true); assert.equal(existsSync(join(finals, "final.tiff")), true)
+  unlinkSync(join(scratch, "link.tmp")); service.database.prepare("DELETE FROM storage_scratch_entries WHERE path=?").run(join(scratch, "link.tmp")); service.database.prepare("INSERT INTO storage_scratch_entries VALUES (?,?)").run(join(scratch, "missing.tmp"), "2000-01-01T00:00:00.000Z"); assert.deepEqual(operations.cleanup(), { removed: 0, missing: 1, refused: 0 }); assert.equal((service.database.prepare("SELECT count(*) AS count FROM storage_scratch_entries WHERE path=?").get(join(scratch, "missing.tmp")) as { count: number }).count, 0)
+  service.close()
+})
+
+test("storage health is owner-visible and blocks only new long capture admission", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "astro-storage-admission-")); const scratch = join(root, "scratch"); const outputs = join(root, "outputs"); mkdirSync(scratch); mkdirSync(outputs)
+  let freeBytes = 1_000; const service = createLocalWebService(join(root, "state.sqlite"), undefined, undefined, undefined, { scratchRoot: scratch, outputsRoot: outputs, thresholds: { noticeFreeBytes: 100, blockFreeBytes: 50, criticalFreeBytes: 10, noticeFreeInodes: 100, blockFreeInodes: 50, criticalFreeInodes: 10, noticeWriteLatencyMs: 5, blockWriteLatencyMs: 10, criticalWriteLatencyMs: 20 }, probe: { freeBytes: () => freeBytes, freeInodes: () => 90, writeLatencyMs: () => 1 } })
+  const listener = await service.listen(); t.after(async () => { await listener.close(); service.close() }); const base = `http://127.0.0.1:${listener.port}`
+  const snapshot = await fetch(`${base}/api/snapshot`).then((response) => response.json()); assert.equal((await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: snapshot.plan.revision, expectedLeaseRevision: snapshot.control.revision, idempotencyKey: "accepted-before-low-storage" }) })).status, 202); freeBytes = 5
+  const health = await fetch(`${base}/api/health/operations`).then((response) => response.json()); assert.deepEqual(health.disk, { freeBytes: 5, freeInodes: 90, writeLatencyMs: 1, state: "critical", capture: "throttleOptionalDerivedWrites" }); assert.equal(JSON.stringify(health).includes(root), false)
+  const rejected = await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: snapshot.plan.revision, expectedLeaseRevision: snapshot.control.revision, idempotencyKey: "low-storage" }) }); assert.equal(rejected.status, 409); assert.equal((await rejected.json()).reason, "StorageUnavailable"); assert.equal((await fetch(`${base}/api/snapshot`).then((response) => response.json())).run.phase, "capture")
+})
 
 test("Process Save materializes configured sources before one Asset, lineage, receipt, and publication outbox transaction", () => {
   const root = mkdtempSync(join(tmpdir(), "astro-process-save-")); const sources = join(root, "sources"); const outputs = join(root, "outputs")
@@ -110,7 +136,7 @@ test("numbered SQLite migrations upgrade a legacy database and reject a newer sc
   const databasePath = join(mkdtempSync(join(tmpdir(), "astro-migrations-")), "state.sqlite")
   const legacy = new DatabaseSync(databasePath); legacy.exec("CREATE TABLE state (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE events (cursor INTEGER PRIMARY KEY,type TEXT NOT NULL,snapshot TEXT NOT NULL); CREATE TABLE receipts (idempotency_key TEXT PRIMARY KEY,response TEXT NOT NULL); CREATE TABLE outbox (id TEXT PRIMARY KEY,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL); CREATE TABLE control_requests (client_id TEXT PRIMARY KEY,person_id TEXT NOT NULL); CREATE TABLE memberships (external_subject TEXT PRIMARY KEY,person_id TEXT NOT NULL,role TEXT NOT NULL); CREATE TABLE library_assets (asset_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,role TEXT NOT NULL,format TEXT NOT NULL,availability TEXT NOT NULL,comparison_group_id TEXT NOT NULL,captured_at TEXT NOT NULL,updated_at TEXT NOT NULL,sharpness REAL NOT NULL,detail TEXT NOT NULL);"); legacy.close()
   const service = createLocalWebService(databasePath)
-  assert.equal((service.database.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 9); assert.equal((service.database.prepare("SELECT count(*) AS count FROM workspace_projections").get() as { count: number }).count, 2); assert.equal((service.database.prepare("SELECT count(*) AS count FROM pragma_table_info('outbox') WHERE name='claim_token'").get() as { count: number }).count, 1)
+  assert.equal((service.database.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 10); assert.equal((service.database.prepare("SELECT count(*) AS count FROM workspace_projections").get() as { count: number }).count, 2); assert.equal((service.database.prepare("SELECT count(*) AS count FROM pragma_table_info('outbox') WHERE name='claim_token'").get() as { count: number }).count, 1)
   service.close()
   const newer = new DatabaseSync(databasePath); newer.prepare("INSERT INTO schema_migrations VALUES (?,?)").run(99, "2026-07-24T00:00:00.000Z"); newer.close()
   assert.throws(() => createLocalWebService(databasePath), /newer than this release/)
@@ -209,7 +235,7 @@ test("operational endpoints expose bounded admitted health without internal deta
   const ready = await fetch(`${base}/api/health/ready`).then((response) => response.json())
   assert.deepEqual(ready, { status: "ready", service: "ready", database: "ready", rig: "unknown", tunnel: "unknown", activeRun: "none", message: "Service and local database are ready; rig and tunnel are not connected in this fixture." })
   const operations = await fetch(`${base}/api/health/operations`).then((response) => response.json())
-  assert.equal(operations.release, "local-web-fixture"); assert.equal(operations.schemaVersion, 9); assert.equal(operations.sqlite.journalMode, "wal"); assert.equal(operations.rig, "unknown"); assert.equal(JSON.stringify(operations).includes("/"), false)
+  assert.equal(operations.release, "local-web-fixture"); assert.equal(operations.schemaVersion, 10); assert.equal(operations.sqlite.journalMode, "wal"); assert.equal(operations.rig, "unknown"); assert.equal(JSON.stringify(operations).includes("/"), false)
   const denied = createLocalWebService(":memory:", () => ({ personId: "viewer", clientId: "viewer", capability: "readOnly" })); const deniedListener = await denied.listen()
   assert.equal((await fetch(`http://127.0.0.1:${deniedListener.port}/api/health/operations`)).status, 403); assert.equal((await fetch(`http://127.0.0.1:${deniedListener.port}/api/health/ready`)).status, 200)
   await deniedListener.close(); denied.close()

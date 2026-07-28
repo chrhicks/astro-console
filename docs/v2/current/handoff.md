@@ -4,11 +4,9 @@ Status: **active Phase 1 backend/infrastructure handoff — 2026-07-27**
 
 ## Single Next Action
 
-Implement and prove measured local storage health and bounded cleanup. Surface
-free bytes, inode reserve, and write-latency thresholds; make only eligible
-scratch/orphan cleanup available; and prove that capture-safe throttling and
-published/local representation state remain honest. Do not select or configure
-an independent backup destination without an explicit owner decision.
+Implement an independent backup destination, copy verification, and a restore
+drill after an explicit owner decision. The local storage operations boundary is
+proven; do not treat local retention as disaster recovery.
 
 Do not add external backup, R2 credentials/configuration, a download endpoint,
 or a UI control merely to make this local operations slice appear complete.
@@ -37,7 +35,7 @@ Asset/file contract:
 ## Verified Baseline
 
 - `apps/v2-local-web` type checks pass.
-- Its SQLite/HTTP/SSE/worker/filesystem integration suite passes **52/52**
+- Its SQLite/HTTP/SSE/worker/filesystem integration suite passes **54/54**
   tests. Those
   tests cover migrations, atomic acceptance and rollback, Access/JWKS
   admission and revocation, lease recovery, worker claims, bounded Library
@@ -71,6 +69,18 @@ Asset/file contract:
 These are foundation proofs, not evidence that R2, off-host recovery, or
 long-running production workers currently work.
 
+- Storage operations now measure app-owned scratch-volume free bytes, free
+  inodes, and a bounded write-plus-fsync latency probe. The owner-only
+  operations projection reports only the derived measurement/state/capture
+  decision, never host paths. Notice, block-new-long-work, and critical
+  thresholds are service-owned; block and critical refuse only new long-run
+  admission and never alter an accepted run.
+- Bounded cleanup removes only recorded Process Save orphans and explicitly
+  recorded eligible scratch entries. It globally bounds each pass, rejects
+  escaped paths, symlink roots/files, and arbitrary/original/final paths, and
+  safely retires missing-file records. This remains local filesystem/SQLite
+  proof; it does not configure external backup or R2.
+
 ## Remaining Backend and Infrastructure Boundaries
 
 | Boundary | Current state | Required proof |
@@ -78,7 +88,7 @@ long-running production workers currently work.
 | Process Save and permanent local output | Local SQLite/filesystem vertical slice proven through the service API | Add a real Process worker/output manifest before exposing a command or UI; retain the same root, checksum, idempotency, and orphan invariants. |
 | Publication worker and private R2 | Local fake-provider SQLite/filesystem vertical slice proven | Real private R2 adapter, least-privilege secret injection only into a separately deployed publisher, provider metadata semantics, and supervised deployment proof. |
 | Downloads | Not implemented | Asset-ID authorization, bounded local stream or short-lived R2 grant, no logged bearer URL, and representation state that does not overclaim object availability. |
-| Storage health and cleanup | Policy only | Measured free bytes/inodes/write latency, threshold projection, safe scratch-only cleanup, and capture-safe throttling evidence. |
+| Storage health and cleanup | Local filesystem/SQLite vertical slice proven | Host production thresholds, capture-load benchmarking, and operating runbook evidence. |
 | Disaster recovery | Local backup only | Independent off-host destination, copy verification, and a restore drill from that destination. Do not call local retention disaster recovery. |
 | Device/session presence | Person-to-client fixture | Stable production client/session authority before treating a person's browsers as distinct presence clients. |
 | Processing deployment | Compose placeholder absent by design | Separate least-privilege processor/publisher lifecycles, bounded resources, and no rig/tunnel credentials. |
@@ -130,10 +140,9 @@ download authorization.
 
 ## Sequenced Follow-up
 
-1. **Storage and recovery operations** — add measured health thresholds,
-   bounded cleanup, a selected independent backup destination, copy checks,
-   and restore evidence. This requires an owner decision on the backup
-   destination before any external configuration.
+1. **Independent recovery** — after an explicit owner decision on destination,
+   add copy verification and a restore drill from that destination. Do not
+   call local retention disaster recovery.
 2. **Real publisher/R2 deployment** — after explicit owner authorization,
    implement the private R2 adapter and isolated credential/deployment proof.
    Retain the proven local worker contract; do not add browser-held secrets or
