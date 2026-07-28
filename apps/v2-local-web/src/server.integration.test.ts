@@ -18,6 +18,7 @@ import { createStorageOperations } from "./storage-operations.ts"
 import { assertSeparateFilesystems, createSqliteSnapshot, restoreDrill, verifySqlite } from "./sqlite-resilience.ts"
 import { publisherConfig } from "./publisher-config.ts"
 import { createR2Provider } from "./r2-provider.ts"
+import { isSqliteBusy } from "./publisher-service.ts"
 import { processorConfig } from "./processor-config.ts"
 import { createProcessorService, runProcessorFromEnvironment } from "./processor-service.ts"
 
@@ -41,6 +42,10 @@ test("R2 publisher configuration and signed fake transport fail closed without n
   await provider.put("published/run/finals/asset.tiff", Buffer.from("abc"), { assetId: "asset", checksum: "abc" }); assert.deepEqual(await provider.head("published/run/finals/asset.tiff"), { checksum: "abc", bytes: 3 }); const putHeaders = requests[0]?.init.headers as Record<string, string>; assert.match(String(putHeaders.authorization), /^AWS4-HMAC-SHA256 /); assert.equal(putHeaders["x-amz-meta-asset-id"], "asset"); assert.equal(putHeaders["x-amz-meta-checksum"], "abc"); assert.equal(String(requests[0]?.url).includes("astro-console-artifacts/published/run/finals/asset.tiff"), true); await assert.rejects(() => provider.put("outside/key", Buffer.from("x"), { assetId: "asset", checksum: "x" }), /publisher prefix/)
   const denied = createR2Provider({ ...publisherConfig(env), credentialsPath }, async () => new Response(undefined, { status: 403 })); await assert.rejects(() => denied.put("published/run/finals/asset.tiff", Buffer.from("abc"), { assetId: "asset", checksum: "abc" }), /R2 PUT failed/)
   writeFileSync(credentialsPath, JSON.stringify({ accessKeyId: "key", secretAccessKey: "secret", extra: "no" })); assert.throws(() => createR2Provider({ ...publisherConfig(env), credentialsPath }), /credentials are invalid/)
+})
+
+test("publisher classifies only SQLite busy and locked errors as transient", () => {
+  assert.equal(isSqliteBusy(new Error("SQLITE_BUSY: database is locked")), true); assert.equal(isSqliteBusy(new Error("SQLITE_LOCKED")), true); assert.equal(isSqliteBusy(new Error("R2 PUT failed with 403")), false); assert.equal(isSqliteBusy("database is locked"), false)
 })
 
 test("SQLite resilience creates a checked snapshot and disposable restore drill while refusing one filesystem", () => {

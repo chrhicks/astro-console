@@ -72,6 +72,10 @@ Asset/file contract:
   endpoint authentication and private missing-object handling without a write.
   No real promoted Asset/outbox PUT, provider HEAD verification after PUT,
   retry recovery, or download proof has occurred.
+- Migration-only publisher and processor SQLite connections now set a bounded
+  five-second busy timeout. The publisher continues only after recognizable
+  SQLite busy/locked errors and otherwise fails fast; this repository behavior
+  is tested, while the next supervised host run must confirm it in logs.
 - The repository has a same-host SQLite resilience procedure: it uses `VACUUM
   INTO`, fails closed if live SQLite and `/mnt/storage/astro-console/backups`
   are on one filesystem, verifies the SSD-side copied bytes and SHA-256, runs a

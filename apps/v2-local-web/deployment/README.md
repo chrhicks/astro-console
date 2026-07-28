@@ -86,6 +86,12 @@ missing-object HEAD behavior is verified; a later supervised promoted asset
 must prove PUT, HEAD checksum/bytes verification, retry/restart recovery, and
 honest projection before publication is called operational.
 
+The publisher and manifest processor use SQLite WAL with a bounded five-second
+busy timeout when opening their migration-only database connection. The
+publisher treats only recognized SQLite busy/locked failures as transient and
+continues its bounded pass loop; other errors remain terminal. Confirm this
+behavior from publisher logs during the next supervised host run.
+
 The manifest processor is repository code only and remains disabled by default.
 It has no HTTP command or browser control. When a later owner-supervised
 deployment is authorized, it must mount only app-owned input/output roots and
