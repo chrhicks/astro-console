@@ -1,19 +1,15 @@
 import { createLocalWebService } from "./server.ts"
 import { rigWorkerConfig, type RigWorkerConfig } from "./rig-worker-config.ts"
+import { createSeestarSolarAdapter, type SolarTestAdapter } from "./seestar-solar-adapter.ts"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Schedule from "effect/Schedule"
 
-export type StartM27CaptureAdapter = {
-  readonly startM27Capture: (work: { readonly runId: string }) => Promise<boolean>
-}
-
-type DispatchResult = "dispatched" | "failed" | "none" | "superseded"
+type DispatchResult = "providerAcknowledged" | "uncertain" | "dispatched" | "failed" | "none" | "superseded"
 type WorkerResult = DispatchResult | "disabled" | "unavailable"
-type WorkerService = ReturnType<typeof createLocalWebService>
 
-export function createRigWorkerService(config: RigWorkerConfig, adapter: StartM27CaptureAdapter | undefined, options: { readonly workerId?: string; readonly pollIntervalMs?: number; readonly now?: () => Date } = {}) {
+export function createRigWorkerService(config: RigWorkerConfig, adapter: SolarTestAdapter | undefined, options: { readonly workerId?: string; readonly pollIntervalMs?: number; readonly now?: () => Date } = {}) {
   const workerId = options.workerId ?? "rig-worker"
   const pollIntervalMs = options.pollIntervalMs ?? 1_000
   if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < 100 || pollIntervalMs > 60_000) throw new Error("Rig worker poll interval must be between 100 and 60000 ms")
@@ -34,12 +30,15 @@ export function createRigWorkerService(config: RigWorkerConfig, adapter: StartM2
     if (closed) return "disabled"
     heartbeat("alive")
     if (adapter === undefined) return "unavailable"
-    return service.dispatchStartOutbox(adapter, workerId)
+    const start = await service.dispatchSolarTestOutbox(adapter, workerId)
+    if (start !== "none") return start
+    return service.dispatchSolarTestStopOutbox(adapter, workerId)
   }
   const close = () => {
     if (closed) return
     closed = true
     heartbeat("stopped")
+    adapter?.close()
     service.close()
   }
   const run = async (runOptions: { readonly maxPasses?: number; readonly signal?: AbortSignal } = {}) => {
@@ -56,12 +55,15 @@ export function createRigWorkerService(config: RigWorkerConfig, adapter: StartM2
     }
     return { passes, health: health() }
   }
-  return { runOnce, run, health, close }
+  return { runOnce, run, health, close, recordSolarStackEvidence: service.recordSolarStackEvidence }
 }
 
 export async function runRigWorkerFromEnvironment(env: Record<string, string | undefined> = process.env) {
   const config = rigWorkerConfig(env)
-  const worker = createRigWorkerService(config, undefined)
+  let recordStack: ((intentId: string, event: unknown, observedAt: string) => boolean) | undefined
+  const adapter = config.mode === "disabled" ? undefined : createSeestarSolarAdapter(config, { onStack: (intentId, event, observedAt) => { recordStack?.(intentId, event, observedAt) } })
+  const worker = createRigWorkerService(config, adapter)
+  recordStack = worker.recordSolarStackEvidence
   if (config.mode === "disabled") return worker.run()
   const controller = new AbortController()
   const stop = () => controller.abort()
@@ -77,7 +79,7 @@ export async function runRigWorkerFromEnvironment(env: Record<string, string | u
 
 function disabledWorker(databasePath: string) {
   const health = () => ({ mode: "disabled" as const, status: "disabled" as const, databasePath })
-  return { runOnce: async (): Promise<WorkerResult> => "disabled", run: async () => ({ passes: 0, health: health() }), health, close: () => undefined }
+  return { runOnce: async (): Promise<WorkerResult> => "disabled", run: async () => ({ passes: 0, health: health() }), health, close: () => undefined, recordSolarStackEvidence: () => false }
 }
 
 if (process.argv[1]?.endsWith("rig-worker.ts")) {

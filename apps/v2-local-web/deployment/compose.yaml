@@ -16,6 +16,24 @@ services:
       - type: volume
         source: astro_console_state
         target: /var/lib/astro-console
+  rig-worker:
+    profiles: [rig]
+    image: ghcr.io/chicks/astro-console:REPLACE_WITH_PINNED_RELEASE
+    command: ["node", "--experimental-strip-types", "src/rig-worker.ts"]
+    env_file: config.env
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    restart: unless-stopped
+    volumes:
+      - type: volume
+        source: astro_console_state
+        target: /var/lib/astro-console
+      - type: bind
+        source: ${ASTRO_SEESTAR_PEM_HOST_PATH:?Set an absolute host-managed PEM path in config.env}
+        target: /run/secrets/seestar.pem
+        read_only: true
   cloudflared:
     image: cloudflare/cloudflared:REPLACE_WITH_PINNED_RELEASE
     command: ["tunnel", "--no-autoupdate", "run"]

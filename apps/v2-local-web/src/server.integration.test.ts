@@ -12,6 +12,7 @@ import { configuredAdmission, configuredListenHost, configuredListenPort, config
 import { createRigWorkerService, runRigWorkerFromEnvironment } from "./rig-worker.ts"
 import { rigWorkerConfig } from "./rig-worker-config.ts"
 import { runSolarTestIntentFromEnvironment } from "./solar-test.ts"
+import { createSeestarSolarAdapter } from "./seestar-solar-adapter.ts"
 
 test("SQLite acceptance atomically persists run, event, receipt, and outbox", async (t) => {
   const service = createLocalWebService(join(mkdtempSync(join(tmpdir(), "astro-local-")), "state.sqlite"))
@@ -35,7 +36,7 @@ test("numbered SQLite migrations upgrade a legacy database and reject a newer sc
   const databasePath = join(mkdtempSync(join(tmpdir(), "astro-migrations-")), "state.sqlite")
   const legacy = new DatabaseSync(databasePath); legacy.exec("CREATE TABLE state (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE events (cursor INTEGER PRIMARY KEY,type TEXT NOT NULL,snapshot TEXT NOT NULL); CREATE TABLE receipts (idempotency_key TEXT PRIMARY KEY,response TEXT NOT NULL); CREATE TABLE outbox (id TEXT PRIMARY KEY,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL); CREATE TABLE control_requests (client_id TEXT PRIMARY KEY,person_id TEXT NOT NULL); CREATE TABLE memberships (external_subject TEXT PRIMARY KEY,person_id TEXT NOT NULL,role TEXT NOT NULL); CREATE TABLE library_assets (asset_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,role TEXT NOT NULL,format TEXT NOT NULL,availability TEXT NOT NULL,comparison_group_id TEXT NOT NULL,captured_at TEXT NOT NULL,updated_at TEXT NOT NULL,sharpness REAL NOT NULL,detail TEXT NOT NULL);"); legacy.close()
   const service = createLocalWebService(databasePath)
-  assert.equal((service.database.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 5); assert.equal((service.database.prepare("SELECT count(*) AS count FROM workspace_projections").get() as { count: number }).count, 2); assert.equal((service.database.prepare("SELECT count(*) AS count FROM pragma_table_info('outbox') WHERE name='claim_token'").get() as { count: number }).count, 1)
+  assert.equal((service.database.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 6); assert.equal((service.database.prepare("SELECT count(*) AS count FROM workspace_projections").get() as { count: number }).count, 2); assert.equal((service.database.prepare("SELECT count(*) AS count FROM pragma_table_info('outbox') WHERE name='claim_token'").get() as { count: number }).count, 1)
   service.close()
   const newer = new DatabaseSync(databasePath); newer.prepare("INSERT INTO schema_migrations VALUES (?,?)").run(99, "2026-07-24T00:00:00.000Z"); newer.close()
   assert.throws(() => createLocalWebService(databasePath), /newer than this release/)
@@ -111,6 +112,20 @@ test("Solar test CLI requires explicit confirmation before opening the database"
   assert.deepEqual(runSolarTestIntentFromEnvironment({ ...base, ASTRO_SOLAR_TEST_SUBJECT: "solar-viewer-subject" }), { outcome: "rejected", reason: "OwnerRequired" })
   const result = runSolarTestIntentFromEnvironment({ ...base, ASTRO_SOLAR_TEST_SUBJECT: "solar-owner-subject" })
   assert.equal(result.outcome, "accepted")
+  if (result.outcome !== "accepted") throw new Error("Expected Solar CLI acceptance")
+  const stopped = runSolarTestIntentFromEnvironment({ ASTRO_LOCAL_WEB_DB: databasePath, ASTRO_SOLAR_TEST_CONFIRM: "submit-solar-test", ASTRO_SOLAR_TEST_ACTION: "stop", ASTRO_SOLAR_TEST_SUBJECT: "solar-owner-subject", ASTRO_SOLAR_TEST_INTENT_ID: result.intentId })
+  assert.deepEqual(stopped, { outcome: "accepted" })
+  const inspected = createLocalWebService(databasePath)
+  assert.equal(inspected.database.prepare("SELECT state FROM solar_test_intents WHERE intent_id=?").get(result.intentId).state, "stopping")
+  assert.equal(inspected.database.prepare("SELECT state FROM outbox WHERE kind='StopSolarTestObservation'").get().state, "pending")
+  inspected.close()
+})
+
+test("Solar adapter stop closes Stack before the Solar view", async () => {
+  const calls: string[] = []
+  const adapter = createSeestarSolarAdapter({ mode: "seestar", databasePath: "/state.sqlite", rigId: "seestar-s30", host: "192.168.4.63", pemPath: "/run/secrets/seestar.pem" }, { onStack: () => undefined, deviceFactory: () => ({ connectAndAuth: async () => true, disconnect: () => undefined, preflightCheck: async () => ({ host: "192.168.4.63", raw: { deviceState: null, viewState: null, setting: null, diskVolume: null, piInfo: null, time: null }, warnings: [] }), startStack: async () => true, startView: async () => true, stopStack: async () => { calls.push("stack"); return true }, stopView: async () => { calls.push("view"); return true }, rawClient: { subscribeToPushEvents: () => () => undefined } }) })
+  assert.equal(await adapter.stopSolarTestObservation("solar-intent"), true)
+  assert.deepEqual(calls, ["stack", "view"])
 })
 
 test("operational endpoints expose bounded admitted health without internal detail", async (t) => {
@@ -120,7 +135,7 @@ test("operational endpoints expose bounded admitted health without internal deta
   const ready = await fetch(`${base}/api/health/ready`).then((response) => response.json())
   assert.deepEqual(ready, { status: "ready", service: "ready", database: "ready", rig: "unknown", tunnel: "unknown", activeRun: "none", message: "Service and local database are ready; rig and tunnel are not connected in this fixture." })
   const operations = await fetch(`${base}/api/health/operations`).then((response) => response.json())
-  assert.equal(operations.release, "local-web-fixture"); assert.equal(operations.schemaVersion, 5); assert.equal(operations.sqlite.journalMode, "wal"); assert.equal(operations.rig, "unknown"); assert.equal(JSON.stringify(operations).includes("/"), false)
+  assert.equal(operations.release, "local-web-fixture"); assert.equal(operations.schemaVersion, 6); assert.equal(operations.sqlite.journalMode, "wal"); assert.equal(operations.rig, "unknown"); assert.equal(JSON.stringify(operations).includes("/"), false)
   const denied = createLocalWebService(":memory:", () => ({ personId: "viewer", clientId: "viewer", capability: "readOnly" })); const deniedListener = await denied.listen()
   assert.equal((await fetch(`http://127.0.0.1:${deniedListener.port}/api/health/operations`)).status, 403); assert.equal((await fetch(`http://127.0.0.1:${deniedListener.port}/api/health/ready`)).status, 200)
   await deniedListener.close(); denied.close()
@@ -277,27 +292,36 @@ test("SQLite worker claims prevent duplicate dispatch and retryable failures rec
   assert.equal(retried.state, "dispatched"); assert.equal(retried.attempts, 2); assert.equal(retried.last_error, null)
 })
 
-test("a rig worker dispatches accepted StartM27Capture once and recovers failed or expired claims", async (t) => {
+test("a rig worker dispatches only a Solar test and records provider acknowledgement separately from Stack evidence", async (t) => {
   const databasePath = join(mkdtempSync(join(tmpdir(), "astro-rig-worker-")), "state.sqlite")
   const service = createLocalWebService(databasePath); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => { await listener.close(); service.close() })
-  assert.equal((await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "rig-worker-start" }) })).status, 202)
+  const intent = service.submitSolarTestIntent({ name: "Solar worker test", idempotencyKey: "rig-worker-solar" }, { personId: "owner", clientId: "desktop", role: "owner", capability: "controlCapable" })
+  if (intent.outcome !== "accepted") throw new Error("Expected Solar intent")
   let calls = 0
   const config = rigWorkerConfig({ ASTRO_LOCAL_WEB_DB: databasePath, ASTRO_RIG_WORKER_MODE: "seestar", ASTRO_SEESTAR_HOST: "192.168.4.63", ASTRO_SEESTAR_PEM_PATH: "/run/secrets/seestar.pem" })
-  const worker = createRigWorkerService(config, { startM27Capture: async (work) => { calls += 1; assert.equal(work.runId, "run-m27-001"); await new Promise((done) => setTimeout(done, 10)); return true } })
-  assert.deepEqual(await Promise.all([worker.runOnce(), worker.runOnce()]), ["dispatched", "none"])
+  const worker = createRigWorkerService(config, { startSolarTestObservation: async (work) => { calls += 1; assert.equal(work.intentId, intent.intentId); return "providerAcknowledged" }, stopSolarTestObservation: async () => true, close: () => undefined })
+  assert.deepEqual(await Promise.all([worker.runOnce(), worker.runOnce()]), ["providerAcknowledged", "none"])
   assert.equal(calls, 1)
-  let row = service.database.prepare("SELECT id,state,claim_token,ack_at,attempts FROM outbox WHERE kind='StartM27Capture'").get() as { id: string; state: string; claim_token: string | null; ack_at: string | null; attempts: number }
+  let row = service.database.prepare("SELECT id,state,claim_token,ack_at,attempts FROM outbox WHERE kind='StartSolarTestObservation'").get() as { id: string; state: string; claim_token: string | null; ack_at: string | null; attempts: number }
   assert.equal(row.state, "dispatched"); assert.equal(row.claim_token, null); assert.notEqual(row.ack_at, null); assert.equal(row.attempts, 1)
-  service.database.prepare("INSERT INTO outbox (id,kind,payload,state) VALUES (?,?,?,?)").run("start-failure", "StartM27Capture", JSON.stringify({ runId: "run-m27-001" }), "pending")
-  const failedWorker = createRigWorkerService(config, { startM27Capture: async () => false }, { workerId: "failed-worker" })
-  assert.equal(await failedWorker.runOnce(), "failed")
-  failedWorker.close()
-  assert.equal(await worker.runOnce(), "dispatched")
-  service.database.prepare("UPDATE outbox SET state='claimed',claim_token='expired',claim_until=?,ack_at=NULL WHERE id=?").run("2000-01-01T00:00:00.000Z", row.id)
-  assert.equal(await worker.runOnce(), "dispatched")
-  row = service.database.prepare("SELECT id,state,claim_token,ack_at,attempts FROM outbox WHERE id=?").get(row.id) as typeof row
-  assert.equal(calls, 3); assert.equal(row.state, "dispatched"); assert.equal(row.claim_token, null); assert.notEqual(row.ack_at, null); assert.equal(row.attempts, 2)
+  assert.equal(service.database.prepare("SELECT state FROM solar_test_intents WHERE intent_id=?").get(intent.intentId).state, "providerAcknowledged")
+  assert.equal(service.recordSolarStackEvidence(intent.intentId, { Event: "Stack", stacked_frame: 1 }, "2026-07-27T12:00:00.000Z"), true)
+  assert.equal(service.database.prepare("SELECT state FROM solar_test_intents WHERE intent_id=?").get(intent.intentId).state, "stackObserved")
+  assert.equal(calls, 1); assert.equal(row.state, "dispatched"); assert.equal(row.claim_token, null); assert.notEqual(row.ack_at, null); assert.equal(row.attempts, 1)
+  const uncertainIntent = service.submitSolarTestIntent({ name: "Solar uncertain worker test", idempotencyKey: "rig-worker-solar-uncertain" }, { personId: "owner", clientId: "desktop", role: "owner", capability: "controlCapable" })
+  if (uncertainIntent.outcome !== "accepted") throw new Error("Expected Solar uncertain intent")
+  const uncertainWorker = createRigWorkerService(config, { startSolarTestObservation: async () => "uncertain", stopSolarTestObservation: async () => true, close: () => undefined }, { workerId: "uncertain-worker" })
+  assert.equal(await uncertainWorker.runOnce(), "uncertain")
+  assert.equal(service.database.prepare("SELECT state FROM solar_test_intents WHERE intent_id=?").get(uncertainIntent.intentId).state, "manualRecovery")
+  assert.equal(service.database.prepare("SELECT state FROM outbox WHERE kind='StartSolarTestObservation' AND state='uncertain'").get().state, "uncertain")
+  uncertainWorker.close()
+  const expiredIntent = service.submitSolarTestIntent({ name: "Solar expired lease test", idempotencyKey: "rig-worker-solar-expired" }, { personId: "owner", clientId: "desktop", role: "owner", capability: "controlCapable" })
+  if (expiredIntent.outcome !== "accepted") throw new Error("Expected Solar expired intent")
+  service.database.prepare("UPDATE outbox SET state='claimed',claim_token='expired',claim_until=? WHERE kind='StartSolarTestObservation' AND state='pending'").run("2000-01-01T00:00:00.000Z")
+  assert.equal(await worker.runOnce(), "none")
+  assert.equal(service.database.prepare("SELECT state FROM solar_test_intents WHERE intent_id=?").get(expiredIntent.intentId).state, "manualRecovery")
+  assert.equal(service.database.prepare("SELECT state FROM solar_test_recovery WHERE intent_id=?").get(expiredIntent.intentId).state, "manualRecovery")
   worker.close()
 })
 
