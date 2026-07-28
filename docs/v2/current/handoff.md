@@ -1,30 +1,30 @@
 # Phase 1 Backend and Infrastructure Readiness Handoff
 
-Status: **active implementation-preparation packet — 2026-07-27**
+Status: **active Phase 1 backend/infrastructure handoff — 2026-07-27**
 
 ## Single Next Action
 
-Implement and prove a local filesystem-backed Process `Save` vertical slice.
-It must materialize and checksum explicitly selected output files before one
-SQLite transaction creates their durable Asset roots, lineage/events, and
-idempotent publication-outbox records. A crash may leave removable orphan
-files, but it must never leave an Asset that claims bytes which do not exist.
+Implement and prove the publisher/R2 boundary as a separate, least-privilege
+worker. It must claim correlated `PublishAsset` outbox records, use stable
+object keys and checksum idempotency, verify the provider result, and project
+truthful representation availability without exposing R2 credentials, object
+keys, or signed URLs.
 
-This is deliberately a local-host boundary first. Do not add R2 credentials,
-a publisher service, a download endpoint, or a UI control merely to make this
-slice appear complete.
+Do not add R2 credentials, external configuration, a download endpoint, or a
+UI control merely to make this worker slice appear complete. External bucket
+configuration still needs an explicit owner decision.
 
 ## Why This Is Next
 
 The local-web foundation already proves SQLite acceptance, durable outbox
 claim/ack/retry, server-derived Access admission, snapshot-first SSE, control
 lease recovery, bounded Library reads, and read-only Plan/Observe/Library/
-Process projections. The current missing production boundary is durable
-artifact bytes: Process `Apply`, `Save`, retry, discard, source switching,
-worker execution, local cleanup, R2 publication, and download grants are not
-implemented.
+Process projections. The remaining production boundaries are publisher/R2
+verification, downloads, measured storage health/cleanup, and independent
+recovery. Process `Apply`, retry, discard, source switching, and worker
+execution remain later processing-workflow slices.
 
-Local Save is the narrowest first boundary because it gives later work a real
+The completed Local Save boundary gives later work a real
 Asset/file contract:
 
 1. the processing worker can materialize selected outputs safely;
@@ -38,11 +38,20 @@ Asset/file contract:
 ## Verified Baseline
 
 - `apps/v2-local-web` type checks pass.
-- Its SQLite/HTTP/SSE/worker integration suite passes **46/46** tests. Those
+- Its SQLite/HTTP/SSE/worker/filesystem integration suite passes **49/49**
+  tests. Those
   tests cover migrations, atomic acceptance and rollback, Access/JWKS
   admission and revocation, lease recovery, worker claims, bounded Library
   reads, HTTP input bounds, security headers, snapshot-first SSE, and shared
-  SQLite projections.
+  SQLite projections, plus durable Process Save materialization, rollback,
+  replay, root/symlink rejection, orphan cleanup, and safe Library detail.
+- Process Save is intentionally a service API only. Configured source IDs
+  resolve under app-owned roots; caller paths, traversal, and symlinks fail
+  closed. It copies to an app-owned temporary path, SHA-256 checksums bytes,
+  atomically promotes each file, then creates Asset detail, lineage/checksum
+  events, the idempotency receipt, and `PublishAsset` outbox records in one
+  SQLite transaction. Failure cannot create a successful Asset; promoted
+  bytes are separately recorded as bounded removable orphans.
 - The repository has a local, consistent SQLite backup primitive using
   `VACUUM INTO`, integrity verification, SHA-256 recording, and a host-managed
   fourteen-day local backup schedule. One online backup/restore drill is
@@ -51,14 +60,14 @@ Asset/file contract:
   It intentionally has no processing or publisher service, no R2 secret, and
   no host port.
 
-These are foundation proofs, not evidence that files, R2, off-host recovery,
-or long-running production workers currently work.
+These are foundation proofs, not evidence that R2, off-host recovery, or
+long-running production workers currently work.
 
 ## Remaining Backend and Infrastructure Boundaries
 
 | Boundary | Current state | Required proof |
 | --- | --- | --- |
-| Process Save and permanent local output | Contract simulation/read-only projection only | Real temp filesystem + SQLite integration: durable bytes and checksums precede atomic Asset/event/outbox commit; failed writes leave no successful metadata; orphan policy is explicit. |
+| Process Save and permanent local output | Local SQLite/filesystem vertical slice proven through the service API | Add a real Process worker/output manifest before exposing a command or UI; retain the same root, checksum, idempotency, and orphan invariants. |
 | Publication worker and private R2 | Not implemented | Claimed outbox work, stable object key/checksum idempotency, provider verification, typed retry/expiry state, and scoped credentials unavailable to browser/processing worker. |
 | Downloads | Not implemented | Asset-ID authorization, bounded local stream or short-lived R2 grant, no logged bearer URL, and representation state that does not overclaim object availability. |
 | Storage health and cleanup | Policy only | Measured free bytes/inodes/write latency, threshold projection, safe scratch-only cleanup, and capture-safe throttling evidence. |
@@ -66,7 +75,7 @@ or long-running production workers currently work.
 | Device/session presence | Person-to-client fixture | Stable production client/session authority before treating a person's browsers as distinct presence clients. |
 | Processing deployment | Compose placeholder absent by design | Separate least-privilege processor/publisher lifecycles, bounded resources, and no rig/tunnel credentials. |
 
-## Implementation Packet: Local Filesystem-backed Save
+## Completed Vertical Slice: Local Filesystem-backed Save
 
 ### Contract
 
@@ -87,7 +96,7 @@ or long-running production workers currently work.
 - Do not delete source assets or scratch during Save. Retention is a later,
   independently auditable worker.
 
-### Tests Required Before Calling It Complete
+### Verified Tests
 
 1. Real temporary-directory filesystem + SQLite success path with two selected
    outputs, checksum verification, Asset/event/receipt/outbox correlation, and
@@ -99,25 +108,23 @@ or long-running production workers currently work.
    writing outside configured roots.
 5. Duplicate/replayed request does not create a second file, Asset, or outbox
    record.
-6. Snapshot/Library detail exposes only safe representation state and stable
+6. Library detail exposes only safe representation state and stable
    Asset identity—not host paths or storage keys.
 
-No UI work belongs in this slice unless a pre-existing projection needs a
-minimal state correction. If any UI changes become necessary, use the required
-Designer validation at wide, compact, and 390 px phone widths.
+No UI work was added. The service API is the intentionally bounded seam for a
+future processing worker; it is not an HTTP command or browser control.
 
 ## Sequenced Follow-up
 
-1. **Local Save boundary** — the next implementation slice above.
-2. **Publisher/R2 boundary** — add a separate worker and adapter after the
+1. **Publisher/R2 boundary** — add a separate worker and adapter after the
    local Asset/file contract is proven. Use a private bucket, stable keys,
    narrow credentials, verification, and lifecycle state; do not expose bucket
    keys or signed URLs.
-3. **Storage and recovery operations** — add measured health thresholds,
+2. **Storage and recovery operations** — add measured health thresholds,
    bounded cleanup, a selected independent backup destination, copy checks,
    and restore evidence. This requires an owner decision on the backup
    destination before any external configuration.
-4. **Production presence/deployment** — establish device/session authority and
+3. **Production presence/deployment** — establish device/session authority and
    add isolated processor/publisher Compose services with resource limits and
    operating runbooks.
 

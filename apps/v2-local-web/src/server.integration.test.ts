@@ -1,11 +1,11 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { existsSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { DatabaseSync } from "node:sqlite"
 import type { IncomingMessage } from "node:http"
-import { generateKeyPairSync, sign } from "node:crypto"
+import { createHash, generateKeyPairSync, sign } from "node:crypto"
 import * as Schema from "effect/Schema"
 import { AcquireSnapshot, RunSnapshot } from "../../../packages/v2-contracts/src/snapshots.ts"
 import { configuredAdmission, configuredListenHost, configuredListenPort, configuredRuntime, createJwksKeyResolver, createLocalWebService, createMembershipBootstrapResolver, createProductionAccessAdmission } from "./server.ts"
@@ -13,6 +13,42 @@ import { createRigWorkerService, runRigWorkerFromEnvironment } from "./rig-worke
 import { rigWorkerConfig } from "./rig-worker-config.ts"
 import { runSolarTestIntentFromEnvironment } from "./solar-test.ts"
 import { createSeestarSolarAdapter } from "./seestar-solar-adapter.ts"
+
+test("Process Save materializes configured sources before one Asset, lineage, receipt, and publication outbox transaction", () => {
+  const root = mkdtempSync(join(tmpdir(), "astro-process-save-")); const sources = join(root, "sources"); const outputs = join(root, "outputs")
+  writeFileSync(join(root, "outside.fits"), "outside"); mkdirSync(sources); writeFileSync(join(sources, "linear.fits"), "linear-bytes"); writeFileSync(join(sources, "final.tiff"), "final-bytes")
+  const service = createLocalWebService(join(root, "state.sqlite"), undefined, undefined, { sourcesRoot: sources, outputsRoot: outputs, sources: { linear: "linear.fits", final: "final.tiff", escape: "../outside.fits" } })
+  const command = { sessionId: "process-m27-001", expectedRevision: 4, idempotencyKey: "save-1", outputs: [{ sourceId: "linear", representation: "linearMaster" }, { sourceId: "final", representation: "final" }] }
+  const accepted = service.saveProcess(command)
+  assert.equal(accepted.outcome, "accepted"); if (accepted.outcome !== "accepted") throw new Error("save did not accept")
+  assert.equal(accepted.assetIds.length, 2); assert.equal(readdirSync(outputs).length, 2)
+  assert.equal((service.database.prepare("SELECT count(*) AS count FROM process_asset_events").get() as { count: number }).count, 2); assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox WHERE kind='PublishAsset'").get() as { count: number }).count, 2)
+  const event = service.database.prepare("SELECT checksum FROM process_asset_events WHERE asset_id=?").get(accepted.assetIds[0]) as { checksum: string }; const savedName = readdirSync(outputs).find((name) => name.startsWith(accepted.assetIds[0]))
+  assert.equal(event.checksum, createHash("sha256").update(readFileSync(join(outputs, savedName ?? "missing"))).digest("hex"))
+  assert.deepEqual(service.saveProcess(command), accepted); assert.equal(readdirSync(outputs).length, 2)
+  const detail = service.database.prepare("SELECT detail FROM library_assets WHERE asset_id=?").get(accepted.assetIds[0]) as { detail: string }
+  assert.doesNotMatch(detail.detail, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))); assert.doesNotMatch(detail.detail, /outputs|checksum|storage/i)
+  assert.equal(service.saveProcess({ ...command, idempotencyKey: "escape", outputs: [{ sourceId: "../outside.fits", representation: "final" }] }).outcome, "rejected")
+  service.close()
+})
+
+test("Process Save rejects symlinks and records transaction-failure bytes as removable orphans", () => {
+  const root = mkdtempSync(join(tmpdir(), "astro-process-orphan-")); const sources = join(root, "sources"); const outputs = join(root, "outputs"); mkdirSync(sources); writeFileSync(join(sources, "source.fits"), "bytes"); writeFileSync(join(root, "outside.fits"), "outside"); symlinkSync(join(root, "outside.fits"), join(sources, "link.fits"))
+  const service = createLocalWebService(join(root, "state.sqlite"), undefined, undefined, { sourcesRoot: sources, outputsRoot: outputs, sources: { source: "source.fits", link: "link.fits" } })
+  assert.equal(service.saveProcess({ sessionId: "process-m27-001", expectedRevision: 4, idempotencyKey: "symlink", outputs: [{ sourceId: "link", representation: "final" }] }).outcome, "rejected")
+  service.database.exec("CREATE TRIGGER reject_publication BEFORE INSERT ON outbox WHEN NEW.kind='PublishAsset' BEGIN SELECT RAISE(ABORT, 'forced publication failure'); END;")
+  const failed = service.saveProcess({ sessionId: "process-m27-001", expectedRevision: 4, idempotencyKey: "commit-failure", outputs: [{ sourceId: "source", representation: "final" }] })
+  assert.deepEqual(failed, { outcome: "rejected", reason: "MaterializationFailed" }); assert.equal((service.database.prepare("SELECT count(*) AS count FROM library_assets WHERE asset_id LIKE 'asset-process-%'").get() as { count: number }).count, 0); assert.equal((service.database.prepare("SELECT count(*) AS count FROM process_save_orphans").get() as { count: number }).count, 1)
+  assert.equal(service.cleanupSavedOrphans(), 1); assert.equal(readdirSync(outputs).length, 0); service.close()
+})
+
+test("Process Save leaves no success metadata when later filesystem materialization fails", () => {
+  const root = mkdtempSync(join(tmpdir(), "astro-process-write-failure-")); const sources = join(root, "sources"); const outputs = join(root, "outputs"); mkdirSync(sources); writeFileSync(join(sources, "first.fits"), "first")
+  const service = createLocalWebService(join(root, "state.sqlite"), undefined, undefined, { sourcesRoot: sources, outputsRoot: outputs, sources: { first: "first.fits", missing: "missing.tiff" } })
+  const result = service.saveProcess({ sessionId: "process-m27-001", expectedRevision: 4, idempotencyKey: "write-failure", outputs: [{ sourceId: "first", representation: "linearMaster" }, { sourceId: "missing", representation: "final" }] })
+  assert.deepEqual(result, { outcome: "rejected", reason: "MaterializationFailed" }); assert.equal((service.database.prepare("SELECT count(*) AS count FROM library_assets WHERE asset_id LIKE 'asset-process-%'").get() as { count: number }).count, 0); assert.equal((service.database.prepare("SELECT count(*) AS count FROM process_save_receipts").get() as { count: number }).count, 0); assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox WHERE kind='PublishAsset'").get() as { count: number }).count, 0); assert.equal((service.database.prepare("SELECT count(*) AS count FROM process_save_orphans").get() as { count: number }).count, 1); assert.equal(readdirSync(outputs).some((name) => name.endsWith(".tmp")), false); assert.equal(service.cleanupSavedOrphans(), 1); assert.equal(readdirSync(outputs).length, 0)
+  service.close()
+})
 
 test("SQLite acceptance atomically persists run, event, receipt, and outbox", async (t) => {
   const service = createLocalWebService(join(mkdtempSync(join(tmpdir(), "astro-local-")), "state.sqlite"))
@@ -36,7 +72,7 @@ test("numbered SQLite migrations upgrade a legacy database and reject a newer sc
   const databasePath = join(mkdtempSync(join(tmpdir(), "astro-migrations-")), "state.sqlite")
   const legacy = new DatabaseSync(databasePath); legacy.exec("CREATE TABLE state (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE events (cursor INTEGER PRIMARY KEY,type TEXT NOT NULL,snapshot TEXT NOT NULL); CREATE TABLE receipts (idempotency_key TEXT PRIMARY KEY,response TEXT NOT NULL); CREATE TABLE outbox (id TEXT PRIMARY KEY,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL); CREATE TABLE control_requests (client_id TEXT PRIMARY KEY,person_id TEXT NOT NULL); CREATE TABLE memberships (external_subject TEXT PRIMARY KEY,person_id TEXT NOT NULL,role TEXT NOT NULL); CREATE TABLE library_assets (asset_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,role TEXT NOT NULL,format TEXT NOT NULL,availability TEXT NOT NULL,comparison_group_id TEXT NOT NULL,captured_at TEXT NOT NULL,updated_at TEXT NOT NULL,sharpness REAL NOT NULL,detail TEXT NOT NULL);"); legacy.close()
   const service = createLocalWebService(databasePath)
-  assert.equal((service.database.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 6); assert.equal((service.database.prepare("SELECT count(*) AS count FROM workspace_projections").get() as { count: number }).count, 2); assert.equal((service.database.prepare("SELECT count(*) AS count FROM pragma_table_info('outbox') WHERE name='claim_token'").get() as { count: number }).count, 1)
+  assert.equal((service.database.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 7); assert.equal((service.database.prepare("SELECT count(*) AS count FROM workspace_projections").get() as { count: number }).count, 2); assert.equal((service.database.prepare("SELECT count(*) AS count FROM pragma_table_info('outbox') WHERE name='claim_token'").get() as { count: number }).count, 1)
   service.close()
   const newer = new DatabaseSync(databasePath); newer.prepare("INSERT INTO schema_migrations VALUES (?,?)").run(99, "2026-07-24T00:00:00.000Z"); newer.close()
   assert.throws(() => createLocalWebService(databasePath), /newer than this release/)
@@ -135,7 +171,7 @@ test("operational endpoints expose bounded admitted health without internal deta
   const ready = await fetch(`${base}/api/health/ready`).then((response) => response.json())
   assert.deepEqual(ready, { status: "ready", service: "ready", database: "ready", rig: "unknown", tunnel: "unknown", activeRun: "none", message: "Service and local database are ready; rig and tunnel are not connected in this fixture." })
   const operations = await fetch(`${base}/api/health/operations`).then((response) => response.json())
-  assert.equal(operations.release, "local-web-fixture"); assert.equal(operations.schemaVersion, 6); assert.equal(operations.sqlite.journalMode, "wal"); assert.equal(operations.rig, "unknown"); assert.equal(JSON.stringify(operations).includes("/"), false)
+  assert.equal(operations.release, "local-web-fixture"); assert.equal(operations.schemaVersion, 7); assert.equal(operations.sqlite.journalMode, "wal"); assert.equal(operations.rig, "unknown"); assert.equal(JSON.stringify(operations).includes("/"), false)
   const denied = createLocalWebService(":memory:", () => ({ personId: "viewer", clientId: "viewer", capability: "readOnly" })); const deniedListener = await denied.listen()
   assert.equal((await fetch(`http://127.0.0.1:${deniedListener.port}/api/health/operations`)).status, 403); assert.equal((await fetch(`http://127.0.0.1:${deniedListener.port}/api/health/ready`)).status, 200)
   await deniedListener.close(); denied.close()
