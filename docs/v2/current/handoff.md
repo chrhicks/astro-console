@@ -80,6 +80,13 @@ Asset/file contract:
   resource limits, then observed running with zero restarts and no lock error
   in a short host check. The repository behavior is tested; sustained
   concurrent-worker behavior remains a later operational observation.
+- The host now has app-owned SSD `processor-sources` and `finals` paths. A
+  one-shot processor preflight ran with only the state volume, read-only
+  source/config binds, and writable finals bind; without a manifest it returned
+  `ManifestUnavailable` and left Process assets/publication work at zero.
+  Non-mutating container checks confirm the processor identity can read sources
+  and write finals, while the deployed publisher can read finals but not write
+  them. No processor is kept running and no synthetic artifact was created.
 - The repository has a same-host SQLite resilience procedure: it uses `VACUUM
   INTO`, fails closed if live SQLite and `/mnt/storage/astro-console/backups`
   are on one filesystem, verifies the SSD-side copied bytes and SHA-256, runs a
