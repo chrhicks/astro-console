@@ -87,6 +87,14 @@ Asset/file contract:
   Non-mutating container checks confirm the processor identity can read sources
   and write finals, while the deployed publisher can read finals but not write
   them. No processor is kept running and no synthetic artifact was created.
+- The stale `c9afc65-solar` rig-worker image was restarting because its older
+  migration set rejected the shared SQLite schema 10 before adapter
+  initialization. With no pending Solar start/stop work, it was replaced by
+  the current schema-compatible `35cd3c7-publisher-lockfix` image under the
+  same state/PEM mounts and hardening. A short host check found zero restarts,
+  no schema error, and still no Solar work. This fixes container liveness only;
+  it is not Seestar connection, provider acknowledgement, Stack evidence, or
+  physical-capture proof.
 - The repository has a same-host SQLite resilience procedure: it uses `VACUUM
   INTO`, fails closed if live SQLite and `/mnt/storage/astro-console/backups`
   are on one filesystem, verifies the SSD-side copied bytes and SHA-256, runs a
