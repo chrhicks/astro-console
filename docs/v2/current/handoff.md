@@ -74,8 +74,12 @@ Asset/file contract:
   retry recovery, or download proof has occurred.
 - Migration-only publisher and processor SQLite connections now set a bounded
   five-second busy timeout. The publisher continues only after recognizable
-  SQLite busy/locked errors and otherwise fails fast; this repository behavior
-  is tested, while the next supervised host run must confirm it in logs.
+  SQLite busy/locked errors and otherwise fails fast. The prior publisher was
+  observed in a lock-triggered restart loop (40 restarts); it was replaced with
+  the `35cd3c7-publisher-lockfix` image under the same private mounts and
+  resource limits, then observed running with zero restarts and no lock error
+  in a short host check. The repository behavior is tested; sustained
+  concurrent-worker behavior remains a later operational observation.
 - The repository has a same-host SQLite resilience procedure: it uses `VACUUM
   INTO`, fails closed if live SQLite and `/mnt/storage/astro-console/backups`
   are on one filesystem, verifies the SSD-side copied bytes and SHA-256, runs a
