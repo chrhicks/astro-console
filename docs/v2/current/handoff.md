@@ -4,10 +4,12 @@ Status: **active Phase 1 backend/infrastructure handoff — 2026-07-27**
 
 ## Single Next Action
 
-Supervise the first real promoted asset publication once one exists: prove the
-isolated publisher can PUT, HEAD-verify, retry safely, and project the durable
-outbox result against private R2. The authenticated publisher deployment is
-running, but no real asset upload/retry proof has occurred.
+Supervise the first real promoted asset publication: stage a genuine Process
+output under the app-owned SSD source root, provide its host-managed manifest,
+then prove the isolated processor can materialize it and the publisher can PUT,
+HEAD-verify, retry safely, and project the durable outbox result against
+private R2. The authenticated publisher deployment is running, but no real
+asset upload/retry proof has occurred.
 
 Do not add external backup, R2 credentials, a download endpoint, or a UI
 control merely to make this Phase 1 boundary appear complete.
@@ -101,7 +103,7 @@ off-host recovery, or long-running production workers currently work.
 
 | Boundary | Current state | Required proof |
 | --- | --- | --- |
-| Process Save and permanent local output | Local SQLite/filesystem vertical slice proven through the service API | Add a real Process worker/output manifest before exposing a command or UI; retain the same root, checksum, idempotency, and orphan invariants. |
+| Process Save and permanent local output | Local SQLite/filesystem vertical slice proven; repository-ready manifest processor is disabled and not deployed | Owner-supervise a real processor deployment with only app-owned source/output binds and a read-only manifest; then materialize a genuine output while retaining root, checksum, idempotency, and orphan invariants. |
 | Publication worker and private R2 | Isolated authenticated publisher deployed; signed missing-object HEAD returns 404 | First real promoted Asset/outbox PUT, provider HEAD checksum/bytes verification, retry/restart, and honest projection proof. |
 | Downloads | Not implemented | Asset-ID authorization, bounded local stream or short-lived R2 grant, no logged bearer URL, and representation state that does not overclaim object availability. |
 | Storage health and cleanup | Local filesystem/SQLite vertical slice proven | Host production thresholds, capture-load benchmarking, and operating runbook evidence. |
@@ -161,7 +163,12 @@ cycle, object lifecycle, or download authorization.
    exists, supervise PUT, provider HEAD checksum/bytes verification, retry and
    restart recovery, and honest Library projection. Do not add browser-held
    secrets, object-key, or signed-URL projection.
-2. **Production presence/deployment** — establish device/session authority and
+2. **Processor activation for a genuine output** — the manifest processor is
+   repository-ready but disabled. Its production activation needs only the
+   app-owned source/output mounts, a read-only host manifest, a current durable
+   owner membership, and bounded resource limits; it must never receive rig,
+   tunnel, or R2 credentials.
+3. **Production presence/deployment** — establish device/session authority and
    add isolated processor/publisher Compose services with resource limits and
    operating runbooks.
 

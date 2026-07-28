@@ -85,3 +85,10 @@ private Standard bucket is `astro-console-artifacts` in ENAM. Authenticated
 missing-object HEAD behavior is verified; a later supervised promoted asset
 must prove PUT, HEAD checksum/bytes verification, retry/restart recovery, and
 honest projection before publication is called operational.
+
+The manifest processor is repository code only and remains disabled by default.
+It has no HTTP command or browser control. When a later owner-supervised
+deployment is authorized, it must mount only app-owned input/output roots and
+a read-only manifest under `/run/config`; the manifest names relative sources,
+and the worker delegates all containment, symlink, checksum, idempotency, and
+outbox rules to Process Save. It does not delete or rename the host manifest.
