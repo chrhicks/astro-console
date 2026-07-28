@@ -4,11 +4,10 @@ Status: **active Phase 1 backend/infrastructure handoff — 2026-07-27**
 
 ## Single Next Action
 
-Perform an owner-supervised private R2 publisher deployment using the proven
-repository contract: create/inject the isolated bucket-only credential, start
-only the publisher profile, and verify upload/head/retry behavior against the
-existing private bucket. No Cloudflare credential or remote host deployment has
-been created in this repository work.
+Supervise the first real promoted asset publication once one exists: prove the
+isolated publisher can PUT, HEAD-verify, retry safely, and project the durable
+outbox result against private R2. The authenticated publisher deployment is
+running, but no real asset upload/retry proof has occurred.
 
 Do not add external backup, R2 credentials, a download endpoint, or a UI
 control merely to make this Phase 1 boundary appear complete.
@@ -18,8 +17,8 @@ control merely to make this Phase 1 boundary appear complete.
 The local-web foundation already proves SQLite acceptance, durable outbox
 claim/ack/retry, server-derived Access admission, snapshot-first SSE, control
 lease recovery, bounded Library reads, and read-only Plan/Observe/Library/
-Process projections. The remaining production boundaries are real R2 adapter
-deployment, downloads, measured storage health/cleanup, and independent
+Process projections. The remaining production boundaries are real R2 asset
+publication proof, downloads, measured storage health/cleanup, and independent
 recovery. Process `Apply`, retry, discard, source switching, and worker
 execution remain later processing-workflow slices.
 
@@ -37,7 +36,7 @@ Asset/file contract:
 ## Verified Baseline
 
 - `apps/v2-local-web` type checks pass.
-- Its SQLite/HTTP/SSE/worker/filesystem integration suite passes **54/54**
+- Its SQLite/HTTP/SSE/worker/filesystem integration suite passes **56/56**
   tests. Those
   tests cover migrations, atomic acceptance and rollback, Access/JWKS
   admission and revocation, lease recovery, worker claims, bounded Library
@@ -52,24 +51,25 @@ Asset/file contract:
   events, the idempotency receipt, and `PublishAsset` outbox records in one
   SQLite transaction. Failure cannot create a successful Asset; promoted
   bytes are separately recorded as bounded removable orphans.
-- The publisher is a separate local worker module using a fake verified
-  provider contract. It persists internal object keys derived from trusted
-  Asset lineage, checksums local bytes, verifies provider metadata, and only
-  then projects `published`. Retry/restart reuses the stored key; an expired
-  claim or stale acknowledgement cannot overwrite later state. Provider or
-  checksum failure projects a safe unavailable/failed representation. Object
-  keys and credentials never enter Library detail. This proves no real R2
-  publisher credential, provider mutation, download grant, or deployment. The
-  local fake-provider test itself made no R2 network request.
+- The publisher worker separately proves durable claim/ack/retry, stable
+  private-style key derivation, local checksum verification, fake-provider
+  upload/head verification, safe representation projection, and stale-claim
+  recovery. Retry/restart reuses the stored key; an expired claim or stale
+  acknowledgement cannot overwrite later state. Provider or checksum failure
+  projects a safe unavailable/failed representation. Object keys and
+  credentials never enter Library detail. The local fake-provider test itself
+  made no R2 network request.
 - A production S3-compatible R2 provider adapter and publisher-only Compose
-  profile now exist in the repository. Non-secret configuration is validated
-  for account `503286fc7e5e8545c172105f991efef1`, private Standard ENAM bucket
-  `astro-console-artifacts`, and its account endpoint; credential JSON is read
-  only from a publisher secret mount. Signed PUT/HEAD behavior is tested with a
-  fake transport; code accepts only `published/` keys and fails safely on bad
-  config/credentials/provider responses. Read-only Cloudflare R2 inventory and
-  detail checks have occurred; no Cloudflare credential, bucket mutation, or
-  host deployment has occurred.
+  profile are deployed. Cloudflare R2 is enabled and the existing private ENAM
+  Standard bucket is `astro-console-artifacts`. A permanent bucket-only object
+  read/write credential is host-managed and mounted only into the dedicated
+  publisher service; it has no public endpoint, tunnel, or rig mounts. The
+  host built image `6762321-r2-publisher` and started
+  `astro-console-publisher` alongside the unchanged healthy origin. A signed
+  HEAD for a deliberately nonexistent `published/` key returned 404, proving
+  endpoint authentication and private missing-object handling without a write.
+  No real promoted Asset/outbox PUT, provider HEAD verification after PUT,
+  retry recovery, or download proof has occurred.
 - The repository has a same-host SQLite resilience procedure: it uses `VACUUM
   INTO`, fails closed if live SQLite and `/mnt/storage/astro-console/backups`
   are on one filesystem, verifies the SSD-side copied bytes and SHA-256, runs a
@@ -78,12 +78,12 @@ Asset/file contract:
   SHA-256, restore-drill status, retention, and destination. This is not
   off-host disaster recovery and does not protect against host loss, fire, or
   theft; no real host installation/configuration was performed here.
-- The Compose starter has only origin, optional rig worker, and `cloudflared`.
-  It intentionally has no processing or publisher service, no R2 secret, and
-  no host port.
+- The Compose deployment now has an isolated profile-gated publisher alongside
+  origin, optional rig worker, and `cloudflared`. The publisher has no public
+  host port, tunnel, or rig credential/mount.
 
-These are foundation proofs, not evidence that R2, off-host recovery, or
-long-running production workers currently work.
+These are foundation proofs, not evidence that real R2 asset publication,
+off-host recovery, or long-running production workers currently work.
 
 - Storage operations now measure app-owned scratch-volume free bytes, free
   inodes, and a bounded write-plus-fsync latency probe. The owner-only
@@ -102,7 +102,7 @@ long-running production workers currently work.
 | Boundary | Current state | Required proof |
 | --- | --- | --- |
 | Process Save and permanent local output | Local SQLite/filesystem vertical slice proven through the service API | Add a real Process worker/output manifest before exposing a command or UI; retain the same root, checksum, idempotency, and orphan invariants. |
-| Publication worker and private R2 | Repository adapter/profile and fake-transport proof complete | Owner-supervised isolated credential injection and real private upload/head/retry deployment proof. |
+| Publication worker and private R2 | Isolated authenticated publisher deployed; signed missing-object HEAD returns 404 | First real promoted Asset/outbox PUT, provider HEAD checksum/bytes verification, retry/restart, and honest projection proof. |
 | Downloads | Not implemented | Asset-ID authorization, bounded local stream or short-lived R2 grant, no logged bearer URL, and representation state that does not overclaim object availability. |
 | Storage health and cleanup | Local filesystem/SQLite vertical slice proven | Host production thresholds, capture-load benchmarking, and operating runbook evidence. |
 | Same-host resilience | Repository-backed SSD procedure proven | Install/supervise it on the host and measure it under capture load; do not call it off-host disaster recovery. |
@@ -149,18 +149,18 @@ long-running production workers currently work.
 No UI work was added. The service API is the intentionally bounded seam for a
 future processing worker; it is not an HTTP command or browser control.
 
-The publisher proves durable outbox claim/ack/retry, stable private-style key
-derivation from trusted lineage, local checksum verification, fake-provider
-upload/head verification, safe representation projection, and stale-claim
-recovery. It does not prove an R2 adapter, credentials, object lifecycle, or
-download authorization.
+The local publisher test proves durable outbox claim/ack/retry, stable private
+key derivation from trusted lineage, checksum verification, safe projection,
+and stale-claim recovery. The deployed adapter has authenticated private R2
+HEAD access only so far; it does not yet prove a real asset PUT/head/retry
+cycle, object lifecycle, or download authorization.
 
 ## Sequenced Follow-up
 
-1. **Real publisher/R2 deployment** — after explicit owner authorization,
-   create/inject the bucket-only credential and supervise publisher-profile
-   upload/head/retry proof. Retain the proven local worker contract; do not add
-   browser-held secrets, object-key, or signed-URL projection.
+1. **First real publisher/R2 asset proof** — when a promoted Asset/outbox entry
+   exists, supervise PUT, provider HEAD checksum/bytes verification, retry and
+   restart recovery, and honest Library projection. Do not add browser-held
+   secrets, object-key, or signed-URL projection.
 2. **Production presence/deployment** — establish device/session authority and
    add isolated processor/publisher Compose services with resource limits and
    operating runbooks.
