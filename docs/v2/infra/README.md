@@ -1,6 +1,6 @@
 # V2 Infrastructure Plan
 
-Status: selected infrastructure direction; Phase 1 local-web implementation is underway
+Status: selected infrastructure direction; Phase 1 host-verification bundle complete
 
 Captured: July 21, 2026
 
@@ -92,8 +92,8 @@ Infrastructure must preserve the accepted product semantics:
 
 ## Recommendation Confidence
 
-The topology decision is strong enough to guide contract and deployment
-spikes. It is not yet an installation specification. Remaining measurements
-include MiniPC addresses and exposed Alpaca devices, container network behavior
-for discovery, storage performance, and validation of the selected retention
-windows.
+The selected topology now has focused deployment evidence: private R2
+publication/download, same-host backup/restore, and rig-worker liveness. It
+is not a complete operations specification. Physical rig proof, storage
+performance, and long-duration workload measurements remain later work; they
+are not part of the next complexity audit.

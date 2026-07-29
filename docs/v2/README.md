@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **Gate 7 and Phase 0.5 accepted; V2 reference and Phase 1 visual implementation authority frozen; not current application behavior**
+Status: **Gate 7 and Phase 0.5 accepted; Phase 1 local-web and host-verification bundle complete; complexity audit next**
 
 This directory is organized to keep normal working context small. Do not read
 the entire V2 tree by default.
@@ -11,8 +11,10 @@ Read these in order when starting or resuming V2 work:
 
 1. [UX and design guidance](ux-design-guidance.md) — durable product and design
    rules accepted through Gate 4.
-2. [Current handoff](current/handoff.md) — current position, deferred choices,
-   and the single next action.
+2. [Current handoff](current/handoff.md) — completed evidence and honest
+   deferred boundaries.
+3. [Phase 1 complexity audit](current/phase-1-complexity-audit.md) — the
+   bounded next review, before any further implementation.
 
 That is the complete default context. Load another document only when the task
 requires its specific detail.
@@ -27,7 +29,7 @@ requires its specific detail.
 | Accepted Gate 5 consequential actions | [Gate 5 action map](current/gate-05-action-map.md) |
 | Accepted canonical Gate 5 contract language | [Gate 5 contract vocabulary](current/gate-05-contract-vocabulary.md) |
 | Executable Effect Schema candidates and fixtures | [V2 contracts package](../../packages/v2-contracts/README.md) |
-| Phase 1 implementation scope and exit criteria | [Current delivery plan](current/delivery-plan.md) |
+| Phase 1 implementation scope and exit criteria | [Phase 1 closeout](current/delivery-plan.md); detailed narrative is archived |
 | Phase 1 production UI implementation | Accepted [visual style guide](current/visual-style-guide.md), [UI component library](current/ui-component-library.md), and [UI build contract](current/ui-build-contract.md) |
 | Why Phase 0.5 made a specific visual decision | [Phase 0.5 design-system archive](archive/phase-0.5/README.md) — historical only; do not use for active implementation authority |
 | Accepted interaction evidence or candidate contracts | The relevant document under [accepted gates](gates/README.md) |
@@ -53,6 +55,10 @@ completed regrade is recorded in the
 [server-perspective audit](current/gate-05-server-audit.md). The accepted
 [Gate 7 walkthrough and decision log](archive/phase-1-foundation/gate-07-walkthrough.md) freezes
 the selected V2 reference.
+
+Phase 1 now has its local-web and host-verification evidence recorded. The
+next activity is a deletion-oriented complexity audit; it does not reopen the
+accepted product model or authorize new features.
 
 ## Context Rules
 

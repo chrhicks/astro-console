@@ -1,87 +1,36 @@
 # Observatory Activation Ledger
 
-Status: **live protected fixture and deployed Solar worker; physical trace unproven — 2026-07-27**
+Status: **Phase 1 activation evidence closed — 2026-07-29**
 
-This is the operational record for the public Phase 1 fixture. It is not a
-claim that a browser command controls either physical rig.
+The interim July 27 ledger is archived in
+[the historical activation record](../archive/handoffs/activation-ledger-2026-07-27.md).
 
-## Live boundary
+## Verified Deployment Evidence
 
-- `observatory.chicks.dev` is protected by a Cloudflare Access self-hosted
-  application using email one-time PIN and an explicit four-person allow
-  policy. The application is hidden from the launcher and has a 24-hour
-  session duration.
-- A Cloudflare Tunnel has healthy connectors and routes only that hostname to
-  `http://127.0.0.1:18080` on the observatory host. The tunnel requires the
-  expected Access team and audience and ends in an explicit 404 catch-all.
-- The origin container is loopback-only, non-root, read-only (apart from its
-  state volume), and verifies the Access JWT issuer, audience, expiry, RS256
-  signature, and bounded JWKS cache before serving protected state.
-- `astro-console-origin` is verified running image
-  `astro-console-v2-local-web:c9afc65-solar`, healthy on loopback. Its visible
-  release label is stale; do not restart a healthy origin merely to change that
-  label. `Run plan` continues to mutate service-owned fixture state only.
-- `astro-console-rig-worker` is verified deployed and running with
-  `unless-stopped`, read-only root, no host port, canonical state volume, and
-  a read-only host-managed PEM mount. It is configured in `seestar` mode for
-  native host `192.168.4.63`.
-- Deployment verification does not establish physical control evidence: no
-  Solar intent has been submitted, no physical command has been issued, and no
-  provider acknowledgement, Stack evidence, stop trace, or restart recovery
-  has yet been observed.
-- `chicks-arch` is reachable for host administration directly over the Eero LAN
-  by SSH at `192.168.7.235`. This is the deployment path for rig-local checks;
-  do not infer a Tailscale route or public port is needed for the Seestar.
+- The Access-protected origin, private download signer, publisher, and tunnel
+  are running in their separate roles. The origin is loopback-bound and the
+  signer is private to its service network.
+- Origin and publisher run the streamlined `eceab25` release. A publisher
+  upload writes R2 attachment metadata; the origin performs an admitted
+  Asset-ID lookup and redirects once to a five-minute private-R2 URL.
+- The published M13 linear-master FITS was refreshed with that attachment
+  metadata. R2 copy and HEAD verification retained its checksum, and the owner
+  confirmed that a fresh private-R2 URL downloaded the FITS in a browser.
+- The rig worker is running and durably reports `alive` / `ready`. No Solar
+  work was pending during its schema-compatible replacement.
+- The enabled same-host SQLite backup timer has a successful checksum-backed
+  run and disposable restore drill. Fourteen-day same-host retention is the
+  accepted current resilience scope.
 
-## Recovery evidence
+## Boundaries Still Honest
 
-- Both origin and tunnel containers use Docker `unless-stopped` restart
-  policy. This was verified live on 2026-07-25.
-- The unused firewall exception for private-LAN TCP/8080 was removed from both
-  runtime and persistent firewalld configuration. No public or LAN origin
-  port is exposed; the active origin remains `127.0.0.1:18080`.
-- A consistent SQLite `VACUUM INTO` backup was created, integrity-checked,
-  copied to a root-only host backup directory outside the live Docker volume,
-  checksum-recorded, restored as a disposable database, and served through a
-  disposable local service with `GET /api/snapshot` returning HTTP 200.
-- A persistent systemd timer now runs the same verified online backup daily
-  with a small randomized delay and retains fourteen days of local
-  backup/checksum pairs. Two timer-service executions have passed.
+- Deployment and worker liveness are not physical Solar capture, provider
+  acknowledgement, Stack evidence, stop, or restart-recovery proof.
+- The backup is same-host resilience, not off-host disaster recovery.
+- The M13 result proves one published artifact download; it does not prove a
+  general processing workflow or sustained operations under capture load.
 
-## Still required
+## Operator Reference
 
-- Copy verified backups to independent storage and maintain a repeatable
-  restore-runbook. The current schedule is local host protection, not off-host
-  disaster recovery.
-- Add container health checks or an equivalent monitored liveness/restart
-  mechanism. Restart policy alone does not detect a stuck process.
-- Make remote client/device authority real. The current deployed desktop
-  client context is service-wide, so it must not be described as enforcing
-  phone read-only behavior for a remote owner browser.
-- Define a prompt revocation procedure. Access sessions last up to 24 hours;
-  origin membership enforcement and host-policy update/reload behavior must
-  be kept accurate in the runbook.
-- Execute and record one physically supervised Solar run before any physical
-  capture, mount, or camera control is represented as live. Deployment is
-  verified; the provider/Stack/stop/restart evidence is not.
-
-## Operator checks
-
-1. Confirm unauthenticated public access redirects to Access, then sign in as
-   an allowed member and confirm the activity shell renders.
-2. Confirm the tunnel has healthy connectors and the origin responds on its
-   loopback health endpoint.
-3. Before an image/config change, make and verify a fresh online SQLite
-   backup. Exercise the restore drill after material schema or deployment
-   changes.
-4. For an urgent membership change, update the host-managed membership policy
-   and use the documented origin reload/restart procedure; also remove the
-   user from the Access policy when immediate Cloudflare-side denial is
-   needed.
-5. Before submitting a Solar intent, connect directly to `192.168.7.235` and
-   verify the running worker's pinned image, host-managed PEM mount, canonical
-   volume, `seestar` mode, and no-port boundary. Do not restart the healthy
-   origin merely because its visible release label is stale.
-
-Do not put Access tokens, tunnel tokens, membership email addresses, image
-build credentials, or host-private paths in this ledger.
+Use the [current handoff](handoff.md) for proven details and deferred work.
+The next code activity is the [complexity audit](phase-1-complexity-audit.md).

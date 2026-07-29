@@ -25,6 +25,10 @@ to override `docs/v2/current/`, accepted gate records, or the UX guidance.
   visual implementation authorities instead.
 - [Phase 1 foundation archive](phase-1-foundation/README.md) — completed
   convergence planning, walkthrough, and solve-geometry evidence.
+- [Phase 1 delivery record](phase-1-foundation/delivery-plan-2026-07-29.md)
+  — completed local-web implementation narrative.
+- [July activation ledger](handoffs/activation-ledger-2026-07-27.md) —
+  superseded interim deployment record; use the current activation ledger.
 
 Use these documents only to answer a specific question about earlier options,
 walkthroughs, or why a decision changed.

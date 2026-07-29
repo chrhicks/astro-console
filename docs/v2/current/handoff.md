@@ -13,6 +13,13 @@ Corrected download deployment, current rig-worker liveness, and scheduled SSD
 backup with restore drill are all verified. No Solar capture or device command
 was issued during this bundle.
 
+## Next: Complexity Audit
+
+The next bounded activity is the
+[Phase 1 complexity audit](phase-1-complexity-audit.md). It is a
+deletion-oriented review of code, deployment, tests, and active documentation;
+it does not reopen accepted V2 product semantics or authorize new features.
+
 The user accepts NVMe live/recent data plus the SSD backup as current
 same-host resilience. Off-host recovery is not current Phase 1 scope.
 
