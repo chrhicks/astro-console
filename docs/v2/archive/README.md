@@ -28,7 +28,16 @@ to override `docs/v2/current/`, accepted gate records, or the UX guidance.
 - [Phase 1 delivery record](phase-1-foundation/delivery-plan-2026-07-29.md)
   — completed local-web implementation narrative.
 - [July activation ledger](handoffs/activation-ledger-2026-07-27.md) —
-  superseded interim deployment record; use the current activation ledger.
+  superseded interim deployment record.
+- [Phase 1 host-verification record](handoffs/phase-1-host-verification-2026-07-29.md)
+  — completed deployment chronology; use the current handoff for active proof
+  boundaries.
+- [Phase 1 activation closeout](handoffs/activation-ledger-2026-07-29.md) —
+  closed deployment summary; use the current handoff for active proof
+  boundaries.
+- [Remote-access comparison](architecture/remote-access-options-2026-07-21.md)
+  and [infrastructure decision record](architecture/infra-decisions-2026-07-21.md)
+  — pre-deployment planning retained for targeted historical lookup.
 
 Use these documents only to answer a specific question about earlier options,
 walkthroughs, or why a decision changed.

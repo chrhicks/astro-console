@@ -14,7 +14,6 @@ import { rigWorkerConfig } from "./rig-worker-config.ts"
 import { runSolarTestIntentFromEnvironment } from "./solar-test.ts"
 import { createSeestarSolarAdapter } from "./seestar-solar-adapter.ts"
 import { createPublisherWorker } from "./publisher-worker.ts"
-import { createStorageOperations } from "./storage-operations.ts"
 import { assertSeparateFilesystems, createSqliteSnapshot, restoreDrill, verifySqlite } from "./sqlite-resilience.ts"
 import { publisherConfig } from "./publisher-config.ts"
 import { createR2Provider } from "./r2-provider.ts"
@@ -25,6 +24,14 @@ import { isSqliteBusy } from "./publisher-service.ts"
 import { processorConfig } from "./processor-config.ts"
 import { createProcessorService, runProcessorFromEnvironment } from "./processor-service.ts"
 import { ingestSourceAsset } from "./source-ingest.ts"
+
+function publisherFixture(idempotencyKey: string) {
+  const root = mkdtempSync(join(tmpdir(), "astro-publisher-")); const sources = join(root, "sources"); const outputs = join(root, "outputs"); mkdirSync(sources); writeFileSync(join(sources, "final.tiff"), "publication-bytes")
+  const service = createLocalWebService(join(root, "state.sqlite"), undefined, undefined, { sourcesRoot: sources, outputsRoot: outputs, sources: { final: "final.tiff" } })
+  const saved = service.saveProcess({ sessionId: "process-m27-001", expectedRevision: 4, idempotencyKey, outputs: [{ sourceId: "final", representation: "final" }] })
+  if (saved.outcome !== "accepted") throw new Error("publisher fixture save did not accept")
+  return { root, outputs, service, saved }
+}
 
 test("manifest processor is disabled by default and only saves bounded configured source outputs", () => {
   const disabledPath = join(mkdtempSync(join(tmpdir(), "astro-processor-disabled-")), "state.sqlite"); assert.deepEqual(processorConfig({}), { mode: "disabled" }); assert.deepEqual(runProcessorFromEnvironment({}), { outcome: "disabled" }); assert.equal(existsSync(disabledPath), false)
@@ -39,13 +46,11 @@ test("manifest processor is disabled by default and only saves bounded configure
   writeFileSync(join(root, "outside.tiff"), "outside"); symlinkSync(join(root, "outside.tiff"), join(sources, "link.tiff")); writeFileSync(manifestPath, JSON.stringify({ ...manifest, idempotencyKey: "processor-link", sources: { final: "link.tiff" } })); const linked = createProcessorService(config, { databaseOpener: openTestDatabase }); assert.equal(linked.runOnce().outcome, "rejected"); linked.close(); const final = createLocalWebService(databasePath); assert.equal((final.database.prepare("SELECT count(*) AS count FROM library_assets WHERE asset_id LIKE 'asset-process-%'").get() as { count: number }).count, before); assert.equal((final.database.prepare("SELECT count(*) AS count FROM outbox WHERE kind='PublishAsset'").get() as { count: number }).count, 1); final.close()
 })
 
-test("source ingest records transaction-failure originals as checksum-backed removable orphans", () => {
-  const root = mkdtempSync(join(tmpdir(), "astro-source-orphan-")); const sources = join(root, "sources"); const originals = join(root, "originals"); const scratch = join(root, "scratch"); const outputs = join(root, "outputs"); mkdirSync(sources); mkdirSync(scratch); mkdirSync(outputs); writeFileSync(join(sources, "original.fits"), "original-bytes")
+test("source ingest records transaction-failure originals as checksum-backed orphans", () => {
+  const root = mkdtempSync(join(tmpdir(), "astro-source-orphan-")); const sources = join(root, "sources"); const originals = join(root, "originals"); mkdirSync(sources); writeFileSync(join(sources, "original.fits"), "original-bytes")
   const database = openMigrationDatabase(join(root, "state.sqlite"), `${root}/`); database.exec("CREATE TRIGGER reject_source_event BEFORE INSERT ON source_ingest_events BEGIN SELECT RAISE(ABORT, 'forced source ingest failure'); END;")
   const result = ingestSourceAsset(database, { sourcesRoot: sources, originalsRoot: originals, sources: { original: "original.fits" } }, { assetId: "asset-source-orphan-001", sourceId: "original", format: "fits", capturedAt: "2026-07-28T00:00:00.000Z", comparisonGroupId: "solar-orphan-001", lineage: { runId: "solar-run-001", solveAttemptId: "solar-solve-001" }, idempotencyKey: "source-orphan-001" }, { personId: "owner", role: "owner", capability: "controlCapable" })
-  assert.deepEqual(result, { outcome: "rejected", reason: "MaterializationFailed" }); const orphan = database.prepare("SELECT path,checksum FROM source_ingest_orphans").get() as { path: string; checksum: string }; assert.equal(existsSync(orphan.path), true); assert.match(orphan.checksum, /^[0-9a-f]{64}$/); assert.equal((database.prepare("SELECT count(*) AS count FROM library_assets WHERE asset_id='asset-source-orphan-001'").get() as { count: number }).count, 0)
-  const operations = createStorageOperations(database, { scratchRoot: scratch, outputsRoot: outputs, originalsRoot: originals, cleanupBatchSize: 8, thresholds: { noticeFreeBytes: 100, blockFreeBytes: 50, criticalFreeBytes: 10, noticeFreeInodes: 100, blockFreeInodes: 50, criticalFreeInodes: 10, noticeWriteLatencyMs: 5, blockWriteLatencyMs: 10, criticalWriteLatencyMs: 20 }, probe: { freeBytes: () => 1_000, freeInodes: () => 1_000, writeLatencyMs: () => 1 } })
-  assert.deepEqual(operations.cleanup(), { removed: 1, missing: 0, refused: 0 }); assert.equal(existsSync(orphan.path), false); assert.equal((database.prepare("SELECT count(*) AS count FROM source_ingest_orphans").get() as { count: number }).count, 0); database.close()
+  assert.deepEqual(result, { outcome: "rejected", reason: "MaterializationFailed" }); const orphan = database.prepare("SELECT path,checksum FROM source_ingest_orphans").get() as { path: string; checksum: string }; assert.equal(existsSync(orphan.path), true); assert.match(orphan.checksum, /^[0-9a-f]{64}$/); assert.equal((database.prepare("SELECT count(*) AS count FROM library_assets WHERE asset_id='asset-source-orphan-001'").get() as { count: number }).count, 0); database.close()
 })
 
 test("R2 publisher configuration and signed fake transport fail closed without network", async () => {
@@ -63,7 +68,7 @@ test("R2 publisher configuration and signed fake transport fail closed without n
 test("authorized Library downloads issue an Asset-ID grant and redirect without projecting bearer data", async (t) => {
   let now = new Date("2026-07-28T12:00:00.000Z"); let issuerUnavailable = false; const grants: Array<{ readonly objectKey: string; readonly expiresAt: string }> = []
   const admission = (request?: IncomingMessage) => request?.headers.authorization === "Bearer viewer" ? { personId: "viewer", clientId: "viewer-desktop", role: "viewer" as const, capability: "readOnly" as const } : request?.headers.authorization === "Bearer owner" ? { personId: "owner", clientId: "owner-desktop", role: "owner" as const, capability: "controlCapable" as const } : undefined
-  const service = createLocalWebService(":memory:", admission, undefined, undefined, undefined, { now: () => now, issuer: { issue: async (grant) => { if (issuerUnavailable) throw new Error("R2 unavailable"); grants.push(grant); return `https://r2.example/${grant.objectKey}?X-Amz-Signature=bearer-${grants.length}` } } }); const assetId = "asset-m27-001"
+  const service = createLocalWebService(":memory:", admission, undefined, undefined, { now: () => now, issuer: { issue: async (grant) => { if (issuerUnavailable) throw new Error("R2 unavailable"); grants.push(grant); return `https://r2.example/${grant.objectKey}?X-Amz-Signature=bearer-${grants.length}` } } }); const assetId = "asset-m27-001"
   service.database.prepare("UPDATE library_assets SET availability='published' WHERE asset_id=?").run(assetId); service.database.prepare("INSERT INTO asset_publications (asset_id,checksum,state,updated_at,object_key) VALUES (?,?,?,?,?)").run(assetId, "checksum", "published", now.toISOString(), "published/run-m27-001/finals/asset-m27-001-checksum.fits")
   const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`; t.after(async () => { await listener.close(); service.close() })
   const request = (authorization = "Bearer viewer") => fetch(`${base}/api/library/assets/${assetId}/download`, { headers: { authorization }, redirect: "manual" })
@@ -99,32 +104,6 @@ test("SQLite resilience creates a checked snapshot and disposable restore drill 
   assert.throws(() => assertSeparateFilesystems(source, join(root, "ssd"), () => 7), /different filesystem/); assert.doesNotThrow(() => assertSeparateFilesystems(source, join(root, "ssd"), (path) => path === source ? 7 : 8))
   const snapshot = createSqliteSnapshot(source, target); assert.equal(snapshot.integrity, "ok"); assert.equal(snapshot.path, "state.sqlite"); assert.ok(snapshot.bytes > 0); assert.equal(snapshot.sha256, verifySqlite(target).sha256)
   const restored = restoreDrill(target, drill); assert.equal(restored.source.integrity, "ok"); assert.equal(restored.restored.integrity, "ok"); assert.match(restored.restored.sha256, /^[0-9a-f]{64}$/); assert.equal(existsSync(drill), false); assert.throws(() => restoreDrill(target, target), /separate/)
-  const hostBackup = readFileSync(new URL("../deployment/host-backup.sh", import.meta.url), "utf8"); assert.match(hostBackup, /readonly backup_dir=\/mnt\/storage\/astro-console\/backups/); assert.match(hostBackup, /stat -c %d/); assert.match(hostBackup, /restore-drill/); assert.match(hostBackup, /retention_days=14/); const promote = hostBackup.indexOf('mv "${staged_target_path}" "${target_path}"'); const finalManifest = hostBackup.indexOf('final_checksum="$(sha256sum "${target_path}"'); assert.ok(promote >= 0 && finalManifest > promote); assert.match(hostBackup, /printf '%s  %s\\n' "\$\{final_checksum\}" "\$\(basename "\$\{target_path\}"\)" > "\$\{staged_checksum_path\}"/); assert.match(hostBackup, /\(cd "\$\{backup_dir\}" && sha256sum -c "\$\(basename "\$\{target_path\}"\)\.sha256"\)/)
-})
-
-test("local storage operations measure thresholded capture safety and clean only bounded recorded scratch orphans", () => {
-  const root = mkdtempSync(join(tmpdir(), "astro-storage-")); const scratch = join(root, "scratch"); const outputs = join(root, "outputs"); const originals = join(root, "originals"); const finals = join(root, "finals"); mkdirSync(scratch); mkdirSync(outputs); mkdirSync(originals); mkdirSync(finals)
-  const databasePath = join(root, "state.sqlite"); const service = createLocalWebService(databasePath)
-  writeFileSync(join(scratch, "eligible.tmp"), "scratch"); writeFileSync(join(scratch, "later.tmp"), "later"); writeFileSync(join(outputs, "orphan.tiff"), "orphan"); writeFileSync(join(originals, "source-orphan.tiff"), "orphan"); writeFileSync(join(originals, "raw.fits"), "original"); writeFileSync(join(finals, "final.tiff"), "final")
-  symlinkSync(join(root, "outside"), join(scratch, "link.tmp")); writeFileSync(join(root, "outside"), "outside")
-  service.database.prepare("INSERT INTO storage_scratch_entries VALUES (?,?)").run(join(scratch, "eligible.tmp"), "2000-01-01T00:00:00.000Z"); service.database.prepare("INSERT INTO storage_scratch_entries VALUES (?,?)").run(join(scratch, "later.tmp"), "2999-01-01T00:00:00.000Z"); service.database.prepare("INSERT INTO storage_scratch_entries VALUES (?,?)").run(join(scratch, "link.tmp"), "2000-01-01T00:00:00.000Z"); service.database.prepare("INSERT INTO process_save_orphans VALUES (?,?,?)").run(join(outputs, "orphan.tiff"), "checksum", "2000-01-01T00:00:00.000Z"); service.database.prepare("INSERT INTO source_ingest_orphans VALUES (?,?,?)").run(join(originals, "source-orphan.tiff"), "checksum", "2000-01-01T00:00:00.000Z")
-  let measurements = { freeBytes: 90, freeInodes: 90, writeLatencyMs: 4 }
-  const operations = createStorageOperations(service.database, { scratchRoot: scratch, outputsRoot: outputs, originalsRoot: originals, cleanupBatchSize: 8, thresholds: { noticeFreeBytes: 100, blockFreeBytes: 50, criticalFreeBytes: 10, noticeFreeInodes: 100, blockFreeInodes: 50, criticalFreeInodes: 10, noticeWriteLatencyMs: 5, blockWriteLatencyMs: 10, criticalWriteLatencyMs: 20 }, probe: { freeBytes: () => measurements.freeBytes, freeInodes: () => measurements.freeInodes, writeLatencyMs: () => measurements.writeLatencyMs } })
-  assert.deepEqual(operations.health(), { ...measurements, state: "notice", capture: "allow" })
-  measurements = { freeBytes: 40, freeInodes: 90, writeLatencyMs: 4 }; assert.equal(operations.health().capture, "blockNewLongWork")
-  measurements = { freeBytes: 90, freeInodes: 90, writeLatencyMs: 21 }; assert.equal(operations.health().capture, "throttleOptionalDerivedWrites")
-  assert.deepEqual(operations.cleanup(), { removed: 3, missing: 0, refused: 1 }); assert.equal(existsSync(join(scratch, "eligible.tmp")), false); assert.equal(existsSync(join(outputs, "orphan.tiff")), false); assert.equal(existsSync(join(scratch, "later.tmp")), true); assert.equal(existsSync(join(scratch, "link.tmp")), true); assert.equal(existsSync(join(root, "outside")), true); assert.equal(existsSync(join(originals, "source-orphan.tiff")), false); assert.equal(existsSync(join(originals, "raw.fits")), true); assert.equal(existsSync(join(finals, "final.tiff")), true)
-  unlinkSync(join(scratch, "link.tmp")); service.database.prepare("DELETE FROM storage_scratch_entries WHERE path=?").run(join(scratch, "link.tmp")); service.database.prepare("INSERT INTO storage_scratch_entries VALUES (?,?)").run(join(scratch, "missing.tmp"), "2000-01-01T00:00:00.000Z"); assert.deepEqual(operations.cleanup(), { removed: 0, missing: 1, refused: 0 }); assert.equal((service.database.prepare("SELECT count(*) AS count FROM storage_scratch_entries WHERE path=?").get(join(scratch, "missing.tmp")) as { count: number }).count, 0)
-  service.close()
-})
-
-test("storage health is owner-visible and blocks only new long capture admission", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "astro-storage-admission-")); const scratch = join(root, "scratch"); const outputs = join(root, "outputs"); mkdirSync(scratch); mkdirSync(outputs)
-  let freeBytes = 1_000; const service = createLocalWebService(join(root, "state.sqlite"), undefined, undefined, undefined, { scratchRoot: scratch, outputsRoot: outputs, thresholds: { noticeFreeBytes: 100, blockFreeBytes: 50, criticalFreeBytes: 10, noticeFreeInodes: 100, blockFreeInodes: 50, criticalFreeInodes: 10, noticeWriteLatencyMs: 5, blockWriteLatencyMs: 10, criticalWriteLatencyMs: 20 }, probe: { freeBytes: () => freeBytes, freeInodes: () => 90, writeLatencyMs: () => 1 } })
-  const listener = await service.listen(); t.after(async () => { await listener.close(); service.close() }); const base = `http://127.0.0.1:${listener.port}`
-  const snapshot = await fetch(`${base}/api/snapshot`).then((response) => response.json()); assert.equal((await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: snapshot.plan.revision, expectedLeaseRevision: snapshot.control.revision, idempotencyKey: "accepted-before-low-storage" }) })).status, 202); freeBytes = 5
-  const health = await fetch(`${base}/api/health/operations`).then((response) => response.json()); assert.deepEqual(health.disk, { freeBytes: 5, freeInodes: 90, writeLatencyMs: 1, state: "critical", capture: "throttleOptionalDerivedWrites" }); assert.equal(JSON.stringify(health).includes(root), false)
-  const rejected = await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: snapshot.plan.revision, expectedLeaseRevision: snapshot.control.revision, idempotencyKey: "low-storage" }) }); assert.equal(rejected.status, 409); assert.equal((await rejected.json()).reason, "StorageUnavailable"); assert.equal((await fetch(`${base}/api/snapshot`).then((response) => response.json())).run.phase, "capture")
 })
 
 test("Process Save materializes configured sources before one Asset, lineage, receipt, and publication outbox transaction", () => {
@@ -164,10 +143,7 @@ test("Process Save leaves no success metadata when later filesystem materializat
 })
 
 test("publisher worker verifies fake provider metadata, retries idempotently, and keeps Library detail safe", async () => {
-  const root = mkdtempSync(join(tmpdir(), "astro-publisher-")); const sources = join(root, "sources"); const outputs = join(root, "outputs"); mkdirSync(sources); writeFileSync(join(sources, "final.tiff"), "publication-bytes")
-  const service = createLocalWebService(join(root, "state.sqlite"), undefined, undefined, { sourcesRoot: sources, outputsRoot: outputs, sources: { final: "final.tiff" } })
-  const saved = service.saveProcess({ sessionId: "process-m27-001", expectedRevision: 4, idempotencyKey: "publisher-save", outputs: [{ sourceId: "final", representation: "final" }] })
-  if (saved.outcome !== "accepted") throw new Error("save did not accept")
+  const { root, outputs, service, saved } = publisherFixture("publisher-save")
   const checksum = (service.database.prepare("SELECT checksum FROM process_asset_events WHERE asset_id=?").get(saved.assetIds[0]) as { checksum: string }).checksum
   service.database.prepare("INSERT INTO asset_publications (asset_id,checksum,state,updated_at,object_key) VALUES (?,?,?,?,?)").run(saved.assetIds[0], checksum, "temporarilyUnavailable", new Date().toISOString(), "")
   const objects = new Map<string, { readonly bytes: number; readonly checksum: string }>(); let mismatch = true; let puts = 0
@@ -181,9 +157,7 @@ test("publisher worker verifies fake provider metadata, retries idempotently, an
 })
 
 test("publisher worker fails closed on conflicting durable publication checksum", async () => {
-  const root = mkdtempSync(join(tmpdir(), "astro-publisher-conflict-")); const sources = join(root, "sources"); const outputs = join(root, "outputs"); mkdirSync(sources); writeFileSync(join(sources, "final.tiff"), "publication-bytes")
-  const service = createLocalWebService(join(root, "state.sqlite"), undefined, undefined, { sourcesRoot: sources, outputsRoot: outputs, sources: { final: "final.tiff" } }); const saved = service.saveProcess({ sessionId: "process-m27-001", expectedRevision: 4, idempotencyKey: "publisher-conflict-save", outputs: [{ sourceId: "final", representation: "final" }] })
-  if (saved.outcome !== "accepted") throw new Error("save did not accept")
+  const { outputs, service, saved } = publisherFixture("publisher-conflict-save")
   service.database.prepare("INSERT INTO asset_publications (asset_id,checksum,state,updated_at,object_key) VALUES (?,?,?,?,?)").run(saved.assetIds[0], "conflicting-checksum", "temporarilyUnavailable", new Date().toISOString(), "published/run-m27-001/finals/old")
   let puts = 0; const worker = createPublisherWorker(service.database, { outputsRoot: outputs }, { put: async () => { puts += 1 }, head: async () => undefined })
   assert.equal(await worker.pass(), "failed"); assert.equal(puts, 0); assert.equal(service.database.prepare("SELECT state FROM asset_publications WHERE asset_id=?").get(saved.assetIds[0]).state, "failedPublication"); assert.equal(service.database.prepare("SELECT state FROM outbox WHERE kind='PublishAsset'").get().state, "failed")
@@ -191,16 +165,14 @@ test("publisher worker fails closed on conflicting durable publication checksum"
 })
 
 test("publisher worker lease expiry and stale acknowledgements cannot project stale provider work", async () => {
-  const root = mkdtempSync(join(tmpdir(), "astro-publisher-lease-")); const sources = join(root, "sources"); const outputs = join(root, "outputs"); mkdirSync(sources); writeFileSync(join(sources, "final.tiff"), "publication-bytes")
-  const service = createLocalWebService(join(root, "state.sqlite"), undefined, undefined, { sourcesRoot: sources, outputsRoot: outputs, sources: { final: "final.tiff" } }); const saved = service.saveProcess({ sessionId: "process-m27-001", expectedRevision: 4, idempotencyKey: "publisher-lease-save", outputs: [{ sourceId: "final", representation: "final" }] })
-  if (saved.outcome !== "accepted") throw new Error("save did not accept")
+  const { outputs, service, saved } = publisherFixture("publisher-lease-save")
   const keys: string[] = []; let stale = true
   const worker = createPublisherWorker(service.database, { outputsRoot: outputs }, { put: async (key) => { keys.push(key); if (stale) { stale = false; service.database.prepare("UPDATE outbox SET claim_token='newer-worker',claim_until=? WHERE kind='PublishAsset'").run("2000-01-01T00:00:00.000Z") } }, head: async () => ({ checksum: createHash("sha256").update("publication-bytes").digest("hex"), bytes: 17 }) })
   assert.equal(await worker.pass(), "superseded"); assert.equal(await worker.pass("replacement"), "published"); const row = service.database.prepare("SELECT state,attempts FROM outbox WHERE kind='PublishAsset'").get() as { state: string; attempts: number }; assert.equal(row.state, "dispatched"); assert.equal(row.attempts, 2); assert.equal(keys.length, 2); assert.equal(keys[0], keys[1]); assert.equal(service.database.prepare("SELECT availability FROM library_assets WHERE asset_id=?").get(saved.assetIds[0]).availability, "published")
   service.close()
 })
 
-test("SQLite acceptance atomically persists run, event, receipt, and outbox", async (t) => {
+test("SQLite acceptance atomically persists fixture run, event, and receipt without hardware work", async (t) => {
   const service = createLocalWebService(join(mkdtempSync(join(tmpdir(), "astro-local-")), "state.sqlite"))
   const listener = await service.listen()
   t.after(async () => { await listener.close(); service.close() })
@@ -212,7 +184,7 @@ test("SQLite acceptance atomically persists run, event, receipt, and outbox", as
   assert.equal((await accepted.json()).outcome, "accepted")
   assert.equal((service.database.prepare("SELECT count(*) AS count FROM events").get() as { count: number }).count, 1)
   assert.equal((service.database.prepare("SELECT count(*) AS count FROM receipts").get() as { count: number }).count, 1)
-  assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox").get() as { count: number }).count, 1)
+  assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox").get() as { count: number }).count, 0)
   const replay = await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify(command) })
   assert.equal(replay.status, 200)
   await listener.close(); service.close()
@@ -321,7 +293,7 @@ test("operational endpoints expose bounded admitted health without internal deta
   const ready = await fetch(`${base}/api/health/ready`).then((response) => response.json())
   assert.deepEqual(ready, { status: "ready", service: "ready", database: "ready", rig: "unknown", tunnel: "unknown", activeRun: "none", message: "Service and local database are ready; rig and tunnel are not connected in this fixture." })
   const operations = await fetch(`${base}/api/health/operations`).then((response) => response.json())
-  assert.equal(operations.release, "local-web-fixture"); assert.equal(operations.schemaVersion, 13); assert.equal(operations.sqlite.journalMode, "wal"); assert.equal(operations.rig, "unknown"); assert.equal(JSON.stringify(operations).includes("/"), false)
+  assert.equal(operations.release, "local-web-fixture"); assert.equal(operations.schemaVersion, 13); assert.equal(operations.sqlite.journalMode, "wal"); assert.equal(operations.disk, "unknown"); assert.equal(operations.rig, "unknown"); assert.equal(JSON.stringify(operations).includes("/"), false)
   const denied = createLocalWebService(":memory:", () => ({ personId: "viewer", clientId: "viewer", capability: "readOnly" })); const deniedListener = await denied.listen()
   assert.equal((await fetch(`http://127.0.0.1:${deniedListener.port}/api/health/operations`)).status, 403); assert.equal((await fetch(`http://127.0.0.1:${deniedListener.port}/api/health/ready`)).status, 200)
   await deniedListener.close(); denied.close()
@@ -431,53 +403,6 @@ test("production Access JWKS admission refreshes by kid, bounds cache use, and f
   assert.equal(await admission(request(missingKid)), undefined); assert.equal(calls, 5)
 })
 
-test("accepted pause dispatches StopStack once through an injected worker", async () => {
-  const service = createLocalWebService()
-  const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
-  const start = await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "pause-start" }) }).then((response) => response.json())
-  const paused = await fetch(`${base}/api/commands/pause-run`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, expectedRunRevision: start.run.revision, idempotencyKey: "pause-once" }) }).then((response) => response.json())
-  assert.equal(paused.snapshot.run.phase, "paused")
-  let calls = 0
-  assert.equal(await service.dispatchPauseOutbox({ stopStack: async () => { calls += 1; return true } }), "dispatched")
-  assert.equal(await service.dispatchPauseOutbox({ stopStack: async () => { calls += 1; return true } }), "none")
-  assert.equal(calls, 1)
-  await listener.close(); service.close()
-})
-
-test("SQLite worker claims prevent duplicate dispatch and retryable failures recover after restart", async (t) => {
-  const databasePath = join(mkdtempSync(join(tmpdir(), "astro-worker-")), "state.sqlite")
-  const service = createLocalWebService(databasePath); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => { await listener.close(); service.close() })
-  await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "claim-start" }) })
-  await fetch(`${base}/api/commands/pause-run`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, expectedRunRevision: 1, idempotencyKey: "claim-pause" }) })
-  let calls = 0
-  const adapter = { stopStack: async () => { calls += 1; await new Promise((done) => setTimeout(done, 15)); return true } }
-  assert.deepEqual(await Promise.all([service.dispatchPauseOutbox(adapter, "worker-a"), service.dispatchPauseOutbox(adapter, "worker-b")]), ["dispatched", "none"])
-  assert.equal(calls, 1)
-  const acknowledged = service.database.prepare("SELECT state,claimed_by,ack_at,attempts FROM outbox WHERE kind='StopStack'").get() as { state: string; claimed_by: string | null; ack_at: string | null; attempts: number }
-  assert.equal(acknowledged.state, "dispatched"); assert.equal(acknowledged.claimed_by, null); assert.notEqual(acknowledged.ack_at, null); assert.equal(acknowledged.attempts, 1)
-  service.database.prepare("UPDATE state SET value=? WHERE key='run'").run("null")
-  await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "stale-start" }) })
-  await fetch(`${base}/api/commands/pause-run`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, expectedRunRevision: 1, idempotencyKey: "stale-pause" }) })
-  let release!: () => void
-  const stale = service.dispatchPauseOutbox({ stopStack: async () => new Promise<boolean>((done) => { release = () => done(true) }) }, "stale-worker")
-  await new Promise((done) => setTimeout(done, 0))
-  service.database.prepare("UPDATE outbox SET claim_token='replacement-token' WHERE kind='StopStack' AND state='claimed'").run()
-  release()
-  assert.equal(await stale, "superseded")
-  service.database.prepare("UPDATE outbox SET state='dispatched',claim_token=NULL,claimed_by=NULL,claim_until=NULL WHERE kind='StopStack' AND claim_token='replacement-token'").run()
-  service.database.prepare("UPDATE state SET value=? WHERE key='run'").run("null")
-  await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "retry-start" }) })
-  await fetch(`${base}/api/commands/pause-run`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, expectedRunRevision: 1, idempotencyKey: "retry-pause" }) })
-  assert.equal(await service.dispatchPauseOutbox({ stopStack: async () => false }), "failed")
-  service.close()
-  const recovered = createLocalWebService(databasePath)
-  t.after(() => recovered.close())
-  assert.equal(await recovered.dispatchPauseOutbox({ stopStack: async () => true }, "recovered-worker"), "dispatched")
-  const retried = recovered.database.prepare("SELECT state,attempts,last_error FROM outbox WHERE kind='StopStack' ORDER BY rowid DESC LIMIT 1").get() as { state: string; attempts: number; last_error: string | null }
-  assert.equal(retried.state, "dispatched"); assert.equal(retried.attempts, 2); assert.equal(retried.last_error, null)
-})
-
 test("a rig worker dispatches only a Solar test and records provider acknowledgement separately from Stack evidence", async (t) => {
   const databasePath = join(mkdtempSync(join(tmpdir(), "astro-rig-worker-")), "state.sqlite")
   const service = createLocalWebService(databasePath); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
@@ -522,7 +447,7 @@ test("rig outbox dispatch leaves a claimed PublishAsset for its publisher", asyn
   assert.equal(await publisher.pass(), "published"); assert.equal(uploads, 1); assert.equal(service.database.prepare("SELECT state FROM outbox WHERE kind='PublishAsset'").get().state, "dispatched"); rig.close(); service.close()
 })
 
-test("enabled worker without an adapter reports liveness and retains pending capture work", async (t) => {
+test("enabled worker without an adapter reports liveness without claiming fixture hardware work", async (t) => {
   const databasePath = join(mkdtempSync(join(tmpdir(), "astro-rig-unconfigured-")), "state.sqlite")
   const service = createLocalWebService(databasePath); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => { await listener.close(); service.close() })
@@ -531,8 +456,7 @@ test("enabled worker without an adapter reports liveness and retains pending cap
   const worker = createRigWorkerService(config, undefined, { now: () => new Date("2026-07-25T12:00:00.000Z") })
   assert.equal(await worker.runOnce(), "unavailable")
   assert.deepEqual(worker.health(), { mode: "seestar", status: "alive", adapter: "unconfigured", lastHeartbeat: "2026-07-25T12:00:00.000Z" })
-  const pending = service.database.prepare("SELECT state,attempts FROM outbox WHERE kind='StartM27Capture'").get() as { state: string; attempts: number }
-  assert.equal(pending.state, "pending"); assert.equal(pending.attempts, 0)
+  assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox WHERE kind='StartM27Capture'").get() as { count: number }).count, 0)
   const operations = await fetch(`${base}/api/health/operations`).then((response) => response.json())
   assert.deepEqual(operations.worker, { status: "alive", adapter: "unconfigured", lastHeartbeat: "2026-07-25T12:00:00.000Z" })
   assert.deepEqual(await worker.run({ maxPasses: 1 }), { passes: 1, health: { mode: "seestar", status: "stopped", adapter: "unconfigured", lastHeartbeat: "2026-07-25T12:00:00.000Z" } })
@@ -550,14 +474,10 @@ test("current controller resumes only the paused revision and replays idempotent
   assert.equal((await resumed.json()).snapshot.run.phase, "capture")
   assert.equal((await fetch(`${base}/api/commands/resume-run`, { method: "POST", body: JSON.stringify(command) })).status, 200)
   assert.equal((await fetch(`${base}/api/commands/resume-run`, { method: "POST", body: JSON.stringify({ ...command, expectedRunRevision: 2, idempotencyKey: "resume-stale" }) })).status, 409)
-  assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox WHERE kind='ResumeStack'").get() as { count: number }).count, 1)
-  let calls = 0
-  assert.equal(await service.dispatchResumeOutbox({ startStack: async () => { calls += 1; return true } }), "dispatched")
-  assert.equal(await service.dispatchResumeOutbox({ startStack: async () => { calls += 1; return true } }), "none")
-  assert.equal(calls, 1)
+  assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox WHERE kind IN ('StartM27Capture','StopStack','ResumeStack','StopRun')").get() as { count: number }).count, 0)
 })
 
-test("resume preserves accepted capture when start-stack dispatch is unavailable or fails", async (t) => {
+test("resume preserves accepted fixture capture without hardware dispatch", async (t) => {
   const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => { await listener.close(); service.close() })
   const resume = async (key: string) => {
@@ -565,24 +485,14 @@ test("resume preserves accepted capture when start-stack dispatch is unavailable
     await fetch(`${base}/api/commands/pause-run`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, expectedRunRevision: 1, idempotencyKey: `${key}-pause` }) })
     return fetch(`${base}/api/commands/resume-run`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: 1, expectedRunRevision: 2, idempotencyKey: `${key}-resume` }) })
   }
-  await resume("resume-unavailable")
-  assert.equal(await service.dispatchResumeOutbox(undefined), "failed")
-  let snapshot = await fetch(`${base}/api/snapshot`).then((response) => response.json())
+  await resume("fixture-resume")
+  const snapshot = await fetch(`${base}/api/snapshot`).then((response) => response.json())
   assert.equal(snapshot.run.phase, "capture")
-  assert.equal(snapshot.dispatch, "failed")
-  assert.equal(snapshot.dispatchAction, "resume")
-  service.database.prepare("UPDATE state SET value=? WHERE key='run'").run("null")
-  service.database.prepare("UPDATE state SET value=? WHERE key='snapshotVersion'").run("4")
-  await resume("resume-failed")
-  assert.equal(await service.dispatchResumeOutbox({ startStack: async () => { throw new Error("device unavailable") } }), "failed")
-  snapshot = await fetch(`${base}/api/snapshot`).then((response) => response.json())
-  assert.equal(snapshot.run.phase, "capture")
-  assert.equal(snapshot.dispatch, "failed")
-  assert.equal(snapshot.dispatchAction, "resume")
-  assert.equal(await service.dispatchResumeOutbox({ startStack: async () => true }), "dispatched")
+  assert.equal(snapshot.dispatch, "none")
+  assert.equal(snapshot.dispatchAction, "none")
 })
 
-test("current controller terminally stops an active run exactly once and preserves dispatch truth", async (t) => {
+test("current controller terminally stops an active fixture run without hardware dispatch", async (t) => {
   const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => { await listener.close(); service.close() })
   await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "stop-start" }) })
@@ -592,18 +502,16 @@ test("current controller terminally stops an active run exactly once and preserv
   assert.equal((await stopped.json()).eventType, "RunStopped")
   assert.equal((await fetch(`${base}/api/commands/stop-run`, { method: "POST", body: JSON.stringify(command) })).status, 200)
   assert.equal((await fetch(`${base}/api/commands/stop-run`, { method: "POST", body: JSON.stringify({ ...command, idempotencyKey: "stop-terminal", expectedRunRevision: 2 }) })).status, 409)
-  assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox WHERE kind='StopRun'").get() as { count: number }).count, 1)
-  assert.equal(await service.dispatchStopOutbox({ stopStack: async () => false }), "failed")
+  assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox WHERE kind IN ('StartM27Capture','StopStack','ResumeStack','StopRun')").get() as { count: number }).count, 0)
   const snapshot = await fetch(`${base}/api/snapshot`).then((response) => response.json())
   assert.equal(snapshot.run.phase, "stopped")
-  assert.equal(snapshot.dispatch, "failed")
-  assert.equal(snapshot.dispatchAction, "stop")
+  assert.equal(snapshot.dispatch, "none")
+  assert.equal(snapshot.dispatchAction, "none")
   assert.match(snapshot.evidence.correction.protection, /accepted capture continues/)
   const html = await fetch(`${base}/`).then((response) => response.text())
   assert.match(html, /Latest solve evidence is preserved\. This run is terminally stopped; no automatic correction or capture will continue\./)
   assert.match(html, /s\.run\?\.phase==='paused'/)
   assert.equal(html.includes("text(q('#correction-protection'),s.evidence.correction.protection)"), false)
-  assert.equal(await service.dispatchStopOutbox({ stopStack: async () => true }), "dispatched")
 })
 
 test("startup backfills shared-control state for a legacy local database without changing accepted work", async (t) => {
@@ -628,7 +536,7 @@ test("startup backfills shared-control state for a legacy local database without
   assert.equal(snapshot.control.revision, 1)
   assert.equal((service.database.prepare("SELECT count(*) AS count FROM events").get() as { count: number }).count, 1)
   assert.equal((service.database.prepare("SELECT count(*) AS count FROM receipts").get() as { count: number }).count, 1)
-  assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox").get() as { count: number }).count, 1)
+  assert.equal((service.database.prepare("SELECT state FROM outbox WHERE id='legacy-outbox'").get() as { state: string }).state, "cancelled")
   await listener.close(); service.close()
 })
 
@@ -749,14 +657,10 @@ test("Library detail uses stable identities and snapshot delivery remains catalo
   assert.match(html, /\/api\/commands\/stop-run/)
   assert.match(html, /\/api\/commands\/resume-run/)
   assert.match(html, /expectedRunRevision:s\.run\.revision/)
-  assert.match(html, /id="pause-dispatch" role="status"/)
-  assert.match(html, /stop-stack dispatch failed/)
   assert.match(html, /id="pause-consequence" role="status"/)
-  assert.match(html, /Pause accepts resumable capture and requests Seestar stop-stack/)
-  assert.match(html, /Resume restores capture and requests Seestar start-stack/)
-  assert.match(html, /start-stack dispatch failed/)
+  assert.match(html, /Pause preserves this deterministic fixture run; it does not send hardware work./)
+  assert.match(html, /Resume restores this deterministic fixture run; it does not send hardware work./)
   assert.match(html, /Stop is terminal: M27 cannot be resumed/)
-  assert.match(html, /terminal stop-stack dispatch completed/)
   assert.match(html, /Stack observed /)
   assert.match(html, /correction-protection/)
   assert.match(html, /id="library-prev" aria-label="Previous Library results window" disabled/)
@@ -767,17 +671,16 @@ test("Library detail uses stable identities and snapshot delivery remains catalo
   await listener.close(); service.close()
 })
 
-test("a failed durable outbox write rolls back the entire run acceptance", async (t) => {
+test("fixture run acceptance does not depend on unserviceable hardware outbox work", async (t) => {
   const service = createLocalWebService(); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => { await listener.close(); service.close() })
   service.database.exec("CREATE TRIGGER reject_outbox BEFORE INSERT ON outbox BEGIN SELECT RAISE(ABORT, 'forced outbox failure'); END;")
-  const failed = await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "rollback-run" }) })
-  assert.equal(failed.status, 400)
-  assert.deepEqual(await failed.json(), { outcome: "rejected", reason: "InvalidInput", message: "The service could not read that action." })
+  const accepted = await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: "plan-m27", expectedPlanRevision: 3, expectedLeaseRevision: 1, idempotencyKey: "fixture-run" }) })
+  assert.equal(accepted.status, 202)
   const after = await fetch(`${base}/api/snapshot`).then((response) => response.json())
-  assert.equal(after.run, null)
-  assert.equal((service.database.prepare("SELECT count(*) AS count FROM events").get() as { count: number }).count, 0)
-  assert.equal((service.database.prepare("SELECT count(*) AS count FROM receipts").get() as { count: number }).count, 0)
+  assert.equal(after.run.phase, "capture")
+  assert.equal((service.database.prepare("SELECT count(*) AS count FROM events").get() as { count: number }).count, 1)
+  assert.equal((service.database.prepare("SELECT count(*) AS count FROM receipts").get() as { count: number }).count, 1)
   assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox").get() as { count: number }).count, 0)
   await listener.close(); service.close()
 })
@@ -892,7 +795,7 @@ test("browser reconnect installs a current snapshot and its stale shell offers n
   assert.equal(started.status, 202)
   const reconnectStream = await fetch(`${base}/api/events`); const reconnectReader = reconnectStream.body?.getReader(); const reconnect = new TextDecoder().decode((await reconnectReader?.read()).value)
   assert.match(reconnect, /event: snapshot/); assert.match(reconnect, /"phase":"capture"/)
-  assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox WHERE kind='StartM27Capture'").get() as { count: number }).count, 1)
+  assert.equal((service.database.prepare("SELECT count(*) AS count FROM outbox WHERE kind='StartM27Capture'").get() as { count: number }).count, 0)
   const shell = await fetch(`${base}/`).then((response) => response.text())
   assert.match(shell, /connection lost · last confirmed/); assert.match(shell, /no action will be replayed/); assert.match(shell, /s\.connection==='stale'/)
   await reconnectReader?.cancel(); await listener.close(); service.close()
@@ -939,7 +842,7 @@ test("two server-configured desktops transfer control without stopping the accep
   const after = await fetch(`${friendBase}/api/snapshot`).then((response) => response.json())
   assert.equal(after.control.holderClientId, "desktop-ada")
   assert.equal(after.run.phase, "capture")
-  assert.equal((owner.database.prepare("SELECT count(*) AS count FROM outbox").get() as { count: number }).count, 1)
+  assert.equal((owner.database.prepare("SELECT count(*) AS count FROM outbox").get() as { count: number }).count, 0)
   await ownerListener.close(); await friendListener.close(); owner.close(); friend.close()
 })
 

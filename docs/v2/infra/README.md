@@ -2,7 +2,7 @@
 
 Status: selected infrastructure direction; Phase 1 host-verification bundle complete
 
-Captured: July 21, 2026
+Captured: July 21, 2026; current authority refreshed July 29, 2026
 
 This plan explains how the accepted V2 product model can run as a durable
 personal observatory service. It began after Gate 3 and now incorporates the
@@ -40,18 +40,10 @@ web app, API, streams, and assets through the tunnel. Hardware control, run
 execution, mutation classification, evidence, storage, and recovery remain on
 that host; Windows driver ownership remains on the MiniPC.
 
-The owner has accepted moving authoritative `chicks.dev` DNS from Vercel to
-Cloudflare. Keep Vercel as registrar initially because a registrar transfer is
-not needed for Tunnel, email, or a future personal website. Recreate every
-existing website, mail, and verification record in Cloudflare before changing
-nameservers.
-
 ## Documents
 
 - [Requirements](requirements.md) records functional, safety, capacity,
   security, and operational requirements plus acceptance scenarios.
-- [Service options](service-options.md) compares Cloudflare, Tailscale, a small
-  VPS, and a future purpose-built hub.
 - [Recommended architecture](architecture.md) defines components, trust
   boundaries, traffic paths, persistence, and deployment phases.
 - [Security model](security.md) covers identity, authorization, secrets,
@@ -61,10 +53,13 @@ nameservers.
 - [Storage and artifact delivery](storage-and-artifacts.md) defines the local
   raw archive, processing scratch, R2 publication, retention, and download
   model.
-- [Decisions and open questions](decisions.md) separates selected direction
-  from the choices that still need the owner's input or a measured spike.
 - [Research sources](research.md) records the current external documentation
   used for the service comparison.
+
+The completed [remote-access comparison](../archive/architecture/remote-access-options-2026-07-21.md)
+and [infrastructure decision record](../archive/architecture/infra-decisions-2026-07-21.md)
+are historical only. The current host/deployment proof is in the
+[Phase 1 handoff](../current/handoff.md).
 
 ## Invariants Inherited From Gates 1–5
 

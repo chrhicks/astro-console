@@ -1,9 +1,12 @@
-# Observatory Activation Ledger
+# Observatory Activation Closeout
 
-Status: **Phase 1 activation evidence closed — 2026-07-29**
+Status: **historical evidence — closed 2026-07-29**
+
+This compact deployment summary is retained for historical lookup. Use the
+[current handoff](../../current/handoff.md) for active proof boundaries.
 
 The interim July 27 ledger is archived in
-[the historical activation record](../archive/handoffs/activation-ledger-2026-07-27.md).
+[the historical activation record](activation-ledger-2026-07-27.md).
 
 ## Verified Deployment Evidence
 
@@ -32,5 +35,6 @@ The interim July 27 ledger is archived in
 
 ## Operator Reference
 
-Use the [current handoff](handoff.md) for proven details and deferred work.
-The next code activity is the [complexity audit](phase-1-complexity-audit.md).
+Use the [current handoff](../../current/handoff.md) for proven details and
+deferred work. The next code activity is the
+[complexity audit](../../current/phase-1-complexity-audit.md).

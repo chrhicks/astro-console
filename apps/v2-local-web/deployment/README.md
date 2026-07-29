@@ -76,7 +76,13 @@ R2 publication, processor/publisher services, and backup restore validation
 remain activation work. Do not create placeholder workers that imply those
 boundaries are live.
 
-The `publisher` Compose profile is deployed as an isolated private-R2 service.
+The optional `compose.publisher.yaml` profile add-on deploys the isolated
+private-R2 publisher service. It is deliberately absent from the base
+origin/download Compose file, so inactive publisher mounts and its environment
+file do not block an origin/download render. Select it only when its
+host-managed publisher values are available. M13 publisher PUT and provider
+HEAD checksum/byte verification have been observed; this structure does not
+claim a general processing workflow or a new publication run.
 It alone receives a host-managed bucket-only object read/write credential;
 origin, rig worker, cloudflared, and browsers do not receive it. It has only
 the state volume, read-only promoted-output bind, and read-only secret bind,
@@ -86,35 +92,45 @@ missing-object HEAD behavior is verified; a later supervised promoted asset
 must prove PUT, HEAD checksum/bytes verification, retry/restart recovery, and
 honest projection before publication is called operational.
 
-The publisher and manifest processor use SQLite WAL with a bounded five-second
-busy timeout when opening their migration-only database connection. The
-publisher treats only recognized SQLite busy/locked failures as transient and
-continues its bounded pass loop; other errors remain terminal. Confirm this
-behavior from publisher logs during the next supervised host run.
+The publisher uses SQLite WAL with a bounded five-second busy timeout when
+opening its migration-only database connection. It treats only recognized
+SQLite busy/locked failures as transient and continues its bounded pass loop;
+other errors remain terminal. Confirm this behavior from publisher logs during
+the next supervised host run.
 
-The manifest processor is repository code only and remains disabled by default.
-It has no HTTP command or browser control. When a later owner-supervised
-deployment is authorized, it must mount only app-owned input/output roots and
-a read-only manifest under `/run/config`; the manifest names relative sources,
-can first materialize an immutable app-owned original with truthful lineage,
-and then delegates containment, symlink, checksum, idempotency, and outbox
-rules to Process Save. Originals are not published by that ingest step. It
-does not delete or rename the host manifest.
+## One-shot processor evidence utility
+
+The manifest processor is retained only as the one-shot utility that produced
+the M13 source/output/publication evidence. It is not an origin environment,
+Compose service, HTTP command, browser control, or ongoing processing
+workflow. For a separately authorized evidence run, copy
+`processor.config.example` outside the repository and run the immutable image
+once with `node --experimental-strip-types src/processor-service.ts`.
+
+Mount only the canonical state volume at `/var/lib/astro-console`, an
+app-owned `processor-sources` bind read-only at the same path, writable
+app-owned `originals` and `outputs` binds at their configured paths, and one
+read-only manifest bind at `/run/config/process-output-manifest.json`. The
+manifest names only relative source paths; it can materialize an immutable
+original with truthful lineage, then delegates containment, symlink, checksum,
+idempotency, and publication-outbox rules to Process Save. Originals are not
+published by ingest alone, and the utility neither deletes nor renames its host
+manifest. Inspect the one JSON result and exit; do not keep the container
+running.
 
 ## Authorized downloads
 
-This is a profile-gated activation bundle, not a real R2 proof. Keep all three
-files outside the repository: an origin `config.env` copied from
-`config.example`, a signer `download-grant.env` copied from
-`download-grant.config.example`, and one authoritative Compose interpolation
-file copied from `compose.env.example`. Keep the existing publisher
-`publisher.env` outside the repository too. That Compose file is the one
-activation source: it names every service env file and supplies every
-`*_HOST_PATH` bind value. Compose resolves those values before it reads a
-service `env_file`, so do not duplicate them in service files. It needs valid
-host paths and the existing publisher env file even for inactive rig and
-publisher profiles because Compose validates all services before profile
-selection. Those values do not start or grant access to inactive services.
+The deployed M13 path is verified: the authenticated origin issued a
+five-minute redirect and the browser downloaded the private-R2 FITS with its
+stored attachment metadata. Keep the two host-managed service files outside
+the repository: an origin `config.env` copied from `config.example` and a
+signer `download-grant.env` copied from `download-grant.config.example`.
+Copy `compose.env.example` as the base Compose interpolation file; it contains
+only origin/download values. Optional rig and publisher values live in
+`compose.rig.env.example` and `compose.publisher.env.example` and are required
+only with `compose.rig.yaml` and `compose.publisher.yaml`. Compose resolves
+interpolation before reading service `env_file`, so do not duplicate bind
+values in service files.
 
 Mount the same randomly generated secret of at least 32 characters into origin
 and signer at the paths shown. Create a separate R2 credential scoped only to
@@ -129,7 +145,19 @@ services with:
 
 `docker compose --env-file /secure/astro-console/compose.env --profile download up -d origin download-grant`
 
+For the supervised rig worker, use both `--env-file
+/secure/astro-console/compose.env --env-file
+/secure/astro-console/compose.rig.env -f compose.rig.yaml --profile rig`; it
+requires `ASTRO_SEESTAR_PEM_HOST_PATH`. For the private publisher, use both
+`--env-file /secure/astro-console/compose.env --env-file
+/secure/astro-console/compose.publisher.env -f compose.publisher.yaml
+--profile publisher`; it requires
+`ASTRO_PUBLISHER_ENV_FILE`, `ASTRO_PUBLISHER_OUTPUTS_HOST_PATH`, and
+`R2_CREDENTIALS_HOST_PATH`. The completed M13 evidence is limited to its
+published artifact and authorized download; neither add-on establishes a
+general processing workflow.
+
 Then verify an admitted published Asset-ID request receives a 303 redirect,
 while its URL/object key appear in neither SQLite audit rows nor browser JSON.
-That proves only the staged path; real R2 behavior and operational monitoring
-still require supervised production evidence.
+The current M13 artifact has that supervised production evidence. Future
+publications and operational monitoring remain separate evidence boundaries.

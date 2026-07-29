@@ -1,5 +1,11 @@
 # Remote Access Service Options
 
+Status: **historical pre-deployment comparison**
+
+This July 21 comparison preserves the options considered before the selected
+deployment path. Use the [infrastructure index](../../infra/README.md) and
+[current handoff](../../current/handoff.md) for current authority.
+
 ## 1. Decision Summary
 
 Use **Cloudflare Tunnel + Cloudflare Access** for the first friend-facing

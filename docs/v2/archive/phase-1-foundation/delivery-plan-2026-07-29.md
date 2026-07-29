@@ -111,7 +111,7 @@ bounded liveness/readiness/owner-health projections, and a non-activating
 origin/control plus cloudflared Compose starter. A protected public fixture is
 now live behind Cloudflare Access and Tunnel, with an online SQLite
 backup/restore drill completed. The authoritative live record is the
-[activation ledger](../../current/activation-ledger.md). Off-host backup replication,
+[activation closeout](../handoffs/activation-ledger-2026-07-29.md). Off-host backup replication,
 device/session authority, rig adapters, disk monitoring, and R2/publisher
 paths remain production-validation work.
 

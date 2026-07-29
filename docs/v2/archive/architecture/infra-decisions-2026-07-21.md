@@ -1,5 +1,11 @@
 # Infrastructure Decisions And Open Questions
 
+Status: **historical pre-deployment planning**
+
+This July 21 decision record predates the completed Phase 1 host-verification
+bundle. Use the [infrastructure index](../../infra/README.md) and
+[current handoff](../../current/handoff.md) for current authority.
+
 ## 1. Selected Direction
 
 These decisions are proposed strongly enough to guide the next infrastructure
