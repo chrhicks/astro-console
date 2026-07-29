@@ -38,7 +38,7 @@ Asset/file contract:
 ## Verified Baseline
 
 - `apps/v2-local-web` type checks pass.
-- Its SQLite/HTTP/SSE/worker/filesystem integration suite passes **56/56**
+- Its SQLite/HTTP/SSE/worker/filesystem integration suite passes **59/59**
   tests. Those
   tests cover migrations, atomic acceptance and rollback, Access/JWKS
   admission and revocation, lease recovery, worker claims, bounded Library
@@ -53,6 +53,13 @@ Asset/file contract:
   events, the idempotency receipt, and `PublishAsset` outbox records in one
   SQLite transaction. Failure cannot create a successful Asset; promoted
   bytes are separately recorded as bounded removable orphans.
+- The disabled manifest processor can now first ingest a host-declared,
+  app-owned source into an immutable local original, with truthful comparison
+  group/run/solve lineage, checksum, receipt, event, and bounded orphan
+  cleanup. A selected output must reference that durable original and exactly
+  match its lineage before it receives a `PublishAsset` record. Originals are
+  never published by ingest alone. The source-ingest tables are numbered
+  SQLite migration 11; idempotency keys reject changed semantic input.
 - The publisher worker separately proves durable claim/ack/retry, stable
   private-style key derivation, local checksum verification, fake-provider
   upload/head verification, safe representation projection, and stale-claim
@@ -126,7 +133,7 @@ off-host recovery, or long-running production workers currently work.
 
 | Boundary | Current state | Required proof |
 | --- | --- | --- |
-| Process Save and permanent local output | Local SQLite/filesystem vertical slice proven; repository-ready manifest processor is disabled and not deployed | Owner-supervise a real processor deployment with only app-owned source/output binds and a read-only manifest; then materialize a genuine output while retaining root, checksum, idempotency, and orphan invariants. |
+| Process Save and permanent local output | Local SQLite/filesystem vertical slice proven; repository-ready manifest processor can ingest truthful originals and promote lineage-matched outputs, but is disabled and not deployed | Owner-supervise a real processor deployment with only app-owned source/original/output binds and a read-only manifest; then materialize a genuine original and distinct selected output while retaining root, checksum, idempotency, and orphan invariants. |
 | Publication worker and private R2 | Isolated authenticated publisher deployed; signed missing-object HEAD returns 404 | First real promoted Asset/outbox PUT, provider HEAD checksum/bytes verification, retry/restart, and honest projection proof. |
 | Downloads | Not implemented | Asset-ID authorization, bounded local stream or short-lived R2 grant, no logged bearer URL, and representation state that does not overclaim object availability. |
 | Storage health and cleanup | Local filesystem/SQLite vertical slice proven | Host production thresholds, capture-load benchmarking, and operating runbook evidence. |
