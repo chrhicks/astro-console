@@ -1,6 +1,11 @@
-## Continuum
+## Astro Console
 
-Start your session by reading your memory summary in `continuum`. Keep your memory updated throughout this session.
+This project is a hobby project amongst a few Astrophotography nerds. It is not a large enterprise production system. It doesn't require 'hardened' and 'secure' and 'safe' everything. Focus on what is strictly required to work through the
+phases of the project. Avoid distractions about 'what could happen' and 'possible risk'. Document these concerns only 
+and allow the user to decide what needs to be done by occasionally.
+
+Think, 'What can i do to trim this code/feature down yet preserve the primary functionality?' as a way to help you make
+those kinds of decisions.
 
 ## Working within this project
 
@@ -59,20 +64,6 @@ The `led-panel` mcp (through executor) allows you communicate to an LED Panel (c
 - to get the users attention (peristent, dismissible, audio)
 - otherwise use it for fun whenever you fancy you could do something creative/playful with it throughout your work
 
-## Desktop Dev Inspection
-
-Run `npm run dev:inspect` from `apps/desktop` to start the same dev stack as `npm run dev` with Electron's remote debugging port exposed on `9222`. The script sets `ELECTRON_INSPECT_PORT=9222`, which the main process forwards to Chromium via `app.commandLine.appendSwitch('remote-debugging-port', ...)` before `app.whenReady()`. The port is opt-in; `npm run dev` does not expose it.
-
-Both `dev` and `dev:inspect` launch Electron through `scripts/dev-electron.ts`, which waits for `dist/main`, the SDK dist, and the Vite dev server before starting Electron, then restarts Electron automatically whenever the built main-process or SDK dist changes. Renderer-only changes still rely on Vite HMR. Prefer `dev:inspect` for validation so UI checks always run against the latest main-process build instead of stale cached modules.
-
-Use `agent-browser` against the running Electron renderer like this:
-
-- `curl http://127.0.0.1:9222/json/list` — get the renderer target and copy its `webSocketDebuggerUrl`
-- `agent-browser connect <webSocketDebuggerUrl>` — attach to the live Electron page
-- `agent-browser snapshot -i` — get interactive elements with refs (`@e1`, `@e2`)
-- `agent-browser click @e1` / `fill @e2 "text"` — interact using refs
-- `agent-browser screenshot /tmp/astro-console.png` — capture visual evidence after UI changes
-
 ## Local Web Dev Inspection
 
 Run `npm run dev:inspect` from `apps/v2-local-web` for UI validation of the
@@ -87,3 +78,19 @@ Stop the originating runner with Ctrl-C. If port 9223 is occupied, stop the
 previous local-web inspect runner before starting another. Prefer this path for
 local-web screenshot, keyboard, overflow, and console evidence when the
 in-app browser has no claimable tab.
+
+## Code Architecture and Design Philosophy
+
+* Use the simple approach first
+* document tangents, emerging ideas instead of chasing them down
+* Avoid at all cost security theater - is it strictly necessary to complete the task?
+
+## Getting Started
+
+1. Start your session by reading your memory summary in `executor` (**continuum** tool). 
+
+Keep your memory updated throughout this session
+- Emerging requirements, future troubleshooting reminders, discoveries
+- Anything you think important to remember between sessions where your context gets reset or compacted
+
+2. Look at the `docs/v2` directory and especially `handoff.md`
