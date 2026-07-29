@@ -6,8 +6,8 @@ Status: **active Phase 1 backend/infrastructure handoff — 2026-07-29**
 
 With a signed-in, admitted owner browser, request the existing published M13
 Asset-ID download and retain the bounded result: the service responds with a
-303 grant, the private R2 object downloads successfully, and neither the
-bearer URL nor the object key appears in browser JSON or the SQLite audit.
+303 grant and the private R2 object downloads successfully. The signed bearer
+URL exists only in that redirect, never in a browser JSON projection.
 
 This is the sole remaining Phase 1 host-verification proof. The corrected
 download deployment, current rig-worker liveness, and scheduled SSD backup
@@ -132,6 +132,12 @@ Asset/file contract:
   private signer configuration. Origin liveness is verified; an admitted
   browser request and private-R2 GET remain required before download delivery
   is called proven.
+- The next streamlined publisher release records each selected output's
+  `Content-Disposition: attachment` metadata when it uploads to R2. Downloads
+  remain one admitted Asset-ID lookup followed by one five-minute 303 grant;
+  there is no persisted grant reservation, replay, rate-limit, or download
+  audit. Existing objects need a separate metadata refresh before their
+  browser behavior changes.
 - The Compose deployment now has an isolated profile-gated publisher alongside
   origin, optional rig worker, and `cloudflared`. The publisher has no public
   host port, tunnel, or rig credential/mount.
@@ -159,7 +165,7 @@ processing workflow.
 | --- | --- | --- |
 | Process Save and permanent local output | One-shot manifest processor ingested an existing M13 LIGHT original and distinct Siril linear master into SSD originals/finals with lineage and checksum proof | Keep processor one-shot/least-privilege; later processing workflow needs a separately authorized product slice. |
 | Publication worker and private R2 | M13 linear master real PUT plus provider HEAD checksum/byte verification observed; durable projection is `published` | Controlled recovery drill under normal load, then an authorized download boundary. |
-| Downloads | Corrected Asset-ID origin and private signer from `d4eed9d` are deployed and origin liveness is verified; repository and local integration proof retain grant/audit redaction boundaries. | Verify one admitted M13 303 grant and successful private-R2 GET, with bearer URL/object key absent from browser JSON and SQLite audit. |
+| Downloads | Corrected Asset-ID origin and private signer from `d4eed9d` are deployed and origin liveness is verified; next publisher release writes attachment metadata at upload and retains a direct, short-lived 303 grant. | Deploy the metadata release, refresh the existing M13 object metadata, then verify one admitted M13 303 and browser download. |
 | Storage health and cleanup | Local filesystem/SQLite vertical slice proven | Host production thresholds, capture-load benchmarking, and operating runbook evidence. |
 | Rig-worker liveness | Schema-compatible worker is running and durably `alive` / `ready`; no Solar work was pending. | No further Phase 1 proof. This remains liveness only, never capture proof. |
 | Same-host resilience | Enabled SSD backup timer has a successful 2026-07-29 run with checksum and disposable restore-drill evidence. | No further Phase 1 proof. This is the accepted current resilience scope. |
