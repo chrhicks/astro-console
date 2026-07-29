@@ -1,17 +1,17 @@
 # Phase 1 Backend and Infrastructure Readiness Handoff
 
-Status: **active Phase 1 backend/infrastructure handoff — 2026-07-29**
+Status: **Phase 1 host-verification bundle complete — 2026-07-29**
 
-## Single Next Action
+## Completed Host-Verification Bundle
 
-With a signed-in, admitted owner browser, request the existing published M13
-Asset-ID download and retain the bounded result: the service responds with a
-303 grant and the private R2 object downloads successfully. The signed bearer
-URL exists only in that redirect, never in a browser JSON projection.
+The published M13 linear-master FITS was refreshed with R2 attachment metadata,
+then downloaded successfully through a fresh five-minute private-R2 link. The
+browser saved the FITS instead of rendering its raw bytes. The signed bearer
+URL exists only in the redirect, never in a browser JSON projection.
 
-This is the sole remaining Phase 1 host-verification proof. The corrected
-download deployment, current rig-worker liveness, and scheduled SSD backup
-with restore drill are now verified.
+Corrected download deployment, current rig-worker liveness, and scheduled SSD
+backup with restore drill are all verified. No Solar capture or device command
+was issued during this bundle.
 
 The user accepts NVMe live/recent data plus the SSD backup as current
 same-host resilience. Off-host recovery is not current Phase 1 scope.
@@ -22,8 +22,8 @@ The local-web foundation already proves SQLite acceptance, durable outbox
 claim/ack/retry, server-derived Access admission, snapshot-first SSE, control
 lease recovery, bounded Library reads, and read-only Plan/Observe/Library/
 Process projections. The host now verifies corrected download deployment,
-rig-worker liveness, and same-host backup. The remaining production proof is
-an admitted M13 download against private R2. Process
+rig-worker liveness, same-host backup, and an M13 browser download against
+private R2. Process
 `Apply`, retry, discard, source switching, and worker
 execution remain later processing-workflow slices.
 
@@ -126,26 +126,23 @@ Asset/file contract:
   drill with `restore_drill=passed`; the timer remains scheduled daily. Two
   earlier manual attempts that day failed while the script was being corrected
   and are not used as backup proof.
-- The active origin and private signer were rebuilt from corrected commit
-  `d4eed9d` after the failed attachment-disposition override was removed. Both
-  are running under their existing production admission, loopback origin, and
-  private signer configuration. Origin liveness is verified; an admitted
-  browser request and private-R2 GET remain required before download delivery
-  is called proven.
-- The next streamlined publisher release records each selected output's
-  `Content-Disposition: attachment` metadata when it uploads to R2. Downloads
-  remain one admitted Asset-ID lookup followed by one five-minute 303 grant;
-  there is no persisted grant reservation, replay, rate-limit, or download
-  audit. Existing objects need a separate metadata refresh before their
-  browser behavior changes.
+- The active origin and private signer were rebuilt first from corrected commit
+  `d4eed9d`, then origin and publisher were updated to streamlined commit
+  `eceab25`. The publisher records each selected output's
+  `Content-Disposition: attachment` metadata at upload; downloads remain one
+  admitted Asset-ID lookup followed by one five-minute 303 grant, with no
+  persisted grant reservation, replay, rate-limit, or download audit.
+- The existing published M13 linear master was refreshed by a same-object R2
+  metadata copy. R2 returned successful copy and HEAD verification with the
+  original checksum and attachment disposition, then the owner confirmed that
+  its fresh private-R2 URL downloaded the FITS rather than rendering raw bytes.
 - The Compose deployment now has an isolated profile-gated publisher alongside
   origin, optional rig worker, and `cloudflared`. The publisher has no public
   host port, tunnel, or rig credential/mount.
 
-These are foundation and one real private-R2 transport proof. They are not
-evidence of deployed authorized download, current rig-worker liveness,
-scheduled same-host backup, fresh capture, or a general long-running
-processing workflow.
+These are foundation, real private-R2 transport, deployed authorized-download,
+current rig-worker-liveness, and scheduled same-host backup proof. They are
+not fresh capture or a general long-running processing workflow.
 
 - Storage operations now measure app-owned scratch-volume free bytes, free
   inodes, and a bounded write-plus-fsync latency probe. The owner-only
@@ -165,7 +162,7 @@ processing workflow.
 | --- | --- | --- |
 | Process Save and permanent local output | One-shot manifest processor ingested an existing M13 LIGHT original and distinct Siril linear master into SSD originals/finals with lineage and checksum proof | Keep processor one-shot/least-privilege; later processing workflow needs a separately authorized product slice. |
 | Publication worker and private R2 | M13 linear master real PUT plus provider HEAD checksum/byte verification observed; durable projection is `published` | Controlled recovery drill under normal load, then an authorized download boundary. |
-| Downloads | Corrected Asset-ID origin and private signer from `d4eed9d` are deployed and origin liveness is verified; next publisher release writes attachment metadata at upload and retains a direct, short-lived 303 grant. | Deploy the metadata release, refresh the existing M13 object metadata, then verify one admitted M13 303 and browser download. |
+| Downloads | Streamlined origin and publisher from `eceab25` are deployed. The M13 object has verified attachment metadata and its fresh private-R2 URL downloaded successfully in the browser. | No further Phase 1 proof. Future outputs receive attachment metadata at publication. |
 | Storage health and cleanup | Local filesystem/SQLite vertical slice proven | Host production thresholds, capture-load benchmarking, and operating runbook evidence. |
 | Rig-worker liveness | Schema-compatible worker is running and durably `alive` / `ready`; no Solar work was pending. | No further Phase 1 proof. This remains liveness only, never capture proof. |
 | Same-host resilience | Enabled SSD backup timer has a successful 2026-07-29 run with checksum and disposable restore-drill evidence. | No further Phase 1 proof. This is the accepted current resilience scope. |
