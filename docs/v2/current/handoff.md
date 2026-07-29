@@ -4,14 +4,14 @@ Status: **active Phase 1 backend/infrastructure handoff — 2026-07-29**
 
 ## Single Next Action
 
-Run one host-verification bundle for the current M13 deployment:
+With a signed-in, admitted owner browser, request the existing published M13
+Asset-ID download and retain the bounded result: the service responds with a
+303 grant, the private R2 object downloads successfully, and neither the
+bearer URL nor the object key appears in browser JSON or the SQLite audit.
 
-1. deploy the reverted, working authorized Asset-ID download endpoint and
-   verify an admitted M13 download against private R2;
-2. repair and verify the current rig-worker restart state without claiming
-   Solar capture; and
-3. deploy the current SSD same-host backup script, confirm one scheduled run,
-   and retain its restore-drill evidence.
+This is the sole remaining Phase 1 host-verification proof. The corrected
+download deployment, current rig-worker liveness, and scheduled SSD backup
+with restore drill are now verified.
 
 The user accepts NVMe live/recent data plus the SSD backup as current
 same-host resilience. Off-host recovery is not current Phase 1 scope.
@@ -21,8 +21,9 @@ same-host resilience. Off-host recovery is not current Phase 1 scope.
 The local-web foundation already proves SQLite acceptance, durable outbox
 claim/ack/retry, server-derived Access admission, snapshot-first SSE, control
 lease recovery, bounded Library reads, and read-only Plan/Observe/Library/
-Process projections. The remaining production work is host verification of
-authorized downloads, rig-worker liveness, and same-host backup. Process
+Process projections. The host now verifies corrected download deployment,
+rig-worker liveness, and same-host backup. The remaining production proof is
+an admitted M13 download against private R2. Process
 `Apply`, retry, discard, source switching, and worker
 execution remain later processing-workflow slices.
 
@@ -106,6 +107,12 @@ Asset/file contract:
   next host bundle must inspect, repair if needed, and verify the current
   worker restart state. It must not claim Seestar connection, provider
   acknowledgement, Stack evidence, or physical capture.
+- On 2026-07-29, the then-current rig worker was confirmed to reject live
+  schema 13 and was replaced with the schema-compatible active local-web
+  image. It is now running with its prior restricted mounts and records
+  durable `alive` / `ready` liveness. A read-only outbox check found no Solar
+  work before or after replacement; this is liveness only, not capture or
+  device proof.
 - The repository has a same-host SQLite resilience procedure: it uses `VACUUM
   INTO`, verifies the SSD-side copied bytes and final-name SHA-256 manifest,
   runs a disposable restore drill, and retains fourteen days only in that
@@ -114,6 +121,17 @@ Asset/file contract:
   script and regression checks are repository proof only; the next bundle must
   install it on the host, retain one scheduled-run result, and retain the
   restore-drill result.
+- The installed `astro-console-backup.timer` is enabled. Its 2026-07-29
+  10:33 host run retained SSD-side checksum evidence and a disposable restore
+  drill with `restore_drill=passed`; the timer remains scheduled daily. Two
+  earlier manual attempts that day failed while the script was being corrected
+  and are not used as backup proof.
+- The active origin and private signer were rebuilt from corrected commit
+  `d4eed9d` after the failed attachment-disposition override was removed. Both
+  are running under their existing production admission, loopback origin, and
+  private signer configuration. Origin liveness is verified; an admitted
+  browser request and private-R2 GET remain required before download delivery
+  is called proven.
 - The Compose deployment now has an isolated profile-gated publisher alongside
   origin, optional rig worker, and `cloudflared`. The publisher has no public
   host port, tunnel, or rig credential/mount.
@@ -141,10 +159,10 @@ processing workflow.
 | --- | --- | --- |
 | Process Save and permanent local output | One-shot manifest processor ingested an existing M13 LIGHT original and distinct Siril linear master into SSD originals/finals with lineage and checksum proof | Keep processor one-shot/least-privilege; later processing workflow needs a separately authorized product slice. |
 | Publication worker and private R2 | M13 linear master real PUT plus provider HEAD checksum/byte verification observed; durable projection is `published` | Controlled recovery drill under normal load, then an authorized download boundary. |
-| Downloads | Repository implementation and local integration proof: admitted Asset-ID endpoint issues a short-lived private-R2 grant without projecting the object key or bearer URL. The failed attachment override was reverted. | Deploy the current endpoint and verify an admitted M13 download against private R2. |
+| Downloads | Corrected Asset-ID origin and private signer from `d4eed9d` are deployed and origin liveness is verified; repository and local integration proof retain grant/audit redaction boundaries. | Verify one admitted M13 303 grant and successful private-R2 GET, with bearer URL/object key absent from browser JSON and SQLite audit. |
 | Storage health and cleanup | Local filesystem/SQLite vertical slice proven | Host production thresholds, capture-load benchmarking, and operating runbook evidence. |
-| Rig-worker liveness | Historical image replacement only; not current proof | Inspect, repair if needed, and verify the current worker restart state without claiming capture. |
-| Same-host resilience | Repository-backed SSD procedure and regression checks proven | Install/supervise it on the host, retain one scheduled run and restore-drill result. This is the accepted current resilience scope. |
+| Rig-worker liveness | Schema-compatible worker is running and durably `alive` / `ready`; no Solar work was pending. | No further Phase 1 proof. This remains liveness only, never capture proof. |
+| Same-host resilience | Enabled SSD backup timer has a successful 2026-07-29 run with checksum and disposable restore-drill evidence. | No further Phase 1 proof. This is the accepted current resilience scope. |
 | Off-host recovery | Not current scope | Revisit only if the user changes the current NVMe-plus-SSD resilience decision. |
 | Device/session presence | Person-to-client fixture | Stable production client/session authority before treating a person's browsers as distinct presence clients. |
 | Processing deployment | Compose placeholder absent by design | Separate least-privilege processor/publisher lifecycles, bounded resources, and no rig/tunnel credentials. |
