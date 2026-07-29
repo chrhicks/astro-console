@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto"
-import { readFileSync } from "node:fs"
+import { createReadStream, statSync } from "node:fs"
 import { relative, resolve } from "node:path"
 import type { DatabaseSync } from "node:sqlite"
 import * as Schema from "effect/Schema"
@@ -10,7 +10,8 @@ const Asset = Schema.Struct({ asset_id: Schema.String, role: Schema.Literals(["l
 const AssetDetail = Schema.Struct({ assetId: Schema.String, lineage: Schema.Struct({ runId: Schema.NonEmptyString }) })
 const Publication = Schema.Struct({ checksum: Schema.String, object_key: Schema.String, state: Schema.Literals(["published", "temporarilyUnavailable", "failedPublication"]) })
 const ClaimedWork = Schema.Struct({ id: Schema.String, payload: Schema.String })
-export type PublisherProvider = { readonly put: (key: string, bytes: Uint8Array, metadata: { readonly assetId: string; readonly checksum: string }) => Promise<void>; readonly head: (key: string) => Promise<{ readonly checksum: string; readonly bytes: number } | undefined> }
+export type PublisherFile = { readonly path: string; readonly bytes: number; readonly checksum: string }
+export type PublisherProvider = { readonly put: (key: string, file: PublisherFile, metadata: { readonly assetId: string; readonly checksum: string }) => Promise<void>; readonly head: (key: string) => Promise<{ readonly checksum: string; readonly bytes: number } | undefined> }
 
 export function createPublisherWorker(database: DatabaseSync, storage: Pick<ProcessSaveStorage, "outputsRoot">, provider: PublisherProvider) {
   const pass = async (workerId = "publisher-worker") => {
@@ -37,8 +38,8 @@ export function createPublisherWorker(database: DatabaseSync, storage: Pick<Proc
       const detail = Schema.decodeUnknownSync(AssetDetail)(JSON.parse(asset.detail))
       if (detail.assetId !== asset.asset_id) return settleFailure(claimed.id, token, asset.asset_id, "failedPublication", "asset detail identity mismatch")
       const path = outputPath(storage.outputsRoot, asset)
-      const bytes = readFileSync(path)
-      if (createHash("sha256").update(bytes).digest("hex") !== work.checksum) return settleFailure(claimed.id, token, asset.asset_id, "failedPublication", "local checksum mismatch")
+      const file = await checksumFile(path)
+      if (file.checksum !== work.checksum) return settleFailure(claimed.id, token, asset.asset_id, "failedPublication", "local checksum mismatch")
       const publicationRaw: unknown = database.prepare("SELECT checksum,object_key,state FROM asset_publications WHERE asset_id=?").get(asset.asset_id)
       const publication = Schema.decodeUnknownSync(Schema.optional(Publication))(publicationRaw)
       if (publication !== undefined && publication.checksum !== work.checksum) return settleFailure(claimed.id, token, asset.asset_id, "failedPublication", "publication checksum conflict")
@@ -46,9 +47,9 @@ export function createPublisherWorker(database: DatabaseSync, storage: Pick<Proc
       database.exec("BEGIN IMMEDIATE")
       database.prepare("INSERT INTO asset_publications (asset_id,checksum,object_key,state,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(asset_id) DO UPDATE SET checksum=excluded.checksum,object_key=excluded.object_key,state=excluded.state,updated_at=excluded.updated_at WHERE asset_publications.checksum=excluded.checksum").run(asset.asset_id, work.checksum, key, "temporarilyUnavailable", new Date().toISOString())
       database.exec("COMMIT")
-      await provider.put(key, bytes, { assetId: asset.asset_id, checksum: work.checksum })
+      await provider.put(key, file, { assetId: asset.asset_id, checksum: work.checksum })
       const verified = await provider.head(key)
-      if (verified?.checksum !== work.checksum || verified.bytes !== bytes.byteLength) return settleFailure(claimed.id, token, asset.asset_id, "failedPublication", "provider verification failed")
+      if (verified?.checksum !== work.checksum || verified.bytes !== file.bytes) return settleFailure(claimed.id, token, asset.asset_id, "failedPublication", "provider verification failed")
       return settlePublished(claimed.id, token, asset, work.checksum)
     } catch {
       return settleFailure(claimed.id, token, work?.assetId, "temporarilyUnavailable", "publisher provider failed")
@@ -84,3 +85,4 @@ export function createPublisherWorker(database: DatabaseSync, storage: Pick<Proc
 
 function outputPath(root: string, asset: typeof Asset.Type) { if (!/^asset-process-[0-9a-f-]+$/.test(asset.asset_id)) throw new Error("asset identity is invalid"); const resolvedRoot = resolve(root); const path = resolve(resolvedRoot, `${asset.asset_id}.${asset.format}`); if (relative(resolvedRoot, path).startsWith("..")) throw new Error("asset path escapes output root"); return path }
 function publicationKey(asset: typeof Asset.Type, runId: string, checksum: string) { return `published/${runId}/${asset.role === "final" ? "finals" : "intermediates"}/${asset.asset_id}-${checksum}.${asset.format}` }
+async function checksumFile(path: string): Promise<PublisherFile> { const checksum = createHash("sha256"); const bytes = statSync(path).size; for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024 })) checksum.update(chunk); return { path, bytes, checksum: checksum.digest("hex") } }
