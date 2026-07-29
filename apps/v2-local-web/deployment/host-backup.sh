@@ -31,7 +31,7 @@ final_checksum="$(sha256sum "${target_path}" | awk '{print $1}')"
 [[ "${stage_checksum}" == "${final_checksum}" ]] || { echo "Promoted SSD backup checksum mismatch" >&2; exit 1; }
 printf '%s  %s\n' "${final_checksum}" "$(basename "${target_path}")" > "${staged_checksum_path}"
 mv "${staged_checksum_path}" "${target_path}.sha256"
-sha256sum -c "${target_path}.sha256"
+(cd "${backup_dir}" && sha256sum -c "$(basename "${target_path}").sha256")
 docker cp "${target_path}" "${origin_container}:${restore_source_path}"
 docker exec "${origin_container}" node --experimental-strip-types scripts/backup-preflight.ts restore-drill "${restore_source_path}" "${restore_drill_path}"
 find "${backup_dir}" -maxdepth 1 -type f \( -name 'state-*.sqlite' -o -name 'state-*.sqlite.sha256' \) -mtime +"${retention_days}" -delete
