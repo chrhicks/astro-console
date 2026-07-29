@@ -1,0 +1,11 @@
+# Used only by the profile-gated private download-grant service.
+# Do not use the publisher's write credential. Supply a dedicated bucket-scoped
+# read-only R2 credential at the host path below; session-token credentials are
+# intentionally rejected because the signer accepts only accessKeyId/secretAccessKey.
+R2_ACCOUNT_ID=REPLACE_WITH_32_LOWERCASE_HEX_ACCOUNT_ID
+R2_BUCKET=astro-console-artifacts
+R2_ENDPOINT=https://REPLACE_WITH_32_LOWERCASE_HEX_ACCOUNT_ID.r2.cloudflarestorage.com
+R2_DOWNLOAD_CREDENTIALS_PATH=/run/secrets/r2-download-credentials.json
+R2_DOWNLOAD_CREDENTIALS_HOST_PATH=/ABSOLUTE/HOST/PATH/r2-download-credentials.json
+ASTRO_DOWNLOAD_GRANT_SHARED_SECRET_PATH=/run/secrets/download-grant-shared-secret
+ASTRO_DOWNLOAD_GRANT_PORT=8791

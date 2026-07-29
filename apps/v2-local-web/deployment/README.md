@@ -100,3 +100,36 @@ can first materialize an immutable app-owned original with truthful lineage,
 and then delegates containment, symlink, checksum, idempotency, and outbox
 rules to Process Save. Originals are not published by that ingest step. It
 does not delete or rename the host manifest.
+
+## Authorized downloads
+
+This is a profile-gated activation bundle, not a real R2 proof. Keep all three
+files outside the repository: an origin `config.env` copied from
+`config.example`, a signer `download-grant.env` copied from
+`download-grant.config.example`, and one authoritative Compose interpolation
+file copied from `compose.env.example`. Keep the existing publisher
+`publisher.env` outside the repository too. That Compose file is the one
+activation source: it names every service env file and supplies every
+`*_HOST_PATH` bind value. Compose resolves those values before it reads a
+service `env_file`, so do not duplicate them in service files. It needs valid
+host paths and the existing publisher env file even for inactive rig and
+publisher profiles because Compose validates all services before profile
+selection. Those values do not start or grant access to inactive services.
+
+Mount the same randomly generated secret of at least 32 characters into origin
+and signer at the paths shown. Create a separate R2 credential scoped only to
+read objects in this bucket; its JSON must contain exactly `accessKeyId` and
+`secretAccessKey`. It is not the publisher credential and must not contain a
+session token. The signer has no host port: `expose: 8791` makes it reachable
+only by the Compose origin service.
+
+After staging the immutable release, taking a consistent SQLite backup, and
+confirming migration and restore-drill evidence, activate only the intended
+services with:
+
+`docker compose --env-file /secure/astro-console/compose.env --profile download up -d origin download-grant`
+
+Then verify an admitted published Asset-ID request receives a 303 redirect,
+while its URL/object key appear in neither SQLite audit rows nor browser JSON.
+That proves only the staged path; real R2 behavior and operational monitoring
+still require supervised production evidence.

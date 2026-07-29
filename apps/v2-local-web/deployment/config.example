@@ -14,6 +14,10 @@ CF_ACCESS_JWKS_URL=https://REPLACE.cloudflareaccess.com/cdn-cgi/access/certs
 CF_ACCESS_JWKS_CACHE_TTL_MS=300000
 ASTRO_MEMBERSHIP_BOOTSTRAP_PATH=/run/config/membership-bootstrap.json
 ASTRO_CLIENT_CONTEXT=desktop
+# Optional authorized-download origin bridge. Keep the signer profile disabled
+# until a dedicated read-only R2 credential and shared secret are installed.
+ASTRO_DOWNLOAD_GRANT_URL=http://download-grant:8791/internal/download-grants
+ASTRO_DOWNLOAD_GRANT_SHARED_SECRET_PATH=/run/secrets/download-grant-shared-secret
 # Tunnel credentials and all policy membership emails remain host-managed.
 # The rig-worker service is profile-gated and disabled by default. Do not start
 # the `rig` profile until the host-managed PEM path and Solar operator checks
@@ -21,7 +25,6 @@ ASTRO_CLIENT_CONTEXT=desktop
 ASTRO_RIG_WORKER_MODE=disabled
 ASTRO_SEESTAR_HOST=192.168.4.63
 ASTRO_SEESTAR_PEM_PATH=/run/secrets/seestar.pem
-ASTRO_SEESTAR_PEM_HOST_PATH=/ABSOLUTE/HOST/PATH/seestar.pem
 # The manifest processor is disabled by default and is not deployed by this
 # example. A future supervised processor service may receive only app-owned
 # source/output binds and one read-only host-managed manifest under /run/config.
