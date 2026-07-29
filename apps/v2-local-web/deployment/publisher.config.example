@@ -1,12 +1,10 @@
 # Copy outside the repository as publisher.env. Only the publisher service reads it.
 ASTRO_LOCAL_WEB_DB=/var/lib/astro-console/state.sqlite
 ASTRO_PUBLISHER_OUTPUTS_ROOT=/var/lib/astro-console/outputs
-ASTRO_PUBLISHER_OUTPUTS_HOST_PATH=/ABSOLUTE/HOST/PATH/promoted-outputs
 R2_ACCOUNT_ID=503286fc7e5e8545c172105f991efef1
 R2_BUCKET=astro-console-artifacts
 R2_ENDPOINT=https://503286fc7e5e8545c172105f991efef1.r2.cloudflarestorage.com
 R2_CREDENTIALS_PATH=/run/secrets/r2-credentials.json
-R2_CREDENTIALS_HOST_PATH=/ABSOLUTE/HOST/PATH/r2-credentials.json
 # The secret JSON contains only accessKeyId and secretAccessKey. Give that key
 # only object read/write permissions on this bucket; no bucket administration,
 # delete, list, rig, tunnel, or browser access. The publisher code itself
