@@ -21,11 +21,15 @@ export function createR2DownloadGrantIssuer(config: { readonly bucket: string; r
     const filename = objectKey.split("/").at(-1)
     if (!filename) throw new Error("R2 object key must name a download")
     const query = new URLSearchParams({ "X-Amz-Algorithm": "AWS4-HMAC-SHA256", "X-Amz-Credential": `${credentials.accessKeyId}/${scope}`, "X-Amz-Date": amzDate, "X-Amz-Expires": String(expiresSeconds), "X-Amz-SignedHeaders": "host", "response-content-disposition": `attachment; filename="${filename}"` })
-    const canonicalQuery = [...query.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([name, value]) => `${encodeURIComponent(name)}=${encodeURIComponent(value)}`).join("&")
+    const canonicalQuery = serializeQuery(query)
     const canonicalRequest = `GET\n${url.pathname}\n${canonicalQuery}\nhost:${url.host}\n\nhost\nUNSIGNED-PAYLOAD`; const signingKey = hmac(hmac(hmac(hmac(`AWS4${credentials.secretAccessKey}`, date), "auto"), "s3"), "aws4_request")
-    query.set("X-Amz-Signature", createHmac("sha256", signingKey).update(`AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${createHash("sha256").update(canonicalRequest).digest("hex")}`).digest("hex")); url.search = query.toString()
+    query.set("X-Amz-Signature", createHmac("sha256", signingKey).update(`AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${createHash("sha256").update(canonicalRequest).digest("hex")}`).digest("hex")); url.search = serializeQuery(query)
     return url.toString()
   } }
 }
 
 function hmac(key: string | Buffer, value: string) { return createHmac("sha256", key).update(value).digest() }
+
+function serializeQuery(query: URLSearchParams) { return [...query.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([name, value]) => `${rfc3986(name)}=${rfc3986(value)}`).join("&") }
+
+function rfc3986(value: string) { return encodeURIComponent(value).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`) }
