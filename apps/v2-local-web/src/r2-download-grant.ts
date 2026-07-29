@@ -18,7 +18,9 @@ export function createR2DownloadGrantIssuer(config: { readonly bucket: string; r
     if (!Number.isInteger(expiresSeconds) || expiresSeconds < 1 || expiresSeconds > 300) throw new Error("R2 download grant expiry must be between one second and five minutes")
     const url = new URL(`/${config.bucket}/${objectKey.split("/").map(encodeURIComponent).join("/")}`, config.endpoint)
     const amzDate = now().toISOString().replace(/[:-]|\.\d{3}/g, ""); const date = amzDate.slice(0, 8); const scope = `${date}/auto/s3/aws4_request`
-    const query = new URLSearchParams({ "X-Amz-Algorithm": "AWS4-HMAC-SHA256", "X-Amz-Credential": `${credentials.accessKeyId}/${scope}`, "X-Amz-Date": amzDate, "X-Amz-Expires": String(expiresSeconds), "X-Amz-SignedHeaders": "host" })
+    const filename = objectKey.split("/").at(-1)
+    if (!filename) throw new Error("R2 object key must name a download")
+    const query = new URLSearchParams({ "X-Amz-Algorithm": "AWS4-HMAC-SHA256", "X-Amz-Credential": `${credentials.accessKeyId}/${scope}`, "X-Amz-Date": amzDate, "X-Amz-Expires": String(expiresSeconds), "X-Amz-SignedHeaders": "host", "response-content-disposition": `attachment; filename="${filename}"` })
     const canonicalQuery = [...query.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([name, value]) => `${encodeURIComponent(name)}=${encodeURIComponent(value)}`).join("&")
     const canonicalRequest = `GET\n${url.pathname}\n${canonicalQuery}\nhost:${url.host}\n\nhost\nUNSIGNED-PAYLOAD`; const signingKey = hmac(hmac(hmac(hmac(`AWS4${credentials.secretAccessKey}`, date), "auto"), "s3"), "aws4_request")
     query.set("X-Amz-Signature", createHmac("sha256", signingKey).update(`AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${createHash("sha256").update(canonicalRequest).digest("hex")}`).digest("hex")); url.search = query.toString()
