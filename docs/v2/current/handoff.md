@@ -1,27 +1,25 @@
 # Phase 1 Backend and Infrastructure Readiness Handoff
 
-Status: **active Phase 1 backend/infrastructure handoff — 2026-07-27**
+Status: **active Phase 1 backend/infrastructure handoff — 2026-07-28**
 
 ## Single Next Action
 
-Supervise the first real promoted asset publication: stage a genuine Process
-output under the app-owned SSD source root, provide its host-managed manifest,
-then prove the isolated processor can materialize it and the publisher can PUT,
-HEAD-verify, retry safely, and project the durable outbox result against
-private R2. The authenticated publisher deployment is running, but no real
-asset upload/retry proof has occurred.
+Use the published M13 simulation asset to design and prove an authorized
+download boundary: authorize by Asset ID, keep keys and bearer grants out of
+the browser projection and logs, and represent availability honestly. It must
+remain independent of the publisher, local-original retention, and run state.
 
-Do not add external backup, R2 credentials, a download endpoint, or a UI
-control merely to make this Phase 1 boundary appear complete.
+Do not add external backup, browser-held R2 credentials, or a UI control
+merely to make this Phase 1 boundary appear complete.
 
 ## Why This Is Next
 
 The local-web foundation already proves SQLite acceptance, durable outbox
 claim/ack/retry, server-derived Access admission, snapshot-first SSE, control
 lease recovery, bounded Library reads, and read-only Plan/Observe/Library/
-Process projections. The remaining production boundaries are real R2 asset
-publication proof, downloads, measured storage health/cleanup, and independent
-recovery. Process `Apply`, retry, discard, source switching, and worker
+Process projections. The remaining production boundaries are authorized
+downloads, measured storage health/cleanup, and independent recovery. Process
+`Apply`, retry, discard, source switching, and worker
 execution remain later processing-workflow slices.
 
 The completed Local Save boundary gives later work a real
@@ -38,7 +36,7 @@ Asset/file contract:
 ## Verified Baseline
 
 - `apps/v2-local-web` type checks pass.
-- Its SQLite/HTTP/SSE/worker/filesystem integration suite passes **59/59**
+- Its SQLite/HTTP/SSE/worker/filesystem integration suite passes **60/60**
   tests. Those
   tests cover migrations, atomic acceptance and rollback, Access/JWKS
   admission and revocation, lease recovery, worker claims, bounded Library
@@ -60,25 +58,32 @@ Asset/file contract:
   match its lineage before it receives a `PublishAsset` record. Originals are
   never published by ingest alone. The source-ingest tables are numbered
   SQLite migration 11; idempotency keys reject changed semantic input.
-- The publisher worker separately proves durable claim/ack/retry, stable
-  private-style key derivation, local checksum verification, fake-provider
-  upload/head verification, safe representation projection, and stale-claim
-  recovery. Retry/restart reuses the stored key; an expired claim or stale
-  acknowledgement cannot overwrite later state. Provider or checksum failure
-  projects a safe unavailable/failed representation. Object keys and
-  credentials never enter Library detail. The local fake-provider test itself
-  made no R2 network request.
-- A production S3-compatible R2 provider adapter and publisher-only Compose
-  profile are deployed. Cloudflare R2 is enabled and the existing private ENAM
-  Standard bucket is `astro-console-artifacts`. A permanent bucket-only object
-  read/write credential is host-managed and mounted only into the dedicated
-  publisher service; it has no public endpoint, tunnel, or rig mounts. The
-  host built image `6762321-r2-publisher` and started
-  `astro-console-publisher` alongside the unchanged healthy origin. A signed
-  HEAD for a deliberately nonexistent `published/` key returned 404, proving
-  endpoint authentication and private missing-object handling without a write.
-  No real promoted Asset/outbox PUT, provider HEAD verification after PUT,
-  retry recovery, or download proof has occurred.
+- The publisher worker streams checksum calculation and R2 upload in 64 KiB
+  chunks, signs the exact checksum and byte length, then HEAD-verifies the
+  provider checksum/bytes before projecting `published`. It preserves durable
+  claim/ack/retry and stable private key derivation; object keys and credentials
+  never enter Library detail. The local streaming and outbox-isolation tests
+  make no R2 network request.
+- A production S3-compatible R2 provider adapter and publisher-only service
+  are deployed. Cloudflare R2 is enabled and the existing private ENAM Standard
+  bucket is `astro-console-artifacts`. A bucket-only read/write credential is
+  host-managed and mounted only into the dedicated publisher; it has no public
+  endpoint, tunnel, or rig mounts. On 2026-07-28, an isolated processor
+  simulated one existing M13 dataset: one real 30-second LIGHT FITS original
+  plus an existing Siril 1.4.3 60-frame lights-only linear master. The service
+  retained both SSD copies with SHA-256 values matching their staged sources,
+  and published the linear master to private R2. Durable outbox `dispatched`,
+  publication `published`, and provider HEAD checksum/byte verification were
+  observed. This is transport proof for an existing dataset—not fresh hardware
+  capture, live image processing, public object access, download authorization,
+  or off-host backup proof.
+- The first real master exposed two recovery defects: full-file buffering
+  exceeded the former 512 MiB publisher cap, and generic rig-worker lease
+  cleanup could expire a different work kind during a long upload. The
+  publisher now streams 64 KiB chunks and runs at 512 MiB with zero restarts;
+  generic lease recovery is scoped to its own work kind. The M13 outbox
+  eventually acknowledged after recoverable attempts, then remained published
+  while the restored rig worker stayed idle with no Solar work.
 - Migration-only publisher and processor SQLite connections now set a bounded
   five-second busy timeout. The publisher continues only after recognizable
   SQLite busy/locked errors and otherwise fails fast. The prior publisher was
@@ -87,13 +92,10 @@ Asset/file contract:
   resource limits, then observed running with zero restarts and no lock error
   in a short host check. The repository behavior is tested; sustained
   concurrent-worker behavior remains a later operational observation.
-- The host now has app-owned SSD `processor-sources` and `finals` paths. A
-  one-shot processor preflight ran with only the state volume, read-only
-  source/config binds, and writable finals bind; without a manifest it returned
-  `ManifestUnavailable` and left Process assets/publication work at zero.
-  Non-mutating container checks confirm the processor identity can read sources
-  and write finals, while the deployed publisher can read finals but not write
-  them. No processor is kept running and no synthetic artifact was created.
+- The host has app-owned SSD `processor-sources`, `originals`, and `finals`
+  paths. The one-shot processor used only the state volume, read-only
+  source/config binds, writable originals/finals binds, and no R2/rig/tunnel
+  credential. It accepted the named M13 manifest and is not kept running.
 - The stale `c9afc65-solar` rig-worker image was restarting because its older
   migration set rejected the shared SQLite schema 10 before adapter
   initialization. With no pending Solar start/stop work, it was replaced by
@@ -114,8 +116,9 @@ Asset/file contract:
   origin, optional rig worker, and `cloudflared`. The publisher has no public
   host port, tunnel, or rig credential/mount.
 
-These are foundation proofs, not evidence that real R2 asset publication,
-off-host recovery, or long-running production workers currently work.
+These are foundation and one real private-R2 transport proof. They are not
+evidence of off-host recovery, public download authorization, fresh capture,
+or a general long-running processing workflow.
 
 - Storage operations now measure app-owned scratch-volume free bytes, free
   inodes, and a bounded write-plus-fsync latency probe. The owner-only
@@ -133,8 +136,8 @@ off-host recovery, or long-running production workers currently work.
 
 | Boundary | Current state | Required proof |
 | --- | --- | --- |
-| Process Save and permanent local output | Local SQLite/filesystem vertical slice proven; repository-ready manifest processor can ingest truthful originals and promote lineage-matched outputs, but is disabled and not deployed | Owner-supervise a real processor deployment with only app-owned source/original/output binds and a read-only manifest; then materialize a genuine original and distinct selected output while retaining root, checksum, idempotency, and orphan invariants. |
-| Publication worker and private R2 | Isolated authenticated publisher deployed; signed missing-object HEAD returns 404 | First real promoted Asset/outbox PUT, provider HEAD checksum/bytes verification, retry/restart, and honest projection proof. |
+| Process Save and permanent local output | One-shot manifest processor ingested an existing M13 LIGHT original and distinct Siril linear master into SSD originals/finals with lineage and checksum proof | Keep processor one-shot/least-privilege; later processing workflow needs a separately authorized product slice. |
+| Publication worker and private R2 | M13 linear master real PUT plus provider HEAD checksum/byte verification observed; durable projection is `published` | Controlled recovery drill under normal load, then an authorized download boundary. |
 | Downloads | Not implemented | Asset-ID authorization, bounded local stream or short-lived R2 grant, no logged bearer URL, and representation state that does not overclaim object availability. |
 | Storage health and cleanup | Local filesystem/SQLite vertical slice proven | Host production thresholds, capture-load benchmarking, and operating runbook evidence. |
 | Same-host resilience | Repository-backed SSD procedure proven | Install/supervise it on the host and measure it under capture load; do not call it off-host disaster recovery. |
@@ -182,22 +185,20 @@ No UI work was added. The service API is the intentionally bounded seam for a
 future processing worker; it is not an HTTP command or browser control.
 
 The local publisher test proves durable outbox claim/ack/retry, stable private
-key derivation from trusted lineage, checksum verification, safe projection,
-and stale-claim recovery. The deployed adapter has authenticated private R2
-HEAD access only so far; it does not yet prove a real asset PUT/head/retry
-cycle, object lifecycle, or download authorization.
+key derivation from trusted lineage, streamed checksum/upload, safe projection,
+and stale-claim recovery. The deployed adapter additionally proved one real
+private R2 PUT plus HEAD checksum/byte verification for the M13 simulation.
+It does not prove download authorization, public object access, object
+lifecycle policy, off-host recovery, fresh capture, or image-processing work.
 
 ## Sequenced Follow-up
 
-1. **First real publisher/R2 asset proof** — when a promoted Asset/outbox entry
-   exists, supervise PUT, provider HEAD checksum/bytes verification, retry and
-   restart recovery, and honest Library projection. Do not add browser-held
-   secrets, object-key, or signed-URL projection.
-2. **Processor activation for a genuine output** — the manifest processor is
-   repository-ready but disabled. Its production activation needs only the
-   app-owned source/output mounts, a read-only host manifest, a current durable
-   owner membership, and bounded resource limits; it must never receive rig,
-   tunnel, or R2 credentials.
+1. **Authorized download boundary** — admit Asset-ID authorization, use a
+   bounded local stream or short-lived private R2 grant, and never project a
+   browser-held secret, object key, or logged bearer URL.
+2. **Independent recovery** — configure an off-host destination, verify copied
+   bytes, and complete a restore drill. Same-host SSD backup remains useful but
+   is not disaster recovery.
 3. **Production presence/deployment** — establish device/session authority and
    add isolated processor/publisher Compose services with resource limits and
    operating runbooks.
