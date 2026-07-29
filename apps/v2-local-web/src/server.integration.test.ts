@@ -477,6 +477,17 @@ test("a rig worker dispatches only a Solar test and records provider acknowledge
   worker.close()
 })
 
+test("rig outbox dispatch leaves a claimed PublishAsset for its publisher", async () => {
+  const root = mkdtempSync(join(tmpdir(), "astro-outbox-isolation-")); const sources = join(root, "sources"); const outputs = join(root, "outputs"); const databasePath = join(root, "state.sqlite"); mkdirSync(sources); writeFileSync(join(sources, "final.tiff"), "publisher-bytes")
+  const service = createLocalWebService(databasePath, undefined, undefined, { sourcesRoot: sources, outputsRoot: outputs, sources: { final: "final.tiff" } }); const saved = service.saveProcess({ sessionId: "process-outbox-isolation", expectedRevision: 1, idempotencyKey: "outbox-isolation-save", outputs: [{ sourceId: "final", representation: "final" }] })
+  if (saved.outcome !== "accepted") throw new Error("save did not accept")
+  service.database.prepare("UPDATE outbox SET state='claimed',claim_token='publisher-token',claimed_by='publisher-worker',claim_until=? WHERE kind='PublishAsset'").run("2000-01-01T00:00:00.000Z")
+  const config = rigWorkerConfig({ ASTRO_LOCAL_WEB_DB: databasePath, ASTRO_RIG_WORKER_MODE: "seestar", ASTRO_SEESTAR_HOST: "192.168.4.63", ASTRO_SEESTAR_PEM_PATH: "/run/secrets/seestar.pem" }); const rig = createRigWorkerService(config, { startSolarTestObservation: async () => "providerAcknowledged", stopSolarTestObservation: async () => true, close: () => undefined })
+  assert.equal(await rig.runOnce(), "none"); const isolated = service.database.prepare("SELECT state,claim_token,claimed_by,claim_until FROM outbox WHERE kind='PublishAsset'").get() as { state: string; claim_token: string | null; claimed_by: string | null; claim_until: string | null }; assert.equal(isolated.state, "claimed"); assert.equal(isolated.claim_token, "publisher-token"); assert.equal(isolated.claimed_by, "publisher-worker"); assert.equal(isolated.claim_until, "2000-01-01T00:00:00.000Z")
+  let uploads = 0; const publisher = createPublisherWorker(service.database, { outputsRoot: outputs }, { put: async (_key, file, metadata) => { uploads += 1; assert.equal(file.checksum, metadata.checksum) }, head: async () => { const checksum = service.database.prepare("SELECT checksum FROM process_asset_events WHERE asset_id=?").get(saved.assetIds[0]) as { checksum: string }; return { checksum: checksum.checksum, bytes: 15 } } })
+  assert.equal(await publisher.pass(), "published"); assert.equal(uploads, 1); assert.equal(service.database.prepare("SELECT state FROM outbox WHERE kind='PublishAsset'").get().state, "dispatched"); rig.close(); service.close()
+})
+
 test("enabled worker without an adapter reports liveness and retains pending capture work", async (t) => {
   const databasePath = join(mkdtempSync(join(tmpdir(), "astro-rig-unconfigured-")), "state.sqlite")
   const service = createLocalWebService(databasePath); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
