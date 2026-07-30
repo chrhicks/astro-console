@@ -40,3 +40,80 @@ intent; it never owns execution.
 Before the first code slice, create an accepted packet for the selected Phase 2
 outcome with the scenario, durable owner, action/failure contract, focused
 verification, proof boundary, and intentionally deferred remainder.
+
+## Proposed First Slice: Multi-Sequence Draft and Deterministic Validation
+
+Status: **proposed — awaiting owner acceptance before implementation**
+
+Build the first real Plan outcome without pretending that the local fixture is
+an observatory planner: an admitted owner can persist a two-or-more-sequence
+draft, see its ordered window/readiness projection, and receive a service-owned
+validation result. This replaces the read-only M27 Plan projection only in the
+explicit deterministic fixture used for the slice. A normal unconfigured
+runtime continues to say that no plan is installed.
+
+### Scenario To Implement After Acceptance
+
+Given an admitted owner on a control-capable desktop and no active run, the
+owner saves a two-sequence future plan. The service stores the draft, evaluates
+the supplied planning facts, and projects each sequence's order, usable window,
+altitude, horizon clearance, estimated time, and storage forecast. It returns
+one plan readiness result:
+
+- `ready` when every critical fact is viable;
+- `readyWithLimitations` when an explicitly named limitation remains; or
+- `blocked` when a required fact is missing or incompatible.
+
+The Plan surface presents the order, the evidence behind the verdict, and the
+named limitation or block. It does not start a run. Refresh and workspace
+navigation replace the browser projection from SQLite and cannot alter the
+draft.
+
+### Canonical Owner And Contract
+
+`ObservingPlan` is the durable service-owned record. It owns the source-plan
+revision, ordered sequence definitions, evaluation inputs, validation result,
+and named limitations. The browser submits a revision-guarded draft intent and
+only renders the returned projection; it does not calculate a verdict or
+decide that a missing fact is safe.
+
+This is the first required extension beyond the accepted contract harness,
+which begins at an already validated plan. The implementation packet must name
+and Schema-decode a single draft-save intent, with an idempotency key and
+expected plan revision. Its result is either the persisted next revision or a
+typed rejection. At minimum, reject stale revisions, malformed or duplicate
+sequence input, a read-only client, unavailable plan evaluation, and any
+critical missing/unsafe planning fact. Exact HTTP routes and SQLite tables are
+implementation detail.
+
+`StartRunFromPlan` remains unchanged and unavailable in this slice. The
+existing M27 start-run fixture proves only the earlier lease/receipt/SSE
+foundation; it is not a Phase 2 managed-run implementation.
+
+### Focused Verification
+
+- A real SQLite/HTTP/SSE integration scenario persists a two-sequence draft,
+  returns the same validated projection after a fresh service instance, and
+  emits one authoritative update.
+- Deterministic cases cover ready, a named non-critical limitation, and each
+  critical block named above; stale or repeated submissions create no extra
+  revision or event.
+- A local-web smoke flow shows the wide desktop, compact desktop, and 390 px
+  read-only phone projection. The phone exposes the same verdict and no draft
+  or run mutation. Designer review is required for the UI change.
+
+### Proof Boundary And Deferred Remainder
+
+The evaluator consumes explicitly configured deterministic planning facts. Its
+tests prove persistence, revision/idempotency, projection, and the chosen
+readiness rules—not live ephemerides, a surveyed horizon, free disk space,
+rig capabilities, device safety, or physical observability. Those inputs need
+their own provider-backed slice before a plan may be presented as operationally
+ready.
+
+Also deferred: target discovery/catalog, real astronomy calculation, live
+readiness providers, `RunDefinition` acceptance, the sequence executor,
+pause/stop/skip/retry/park, active-run edits, hardware calls, and all Solar or
+processing work. The next packet after this slice should connect a persisted
+validated plan to immutable `RunDefinition` acceptance, still using a fake
+executor before any device boundary.

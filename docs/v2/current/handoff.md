@@ -27,10 +27,12 @@ does not authorize further cleanup by default.
 
 ## Next Session: Plan One Phase 2 Slice
 
-Use [Phase 2 planning](phase-2-planning.md) to select one vertical slice. Do
+The proposed first packet is now [Multi-Sequence Draft and Deterministic
+Validation](phase-2-planning.md#proposed-first-slice-multi-sequence-draft-and-deterministic-validation).
+It is deliberately awaiting owner acceptance; it authorizes no code yet. Do
 not infer authorization for a physical Solar run, processing workflow,
-off-host recovery, storage-health operations, or new browser controls from
-this handoff alone.
+off-host recovery, storage-health operations, or new browser controls beyond
+an accepted Phase 2 slice.
 
 The user accepts NVMe live/recent data plus the SSD backup as current
 same-host resilience. Off-host recovery is not current Phase 1 scope.
