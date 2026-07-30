@@ -1,6 +1,6 @@
 # Phase 1 Complexity Audit
 
-Status: **next bounded review — no implementation approved yet**
+Status: **complete — 2026-07-30**
 
 ## Purpose
 
@@ -35,7 +35,13 @@ reservation, audit, and rate-limit state. It now uses one admitted Asset-ID
 lookup, one private signer call, and one 303 redirect; attachment behavior is
 stored on the R2 object at publication.
 
-## Exit
+## Outcome
 
-Produce a ranked, evidence-backed deletion/simplification plan. Implementation
-happens only in separately accepted slices.
+The initial bounded simplification work is recorded in `88ef511` and
+`9bf3abb`. The final branch-wide regression against `main` identified and
+resolved the malformed Library asset path and opaque local-web shell in
+`7eadf38`, then removed remaining whitespace noise in `c969352`.
+
+The unrelated desktop commit `4308796` was fast-forwarded onto `main`, leaving
+no desktop or SDK paths unique to `v2`. Phase 1 is closed; use the
+[Phase 2 planning handoff](phase-2-planning.md) for subsequent work.

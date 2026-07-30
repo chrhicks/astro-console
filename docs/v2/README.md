@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **Gate 7 and Phase 0.5 accepted; Phase 1 implementation and host-verification complete; final quality regression and closeout next**
+Status: **Gate 7 and Phase 0.5 accepted; Phase 1 closed; Phase 2 planning prepared**
 
 This directory is organized to keep normal working context small. Do not read
 the entire V2 tree by default.
@@ -13,8 +13,8 @@ Read these in order when starting or resuming V2 work:
    rules accepted through Gate 4.
 2. [Current handoff](current/handoff.md) — completed evidence and honest
    deferred boundaries.
-3. [Phase 1 closeout](current/delivery-plan.md) — the final quality-regression
-   context and accepted exit criteria before Phase 2 planning.
+3. [Phase 2 planning handoff](current/phase-2-planning.md) — the bounded
+   starting point for selecting the next vertical slice.
 
 That is the complete default context. Load another document only when the task
 requires its specific detail.
@@ -30,6 +30,7 @@ requires its specific detail.
 | Accepted canonical Gate 5 contract language | [Gate 5 contract vocabulary](current/gate-05-contract-vocabulary.md) |
 | Executable Effect Schema candidates and fixtures | [V2 contracts package](../../packages/v2-contracts/README.md) |
 | Phase 1 implementation scope and exit criteria | [Phase 1 closeout](current/delivery-plan.md); detailed narrative is archived |
+| Phase 2 planning and first-slice selection | [Phase 2 planning handoff](current/phase-2-planning.md) |
 | Phase 1 production UI implementation | Accepted [visual style guide](current/visual-style-guide.md), [UI component library](current/ui-component-library.md), and [UI build contract](current/ui-build-contract.md) |
 | Why Phase 0.5 made a specific visual decision | [Phase 0.5 design-system archive](archive/phase-0.5/README.md) — historical only; do not use for active implementation authority |
 | Accepted interaction evidence or candidate contracts | The relevant document under [accepted gates](gates/README.md) |
@@ -56,9 +57,10 @@ completed regrade is recorded in the
 [Gate 7 walkthrough and decision log](archive/phase-1-foundation/gate-07-walkthrough.md) freezes
 the selected V2 reference.
 
-Phase 1 now has its local-web and host-verification evidence recorded. The
-next session runs one final deletion-oriented code-quality regression, closes
-Phase 1 against its accepted criteria, and only then begins Phase 2 planning.
+Phase 1 is closed: the local-web and host-verification evidence are recorded,
+the branch-wide quality regression has landed its bounded fixes, and the
+unrelated desktop work is now on `main`. The next session plans Phase 2 and
+selects one bounded vertical slice before implementation begins.
 
 ## Context Rules
 

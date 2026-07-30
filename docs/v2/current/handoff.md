@@ -1,6 +1,6 @@
-# Phase 1 Backend and Infrastructure Readiness Handoff
+# Phase 2 Planning Handoff
 
-Status: **Phase 1 implementation and host-verification complete — final quality regression and closeout next**
+Status: **Phase 1 closed — select one Phase 2 vertical slice before implementation**
 
 ## Completed Host-Verification Bundle
 
@@ -13,14 +13,24 @@ Corrected download deployment, current rig-worker liveness, and scheduled SSD
 backup with restore drill are all verified. No Solar capture or device command
 was issued during this bundle.
 
-## Next Session: Final Quality Regression, Then Phase 1 Closeout
+## Phase 1 Closeout
 
-Run one final regression review against `main`, focused on code quality and
-unintended local-web complexity. It is deletion-oriented and does not reopen
-accepted V2 product semantics or authorize new features. Record any resulting
-bounded fixes, then close Phase 1 against its accepted delivery criteria before
-planning Phase 2. The previous [Phase 1 complexity audit](phase-1-complexity-audit.md)
-is completed context for that review.
+The branch-wide regression against `main` is complete. It retained the accepted
+V2 product semantics, fixed the malformed Library asset path, made the
+local-web shell explicit instead of copy-patched, and removed whitespace noise.
+Local-web build/tests pass **59/59**, contracts build/tests pass **179/179**,
+and desktop build/tests pass **182/182**. The local-web Designer re-review
+passed at wide, compact, and 390 px phone widths.
+
+`4308796` is now on `main`; `v2` has no unique desktop or SDK paths. Phase 1
+does not authorize further cleanup by default.
+
+## Next Session: Plan One Phase 2 Slice
+
+Use [Phase 2 planning](phase-2-planning.md) to select one vertical slice. Do
+not infer authorization for a physical Solar run, processing workflow,
+off-host recovery, storage-health operations, or new browser controls from
+this handoff alone.
 
 The user accepts NVMe live/recent data plus the SSD backup as current
 same-host resilience. Off-host recovery is not current Phase 1 scope.

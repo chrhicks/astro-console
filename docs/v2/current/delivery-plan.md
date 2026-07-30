@@ -25,7 +25,11 @@ This short record is the active boundary.
 
 ## Next Work
 
-The next activity is a bounded
-[Phase 1 complexity audit](phase-1-complexity-audit.md), not a feature
-extension. Preserve accepted product semantics and remove complexity only when
-the delivered behavior and proof boundary remain clearer.
+Phase 1's branch-wide quality regression is complete. Its bounded fixes are
+`7eadf38` (local-web shell and malformed Library path) and `c969352`
+(whitespace cleanup); the unrelated desktop commit `4308796` now belongs to
+`main`, leaving `v2` V2-only.
+
+Continue with the [Phase 2 planning handoff](phase-2-planning.md). Select one
+vertical slice before implementation; do not treat this closeout as authority
+to begin every deferred Phase 1 boundary at once.
