@@ -1,7 +1,7 @@
 ## Astro Console
 
 This project is a hobby project amongst a few Astrophotography nerds. It is not a large enterprise production system. It doesn't require 'hardened' and 'secure' and 'safe' everything. Focus on what is strictly required to work through the
-phases of the project. Avoid distractions about 'what could happen' and 'possible risk'. Document these concerns only 
+phases of the project. Avoid distractions about 'what could happen' and 'possible risk'. Document these concerns only
 and allow the user to decide what needs to be done by occasionally.
 
 Think, 'What can i do to trim this code/feature down yet preserve the primary functionality?' as a way to help you make
@@ -87,7 +87,7 @@ in-app browser has no claimable tab.
 
 ## Getting Started
 
-1. Start your session by reading your memory summary in `executor` (**continuum** tool). 
+1. Start your session by reading your memory summary in `executor` (**continuum** tool).
 
 Keep your memory updated throughout this session
 - Emerging requirements, future troubleshooting reminders, discoveries

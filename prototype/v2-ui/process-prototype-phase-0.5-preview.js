@@ -261,4 +261,3 @@
   window.ProcessPrototype = Object.freeze({ scenarios, steps, operationControls, dataSources });
   render();
 })();
-
