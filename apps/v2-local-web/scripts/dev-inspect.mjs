@@ -6,9 +6,10 @@ const appRoot = resolve(import.meta.dirname, "..")
 const requestedClient = process.argv.find((argument) => argument.startsWith("--client="))?.slice("--client=".length) ?? "owner"
 if (!["owner", "friend", "phone"].includes(requestedClient)) throw new Error("--client must be owner, friend, or phone")
 const profile = resolve(appRoot, `.astro-local-web/inspect-chrome-profile-${requestedClient}`)
+const database = resolve(appRoot, `.astro-local-web/inspect-state-${requestedClient}.sqlite`)
 const chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 mkdirSync(profile, { recursive: true })
-const server = spawn(process.execPath, ["--experimental-strip-types", "src/server.ts"], { cwd: appRoot, env: { ...process.env, ASTRO_LOCAL_WEB_CLIENT: requestedClient }, stdio: ["inherit", "pipe", "pipe"] })
+const server = spawn(process.execPath, ["--experimental-strip-types", "src/server.ts"], { cwd: appRoot, env: { ...process.env, ASTRO_LOCAL_WEB_CLIENT: requestedClient, ASTRO_LOCAL_WEB_FIXTURE: "m27", ASTRO_LOCAL_WEB_DB: database }, stdio: ["inherit", "pipe", "pipe"] })
 let browser
 const stop = () => { if (browser) browser.kill(); server.kill() }
 process.on("SIGINT", stop); process.on("SIGTERM", stop)

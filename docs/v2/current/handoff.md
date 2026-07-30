@@ -26,9 +26,13 @@ same-host resilience. Off-host recovery is not current Phase 1 scope.
 ## Verified Baseline
 
 - `apps/v2-local-web` type checks and its SQLite/HTTP/SSE/worker/filesystem
-  integration suite pass **58/58**. The suite covers the retained local-web
-  foundation, Process Save/publisher boundary, and the deterministic M27
-  fixture without creating generic hardware work.
+  integration suite pass **59/59**. The suite covers the retained local-web
+  foundation, Process Save/publisher boundary, and the deliberately installed
+  deterministic M27 fixture without creating generic hardware work. Normal
+  origin, rig-worker, Solar CLI, publisher, and processor database opening
+  runs migrations without seeding that fixture's Plan, Library, or Process data.
+  A fresh origin instead reports a truthful `unavailable` plan projection until
+  an authorized workflow installs real state.
 - Process Save is a service API only: app-owned source IDs resolve under
   configured roots, selected bytes are checksummed and atomically promoted,
   and Asset/provenance/receipt/`PublishAsset` records commit together. Recorded
