@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **Gate 7 and Phase 0.5 accepted; Phase 1 closed; Phase 2 planning prepared**
+Status: **Phases 0, 0.5, and 1 complete; Phase 2 is next in the durable V2.0 roadmap**
 
 This directory is organized to keep normal working context small. Do not read
 the entire V2 tree by default.
@@ -13,8 +13,10 @@ Read these in order when starting or resuming V2 work:
    rules accepted through Gate 4.
 2. [Current handoff](current/handoff.md) — completed evidence and honest
    deferred boundaries.
-3. [Phase 2 planning handoff](current/phase-2-planning.md) — the bounded
-   starting point for selecting the next vertical slice.
+3. [V2 delivery plan](current/delivery-plan.md) — durable end-to-end V2.0
+   scope and phase exit criteria.
+4. [Phase 2 implementation planning](current/phase-2-planning.md) — the next
+   phase's bounded slice method.
 
 That is the complete default context. Load another document only when the task
 requires its specific detail.
@@ -29,8 +31,9 @@ requires its specific detail.
 | Accepted Gate 5 consequential actions | [Gate 5 action map](current/gate-05-action-map.md) |
 | Accepted canonical Gate 5 contract language | [Gate 5 contract vocabulary](current/gate-05-contract-vocabulary.md) |
 | Executable Effect Schema candidates and fixtures | [V2 contracts package](../../packages/v2-contracts/README.md) |
-| Phase 1 implementation scope and exit criteria | [Phase 1 closeout](current/delivery-plan.md); detailed narrative is archived |
-| Phase 2 planning and first-slice selection | [Phase 2 planning handoff](current/phase-2-planning.md) |
+| End-to-end V2.0 scope, phases, and exit criteria | [V2 delivery plan](current/delivery-plan.md) |
+| Phase 2 slice selection and execution method | [Phase 2 implementation planning](current/phase-2-planning.md) |
+| Ideas outside V2.0 | [Post-V2.0 notes](current/v2-post-v2.0-notes.md) |
 | Phase 1 production UI implementation | Accepted [visual style guide](current/visual-style-guide.md), [UI component library](current/ui-component-library.md), and [UI build contract](current/ui-build-contract.md) |
 | Why Phase 0.5 made a specific visual decision | [Phase 0.5 design-system archive](archive/phase-0.5/README.md) — historical only; do not use for active implementation authority |
 | Accepted interaction evidence or candidate contracts | The relevant document under [accepted gates](gates/README.md) |
@@ -58,9 +61,9 @@ completed regrade is recorded in the
 the selected V2 reference.
 
 Phase 1 is closed: the local-web and host-verification evidence are recorded,
-the branch-wide quality regression has landed its bounded fixes, and the
-unrelated desktop work is now on `main`. The next session plans Phase 2 and
-selects one bounded vertical slice before implementation begins.
+and the branch-wide quality regression has landed its bounded fixes. The
+durable delivery plan now carries V2.0 forward; Phase 2 (Plan and Managed Runs)
+is next and proceeds in bounded vertical slices.
 
 ## Context Rules
 
