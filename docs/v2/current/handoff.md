@@ -1,6 +1,6 @@
 # Phase 1 Backend and Infrastructure Readiness Handoff
 
-Status: **Phase 1 host-verification bundle complete — 2026-07-29**
+Status: **Phase 1 implementation and host-verification complete — final quality regression and closeout next**
 
 ## Completed Host-Verification Bundle
 
@@ -13,12 +13,14 @@ Corrected download deployment, current rig-worker liveness, and scheduled SSD
 backup with restore drill are all verified. No Solar capture or device command
 was issued during this bundle.
 
-## Next: Complexity Audit
+## Next Session: Final Quality Regression, Then Phase 1 Closeout
 
-The next bounded activity is the
-[Phase 1 complexity audit](phase-1-complexity-audit.md). It is a
-deletion-oriented review of code, deployment, tests, and active documentation;
-it does not reopen accepted V2 product semantics or authorize new features.
+Run one final regression review against `main`, focused on code quality and
+unintended local-web complexity. It is deletion-oriented and does not reopen
+accepted V2 product semantics or authorize new features. Record any resulting
+bounded fixes, then close Phase 1 against its accepted delivery criteria before
+planning Phase 2. The previous [Phase 1 complexity audit](phase-1-complexity-audit.md)
+is completed context for that review.
 
 The user accepts NVMe live/recent data plus the SSD backup as current
 same-host resilience. Off-host recovery is not current Phase 1 scope.

@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **Gate 7 and Phase 0.5 accepted; Phase 1 local-web and host-verification bundle complete; complexity audit next**
+Status: **Gate 7 and Phase 0.5 accepted; Phase 1 implementation and host-verification complete; final quality regression and closeout next**
 
 This directory is organized to keep normal working context small. Do not read
 the entire V2 tree by default.
@@ -13,8 +13,8 @@ Read these in order when starting or resuming V2 work:
    rules accepted through Gate 4.
 2. [Current handoff](current/handoff.md) — completed evidence and honest
    deferred boundaries.
-3. [Phase 1 complexity audit](current/phase-1-complexity-audit.md) — the
-   bounded next review, before any further implementation.
+3. [Phase 1 closeout](current/delivery-plan.md) — the final quality-regression
+   context and accepted exit criteria before Phase 2 planning.
 
 That is the complete default context. Load another document only when the task
 requires its specific detail.
@@ -57,8 +57,8 @@ completed regrade is recorded in the
 the selected V2 reference.
 
 Phase 1 now has its local-web and host-verification evidence recorded. The
-next activity is a deletion-oriented complexity audit; it does not reopen the
-accepted product model or authorize new features.
+next session runs one final deletion-oriented code-quality regression, closes
+Phase 1 against its accepted criteria, and only then begins Phase 2 planning.
 
 ## Context Rules
 
