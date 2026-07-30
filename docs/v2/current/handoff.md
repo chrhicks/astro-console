@@ -27,14 +27,16 @@ does not authorize further cleanup by default.
 
 ## Next Session: Plan One Phase 2 Slice
 
-The first Phase 2 slice is complete: [Multi-Sequence Draft and Deterministic
-Validation](phase-2-planning.md#first-slice-multi-sequence-draft-and-deterministic-validation).
-It proves the fake-first Plan persistence and projection boundary only. The
-next packet should accept a persisted validated draft as an immutable
-`RunDefinition`, still with a fake executor and without device work. Do not
-infer authorization for a physical Solar run, processing workflow, off-host
-recovery, storage-health operations, or browser controls beyond that accepted
-slice.
+The first three Phase 2 slices are complete: [Multi-Sequence Draft and
+Deterministic Validation](phase-2-planning.md#first-slice-multi-sequence-draft-and-deterministic-validation),
+[Immutable RunDefinition Acceptance](phase-2-planning.md#second-slice-immutable-rundefinition-acceptance),
+and [Bounded Fake Execution](phase-2-planning.md#third-slice-bounded-fake-execution-of-an-accepted-rundefinition).
+They prove deterministic Plan persistence/projection, a revisioned immutable
+RunDefinition snapshot, and a two-sequence fake executor through completion.
+The next packet should select the smallest missing Phase 2 managed-run outcome
+without inferring a device or provider boundary. Do not infer authorization for
+a physical Solar run, processing workflow, off-host recovery, storage-health
+operations, or browser controls beyond that accepted slice.
 
 The user accepts NVMe live/recent data plus the SSD backup as current
 same-host resilience. Off-host recovery is not current Phase 1 scope.
@@ -42,13 +44,25 @@ same-host resilience. Off-host recovery is not current Phase 1 scope.
 ## Verified Baseline
 
 - `apps/v2-local-web` type checks and its SQLite/HTTP/SSE/worker/filesystem
-  integration suite pass **59/59**. The suite covers the retained local-web
+  integration suite pass **63/63**. The suite covers the retained local-web
   foundation, Process Save/publisher boundary, and the deliberately installed
   deterministic M27 fixture without creating generic hardware work. Normal
   origin, rig-worker, Solar CLI, publisher, and processor database opening
   runs migrations without seeding that fixture's Plan, Library, or Process data.
   A fresh origin instead reports a truthful `unavailable` plan projection until
   an authorized workflow installs real state.
+- A ready persisted deterministic `ObservingPlan` can be accepted once as an
+  immutable SQLite `RunDefinition` snapshot with a `fake` executor marker.
+  The service revision-guards and idempotently replays acceptance, publishes
+  one authoritative SSE update, and does not create an outbox record, active
+  run, provider call, or device command. Later draft revisions do not alter
+  the accepted snapshot; this is acceptance evidence, never execution proof.
+- `StartRunFromPlan` resolves the accepted definition and, for the `fake`
+  executor only, starts a controller-owned durable run at `preflight`. The
+  deterministic service transition advances both sequences through `acquire`,
+  `capture`, and `verify` to `completed`, preserving run revision, sequence
+  progress, and SSE truth through restart. This proves a fake executor only:
+  it creates no outbox work, provider call, capture evidence, or device command.
 - Process Save is a service API only: app-owned source IDs resolve under
   configured roots, selected bytes are checksummed and atomically promoted,
   and Asset/provenance/receipt/`PublishAsset` records commit together. Recorded

@@ -10,6 +10,7 @@ import type { DownloadGrantIssuer } from "./r2-download-grant.ts"
 import { configuredDownloadGrantIssuer } from "./download-grant-config.ts"
 import { applicationShell } from "./application-shell.ts"
 const StartRun = Schema.TaggedStruct("StartRunFromPlan", { planId: Schema.NonEmptyString, expectedPlanRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), expectedLeaseRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), idempotencyKey: Schema.NonEmptyString })
+const AcceptRunDefinition = Schema.TaggedStruct("AcceptRunDefinition", { planId: Schema.NonEmptyString, expectedPlanRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), expectedLeaseRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), idempotencyKey: Schema.NonEmptyString })
 const SavePlanDraft = Schema.Struct({
   planId: Schema.NonEmptyString,
   expectedPlanRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -56,22 +57,25 @@ export function createJwksKeyResolver(config: { readonly url: string; readonly c
 async function verifiedAccessClaims(config: { readonly issuer: string; readonly audience: string; readonly keyResolver: JwksKeyResolver }, request: IncomingMessage | undefined) { const token = accessToken(request); if (token === undefined || !validClaims(config, token.claims)) return undefined; const key = await config.keyResolver.resolve(token.header.kid); return key !== undefined && verifyAccessToken(token, key) ? token.claims : undefined }
 export function createProductionAccessAdmission(config: { readonly issuer: string; readonly audience: string; readonly keyResolver: JwksKeyResolver; readonly databasePath: string; readonly clientContext: "desktop" | "phone"; readonly bootstrap?: typeof MembershipBootstrap.Type; readonly bootstrapResolver?: MembershipBootstrapResolver }): RequestAdmission { const staticPolicy = config.bootstrap === undefined ? undefined : membershipPolicy(config.bootstrap); if (staticPolicy === undefined && config.bootstrapResolver === undefined) throw new Error("Production admission requires a membership bootstrap policy"); return async (request) => { const claims = await verifiedAccessClaims(config, request); if (!claims || claims.email === undefined) return undefined; const policy = config.bootstrapResolver?.load() ?? staticPolicy; if (policy === undefined) return undefined; const entry = policy.find((item) => item.email === normalizedEmail(claims.email)); if (!entry) return undefined; const membership = new DatabaseSync(config.databasePath); try { membership.exec("BEGIN IMMEDIATE"); membership.prepare("INSERT INTO memberships VALUES (?,?,?) ON CONFLICT(external_subject) DO UPDATE SET person_id=excluded.person_id,role=excluded.role").run(claims.sub, entry.personId, entry.role); const raw: unknown = membership.prepare("SELECT person_id,role FROM memberships WHERE external_subject=?").get(claims.sub); const stored = Schema.decodeUnknownSync(MembershipRow)(raw); membership.exec("COMMIT"); if (stored.person_id !== entry.personId || stored.role !== entry.role) return undefined; return { personId: stored.person_id, clientId: `access:${claims.sub}`, role: stored.role, capability: stored.role === "owner" && config.clientContext === "desktop" ? "controlCapable" : "readOnly" } } catch { try { membership.exec("ROLLBACK") } catch {} return undefined } finally { membership.close() } } }
 export const createLocalFixtureAdmission = (identity: LocalIdentity): RequestAdmission => () => ({ ...identity, role: identity.role ?? (identity.personId === "owner-chicks" ? "owner" : "viewer") })
-type Run = { readonly id: string; readonly revision: number; readonly phase: "capture" | "paused" | "stopped"; readonly target: string; readonly progress: number }
+type RunPhase = "preflight" | "acquire" | "capture" | "verify" | "completed" | "paused" | "stopped"
+type Run = { readonly id: string; readonly revision: number; readonly phase: RunPhase; readonly target: string; readonly progress: number; readonly sourceDefinitionId?: string; readonly activeSequenceIndex?: number; readonly completedSequenceCount?: number }
 type Evidence = { readonly frameId: string; readonly capturedAt: string; readonly quality: "verified" | "warning"; readonly desired: string; readonly solved: string; readonly uncertaintyArcsec: number; readonly stack: { readonly availability: "available" | "unavailable"; readonly observedAt: string; readonly frameCount: number; readonly message: string }; readonly correction: { readonly state: "automatic" | "exhausted"; readonly evidence: string; readonly bound: string; readonly protection: string; readonly action: string } }
 type Snapshot = { readonly snapshotVersion: number; readonly eventCursor: number; readonly generatedAt: string; readonly identity: LocalIdentity; readonly plan: { readonly id: string; readonly revision: number; readonly target: string; readonly readiness: PlanReadiness | "unavailable"; readonly runEligible: boolean }; readonly control: { readonly holderClientId: string | null; readonly revision: number; readonly state: "held" | "reconnecting" | "unheld"; readonly reconnectGraceUntil?: string; readonly pendingRequests: ReadonlyArray<{ readonly clientId: string; readonly personId: string }> }; readonly run: Run | null; readonly dispatch: "none" | "pending" | "dispatched" | "unavailable" | "failed"; readonly dispatchAction: "none" | "pause" | "resume" | "stop"; readonly evidence: Evidence; readonly connection: "current" }
 type ControlEvent = "ControlRequested" | "ControlGranted" | "OwnerTookControl" | "ControlReconnectGraceStarted" | "ControlReconnected" | "ControlGraceExpired" | "PauseAccepted" | "ResumeAccepted" | "RunStopped"
-type FailureReason = "Unauthenticated" | "FreshnessConflict" | "PlanUnavailable" | "ClientReadOnly" | "ControlLeaseLost" | "OwnerRequired" | "ControlRequestUnavailable" | "ActiveRunConflict" | "InvalidInput"
+type FailureReason = "Unauthenticated" | "FreshnessConflict" | "PlanUnavailable" | "PlanNotReady" | "RunDefinitionAlreadyAccepted" | "ClientReadOnly" | "ControlLeaseLost" | "OwnerRequired" | "ControlRequestUnavailable" | "ActiveRunConflict" | "InvalidInput"
 type CommandResult = { readonly outcome: "accepted"; readonly eventType?: ControlEvent; readonly message?: string; readonly run?: Run; readonly snapshot: Snapshot } | { readonly outcome: "rejected"; readonly reason: FailureReason; readonly message: string }
 type PlanReadiness = "ready" | "readyWithLimitations" | "blocked"
 type DraftSequence = typeof SavePlanDraft.Type["sequences"][number]
 type PlanProjection = { readonly planId: string; readonly revision: number; readonly readiness: PlanReadiness; readonly readinessSummary: string; readonly limitations: ReadonlyArray<string>; readonly sequences: ReadonlyArray<DraftSequence & { readonly viability: "viable" | "limited" | "blocked" }> }
 type SavePlanDraftResult = { readonly outcome: "accepted"; readonly plan: PlanProjection; readonly snapshot: Snapshot } | { readonly outcome: "rejected"; readonly reason: FailureReason; readonly message: string }
+type RunDefinition = { readonly id: string; readonly sourcePlanId: string; readonly sourcePlanRevision: number; readonly acceptedAt: string; readonly executor: "fake" | "fixture"; readonly plan: PlanProjection }
+type AcceptRunDefinitionResult = { readonly outcome: "accepted"; readonly runDefinition: RunDefinition; readonly snapshot: Snapshot } | { readonly outcome: "rejected"; readonly reason: FailureReason; readonly message: string }
 type LibraryRole = "original" | "linearMaster" | "intermediate" | "final" | "preview" | "diagnostic"
 type LibrarySort = "capturedAtDescending" | "sharpestFirst" | "recentlyUpdated"
 
 const StoredEvidence = Schema.Struct({ frameId: Schema.String, capturedAt: Schema.String, quality: Schema.Literals(["verified", "warning"]), desired: Schema.String, solved: Schema.String, uncertaintyArcsec: Schema.Number, stack: Schema.optionalKey(Schema.Struct({ availability: Schema.Literals(["available", "unavailable"]), observedAt: Schema.String, frameCount: Schema.Int, message: Schema.String })), correction: Schema.Struct({ state: Schema.Literals(["automatic", "exhausted"]), evidence: Schema.String, bound: Schema.String, protection: Schema.String, action: Schema.String }) })
 const AdapterObservation = Schema.Struct({ frameId: Schema.NonEmptyString, capturedAt: Schema.NonEmptyString, quality: Schema.Literals(["verified", "warning"]), desired: Schema.NonEmptyString, solved: Schema.NonEmptyString, uncertaintyArcsec: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)), correctionState: Schema.Literals(["automatic", "exhausted"]), correctionEvidence: Schema.NonEmptyString, correctionBound: Schema.NonEmptyString, protection: Schema.NonEmptyString })
-const StoredState = Schema.Struct({ snapshotVersion: Schema.Int, eventCursor: Schema.Int, planRevision: Schema.Int, leaseRevision: Schema.Int, leaseHolder: Schema.NullOr(Schema.String), leaseState: Schema.Literals(["held", "reconnecting", "unheld"]), reconnectGraceUntil: Schema.NullOr(Schema.String), run: Schema.NullOr(Schema.Struct({ id: Schema.String, revision: Schema.Int, phase: Schema.Literals(["capture", "paused", "stopped"]), target: Schema.String, progress: Schema.Number })), evidence: StoredEvidence })
+const StoredState = Schema.Struct({ snapshotVersion: Schema.Int, eventCursor: Schema.Int, planRevision: Schema.Int, leaseRevision: Schema.Int, leaseHolder: Schema.NullOr(Schema.String), leaseState: Schema.Literals(["held", "reconnecting", "unheld"]), reconnectGraceUntil: Schema.NullOr(Schema.String), run: Schema.NullOr(Schema.Struct({ id: Schema.String, revision: Schema.Int, phase: Schema.Literals(["preflight", "acquire", "capture", "verify", "completed", "paused", "stopped"]), target: Schema.String, progress: Schema.Number, sourceDefinitionId: Schema.optionalKey(Schema.String), activeSequenceIndex: Schema.optionalKey(Schema.Int), completedSequenceCount: Schema.optionalKey(Schema.Int) })), evidence: StoredEvidence })
 const StoredRequest = Schema.Struct({ client_id: Schema.String, person_id: Schema.String })
 const ControlRequestRow = Schema.Struct({ client_id: Schema.String })
 const StoredRow = Schema.Struct({ value: Schema.String })
@@ -89,20 +93,23 @@ const LibraryAssetRow = Schema.Struct({ asset_id: Schema.String, revision: Schem
 const LibraryDetail = Schema.Struct({ assetId: Schema.String, revision: Schema.Int, role: LibraryRole, format: Schema.Literals(["cameraRaw", "fits", "tiff", "png", "jpeg"]), availability: Schema.Literals(["availableLocally", "preparing", "published", "expiring", "expired", "republishing", "temporarilyUnavailable", "failedPublication"]), capturedAt: Schema.String, comparisonGroupId: Schema.String, lineage: Schema.Struct({ sourceAssetIds: Schema.Array(Schema.String), runId: Schema.String, solveAttemptId: Schema.String }), representations: Schema.Array(Schema.Struct({ label: Schema.String, state: Schema.String })) })
 const DownloadAssetRow = Schema.Struct({ asset_id: Schema.String, role: LibraryRole, format: Schema.Literals(["cameraRaw", "fits", "tiff", "png", "jpeg"]), availability: Schema.Literals(["availableLocally", "preparing", "published", "expiring", "expired", "republishing", "temporarilyUnavailable", "failedPublication"]), state: Schema.String, object_key: Schema.String })
 const PlanWorkspace = Schema.Struct({ planId: Schema.String, revision: Schema.Int, readiness: Schema.Literals(["ready", "readyWithLimitations", "blocked"]), readinessSummary: Schema.String, limitations: Schema.Array(Schema.String), sequences: Schema.Array(Schema.Struct({ sequenceId: Schema.String, target: Schema.String, capture: Schema.String, acquisition: Schema.String, stopCondition: Schema.String, window: Schema.Struct({ startsAt: Schema.String, endsAt: Schema.String, usableMinutes: Schema.Int, peakAltitudeDeg: Schema.Number, horizonClearanceDeg: Schema.Number }), estimatedMinutes: Schema.Int, storageForecastMb: Schema.Int, horizon: Schema.Literals(["clear", "limited", "blocked", "missing"]), storage: Schema.Literals(["available", "limited", "blocked", "missing"]), viability: Schema.Literals(["viable", "limited", "blocked"]) })) })
+const StoredRunDefinition = Schema.Struct({ id: Schema.String, sourcePlanId: Schema.String, sourcePlanRevision: Schema.Int, acceptedAt: Schema.String, executor: Schema.Literals(["fake", "fixture"]), plan: PlanWorkspace })
 const LegacyPlanWorkspace = Schema.Struct({ planId: Schema.Literal("plan-m27"), revision: Schema.Int, target: Schema.NonEmptyString, readiness: Schema.Literal("ready"), readinessSummary: Schema.String, observingWindow: Schema.Struct({ startsAt: Schema.NonEmptyString, endsAt: Schema.NonEmptyString, usableMinutes: Schema.Int, peakAltitudeDeg: Schema.Finite, horizonClearanceDeg: Schema.Finite }), sequences: Schema.Array(Schema.Struct({ sequenceId: Schema.NonEmptyString, order: Schema.optionalKey(Schema.Int), target: Schema.NonEmptyString, capture: Schema.NonEmptyString, acquisition: Schema.NonEmptyString, stopCondition: Schema.NonEmptyString, viability: Schema.Literal("viable") })) })
 const ObservingPlanRow = Schema.Struct({ plan_id: Schema.String, revision: Schema.Int, projection: Schema.String, run_eligible: Schema.Int })
 const PlanReceiptRow = Schema.Struct({ response: Schema.String })
+const RunDefinitionRow = Schema.Struct({ run_definition_id: Schema.String, source_plan_id: Schema.String, source_plan_revision: Schema.Int, definition: Schema.String, accepted_at: Schema.String })
+const RunDefinitionReceiptRow = Schema.Struct({ response: Schema.String })
 const ProcessWorkspace = Schema.Struct({ sessionId: Schema.String, revision: Schema.Int, phase: Schema.Literal("develop"), sourceAssetId: Schema.String, sourceLabel: Schema.String, preview: Schema.Struct({ label: Schema.String, state: Schema.Literal("synchronized"), evidence: Schema.String }), history: Schema.Array(Schema.Struct({ stepId: Schema.String, label: Schema.String, state: Schema.Literals(["applied", "current"]), tool: Schema.String })), checkpoint: Schema.Struct({ stepId: Schema.String, label: Schema.String, protectedBy: Schema.String }), failure: Schema.Struct({ state: Schema.Literal("none"), retryScope: Schema.String }), protection: Schema.String })
 const ReceiptRow = Schema.Struct({ response: Schema.String })
 const StoredIdentity = Schema.Struct({ personId: Schema.String, clientId: Schema.String, capability: Schema.Literals(["controlCapable", "readOnly"]), role: Schema.optionalKey(Schema.Literals(["owner", "viewer"])) })
-const StoredRun = Schema.Struct({ id: Schema.String, revision: Schema.Int, phase: Schema.Literals(["capture", "paused", "stopped"]), target: Schema.String, progress: Schema.Number })
+const StoredRun = Schema.Struct({ id: Schema.String, revision: Schema.Int, phase: Schema.Literals(["preflight", "acquire", "capture", "verify", "completed", "paused", "stopped"]), target: Schema.String, progress: Schema.Number, sourceDefinitionId: Schema.optionalKey(Schema.String), activeSequenceIndex: Schema.optionalKey(Schema.Int), completedSequenceCount: Schema.optionalKey(Schema.Int) })
 const StoredSnapshot = Schema.Struct({ snapshotVersion: Schema.Int, eventCursor: Schema.Int, generatedAt: Schema.String, identity: StoredIdentity, plan: Schema.Struct({ id: Schema.String, revision: Schema.Int, target: Schema.String, readiness: Schema.Literals(["ready", "unavailable"]) }), control: Schema.Struct({ holderClientId: Schema.NullOr(Schema.String), revision: Schema.Int, state: Schema.Literals(["held", "reconnecting", "unheld"]), reconnectGraceUntil: Schema.optionalKey(Schema.String), pendingRequests: Schema.Array(Schema.Struct({ clientId: Schema.String, personId: Schema.String })) }), run: Schema.NullOr(StoredRun), dispatch: Schema.Literals(["none", "pending", "dispatched", "unavailable", "failed"]), dispatchAction: Schema.Literals(["none", "pause", "resume", "stop"]), evidence: StoredEvidence, connection: Schema.Literal("current") })
 const CommandResultSchema = Schema.Union([
   Schema.Struct({ outcome: Schema.Literal("accepted"), eventType: Schema.optionalKey(Schema.Literals(["ControlRequested", "ControlGranted", "OwnerTookControl", "ControlReconnectGraceStarted", "ControlReconnected", "ControlGraceExpired", "PauseAccepted", "ResumeAccepted", "RunStopped"])), message: Schema.optionalKey(Schema.String), run: Schema.optionalKey(StoredRun), snapshot: StoredSnapshot }),
-  Schema.Struct({ outcome: Schema.Literal("rejected"), reason: Schema.Literals(["Unauthenticated", "FreshnessConflict", "PlanUnavailable", "ClientReadOnly", "ControlLeaseLost", "OwnerRequired", "ControlRequestUnavailable", "ActiveRunConflict", "InvalidInput"]), message: Schema.String }),
+  Schema.Struct({ outcome: Schema.Literal("rejected"), reason: Schema.Literals(["Unauthenticated", "FreshnessConflict", "PlanUnavailable", "PlanNotReady", "RunDefinitionAlreadyAccepted", "ClientReadOnly", "ControlLeaseLost", "OwnerRequired", "ControlRequestUnavailable", "ActiveRunConflict", "InvalidInput"]), message: Schema.String }),
 ])
 const operatorMessages = {
-  Unauthenticated: "A verified member identity is required.", FreshnessConflict: "The plan changed. Review the current plan before running it.", PlanUnavailable: "No observation plan is installed.", ClientReadOnly: "Monitoring is read-only on this client.", ControlLeaseLost: "Control changed hands. Your command was not sent to the observatory; the accepted run continues.", OwnerRequired: "Only the owner can grant control.", ControlRequestUnavailable: "There is no current control request to grant.", ActiveRunConflict: "A run is already active. Return to Observe.", InvalidInput: "The service could not read that action.", ControlRequested: "Control request recorded. The owner can grant or decline it.", ControlGranted: "Control granted. The other desktop now owns control.", OwnerTookControl: "Control returned to the owner desktop.", ControlReconnectGraceStarted: "Reconnect grace is active; accepted work continues.", ControlReconnected: "Controller reconnected; control remains current.", ControlGraceExpired: "Reconnect grace expired. Control is unheld; accepted work continues.", PauseAccepted: "Pause was accepted by the service.", ResumeAccepted: "Resume was accepted by the service.", RunStopped: "Stop was accepted by the service. This run cannot be resumed.",
+  Unauthenticated: "A verified member identity is required.", FreshnessConflict: "The plan or control changed. Review the current plan before accepting it.", PlanUnavailable: "No observation plan is installed.", PlanNotReady: "The plan is not ready for RunDefinition acceptance.", RunDefinitionAlreadyAccepted: "This plan revision already has an immutable RunDefinition.", ClientReadOnly: "Monitoring is read-only on this client.", ControlLeaseLost: "Control changed hands. Your command was not sent to the observatory; the accepted run continues.", OwnerRequired: "Only the owner can accept a RunDefinition.", ControlRequestUnavailable: "There is no current control request to grant.", ActiveRunConflict: "A run is already active. Return to Observe.", InvalidInput: "The service could not read that action.", ControlRequested: "Control request recorded. The owner can grant or decline it.", ControlGranted: "Control granted. The other desktop now owns control.", OwnerTookControl: "Control returned to the owner desktop.", ControlReconnectGraceStarted: "Reconnect grace is active; accepted work continues.", ControlReconnected: "Controller reconnected; control remains current.", ControlGraceExpired: "Reconnect grace expired. Control is unheld; accepted work continues.", PauseAccepted: "Pause was accepted by the service.", ResumeAccepted: "Resume was accepted by the service.", RunStopped: "Stop was accepted by the service. This run cannot be resumed.",
 } satisfies Record<FailureReason | ControlEvent, string>
 
 export function createLocalWebService(databasePath = ":memory:", identityResolver: RequestAdmission = createLocalFixtureAdmission({ personId: "owner-chicks", clientId: "desktop-owner", capability: "controlCapable" }), brandAssetPath: URL = new URL("../assets/brand/alignment-aperture-light.svg", import.meta.url), processSaveStorage?: ProcessSaveStorage, downloadGrants?: DownloadGrantConfig, options: { readonly fixture?: "m27" } = {}) {
@@ -138,6 +145,7 @@ export function createLocalWebService(databasePath = ":memory:", identityResolve
     if (request.method === "GET" && url.pathname.startsWith("/api/library/assets/")) return libraryDetail(response, database, decodedAssetId(url.pathname.slice("/api/library/assets/".length)))
     if (request.method === "POST" && url.pathname === "/api/commands/start-run") { const input = await body(request); return input === BodyTooLarge ? json(response, 413, reject("InvalidInput").body) : runCommand(response, input, database, identity, publish) }
     if (request.method === "POST" && url.pathname === "/api/commands/save-plan-draft") { const input = await body(request); return input === BodyTooLarge ? json(response, 413, reject("InvalidInput").body) : savePlanDraftCommand(response, input, database, identity, publish) }
+    if (request.method === "POST" && url.pathname === "/api/commands/accept-run-definition") { const input = await body(request); return input === BodyTooLarge ? json(response, 413, reject("InvalidInput").body) : acceptRunDefinitionCommand(response, input, database, identity, publish) }
     if (request.method === "POST" && controlPaths.has(url.pathname)) { const input = await body(request); return input === BodyTooLarge ? json(response, 413, reject("InvalidInput").body) : controlCommand(response, input, database, url.pathname, identity, publish) }
     response.writeHead(404, responseHeaders("text/plain; charset=utf-8")).end()
   }
@@ -220,7 +228,8 @@ export function createLocalWebService(databasePath = ":memory:", identityResolve
   }
   const saveProcess = (raw: unknown, identity = projectionIdentity()) => processSaveStorage === undefined ? { outcome: "rejected" as const, reason: "InvalidInput" as const } : saveProcessOutputs(database, processSaveStorage, raw, identity)
   const cleanupSavedOrphans = () => processSaveStorage === undefined ? 0 : cleanupProcessOrphans(database, processSaveStorage)
-  return { database, handler, listen, close, ingestObservation, ingestSeestarStackPush, dispatchSolarTestOutbox, requestSolarTestStop, dispatchSolarTestStopOutbox, recordSolarStackEvidence, resolveSolarTestCliIdentity, submitSolarTestIntent, saveProcess, cleanupSavedOrphans }
+  const advanceFakeRun = () => { const result = advanceFakeRunState(database, projectionIdentity()); if (result?.event !== undefined) publish(result.event.type, result.event.cursor); return result?.body }
+  return { database, handler, listen, close, ingestObservation, ingestSeestarStackPush, dispatchSolarTestOutbox, requestSolarTestStop, dispatchSolarTestStopOutbox, recordSolarStackEvidence, resolveSolarTestCliIdentity, submitSolarTestIntent, saveProcess, cleanupSavedOrphans, advanceFakeRun }
 }
 
 export function installM27Fixture(database: DatabaseSync) { migrateState(database); seedLibrary(database); seedWorkspaces(database); ensureM27FixturePlan(database) }
@@ -251,7 +260,9 @@ function migrateDatabase(db: DatabaseSync) {
     () => {},
     () => db.exec("CREATE TABLE IF NOT EXISTS observing_plans (plan_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,projection TEXT NOT NULL); CREATE TABLE IF NOT EXISTS observing_plan_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id))"),
     () => { db.exec("ALTER TABLE observing_plans ADD COLUMN run_eligible INTEGER NOT NULL DEFAULT 0"); migrateLegacyPlanWorkspace(db) },
-    () => migrateLegacyPlanWorkspace(db)
+    () => migrateLegacyPlanWorkspace(db),
+    () => db.exec("CREATE TABLE IF NOT EXISTS run_definitions (run_definition_id TEXT PRIMARY KEY,source_plan_id TEXT NOT NULL,source_plan_revision INTEGER NOT NULL,definition TEXT NOT NULL,accepted_at TEXT NOT NULL,UNIQUE(source_plan_id,source_plan_revision)); CREATE TABLE IF NOT EXISTS run_definition_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id))"),
+    () => {}
   ] as const
   if (latest > migrations.length) throw new Error(`Database schema ${latest} is newer than this release`)
   for (let index = latest; index < migrations.length; index += 1) {
@@ -278,6 +289,8 @@ function ensureM27FixturePlan(db: DatabaseSync) {
     if (plan.planId !== "plan-m27") return
     db.prepare("INSERT OR IGNORE INTO observing_plans (plan_id,revision,projection) VALUES (?,?,?)").run(plan.planId, plan.revision, JSON.stringify(plan))
     db.prepare("UPDATE observing_plans SET run_eligible=1 WHERE plan_id=? AND revision=3").run(plan.planId)
+    const definition: RunDefinition = { id: "run-definition-m27-fixture", sourcePlanId: plan.planId, sourcePlanRevision: plan.revision, acceptedAt: "2026-07-25T00:00:00.000Z", executor: "fixture", plan }
+    db.prepare("INSERT OR IGNORE INTO run_definitions VALUES (?,?,?,?,?)").run(definition.id, definition.sourcePlanId, definition.sourcePlanRevision, JSON.stringify(definition), definition.acceptedAt)
   } catch {}
 }
 function migrateOutbox(db: DatabaseSync) { const raw: unknown = db.prepare("PRAGMA table_info(outbox)").all(); const columns = new Set(Schema.decodeUnknownSync(Schema.Array(SqliteColumnRow))(raw).map((column) => column.name)); for (const [name, definition] of [["claim_token", "TEXT"], ["claimed_by", "TEXT"], ["claim_until", "TEXT"], ["attempts", "INTEGER NOT NULL DEFAULT 0"], ["last_error", "TEXT"], ["retry_after", "TEXT"], ["ack_at", "TEXT"]] as const) if (!columns.has(name)) db.exec(`ALTER TABLE outbox ADD COLUMN ${name} ${definition}`) }
@@ -336,16 +349,53 @@ function acceptRun(db: DatabaseSync, input: typeof StartRun.Type, identity: Loca
   if (identity.capability === "readOnly") return reject("ClientReadOnly")
   if (current.plan.readiness !== "ready" || !current.plan.runEligible) return reject("PlanUnavailable")
   if (input.planId !== current.plan.id || input.expectedPlanRevision !== current.plan.revision || input.expectedLeaseRevision !== current.control.revision) return reject("FreshnessConflict")
+  if (current.control.holderClientId !== identity.clientId) return reject("ControlLeaseLost")
   if (current.run !== null) return reject("ActiveRunConflict")
+  const definitionRaw: unknown = db.prepare("SELECT definition FROM run_definitions WHERE source_plan_id=? AND source_plan_revision=?").get(input.planId, input.expectedPlanRevision)
+  const definitionRow = Schema.decodeUnknownSync(Schema.optional(Schema.Struct({ definition: Schema.String })))(definitionRaw)
+  if (definitionRow === undefined) return reject("PlanUnavailable")
+  const definition = Schema.decodeUnknownSync(StoredRunDefinition)(JSON.parse(definitionRow.definition))
   db.exec("BEGIN IMMEDIATE")
   try {
-    const next = { ...current, snapshotVersion: current.snapshotVersion + 1, eventCursor: current.eventCursor + 1, run: { id: "run-m27-001", revision: 1, phase: "capture" as const, target: current.plan.target, progress: 0 } }
+    const fixture = definition.executor === "fixture"
+    const run: Run = fixture ? { id: "run-m27-001", revision: 1, phase: "capture", target: definition.plan.sequences[0]?.target ?? current.plan.target, progress: 0, sourceDefinitionId: definition.id, activeSequenceIndex: 0, completedSequenceCount: 0 } : { id: `run-${definition.id}`, revision: 1, phase: "preflight", target: definition.plan.sequences[0]?.target ?? current.plan.target, progress: 0, sourceDefinitionId: definition.id, activeSequenceIndex: 0, completedSequenceCount: 0 }
+    const next = { ...current, snapshotVersion: current.snapshotVersion + 1, eventCursor: current.eventCursor + 1, run }
     commit(db, { snapshotVersion: next.snapshotVersion, eventCursor: next.eventCursor, run: next.run })
     const result: CommandResult = { outcome: "accepted", run: next.run, snapshot: snapshot(db, identity) }
     record(db, input.idempotencyKey, result, next.eventCursor, "RunStarted")
     db.exec("COMMIT")
     return { status: 202, body: result, event: { type: "RunStarted", cursor: next.eventCursor } }
   } catch (error) { db.exec("ROLLBACK"); throw error }
+}
+function advanceFakeRunState(db: DatabaseSync, identity: LocalIdentity) {
+  const current = state(db)
+  if (current.run?.sourceDefinitionId === undefined || current.run.activeSequenceIndex === undefined || current.run.completedSequenceCount === undefined) return undefined
+  const definitionRaw: unknown = db.prepare("SELECT definition FROM run_definitions WHERE run_definition_id=?").get(current.run.sourceDefinitionId)
+  const definitionRow = Schema.decodeUnknownSync(Schema.optional(Schema.Struct({ definition: Schema.String })))(definitionRaw)
+  if (definitionRow === undefined) return undefined
+  const definition = Schema.decodeUnknownSync(StoredRunDefinition)(JSON.parse(definitionRow.definition))
+  if (definition.executor !== "fake") return undefined
+  const transition = nextFakeRunTransition(current.run, definition)
+  if (transition === undefined) return undefined
+  db.exec("BEGIN IMMEDIATE")
+  try {
+    const cursor = current.eventCursor + 1
+    commit(db, { snapshotVersion: current.snapshotVersion + 1, eventCursor: cursor, run: transition.run })
+    const body = { outcome: "accepted" as const, run: transition.run, snapshot: snapshot(db, identity) }
+    db.prepare("INSERT INTO events VALUES (?,?,?)").run(cursor, transition.eventType, JSON.stringify(body))
+    db.exec("COMMIT")
+    return { body, event: { type: transition.eventType, cursor } }
+  } catch (error) { db.exec("ROLLBACK"); throw error }
+}
+function nextFakeRunTransition(run: Run, definition: typeof StoredRunDefinition.Type) {
+  if (run.phase === "preflight") return { eventType: "RunPreflightCompleted", run: { ...run, revision: run.revision + 1, phase: "acquire" as const, progress: 10 } }
+  if (run.phase === "acquire") return { eventType: "RunAcquireCompleted", run: { ...run, revision: run.revision + 1, phase: "capture" as const, progress: 25 } }
+  if (run.phase === "capture") return { eventType: "RunCaptureCompleted", run: { ...run, revision: run.revision + 1, phase: "verify" as const, progress: 75 } }
+  if (run.phase !== "verify") return undefined
+  const completed = run.completedSequenceCount + 1
+  const next = definition.plan.sequences[run.activeSequenceIndex + 1]
+  if (next === undefined) return { eventType: "RunCompleted", run: { ...run, revision: run.revision + 1, phase: "completed" as const, progress: 100, completedSequenceCount: completed } }
+  return { eventType: "RunSequenceVerified", run: { ...run, revision: run.revision + 1, phase: "preflight" as const, target: next.target, progress: Math.floor((completed / definition.plan.sequences.length) * 100), activeSequenceIndex: run.activeSequenceIndex + 1, completedSequenceCount: completed } }
 }
 
 function acceptControl(db: DatabaseSync, path: string, input: typeof ControlCommand.Type, identity: LocalIdentity) {
@@ -383,7 +433,7 @@ function commit(db: DatabaseSync, values: Record<string, unknown>) { const put =
 function persistEvidence(db: DatabaseSync, evidence: Evidence, identityResolver: () => LocalIdentity) { const current = state(db); db.exec("BEGIN IMMEDIATE"); try { commit(db, { evidence, snapshotVersion: current.snapshotVersion + 1, eventCursor: current.eventCursor + 1 }); db.prepare("INSERT INTO events VALUES (?,?,?)").run(current.eventCursor + 1, "ObservationProjected", JSON.stringify(evidence)); db.exec("COMMIT"); return snapshot(db, identityResolver()) } catch (error) { db.exec("ROLLBACK"); throw error } }
 function record(db: DatabaseSync, key: string, result: CommandResult, cursor: number, type: string) { db.prepare("INSERT INTO receipts VALUES (?,?)").run(key, JSON.stringify(result)); db.prepare("INSERT INTO events VALUES (?,?,?)").run(cursor, type, JSON.stringify(result)) }
 function receipt(db: DatabaseSync, key: string): CommandResult | undefined { const raw: unknown = db.prepare("SELECT response FROM receipts WHERE idempotency_key=?").get(key); const row = Schema.decodeUnknownSync(Schema.optional(ReceiptRow))(raw); if (row === undefined) return undefined; const parsed: unknown = JSON.parse(row.response); return Schema.decodeUnknownSync(CommandResultSchema)(parsed) }
-function reject(reason: FailureReason) { return { status: reason === "Unauthenticated" ? 401 : reason === "FreshnessConflict" || reason === "PlanUnavailable" || reason === "ActiveRunConflict" ? 409 : reason === "InvalidInput" ? 400 : 403, body: { outcome: "rejected" as const, reason, message: operatorMessages[reason] } } }
+function reject(reason: FailureReason) { return { status: reason === "Unauthenticated" ? 401 : reason === "FreshnessConflict" || reason === "PlanUnavailable" || reason === "PlanNotReady" || reason === "RunDefinitionAlreadyAccepted" || reason === "ActiveRunConflict" ? 409 : reason === "InvalidInput" ? 400 : 403, body: { outcome: "rejected" as const, reason, message: operatorMessages[reason] } } }
 function runCommand(response: ServerResponse, raw: unknown | undefined, db: DatabaseSync, identity: LocalIdentity, publish: (type: string, cursor: number) => void) { return decodedCommand(response, raw, StartRun, (input) => acceptRun(db, input, identity), publish) }
 function savePlanDraftCommand(response: ServerResponse, raw: unknown | undefined, db: DatabaseSync, identity: LocalIdentity, publish: (type: string, cursor: number) => void) {
   if (raw === undefined) return json(response, 400, reject("InvalidInput").body)
@@ -419,6 +469,49 @@ function acceptPlanDraft(db: DatabaseSync, input: typeof SavePlanDraft.Type, ide
     db.prepare("INSERT INTO events VALUES (?,?,?)").run(cursor, "PlanDraftSaved", JSON.stringify(result))
     db.exec("COMMIT")
     return { status: 202, body: result, event: { type: "PlanDraftSaved", cursor } }
+  } catch (error) { db.exec("ROLLBACK"); throw error }
+}
+function acceptRunDefinitionCommand(response: ServerResponse, raw: unknown | undefined, db: DatabaseSync, identity: LocalIdentity, publish: (type: string, cursor: number) => void) {
+  if (raw === undefined) return json(response, 400, reject("InvalidInput").body)
+  try {
+    const result = acceptRunDefinition(db, Schema.decodeUnknownSync(AcceptRunDefinition)(raw), identity)
+    if (result.event !== undefined) publish(result.event.type, result.event.cursor)
+    return json(response, result.status, result.body)
+  } catch { return json(response, 400, reject("InvalidInput").body) }
+}
+function acceptRunDefinition(db: DatabaseSync, input: typeof AcceptRunDefinition.Type, identity: LocalIdentity) {
+  if (!isOwner(identity)) return reject("OwnerRequired")
+  if (identity.capability === "readOnly") return reject("ClientReadOnly")
+  const semanticKey = createHash("sha256").update(JSON.stringify({ version: 1, planId: input.planId, expectedPlanRevision: input.expectedPlanRevision, expectedLeaseRevision: input.expectedLeaseRevision })).digest("hex")
+  const receiptRaw: unknown = db.prepare("SELECT response FROM run_definition_receipts WHERE idempotency_key=? AND owner_person_id=?").get(input.idempotencyKey, identity.personId)
+  const existing = Schema.decodeUnknownSync(Schema.optional(RunDefinitionReceiptRow))(receiptRaw)
+  if (existing !== undefined) {
+    const stored = Schema.decodeUnknownSync(Schema.Struct({ semanticKey: Schema.String, result: Schema.Unknown }))(JSON.parse(existing.response))
+    return stored.semanticKey === semanticKey ? { status: 200, body: stored.result } : reject("InvalidInput")
+  }
+  const current = state(db)
+  if (current.plan.readiness === "unavailable") return reject("PlanUnavailable")
+  if (input.planId !== current.plan.id || input.expectedPlanRevision !== current.plan.revision || input.expectedLeaseRevision !== current.control.revision) return reject("FreshnessConflict")
+  if (current.run !== null) return reject("ActiveRunConflict")
+  if (current.plan.readiness !== "ready") return reject("PlanNotReady")
+  const definitionRaw: unknown = db.prepare("SELECT run_definition_id,source_plan_id,source_plan_revision,definition,accepted_at FROM run_definitions WHERE source_plan_id=? AND source_plan_revision=?").get(input.planId, input.expectedPlanRevision)
+  if (Schema.decodeUnknownSync(Schema.optional(RunDefinitionRow))(definitionRaw) !== undefined) return reject("RunDefinitionAlreadyAccepted")
+  const planRaw: unknown = db.prepare("SELECT projection FROM observing_plans WHERE plan_id=? AND revision=?").get(input.planId, input.expectedPlanRevision)
+  const plan = Schema.decodeUnknownSync(Schema.Struct({ projection: Schema.String }))(planRaw)
+  const acceptedAt = new Date().toISOString()
+  const definition: RunDefinition = { id: `run-definition-${randomUUID()}`, sourcePlanId: input.planId, sourcePlanRevision: input.expectedPlanRevision, acceptedAt, executor: "fake", plan: Schema.decodeUnknownSync(PlanWorkspace)(JSON.parse(plan.projection)) }
+  db.exec("BEGIN IMMEDIATE")
+  try {
+    const cursor = current.eventCursor + 1
+    const marked = db.prepare("UPDATE observing_plans SET run_eligible=1 WHERE plan_id=? AND revision=? AND run_eligible=0").run(input.planId, input.expectedPlanRevision)
+    if (marked.changes !== 1) { db.exec("ROLLBACK"); return reject("RunDefinitionAlreadyAccepted") }
+    db.prepare("INSERT INTO run_definitions VALUES (?,?,?,?,?)").run(definition.id, definition.sourcePlanId, definition.sourcePlanRevision, JSON.stringify(definition), definition.acceptedAt)
+    commit(db, { snapshotVersion: current.snapshotVersion + 1, eventCursor: cursor })
+    const result: AcceptRunDefinitionResult = { outcome: "accepted", runDefinition: definition, snapshot: snapshot(db, identity) }
+    db.prepare("INSERT INTO run_definition_receipts VALUES (?,?,?,?)").run(input.idempotencyKey, identity.personId, semanticKey, JSON.stringify({ semanticKey, result }))
+    db.prepare("INSERT INTO events VALUES (?,?,?)").run(cursor, "RunDefinitionAccepted", JSON.stringify(result))
+    db.exec("COMMIT")
+    return { status: 202, body: result, event: { type: "RunDefinitionAccepted", cursor } }
   } catch (error) { db.exec("ROLLBACK"); throw error }
 }
 function controlCommand(response: ServerResponse, raw: unknown | undefined, db: DatabaseSync, path: string, identity: LocalIdentity, publish: (type: string, cursor: number) => void) { return decodedCommand(response, raw, ControlCommand, (input) => acceptControl(db, path, input, identity), publish) }

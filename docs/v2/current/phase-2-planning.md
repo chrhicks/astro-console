@@ -133,3 +133,101 @@ fresh, schema-13, schema-15, and existing-fixture upgrade paths. UI validation
 and Designer review passed at wide, compact, and 390 px phone widths, including
 save-to-SSE truth, restart persistence, no horizontal overflow, and responsive
 control restoration.
+
+## Second Slice: Immutable RunDefinition Acceptance
+
+Status: **complete July 30, 2026 — fake-executor proof only**
+
+An admitted control-capable desktop user with no active run may accept the
+current persisted `ready` deterministic `ObservingPlan`. The service
+revision-checks and idempotently accepts that exact stored plan into one
+immutable `RunDefinition`, records it durably, and publishes the resulting
+authoritative projection. A later draft revision cannot alter that accepted
+definition. The fake executor records no device work and no physical or
+provider-backed execution claim is made.
+
+`RunDefinition` is the canonical durable execution input. `ObservingPlan`
+continues to own future intent and validation; the browser submits an intent
+and renders the service result. Acceptance rejects a read-only client, stale
+plan or lease revision, an unavailable, blocked, or limited plan, a concurrent
+active run, malformed input, and reuse of an idempotency key with different
+semantic input. The accepted result must expose its source-plan revision and
+immutable sequence facts without treating browser navigation or refresh as
+execution control.
+
+Focused verification must cover real SQLite persistence across restart,
+one authoritative SSE update, replay without an extra definition or event,
+the typed rejections above, and preservation of the accepted definition after
+a subsequent draft save. If this changes the fixture-visible Plan surface, it
+also requires wide desktop, compact desktop, and 390 px read-only phone
+validation plus Designer review.
+
+Deferred: the bounded sequence state machine, preflight providers, device
+commands, pause/stop/skip/retry/park policies, active-run edits, live
+astronomy or readiness facts, and all Solar work. This slice advances only the
+delivery-plan outcome to start an immutable `RunDefinition` from an approved
+plan; it does not claim the Phase 2 fake plan has executed through completion.
+
+### Recorded Evidence
+
+The local-web service stores a ready persisted plan revision as one immutable
+SQLite `RunDefinition` snapshot, marked `executor: "fake"`, and emits one
+`RunDefinitionAccepted` SSE update. Replaying the same idempotency key returns
+the original definition without another row or event. A later plan draft does
+not change the stored definition, and acceptance creates neither an outbox
+record nor an active run.
+
+The focused SQLite/HTTP/SSE integration proof covers restart persistence,
+stale plan or lease input, unavailable, limited, and blocked plans, read-only
+clients, an active-run conflict, malformed input, duplicate acceptance, and
+an idempotency-key semantic mismatch. Local-web build passes and integration
+tests pass **62/62**. No visible surface changed, so no UI or Designer review
+was required for this service-only slice.
+
+## Third Slice: Bounded Fake Execution of an Accepted RunDefinition
+
+Status: **complete July 30, 2026 — fake-executor proof only**
+
+An admitted current desktop controller may start an already accepted immutable
+`RunDefinition` when no run is active. The service owns the resulting
+`ActiveRun`, rechecks the definition identity, lease, freshness, and
+idempotency, records `RunStarted` at `preflight`, and never creates a second
+definition. This local-web transition preserves the accepted `StartRunFromPlan`
+meaning while resolving the already accepted definition rather than inventing
+a competing user-facing command.
+
+The deterministic fake executor is a service-side test boundary. It advances
+the accepted two-sequence definition through `preflight`, `acquire`, `capture`,
+and `verify`, then advances to the next sequence or terminal `completed`.
+Every transition advances the run revision once, records durable state and an
+authoritative event, and survives a service restart. Browser refresh and
+workspace navigation consume the projection only and never advance execution.
+
+Focused verification must prove SQLite persistence, the ordered two-sequence
+transition path, SSE projection, restart recovery, idempotent start or advance,
+stale lease and concurrent-run rejection, and preservation of the immutable
+definition despite later plan drafts. It must also prove that the slice creates
+no outbox work, provider call, device command, capture evidence, or claim of
+physical execution.
+
+Deferred: real or provider-backed preflight, readiness, acquisition, capture,
+verification, pause/stop/skip/retry/park, active-run edits, browser controls,
+and all Solar work. If the active-run projection requires a visible UI change,
+the required wide, compact, and 390 px read-only phone validation and Designer
+review apply before completion.
+
+### Recorded Evidence
+
+`StartRunFromPlan` now resolves the exact persisted immutable definition for
+the plan revision rather than creating another definition. A current controller
+starts the fake definition at `preflight`; the service-owned deterministic
+executor persists ordered `preflight`, `acquire`, `capture`, and `verify`
+transitions for both sequences, then persists `completed`. Each transition
+advances the run revision and emits one authoritative SSE event. Restarting
+between sequences restores the exact active sequence and continues from it.
+
+The SQLite/HTTP/SSE proof covers idempotent start, a control-capable non-holder
+rejected before `RunStarted`, concurrent-run rejection, restart recovery, the
+full two-sequence path, immutable source linkage, and zero outbox work. Local
+web build passes and integration tests pass **63/63**. This service-only slice
+does not alter a visible UI surface, so no UI or Designer review was required.
