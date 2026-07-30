@@ -231,3 +231,59 @@ rejected before `RunStarted`, concurrent-run rejection, restart recovery, the
 full two-sequence path, immutable source linkage, and zero outbox work. Local
 web build passes and integration tests pass **63/63**. This service-only slice
 does not alter a visible UI surface, so no UI or Designer review was required.
+
+## Fourth Slice: Bounded Pause and Resume of a Fake Active Run
+
+Status: **complete July 30, 2026 — fake-executor proof only**
+
+A current desktop controller may pause a non-terminal fake `ActiveRun` at its
+current durable phase. The service records the preserved resumable phase and
+does not automatically advance the fake executor while paused. The controller
+may later resume that exact phase; only then may deterministic advancement
+continue. Browser navigation, refresh, disconnection, and workspace changes
+never pause or resume a run.
+
+`ActiveRun` is the canonical durable owner of paused state, preserved phase,
+run revision, and pause/resume facts. The browser submits `PauseRun` or
+`ResumeRun` intent and renders the returned projection. Both intents are
+revision- and lease-guarded and idempotent. Pause rejects a read-only client,
+lost or stale control lease, stale run revision, an already paused or terminal
+run, and idempotency-key semantic mismatch. Resume rejects the same authority
+and freshness failures, a non-paused run, an unavailable resumable phase, and
+an idempotency-key semantic mismatch.
+
+An accepted pause or resume advances the run revision exactly once, records a
+durable `RunPaused` or `RunResumed` fact, and publishes one authoritative SSE
+update. Replaying the same accepted intent returns the prior result without an
+additional revision or event. Restart restores paused state and blocks fake
+advancement until a successful resume restores the exact preserved phase.
+
+The fixture-visible Observe surface adds only desktop pause/resume intervention
+and truthful paused status. The phone remains read-only; the global shell does
+not duplicate the Observe command. Verification includes real SQLite/HTTP/SSE
+persistence, idempotency, lease and revision failures, paused restart behavior,
+and resumption through the remaining two-sequence fake path. Wide desktop,
+compact desktop, and 390 px phone smoke evidence plus Designer review are
+required for this UI change.
+
+This proves durable managed-run intervention against the fake executor only.
+It creates no provider call, device command, outbox work, capture evidence, or
+Solar activity. Stop, skip, retry, park, and active-run edit classification
+remain separate slices.
+
+### Recorded Evidence
+
+The local-web service persists a paused fake or fixture `ActiveRun` with its
+resumable phase, records `RunPaused` and `RunResumed` exactly once, and restores
+that paused state after restart. A resume restores the exact prior fake phase;
+the executor does not advance while paused. Lease and run revisions, typed
+rejections, and semantic idempotency are service-owned. Pause and resume
+require a persisted fake or fixture `RunDefinition`; source-less experimental
+run state is rejected without mutation or an intervention receipt.
+
+The fixture Observe surface exposes `Pause capture` only to the current desktop
+controller during capture, then exposes `Resume capture` with truthful paused
+state. The 390 px phone remains read-only. Local-web build and integration
+tests pass **64/64**. Designer re-review passed at wide, compact, and 390 px
+phone widths, including keyboard pause/resume, no horizontal overflow, and
+console health.

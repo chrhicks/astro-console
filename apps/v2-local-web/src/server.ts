@@ -11,6 +11,8 @@ import { configuredDownloadGrantIssuer } from "./download-grant-config.ts"
 import { applicationShell } from "./application-shell.ts"
 const StartRun = Schema.TaggedStruct("StartRunFromPlan", { planId: Schema.NonEmptyString, expectedPlanRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), expectedLeaseRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), idempotencyKey: Schema.NonEmptyString })
 const AcceptRunDefinition = Schema.TaggedStruct("AcceptRunDefinition", { planId: Schema.NonEmptyString, expectedPlanRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), expectedLeaseRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), idempotencyKey: Schema.NonEmptyString })
+const PauseRun = Schema.TaggedStruct("PauseRun", { expectedLeaseRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), expectedRunRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), idempotencyKey: Schema.NonEmptyString })
+const ResumeRun = Schema.TaggedStruct("ResumeRun", { expectedLeaseRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), expectedRunRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), idempotencyKey: Schema.NonEmptyString })
 const SavePlanDraft = Schema.Struct({
   planId: Schema.NonEmptyString,
   expectedPlanRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -58,11 +60,11 @@ async function verifiedAccessClaims(config: { readonly issuer: string; readonly 
 export function createProductionAccessAdmission(config: { readonly issuer: string; readonly audience: string; readonly keyResolver: JwksKeyResolver; readonly databasePath: string; readonly clientContext: "desktop" | "phone"; readonly bootstrap?: typeof MembershipBootstrap.Type; readonly bootstrapResolver?: MembershipBootstrapResolver }): RequestAdmission { const staticPolicy = config.bootstrap === undefined ? undefined : membershipPolicy(config.bootstrap); if (staticPolicy === undefined && config.bootstrapResolver === undefined) throw new Error("Production admission requires a membership bootstrap policy"); return async (request) => { const claims = await verifiedAccessClaims(config, request); if (!claims || claims.email === undefined) return undefined; const policy = config.bootstrapResolver?.load() ?? staticPolicy; if (policy === undefined) return undefined; const entry = policy.find((item) => item.email === normalizedEmail(claims.email)); if (!entry) return undefined; const membership = new DatabaseSync(config.databasePath); try { membership.exec("BEGIN IMMEDIATE"); membership.prepare("INSERT INTO memberships VALUES (?,?,?) ON CONFLICT(external_subject) DO UPDATE SET person_id=excluded.person_id,role=excluded.role").run(claims.sub, entry.personId, entry.role); const raw: unknown = membership.prepare("SELECT person_id,role FROM memberships WHERE external_subject=?").get(claims.sub); const stored = Schema.decodeUnknownSync(MembershipRow)(raw); membership.exec("COMMIT"); if (stored.person_id !== entry.personId || stored.role !== entry.role) return undefined; return { personId: stored.person_id, clientId: `access:${claims.sub}`, role: stored.role, capability: stored.role === "owner" && config.clientContext === "desktop" ? "controlCapable" : "readOnly" } } catch { try { membership.exec("ROLLBACK") } catch {} return undefined } finally { membership.close() } } }
 export const createLocalFixtureAdmission = (identity: LocalIdentity): RequestAdmission => () => ({ ...identity, role: identity.role ?? (identity.personId === "owner-chicks" ? "owner" : "viewer") })
 type RunPhase = "preflight" | "acquire" | "capture" | "verify" | "completed" | "paused" | "stopped"
-type Run = { readonly id: string; readonly revision: number; readonly phase: RunPhase; readonly target: string; readonly progress: number; readonly sourceDefinitionId?: string; readonly activeSequenceIndex?: number; readonly completedSequenceCount?: number }
+type Run = { readonly id: string; readonly revision: number; readonly phase: RunPhase; readonly target: string; readonly progress: number; readonly sourceDefinitionId?: string; readonly activeSequenceIndex?: number; readonly completedSequenceCount?: number; readonly resumablePhase?: Exclude<RunPhase, "paused" | "completed" | "stopped"> }
 type Evidence = { readonly frameId: string; readonly capturedAt: string; readonly quality: "verified" | "warning"; readonly desired: string; readonly solved: string; readonly uncertaintyArcsec: number; readonly stack: { readonly availability: "available" | "unavailable"; readonly observedAt: string; readonly frameCount: number; readonly message: string }; readonly correction: { readonly state: "automatic" | "exhausted"; readonly evidence: string; readonly bound: string; readonly protection: string; readonly action: string } }
 type Snapshot = { readonly snapshotVersion: number; readonly eventCursor: number; readonly generatedAt: string; readonly identity: LocalIdentity; readonly plan: { readonly id: string; readonly revision: number; readonly target: string; readonly readiness: PlanReadiness | "unavailable"; readonly runEligible: boolean }; readonly control: { readonly holderClientId: string | null; readonly revision: number; readonly state: "held" | "reconnecting" | "unheld"; readonly reconnectGraceUntil?: string; readonly pendingRequests: ReadonlyArray<{ readonly clientId: string; readonly personId: string }> }; readonly run: Run | null; readonly dispatch: "none" | "pending" | "dispatched" | "unavailable" | "failed"; readonly dispatchAction: "none" | "pause" | "resume" | "stop"; readonly evidence: Evidence; readonly connection: "current" }
-type ControlEvent = "ControlRequested" | "ControlGranted" | "OwnerTookControl" | "ControlReconnectGraceStarted" | "ControlReconnected" | "ControlGraceExpired" | "PauseAccepted" | "ResumeAccepted" | "RunStopped"
-type FailureReason = "Unauthenticated" | "FreshnessConflict" | "PlanUnavailable" | "PlanNotReady" | "RunDefinitionAlreadyAccepted" | "ClientReadOnly" | "ControlLeaseLost" | "OwnerRequired" | "ControlRequestUnavailable" | "ActiveRunConflict" | "InvalidInput"
+type ControlEvent = "ControlRequested" | "ControlGranted" | "OwnerTookControl" | "ControlReconnectGraceStarted" | "ControlReconnected" | "ControlGraceExpired" | "RunPaused" | "RunResumed" | "RunStopped"
+type FailureReason = "Unauthenticated" | "FreshnessConflict" | "PlanUnavailable" | "PlanNotReady" | "RunDefinitionAlreadyAccepted" | "ClientReadOnly" | "ControlLeaseLost" | "OwnerRequired" | "ControlRequestUnavailable" | "ActiveRunConflict" | "RunRevisionConflict" | "AlreadyPaused" | "AlreadyTerminal" | "NotPaused" | "ResumePhaseUnavailable" | "IdempotencyConflict" | "InvalidInput"
 type CommandResult = { readonly outcome: "accepted"; readonly eventType?: ControlEvent; readonly message?: string; readonly run?: Run; readonly snapshot: Snapshot } | { readonly outcome: "rejected"; readonly reason: FailureReason; readonly message: string }
 type PlanReadiness = "ready" | "readyWithLimitations" | "blocked"
 type DraftSequence = typeof SavePlanDraft.Type["sequences"][number]
@@ -75,7 +77,7 @@ type LibrarySort = "capturedAtDescending" | "sharpestFirst" | "recentlyUpdated"
 
 const StoredEvidence = Schema.Struct({ frameId: Schema.String, capturedAt: Schema.String, quality: Schema.Literals(["verified", "warning"]), desired: Schema.String, solved: Schema.String, uncertaintyArcsec: Schema.Number, stack: Schema.optionalKey(Schema.Struct({ availability: Schema.Literals(["available", "unavailable"]), observedAt: Schema.String, frameCount: Schema.Int, message: Schema.String })), correction: Schema.Struct({ state: Schema.Literals(["automatic", "exhausted"]), evidence: Schema.String, bound: Schema.String, protection: Schema.String, action: Schema.String }) })
 const AdapterObservation = Schema.Struct({ frameId: Schema.NonEmptyString, capturedAt: Schema.NonEmptyString, quality: Schema.Literals(["verified", "warning"]), desired: Schema.NonEmptyString, solved: Schema.NonEmptyString, uncertaintyArcsec: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)), correctionState: Schema.Literals(["automatic", "exhausted"]), correctionEvidence: Schema.NonEmptyString, correctionBound: Schema.NonEmptyString, protection: Schema.NonEmptyString })
-const StoredState = Schema.Struct({ snapshotVersion: Schema.Int, eventCursor: Schema.Int, planRevision: Schema.Int, leaseRevision: Schema.Int, leaseHolder: Schema.NullOr(Schema.String), leaseState: Schema.Literals(["held", "reconnecting", "unheld"]), reconnectGraceUntil: Schema.NullOr(Schema.String), run: Schema.NullOr(Schema.Struct({ id: Schema.String, revision: Schema.Int, phase: Schema.Literals(["preflight", "acquire", "capture", "verify", "completed", "paused", "stopped"]), target: Schema.String, progress: Schema.Number, sourceDefinitionId: Schema.optionalKey(Schema.String), activeSequenceIndex: Schema.optionalKey(Schema.Int), completedSequenceCount: Schema.optionalKey(Schema.Int) })), evidence: StoredEvidence })
+const StoredState = Schema.Struct({ snapshotVersion: Schema.Int, eventCursor: Schema.Int, planRevision: Schema.Int, leaseRevision: Schema.Int, leaseHolder: Schema.NullOr(Schema.String), leaseState: Schema.Literals(["held", "reconnecting", "unheld"]), reconnectGraceUntil: Schema.NullOr(Schema.String), run: Schema.NullOr(Schema.Struct({ id: Schema.String, revision: Schema.Int, phase: Schema.Literals(["preflight", "acquire", "capture", "verify", "completed", "paused", "stopped"]), target: Schema.String, progress: Schema.Number, sourceDefinitionId: Schema.optionalKey(Schema.String), activeSequenceIndex: Schema.optionalKey(Schema.Int), completedSequenceCount: Schema.optionalKey(Schema.Int), resumablePhase: Schema.optionalKey(Schema.Literals(["preflight", "acquire", "capture", "verify"])) })), evidence: StoredEvidence })
 const StoredRequest = Schema.Struct({ client_id: Schema.String, person_id: Schema.String })
 const ControlRequestRow = Schema.Struct({ client_id: Schema.String })
 const StoredRow = Schema.Struct({ value: Schema.String })
@@ -102,14 +104,14 @@ const RunDefinitionReceiptRow = Schema.Struct({ response: Schema.String })
 const ProcessWorkspace = Schema.Struct({ sessionId: Schema.String, revision: Schema.Int, phase: Schema.Literal("develop"), sourceAssetId: Schema.String, sourceLabel: Schema.String, preview: Schema.Struct({ label: Schema.String, state: Schema.Literal("synchronized"), evidence: Schema.String }), history: Schema.Array(Schema.Struct({ stepId: Schema.String, label: Schema.String, state: Schema.Literals(["applied", "current"]), tool: Schema.String })), checkpoint: Schema.Struct({ stepId: Schema.String, label: Schema.String, protectedBy: Schema.String }), failure: Schema.Struct({ state: Schema.Literal("none"), retryScope: Schema.String }), protection: Schema.String })
 const ReceiptRow = Schema.Struct({ response: Schema.String })
 const StoredIdentity = Schema.Struct({ personId: Schema.String, clientId: Schema.String, capability: Schema.Literals(["controlCapable", "readOnly"]), role: Schema.optionalKey(Schema.Literals(["owner", "viewer"])) })
-const StoredRun = Schema.Struct({ id: Schema.String, revision: Schema.Int, phase: Schema.Literals(["preflight", "acquire", "capture", "verify", "completed", "paused", "stopped"]), target: Schema.String, progress: Schema.Number, sourceDefinitionId: Schema.optionalKey(Schema.String), activeSequenceIndex: Schema.optionalKey(Schema.Int), completedSequenceCount: Schema.optionalKey(Schema.Int) })
+const StoredRun = Schema.Struct({ id: Schema.String, revision: Schema.Int, phase: Schema.Literals(["preflight", "acquire", "capture", "verify", "completed", "paused", "stopped"]), target: Schema.String, progress: Schema.Number, sourceDefinitionId: Schema.optionalKey(Schema.String), activeSequenceIndex: Schema.optionalKey(Schema.Int), completedSequenceCount: Schema.optionalKey(Schema.Int), resumablePhase: Schema.optionalKey(Schema.Literals(["preflight", "acquire", "capture", "verify"])) })
 const StoredSnapshot = Schema.Struct({ snapshotVersion: Schema.Int, eventCursor: Schema.Int, generatedAt: Schema.String, identity: StoredIdentity, plan: Schema.Struct({ id: Schema.String, revision: Schema.Int, target: Schema.String, readiness: Schema.Literals(["ready", "unavailable"]) }), control: Schema.Struct({ holderClientId: Schema.NullOr(Schema.String), revision: Schema.Int, state: Schema.Literals(["held", "reconnecting", "unheld"]), reconnectGraceUntil: Schema.optionalKey(Schema.String), pendingRequests: Schema.Array(Schema.Struct({ clientId: Schema.String, personId: Schema.String })) }), run: Schema.NullOr(StoredRun), dispatch: Schema.Literals(["none", "pending", "dispatched", "unavailable", "failed"]), dispatchAction: Schema.Literals(["none", "pause", "resume", "stop"]), evidence: StoredEvidence, connection: Schema.Literal("current") })
 const CommandResultSchema = Schema.Union([
-  Schema.Struct({ outcome: Schema.Literal("accepted"), eventType: Schema.optionalKey(Schema.Literals(["ControlRequested", "ControlGranted", "OwnerTookControl", "ControlReconnectGraceStarted", "ControlReconnected", "ControlGraceExpired", "PauseAccepted", "ResumeAccepted", "RunStopped"])), message: Schema.optionalKey(Schema.String), run: Schema.optionalKey(StoredRun), snapshot: StoredSnapshot }),
-  Schema.Struct({ outcome: Schema.Literal("rejected"), reason: Schema.Literals(["Unauthenticated", "FreshnessConflict", "PlanUnavailable", "PlanNotReady", "RunDefinitionAlreadyAccepted", "ClientReadOnly", "ControlLeaseLost", "OwnerRequired", "ControlRequestUnavailable", "ActiveRunConflict", "InvalidInput"]), message: Schema.String }),
+  Schema.Struct({ outcome: Schema.Literal("accepted"), eventType: Schema.optionalKey(Schema.Literals(["ControlRequested", "ControlGranted", "OwnerTookControl", "ControlReconnectGraceStarted", "ControlReconnected", "ControlGraceExpired", "RunPaused", "RunResumed", "RunStopped"])), message: Schema.optionalKey(Schema.String), run: Schema.optionalKey(StoredRun), snapshot: StoredSnapshot }),
+  Schema.Struct({ outcome: Schema.Literal("rejected"), reason: Schema.Literals(["Unauthenticated", "FreshnessConflict", "PlanUnavailable", "PlanNotReady", "RunDefinitionAlreadyAccepted", "ClientReadOnly", "ControlLeaseLost", "OwnerRequired", "ControlRequestUnavailable", "ActiveRunConflict", "RunRevisionConflict", "AlreadyPaused", "AlreadyTerminal", "NotPaused", "ResumePhaseUnavailable", "IdempotencyConflict", "InvalidInput"]), message: Schema.String }),
 ])
 const operatorMessages = {
-  Unauthenticated: "A verified member identity is required.", FreshnessConflict: "The plan or control changed. Review the current plan before accepting it.", PlanUnavailable: "No observation plan is installed.", PlanNotReady: "The plan is not ready for RunDefinition acceptance.", RunDefinitionAlreadyAccepted: "This plan revision already has an immutable RunDefinition.", ClientReadOnly: "Monitoring is read-only on this client.", ControlLeaseLost: "Control changed hands. Your command was not sent to the observatory; the accepted run continues.", OwnerRequired: "Only the owner can accept a RunDefinition.", ControlRequestUnavailable: "There is no current control request to grant.", ActiveRunConflict: "A run is already active. Return to Observe.", InvalidInput: "The service could not read that action.", ControlRequested: "Control request recorded. The owner can grant or decline it.", ControlGranted: "Control granted. The other desktop now owns control.", OwnerTookControl: "Control returned to the owner desktop.", ControlReconnectGraceStarted: "Reconnect grace is active; accepted work continues.", ControlReconnected: "Controller reconnected; control remains current.", ControlGraceExpired: "Reconnect grace expired. Control is unheld; accepted work continues.", PauseAccepted: "Pause was accepted by the service.", ResumeAccepted: "Resume was accepted by the service.", RunStopped: "Stop was accepted by the service. This run cannot be resumed.",
+  Unauthenticated: "A verified member identity is required.", FreshnessConflict: "The plan or control changed. Review the current plan before accepting it.", PlanUnavailable: "No observation plan is installed.", PlanNotReady: "The plan is not ready for RunDefinition acceptance.", RunDefinitionAlreadyAccepted: "This plan revision already has an immutable RunDefinition.", ClientReadOnly: "Monitoring is read-only on this client.", ControlLeaseLost: "Control changed hands. Your command was not sent to the observatory; the accepted run continues.", OwnerRequired: "Only the owner can accept a RunDefinition.", ControlRequestUnavailable: "There is no current control request to grant.", ActiveRunConflict: "A run is already active. Return to Observe.", RunRevisionConflict: "The active run changed. Refresh Observe before trying again.", AlreadyPaused: "This run is already paused.", AlreadyTerminal: "This run is terminal and cannot be paused.", NotPaused: "This run is not paused.", ResumePhaseUnavailable: "The paused run has no resumable phase.", IdempotencyConflict: "This idempotency key was already used for a different command.", InvalidInput: "The service could not read that action.", ControlRequested: "Control request recorded. The owner can grant or decline it.", ControlGranted: "Control granted. The other desktop now owns control.", OwnerTookControl: "Control returned to the owner desktop.", ControlReconnectGraceStarted: "Reconnect grace is active; accepted work continues.", ControlReconnected: "Controller reconnected; control remains current.", ControlGraceExpired: "Reconnect grace expired. Control is unheld; accepted work continues.", RunPaused: "Pause was accepted by the service.", RunResumed: "Resume was accepted by the service.", RunStopped: "Stop was accepted by the service. This run cannot be resumed.",
 } satisfies Record<FailureReason | ControlEvent, string>
 
 export function createLocalWebService(databasePath = ":memory:", identityResolver: RequestAdmission = createLocalFixtureAdmission({ personId: "owner-chicks", clientId: "desktop-owner", capability: "controlCapable" }), brandAssetPath: URL = new URL("../assets/brand/alignment-aperture-light.svg", import.meta.url), processSaveStorage?: ProcessSaveStorage, downloadGrants?: DownloadGrantConfig, options: { readonly fixture?: "m27" } = {}) {
@@ -144,6 +146,8 @@ export function createLocalWebService(databasePath = ":memory:", identityResolve
     if (request.method === "GET" && url.pathname.startsWith("/api/library/assets/") && url.pathname.endsWith("/download")) return downloadAsset(response, database, url, downloadGrants)
     if (request.method === "GET" && url.pathname.startsWith("/api/library/assets/")) return libraryDetail(response, database, decodedAssetId(url.pathname.slice("/api/library/assets/".length)))
     if (request.method === "POST" && url.pathname === "/api/commands/start-run") { const input = await body(request); return input === BodyTooLarge ? json(response, 413, reject("InvalidInput").body) : runCommand(response, input, database, identity, publish) }
+    if (request.method === "POST" && url.pathname === "/api/commands/pause-run") { const input = await body(request); return input === BodyTooLarge ? json(response, 413, reject("InvalidInput").body) : runInterventionCommand(response, input, PauseRun, "pause", database, identity, publish) }
+    if (request.method === "POST" && url.pathname === "/api/commands/resume-run") { const input = await body(request); return input === BodyTooLarge ? json(response, 413, reject("InvalidInput").body) : runInterventionCommand(response, input, ResumeRun, "resume", database, identity, publish) }
     if (request.method === "POST" && url.pathname === "/api/commands/save-plan-draft") { const input = await body(request); return input === BodyTooLarge ? json(response, 413, reject("InvalidInput").body) : savePlanDraftCommand(response, input, database, identity, publish) }
     if (request.method === "POST" && url.pathname === "/api/commands/accept-run-definition") { const input = await body(request); return input === BodyTooLarge ? json(response, 413, reject("InvalidInput").body) : acceptRunDefinitionCommand(response, input, database, identity, publish) }
     if (request.method === "POST" && controlPaths.has(url.pathname)) { const input = await body(request); return input === BodyTooLarge ? json(response, 413, reject("InvalidInput").body) : controlCommand(response, input, database, url.pathname, identity, publish) }
@@ -237,7 +241,7 @@ export function openPublisherDatabase(databasePath: string, allowedRoot = "/var/
 export function openProcessorDatabase(databasePath: string, allowedRoot = "/var/lib/astro-console/") { return openMigrationDatabase(databasePath, allowedRoot) }
 export function openMigrationDatabase(databasePath: string, allowedRoot: string) { if (!allowedRoot.startsWith("/") || !allowedRoot.endsWith("/") || !databasePath.startsWith(allowedRoot) || /[\r\n]|(?:^|\/)\.\.(?:\/|$)/.test(databasePath)) throw new Error("Database path must be app-owned"); mkdirSync(dirname(databasePath), { recursive: true }); const database = new DatabaseSync(databasePath); database.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL"); migrateDatabase(database); return database }
 
-const controlPaths = new Set(["/api/commands/request-control", "/api/commands/grant-control", "/api/commands/take-control", "/api/commands/controller-disconnected", "/api/commands/controller-reconnected", "/api/commands/pause-run", "/api/commands/resume-run", "/api/commands/stop-run"])
+const controlPaths = new Set(["/api/commands/request-control", "/api/commands/grant-control", "/api/commands/take-control", "/api/commands/controller-disconnected", "/api/commands/controller-reconnected", "/api/commands/stop-run"])
 const isOwner = (identity: LocalIdentity) => identity.role === "owner"
 
 function migrateDatabase(db: DatabaseSync) {
@@ -262,7 +266,8 @@ function migrateDatabase(db: DatabaseSync) {
     () => { db.exec("ALTER TABLE observing_plans ADD COLUMN run_eligible INTEGER NOT NULL DEFAULT 0"); migrateLegacyPlanWorkspace(db) },
     () => migrateLegacyPlanWorkspace(db),
     () => db.exec("CREATE TABLE IF NOT EXISTS run_definitions (run_definition_id TEXT PRIMARY KEY,source_plan_id TEXT NOT NULL,source_plan_revision INTEGER NOT NULL,definition TEXT NOT NULL,accepted_at TEXT NOT NULL,UNIQUE(source_plan_id,source_plan_revision)); CREATE TABLE IF NOT EXISTS run_definition_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id))"),
-    () => {}
+    () => {},
+    () => db.exec("CREATE TABLE IF NOT EXISTS run_intervention_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id))")
   ] as const
   if (latest > migrations.length) throw new Error(`Database schema ${latest} is newer than this release`)
   for (let index = latest; index < migrations.length; index += 1) {
@@ -398,17 +403,73 @@ function nextFakeRunTransition(run: Run, definition: typeof StoredRunDefinition.
   return { eventType: "RunSequenceVerified", run: { ...run, revision: run.revision + 1, phase: "preflight" as const, target: next.target, progress: Math.floor((completed / definition.plan.sequences.length) * 100), activeSequenceIndex: run.activeSequenceIndex + 1, completedSequenceCount: completed } }
 }
 
+function runInterventionCommand<Input extends typeof PauseRun.Type | typeof ResumeRun.Type>(response: ServerResponse, raw: unknown | undefined, schema: Schema.Schema<Input>, intent: "pause" | "resume", db: DatabaseSync, identity: LocalIdentity, publish: (type: string, cursor: number) => void) {
+  if (raw === undefined) return json(response, 400, reject("InvalidInput").body)
+  try {
+    const result = acceptRunIntervention(db, Schema.decodeUnknownSync(schema)(raw), intent, identity)
+    if (result.event !== undefined) publish(result.event.type, result.event.cursor)
+    return json(response, result.status, result.body)
+  } catch { return json(response, 400, reject("InvalidInput").body) }
+}
+
+function hasFakeRunDefinition(db: DatabaseSync) {
+  const run = state(db).run
+  if (run?.sourceDefinitionId === undefined) return false
+  const raw: unknown = db.prepare("SELECT definition FROM run_definitions WHERE run_definition_id=?").get(run.sourceDefinitionId)
+  const row = Schema.decodeUnknownSync(Schema.optional(Schema.Struct({ definition: Schema.String })))(raw)
+  if (row === undefined) return false
+  const definition = Schema.decodeUnknownSync(StoredRunDefinition)(JSON.parse(row.definition))
+  return definition.executor === "fake" || definition.executor === "fixture"
+}
+
+function acceptRunIntervention(db: DatabaseSync, input: typeof PauseRun.Type | typeof ResumeRun.Type, intent: "pause" | "resume", identity: LocalIdentity) {
+  if (identity.capability === "readOnly") return reject("ClientReadOnly")
+  if (!hasFakeRunDefinition(db)) return reject("RunRevisionConflict")
+  const semanticKey = createHash("sha256").update(JSON.stringify({ version: 1, intent, expectedLeaseRevision: input.expectedLeaseRevision, expectedRunRevision: input.expectedRunRevision })).digest("hex")
+  const receiptRaw: unknown = db.prepare("SELECT semantic_key,response FROM run_intervention_receipts WHERE idempotency_key=? AND owner_person_id=?").get(input.idempotencyKey, identity.personId)
+  const existing = Schema.decodeUnknownSync(Schema.optional(Schema.Struct({ semantic_key: Schema.String, response: Schema.String })))(receiptRaw)
+  if (existing !== undefined) return existing.semantic_key === semanticKey ? { status: 200, body: Schema.decodeUnknownSync(CommandResultSchema)(JSON.parse(existing.response)) } : reject("IdempotencyConflict")
+  expireReconnectGrace(db)
+  const current = state(db)
+  if (input.expectedLeaseRevision !== current.control.revision) return reject("ControlLeaseLost")
+  if (current.control.holderClientId !== identity.clientId) return reject("ControlLeaseLost")
+  if (intent === "pause") {
+    if (current.run === null || input.expectedRunRevision !== current.run.revision) return reject("RunRevisionConflict")
+    if (current.run.phase === "paused") return reject("AlreadyPaused")
+    if (current.run.phase === "completed" || current.run.phase === "stopped") return reject("AlreadyTerminal")
+  }
+  if (intent === "resume") {
+    if (current.run === null || current.run.phase !== "paused") return reject("NotPaused")
+    if (input.expectedRunRevision !== current.run.revision) return reject("RunRevisionConflict")
+    if (current.run.resumablePhase === undefined) return reject("ResumePhaseUnavailable")
+  }
+  const run = current.run
+  if (run === null) return reject("RunRevisionConflict")
+  const nextRun: Run = intent === "pause"
+    ? { ...run, revision: run.revision + 1, phase: "paused", resumablePhase: run.phase }
+    : { ...run, revision: run.revision + 1, phase: run.resumablePhase ?? "paused", resumablePhase: undefined }
+  const eventType: ControlEvent = intent === "pause" ? "RunPaused" : "RunResumed"
+  db.exec("BEGIN IMMEDIATE")
+  try {
+    const cursor = current.eventCursor + 1
+    commit(db, { snapshotVersion: current.snapshotVersion + 1, eventCursor: cursor, run: nextRun })
+    const result: CommandResult = { outcome: "accepted", eventType, message: operatorMessages[eventType], run: nextRun, snapshot: snapshot(db, identity) }
+    db.prepare("INSERT INTO run_intervention_receipts VALUES (?,?,?,?)").run(input.idempotencyKey, identity.personId, semanticKey, JSON.stringify(result))
+    db.prepare("INSERT INTO events VALUES (?,?,?)").run(cursor, eventType, JSON.stringify(result))
+    db.exec("COMMIT")
+    return { status: 202, body: result, event: { type: eventType, cursor } }
+  } catch (error) { db.exec("ROLLBACK"); throw error }
+}
+
 function acceptControl(db: DatabaseSync, path: string, input: typeof ControlCommand.Type, identity: LocalIdentity) {
   expireReconnectGrace(db)
   const existing = receipt(db, input.idempotencyKey); if (existing !== undefined) return { status: 200, body: existing }
   const current = state(db)
   if (identity.capability === "readOnly") return reject("ClientReadOnly")
   if (input.expectedLeaseRevision !== current.control.revision) return reject("FreshnessConflict")
-  if (["/api/commands/pause-run", "/api/commands/resume-run", "/api/commands/stop-run"].includes(path) && current.control.holderClientId !== identity.clientId) return reject("ControlLeaseLost")
+  if (path === "/api/commands/stop-run" && current.control.holderClientId !== identity.clientId) return reject("ControlLeaseLost")
   if (["/api/commands/controller-disconnected", "/api/commands/controller-reconnected"].includes(path) && current.control.holderClientId !== identity.clientId) return reject("ControlLeaseLost")
   if (path === "/api/commands/controller-reconnected" && current.control.state !== "reconnecting") return reject("FreshnessConflict")
-  if (path === "/api/commands/pause-run" && (current.run === null || current.run.phase !== "capture" || input.expectedRunRevision !== current.run.revision)) return reject("FreshnessConflict")
-  if (path === "/api/commands/resume-run" && (current.run === null || current.run.phase !== "paused" || input.expectedRunRevision !== current.run.revision)) return reject("FreshnessConflict")
   if (path === "/api/commands/stop-run" && (current.run === null || current.run.phase === "stopped" || input.expectedRunRevision !== current.run.revision)) return reject("FreshnessConflict")
   if (path === "/api/commands/grant-control" && !isOwner(identity)) return reject("OwnerRequired")
   db.exec("BEGIN IMMEDIATE")
@@ -419,10 +480,8 @@ function acceptControl(db: DatabaseSync, path: string, input: typeof ControlComm
     if (path === "/api/commands/take-control") { holder = identity.clientId; leaseState = "held"; grace = null; revision += 1; eventType = "OwnerTookControl"; db.exec("DELETE FROM control_requests") }
     if (path === "/api/commands/controller-disconnected") { leaseState = "reconnecting"; grace = new Date(Date.now() + 30_000).toISOString(); revision += 1; eventType = "ControlReconnectGraceStarted" }
     if (path === "/api/commands/controller-reconnected") { leaseState = "held"; grace = null; revision += 1; eventType = "ControlReconnected" }
-    if (path === "/api/commands/pause-run") eventType = "PauseAccepted"
-    if (path === "/api/commands/resume-run") eventType = "ResumeAccepted"
     if (path === "/api/commands/stop-run") eventType = "RunStopped"
-    const nextRun = path === "/api/commands/pause-run" && current.run !== null ? { ...current.run, revision: current.run.revision + 1, phase: "paused" as const } : path === "/api/commands/resume-run" && current.run !== null ? { ...current.run, revision: current.run.revision + 1, phase: "capture" as const } : path === "/api/commands/stop-run" && current.run !== null ? { ...current.run, revision: current.run.revision + 1, phase: "stopped" as const } : current.run
+    const nextRun = path === "/api/commands/stop-run" && current.run !== null ? { ...current.run, revision: current.run.revision + 1, phase: "stopped" as const } : current.run
     const cursor = current.eventCursor + 1; commit(db, { snapshotVersion: current.snapshotVersion + 1, eventCursor: cursor, leaseRevision: revision, leaseHolder: holder, leaseState, reconnectGraceUntil: grace, ...(nextRun === current.run ? {} : { run: nextRun }) })
     const result: CommandResult = { outcome: "accepted", eventType, message: operatorMessages[eventType], snapshot: snapshot(db, identity) }; record(db, input.idempotencyKey, result, cursor, eventType); db.exec("COMMIT")
     return { status: 202, body: result, event: { type: eventType, cursor } }
@@ -433,7 +492,7 @@ function commit(db: DatabaseSync, values: Record<string, unknown>) { const put =
 function persistEvidence(db: DatabaseSync, evidence: Evidence, identityResolver: () => LocalIdentity) { const current = state(db); db.exec("BEGIN IMMEDIATE"); try { commit(db, { evidence, snapshotVersion: current.snapshotVersion + 1, eventCursor: current.eventCursor + 1 }); db.prepare("INSERT INTO events VALUES (?,?,?)").run(current.eventCursor + 1, "ObservationProjected", JSON.stringify(evidence)); db.exec("COMMIT"); return snapshot(db, identityResolver()) } catch (error) { db.exec("ROLLBACK"); throw error } }
 function record(db: DatabaseSync, key: string, result: CommandResult, cursor: number, type: string) { db.prepare("INSERT INTO receipts VALUES (?,?)").run(key, JSON.stringify(result)); db.prepare("INSERT INTO events VALUES (?,?,?)").run(cursor, type, JSON.stringify(result)) }
 function receipt(db: DatabaseSync, key: string): CommandResult | undefined { const raw: unknown = db.prepare("SELECT response FROM receipts WHERE idempotency_key=?").get(key); const row = Schema.decodeUnknownSync(Schema.optional(ReceiptRow))(raw); if (row === undefined) return undefined; const parsed: unknown = JSON.parse(row.response); return Schema.decodeUnknownSync(CommandResultSchema)(parsed) }
-function reject(reason: FailureReason) { return { status: reason === "Unauthenticated" ? 401 : reason === "FreshnessConflict" || reason === "PlanUnavailable" || reason === "PlanNotReady" || reason === "RunDefinitionAlreadyAccepted" || reason === "ActiveRunConflict" ? 409 : reason === "InvalidInput" ? 400 : 403, body: { outcome: "rejected" as const, reason, message: operatorMessages[reason] } } }
+function reject(reason: FailureReason) { return { status: reason === "Unauthenticated" ? 401 : reason === "FreshnessConflict" || reason === "PlanUnavailable" || reason === "PlanNotReady" || reason === "RunDefinitionAlreadyAccepted" || reason === "ActiveRunConflict" || reason === "RunRevisionConflict" || reason === "AlreadyPaused" || reason === "AlreadyTerminal" || reason === "NotPaused" || reason === "ResumePhaseUnavailable" || reason === "IdempotencyConflict" ? 409 : reason === "InvalidInput" ? 400 : 403, body: { outcome: "rejected" as const, reason, message: operatorMessages[reason] } } }
 function runCommand(response: ServerResponse, raw: unknown | undefined, db: DatabaseSync, identity: LocalIdentity, publish: (type: string, cursor: number) => void) { return decodedCommand(response, raw, StartRun, (input) => acceptRun(db, input, identity), publish) }
 function savePlanDraftCommand(response: ServerResponse, raw: unknown | undefined, db: DatabaseSync, identity: LocalIdentity, publish: (type: string, cursor: number) => void) {
   if (raw === undefined) return json(response, 400, reject("InvalidInput").body)

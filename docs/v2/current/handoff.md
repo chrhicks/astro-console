@@ -27,16 +27,18 @@ does not authorize further cleanup by default.
 
 ## Next Session: Plan One Phase 2 Slice
 
-The first three Phase 2 slices are complete: [Multi-Sequence Draft and
+The first four Phase 2 slices are complete: [Multi-Sequence Draft and
 Deterministic Validation](phase-2-planning.md#first-slice-multi-sequence-draft-and-deterministic-validation),
 [Immutable RunDefinition Acceptance](phase-2-planning.md#second-slice-immutable-rundefinition-acceptance),
-and [Bounded Fake Execution](phase-2-planning.md#third-slice-bounded-fake-execution-of-an-accepted-rundefinition).
+[Bounded Fake Execution](phase-2-planning.md#third-slice-bounded-fake-execution-of-an-accepted-rundefinition),
+and [Bounded Pause and Resume](phase-2-planning.md#fourth-slice-bounded-pause-and-resume-of-a-fake-active-run).
 They prove deterministic Plan persistence/projection, a revisioned immutable
-RunDefinition snapshot, and a two-sequence fake executor through completion.
-The next packet should select the smallest missing Phase 2 managed-run outcome
-without inferring a device or provider boundary. Do not infer authorization for
-a physical Solar run, processing workflow, off-host recovery, storage-health
-operations, or browser controls beyond that accepted slice.
+RunDefinition snapshot, a two-sequence fake executor through completion, and
+durable pause/resume of a fake active run. The next packet should select the
+smallest missing Phase 2 managed-run outcome without inferring a device or
+provider boundary. Do not infer authorization for a physical Solar run,
+processing workflow, off-host recovery, storage-health operations, or browser
+controls beyond that accepted slice.
 
 The user accepts NVMe live/recent data plus the SSD backup as current
 same-host resilience. Off-host recovery is not current Phase 1 scope.
@@ -44,7 +46,7 @@ same-host resilience. Off-host recovery is not current Phase 1 scope.
 ## Verified Baseline
 
 - `apps/v2-local-web` type checks and its SQLite/HTTP/SSE/worker/filesystem
-  integration suite pass **63/63**. The suite covers the retained local-web
+  integration suite pass **64/64**. The suite covers the retained local-web
   foundation, Process Save/publisher boundary, and the deliberately installed
   deterministic M27 fixture without creating generic hardware work. Normal
   origin, rig-worker, Solar CLI, publisher, and processor database opening
@@ -63,6 +65,13 @@ same-host resilience. Off-host recovery is not current Phase 1 scope.
   `capture`, and `verify` to `completed`, preserving run revision, sequence
   progress, and SSE truth through restart. This proves a fake executor only:
   it creates no outbox work, provider call, capture evidence, or device command.
+- A current desktop controller can pause a fake or fixture active run, which
+  durably preserves its resumable phase and records one `RunPaused` fact. The
+  executor does not advance while paused; a revision- and lease-guarded resume
+  restores that exact phase and records one `RunResumed` fact. This is fake-only
+  managed-run intervention: it creates no provider call, device command,
+  outbox work, or capture evidence. The desktop Observe fixture exposes the
+  eligible Pause/Resume control; the phone remains read-only.
 - Process Save is a service API only: app-owned source IDs resolve under
   configured roots, selected bytes are checksummed and atomically promoted,
   and Asset/provenance/receipt/`PublishAsset` records commit together. Recorded
