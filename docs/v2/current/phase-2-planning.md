@@ -41,9 +41,9 @@ Before the first code slice, create an accepted packet for the selected Phase 2
 outcome with the scenario, durable owner, action/failure contract, focused
 verification, proof boundary, and intentionally deferred remainder.
 
-## Proposed First Slice: Multi-Sequence Draft and Deterministic Validation
+## First Slice: Multi-Sequence Draft and Deterministic Validation
 
-Status: **proposed — awaiting owner acceptance before implementation**
+Status: **complete July 30, 2026 — deterministic fixture proof only**
 
 Build the first real Plan outcome without pretending that the local fixture is
 an observatory planner: an admitted owner can persist a two-or-more-sequence
@@ -52,7 +52,7 @@ validation result. This replaces the read-only M27 Plan projection only in the
 explicit deterministic fixture used for the slice. A normal unconfigured
 runtime continues to say that no plan is installed.
 
-### Scenario To Implement After Acceptance
+### Implemented Scenario
 
 Given an admitted owner on a control-capable desktop and no active run, the
 owner saves a two-sequence future plan. The service stores the draft, evaluates
@@ -117,3 +117,19 @@ pause/stop/skip/retry/park, active-run edits, hardware calls, and all Solar or
 processing work. The next packet after this slice should connect a persisted
 validated plan to immutable `RunDefinition` acceptance, still using a fake
 executor before any device boundary.
+
+### Recorded Evidence
+
+The local-web service now persists an admitted owner’s two-sequence deterministic
+draft in SQLite, revision-guards and idempotently replays saves, publishes the
+updated Plan projection through SSE, and restores it after a service restart.
+The fixture-only owner desktop exposes `Save deterministic two-sequence draft`;
+the phone exposes the same evidence without any mutation. Saved drafts are
+explicitly non-executable: `runEligible` is false, `StartRunFromPlan` rejects
+them, and no browser `Run plan` control is rendered.
+
+Local-web build and integration tests pass **61/61**. The migration suite covers
+fresh, schema-13, schema-15, and existing-fixture upgrade paths. UI validation
+and Designer review passed at wide, compact, and 390 px phone widths, including
+save-to-SSE truth, restart persistence, no horizontal overflow, and responsive
+control restoration.

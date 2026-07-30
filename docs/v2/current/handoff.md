@@ -27,12 +27,14 @@ does not authorize further cleanup by default.
 
 ## Next Session: Plan One Phase 2 Slice
 
-The proposed first packet is now [Multi-Sequence Draft and Deterministic
-Validation](phase-2-planning.md#proposed-first-slice-multi-sequence-draft-and-deterministic-validation).
-It is deliberately awaiting owner acceptance; it authorizes no code yet. Do
-not infer authorization for a physical Solar run, processing workflow,
-off-host recovery, storage-health operations, or new browser controls beyond
-an accepted Phase 2 slice.
+The first Phase 2 slice is complete: [Multi-Sequence Draft and Deterministic
+Validation](phase-2-planning.md#first-slice-multi-sequence-draft-and-deterministic-validation).
+It proves the fake-first Plan persistence and projection boundary only. The
+next packet should accept a persisted validated draft as an immutable
+`RunDefinition`, still with a fake executor and without device work. Do not
+infer authorization for a physical Solar run, processing workflow, off-host
+recovery, storage-health operations, or browser controls beyond that accepted
+slice.
 
 The user accepts NVMe live/recent data plus the SSD backup as current
 same-host resilience. Off-host recovery is not current Phase 1 scope.
