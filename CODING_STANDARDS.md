@@ -1,225 +1,116 @@
 # Coding Standards
 
-## Effect
+## Authority And Scope
 
-Use the `effect` skill when implementing anything. Choose the references that apply to the task you're trying to implement or review.
+- Production application code is Effect-first.
+- The `effect` skill is the current authority for Effect APIs and patterns.
+- [Effect Guidance](EFFECT_GUIDANCE.md) is binding for this repository's tagged
+  data, errors, and service-boundary rules.
+- App-specific standards extend this contract. Nearby compatible code sets local
+  conventions; report a conflict rather than guessing.
 
-Apply the repository-specific rules in [Effect Guidance](EFFECT_GUIDANCE.md) in
-addition to the skill. In particular, do not use manual `_tag` string checks as
-the primary dispatch or recovery mechanism.
+## Effect Boundary
 
-## Core Working Style
+- Keep deterministic pure domain and presentation transformations as plain
+  functions.
+- Use Effect for application workflows, dependencies and services,
+  configuration, expected failures, resource lifecycles, concurrency, streams,
+  schedules, and boundary decoding.
+- Execute effects with `Effect.runPromise`, `Effect.runSync`, or another runtime
+  entry only at executable, framework, or test edges.
+- Use `Effect.gen(function* () { ... })` for multi-step workflows and `pipe`
+  for linear composition. Keep generators focused on the workflow.
+- Use `Schema.decodeUnknownEffect(...)` for unknown data at API, IPC, device,
+  persistence, event, and provider boundaries. Do not cast before decoding.
+- Use constrained branded Schema IDs for durable or boundary identity.
+- Model expected service failures with `Schema.TaggedErrorClass`; recover with
+  typed Effect operators such as `catchTag` and `catchTags`.
+- Do not use broad `catchAll`, cause recovery, or manual `_tag` dispatch as the
+  default recovery or routing mechanism. Follow Effect Guidance for the narrow
+  exhaustive-match and metadata-lookup exceptions.
+- Use `Context.Service` and `Layer` for real replaceable, lifecycle-owning, or
+  authority-bearing dependencies. Do not hide these behind default references.
+- Use `Effect.fn` for public or non-trivial service operations.
+- Read runtime configuration through `Config`, with providers at startup and
+  test boundaries; do not read environment variables in application workflows.
+- Use `Scope` and `acquireRelease` for resources. Layers own long-lived work
+  and fork it into their scope.
+- Use `Schedule` for retry, polling, pacing, and repetition; use `Stream` for
+  many-valued effectful sources. Bound concurrency and make its ordering policy
+  explicit.
 
-- Make the smallest correct change.
-- Keep logic in one function unless extraction clearly improves reuse, composition, or names a real concept.
-- Do not create single-use helpers without a strong reason.
-- Inline values used once when that keeps the code readable.
-- Prefer `const` over `let`.
-- Avoid `else` when an early return or ternary keeps the flow clearer.
-- Avoid `try`/`catch` when a simpler control flow is available.
-- Avoid `any` and other loose typing shortcuts.
-- Prefer concise names and dot access over unnecessary destructuring.
-- Prefer functional array methods over imperative loops when type inference stays clear.
+## Architecture
 
-## Imports And Module Boundaries
+- Give each domain decision, derived state, configuration decision, and action
+  eligibility rule one canonical owner. Other layers consume that owner.
+- Derive state from authoritative inputs. Stored projections are intentional
+  caches with explicit authority and invalidation.
+- Keep transports thin: decode input, obtain trusted identity and authority,
+  call one workflow or service operation, recover expected typed errors, and
+  map to the public contract.
+- Adapters isolate vendor protocol details, quirks, compatibility behavior, and
+  telemetry normalization behind normalized domain contracts.
+- Workflows orchestrate. Projectors are pure. Renderers consume typed
+  projections and closed typed actions, never vendor or transport state.
+- Guard async state commits with session or generation identity and operation
+  identity.
+- Recovery work, including stop, park, and disconnect, takes priority over
+  ordinary operations. Disconnect cancels and rejects queued work.
+- Correlate aggregate state and active session atomically. Aggregate state is
+  the app-facing truth.
+- Treat storage and media as a subsystem with validated paths, bounded input,
+  and honest partial failure.
+- Keep provider and network calls outside authoritative persistence
+  transactions.
+- Keep event and action vocabularies closed typed unions or exhaustive maps.
+- Keep phone authority and read authority aligned with their canonical truth
+  where those concepts apply.
 
-- Never alias imports.
-- Never use star imports.
-- If a namespace-like API is needed, import the module's exported namespace by name.
-- Use dynamic imports for heavy or branch-specific code paths when that preserves startup cost and readability.
-- Keep dependency direction clean. In the source repo this means Schema -> Core and Protocol -> Server, with client runtime code depending on Schema and Protocol but not Core or Server.
+## Testing And Evidence
 
-## Types And Runtime APIs
+- Prefer real behavior and live layers over mocks. Reusable fakes fail closed
+  for unconfigured behavior and visibly expose configured scenarios.
+- Use Effect test layers and deterministic synchronization: `Deferred`,
+  `Queue`, `Latch`, `Ref`, controllable promises, and `TestClock`, not sleeps.
+- Test idempotency, typed failures, finalization, retry bounds, concurrency,
+  and malformed boundary data when the changed behavior requires them.
+- Name `*.proof.test.ts` only for deterministic consequential simulations that
+  cover the relevant boundary-to-authoritative-evidence path. Pure transition
+  tests are not proof tests.
+- Name `*.integration.test.ts` when real SQLite, filesystem, worker, CLI, or
+  provider-adapter behavior is required. Test persistence and worker recovery
+  with the selected real implementation.
+- Version idempotency hashes over canonical decoded semantic fields; exclude
+  transport-only identity and JSON property order.
+- For visible UI, CLI, or TUI changes, pair automated checks with focused smoke
+  evidence, including a screenshot when it is relevant.
 
-- Rely on type inference unless an exported surface or a non-obvious value needs explicit annotation.
-- Use precise types instead of unchecked casts, non-null assertions, or compatibility shims.
-- In Effect-based code, parse `unknown` external data with `Effect.Schema` instead of ad-hoc structural type guards or unchecked casts when the value crosses a trust boundary and needs validation.
-- Decode unknown input explicitly and handle schema failures deliberately. Do not cast unknown input to a typed shape before decoding it.
-- Prefer platform-native helpers when they fit the codebase. In the source repo this includes Bun APIs such as `Bun.file()`.
+## Change Quality And Migration
 
-## Complex Logic
+- Make the smallest correct change. Inspect nearby code before editing.
+- Prefer inference unless an exported surface or non-obvious value needs an
+  annotation.
+- Do not use import aliases, star imports, `any`, unchecked casts, or non-null
+  assertions.
+- Do not add unnecessary helpers, comments, abstractions, compatibility paths,
+  or duplicated decisions. Extract only real concepts or reusable composition.
+- Regenerate generated output from its source definition; never patch generated
+  output directly.
+- New production code follows this Effect-first contract. Migrate existing
+  imperative production code when an Epic materially changes its ownership
+  boundary; do not perform unrelated big-bang rewrites.
+- Prototype, archive, and legacy code is not implementation authority. Edits to
+  still-built legacy code must not knowingly introduce new violations.
 
-- Make the main function read as the happy path.
-- Move real supporting concepts into small helpers placed close to the caller, usually below the main export.
-- Do not extract helpers for simple expressions just to reduce line count.
-- Add comments only for non-obvious constraints, surprising behavior, or important invariants.
-- Give each shared domain decision and derived state one owner. Reuse that owner rather than recomputing the rule in workflows, projections, and UI.
-- Keep a selector or predicate local when it only shapes one component's presentation. Give reusable or domain-significant selection a named, centralized owner near the state it interprets.
-- Name business-priority condition chains as decision functions when their ordering affects behavior. Simple local presentation ternaries remain appropriate when they do not encode a shared rule.
-- Model lifecycles with explicit discriminated states when transition validity, cancellation, recovery, or terminal behavior matters; do not infer them from unrelated flags.
+## Package Gates And Contributions
 
-## Stateful Changes And Review
-
-For a change that adds or alters state, phases, capabilities, or action eligibility, authors and reviewers must:
-
-- Name the canonical owner for each stateful or action decision, and make other layers consume that decision rather than recreate it.
-- Trace each equivalent phase, capability, and action-eligibility rule through the workflow/runtime, projector, and renderer; resolve mismatches at the canonical owner.
-- Centralize a predicate or selector only when it is shared or names a domain-significant rule. Keep simple local presentation expressions local.
-- Derive projections from authoritative inputs when those inputs are available. Store a projection only as an intentional cache, and document its authority, invalidation, and reason for storage.
-- Distinguish stable capabilities from transient activity: derive eligibility and presentation from a stable capability when that is the rule, not from an operation mode that happens to imply it now.
-- Do not apply blanket ternary bans or state-machine mandates. Use the smallest representation that makes the decision and its ownership clear.
-
-## Repo-Specific Patterns From OpenCode V2
-
-- Do not hand-edit generated client output after API changes; regenerate it from the owning package.
-- Keep V2 work in the V2 package set and avoid legacy V1 areas unless explicitly requested.
-- In Effect-heavy code, prefer current Effect v4 patterns, `Effect.gen(...)` for multi-step flows, thin transport handlers, explicit layer composition, and live tests over mocks.
-- In Effect generators, bind services to named variables before calling methods instead of nesting service yields.
-- In Drizzle schemas, prefer `snake_case` field names so column names do not need remapping strings.
-
-## Architecture Invariants
-
-Enforceable boundaries for this repo. For rationale and migration details see `docs/architecture-v4.md`. Before feature work, identify the owning layer: SDK/vendor protocol, adapter, workflow/runtime, projector, renderer, or storage.
-
-- Decode unknown input at every trust boundary. Decode IPC outputs and device events before the renderer consumes them.
-- Keep vendor protocol details below the Rig boundary, inside SDK/vendor protocol packages or thin adapters.
-- Keep vendor-specific quirks, compatibility behavior, and telemetry normalization in the owning adapter; expose only the normalized domain contract above it.
-- Callable Rig surfaces are the canonical capability source. Booleans only express semantics not structurally expressible there.
-- Keep generic camera exposure distinct from vendor-native capture.
-- Workflows orchestrate. Adapters translate and assemble. Projectors are pure UI normalization.
-- The renderer consumes typed projections and actions, never vendor or transport state.
-- Guard every async state commit with session identity/generation and operation identity.
-- Coordinate connect/disconnect lifecycle. Disconnect terminally cancels and rejects queued work.
-- Stop/park/disconnect recovery supersedes ordinary operations and must not wait behind them.
-- Correlate aggregate state and active session atomically. Aggregate state is the app-facing truth.
-- Treat storage/media as a subsystem: validated paths, bounded inputs, honest partial failure.
-- Keep event and action vocabularies as closed typed unions or maps.
-
-## Testing And Verification
-
-- Verify from the narrowest relevant package or app directory, not from a monorepo root that intentionally blocks root tests.
-- Use the project's standard typecheck command instead of calling `tsc` directly when local scripts define the contract.
-- Prefer testing real behavior over duplicating implementation logic in tests.
-- Avoid mocks unless they are the only realistic option.
-- Make reusable fakes fail closed for unconfigured behavior and expose configured scenarios visibly; do not let a permissive default hide an untested path. A one-off test may use the smallest local fake that makes its scenario clear.
-- Synchronize lifecycle and race tests with deterministic barriers, events, or controllable promises. Do not use fixed sleeps as proof that an asynchronous transition occurred.
-- Prefer named fixture configuration to growing optional positional arguments when a fixture has several independently meaningful settings.
-- For UI, CLI, or TUI changes, pair automated checks with a focused smoke test and capture screenshot evidence when the change is visible.
-- Use `*.proof.test.ts` only for deterministic server simulations that exercise
-  a consequential scenario across decoding, authority, idempotency,
-  transactional acceptance, domain decisions, durable evidence, outbox work,
-  and authoritative projection. A unit test that calls a pure transition does
-  not earn the proof suffix.
-- Use `*.integration.test.ts` when the test depends on a real implementation
-  boundary such as SQLite, filesystem behavior, a worker, CLI, or provider
-  adapter. Proof tests may use deterministic in-memory services but must fail
-  closed for behavior they do not configure.
-- Version idempotency hashes over canonical decoded semantic fields. Exclude
-  transport-only identity such as `commandId`; never treat caller JSON property
-  order as canonical input.
-- An in-memory proof may establish atomic outbox insertion and that adapters do
-  not run inside acceptance. Worker claim, acknowledgement, retry, lease
-  recovery, and crash behavior are integration concerns and must be tested
-  against the selected persistence and worker implementation.
-
-## Contribution Hygiene
-
-- Keep branches, commits, and PRs focused and small.
-- Use conventional commit style for commit messages and PR titles: `type(scope): summary`.
-- Explain why a change works and how it was verified.
-- Do not pad reviews, issues, or PR descriptions with long AI-generated filler.
-
-## Agent Authoring Patterns
-
-- Keep agent prompts short, narrow, and operational.
-- Put stable metadata in YAML frontmatter.
-- Give agents only the tools they need.
-- Make ownership boundaries explicit: what the agent should do, what it must not do, and how it should report results.
-
-## Subagent Contract
-
-When implementing code using these standards:
-
-- Read this file first and treat it as the style authority.
-- Inspect nearby code before introducing a new pattern.
-- Prefer the existing local style when it is compatible with this document.
-- Make the smallest correct change that satisfies the task.
-- Verify with the narrowest relevant command.
-- If the local code clearly requires a pattern that conflicts with this document, stop and report the conflict instead of improvising.
-
-## Few-Shot Examples
-
-### Example: small refactor
-
-Do this:
-
-```ts
-function resolveLabel(value: string | undefined) {
-  if (!value) return "unknown"
-  return value.trim()
-}
-```
-
-Not this:
-
-```ts
-function normalize(value: string | undefined) {
-  let result
-  if (!value) {
-    result = "unknown"
-  } else {
-    result = value.trim()
-  }
-  return result
-}
-```
-
-### Example: helper extraction
-
-Do this when the helper names a real concept:
-
-```ts
-export function loadThing(input: unknown) {
-  const config = requireConfig(input)
-  return createThing(config)
-}
-
-function requireConfig(input: unknown) {
-  // validation here
-}
-```
-
-Do not extract a helper that is only a renamed one-line expression.
-
-### Example: ordered business decision
-
-Do this when status precedence affects behavior:
-
-```ts
-function decideWorkStatus(work: Work) {
-  if (work.cancelledAt) return "cancelled"
-  if (work.failedAt) return "failed"
-  if (work.completedAt) return "completed"
-  return "active"
-}
-```
-
-Not this:
-
-```ts
-const status = work.cancelledAt ? "cancelled" : work.failedAt ? "failed" : work.completedAt ? "completed" : "active"
-```
-
-### Example: stable capability selector
-
-Do this when eligibility is determined by a stable capability:
-
-```ts
-function canConfigureDarks(camera: Camera) {
-  return Boolean(camera.startDarkExposure)
-}
-```
-
-Not this when `captureMode` only describes current activity:
-
-```ts
-const canConfigureDarks = captureMode !== "capturing"
-```
-
-### Example: generated surfaces
-
-If a task changes a generated API surface, edit the source definition and run the owning generate command. Do not patch generated files by hand.
-
-### Example: verification
-
-If only one package or app changed, run that package or app's local verification command first. Do not default to root-wide commands when a narrower check proves the change.
+- New production packages provide `format`, `format:check`, `typecheck`, `lint`,
+  `build`, `test`, and `check` scripts where applicable. Existing packages adopt
+  missing gates when an Epic materially changes their tooling boundary.
+- New TypeScript configurations enable `strict`, `noUncheckedIndexedAccess`,
+  and `exactOptionalPropertyTypes`; existing configurations adopt them when an
+  Epic materially changes their ownership boundary.
+- Verify from the narrowest affected package or app. Use its declared commands
+  rather than invoking `tsc` directly when scripts define the contract.
+- Keep commits and PRs focused. Use conventional commit form:
+  `type(scope): summary`.
