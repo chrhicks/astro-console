@@ -30,6 +30,10 @@ type FixtureState = {
     | 'progressValue'
     | 'progressMax'
     | 'sequenceProgress'
+    | 'membership'
+    | 'presence'
+    | 'attentionOwner'
+    | 'health'
   >
   observe: Omit<
     ObserveView,
@@ -398,14 +402,28 @@ export function projectFixture(scenario: FixtureScenario): Projection {
       ...state.shell,
       readOnly: true,
       capability: 'Read-only fixture capability',
+      membership: 'Fixture member',
+      presence: 'Fixture presence',
+      attentionOwner: 'Fixture attention owner',
+      health: [
+        {
+          label: 'Fixture',
+          state: 'simulated',
+          summary: 'Fixture: simulated',
+          detail: 'Development fixture / not service health',
+          tone: 'neutral',
+        },
+      ],
       progressValue: scenario === 'disconnected' ? 0 : 24,
       progressMax: scenario === 'disconnected' ? 1 : 108,
       sequenceProgress:
         scenario === 'disconnected' ? 'Sequence unavailable' : 'Sequence 1 / 3',
     },
     plan: {
+      detailAvailable: true,
       title: 'Three targets until dawn',
       readiness: 'Ready with limitation: NGC 7000 has a short usable window.',
+      detail: 'Development fixture plan detail is read-only.',
       sequences: [
         {
           id: 'SQ-M31-L-01',

@@ -54,11 +54,22 @@ test('production projection fails closed for every consequential action', () => 
   assert.equal(unavailableProjection.shell.readOnly, true)
   assert.equal(
     unavailableProjection.shell.capability,
-    'Read-only / mutations unavailable',
+    'Capability unknown / mutations unavailable',
   )
   assert.equal('action' in unavailableProjection.plan, false)
   assert.equal('action' in unavailableProjection.library, false)
   assert.equal('action' in unavailableProjection.process, false)
+})
+
+test('unavailable Plan projection does not claim a draft or revision', () => {
+  const markup = renderToStaticMarkup(
+    createElement(PlanView, { view: unavailableProjection.plan }),
+  )
+  assert.match(markup, /Plan draft and revision detail are unavailable/)
+  assert.doesNotMatch(markup, /Draft revision is visible/)
+  assert.doesNotMatch(markup, /Tonight|25 July|21:00|Dawn 04:32|motion arcs/)
+  assert.match(markup, /Sky and observing-window evidence are unavailable/)
+  assert.match(markup, /Schedule detail is unavailable/)
 })
 
 test('freshness protects actions without viewport-derived authority', () => {
@@ -207,7 +218,10 @@ test('status and shell environment preserve semantic and projected facts', () =>
     ),
   )
   assert.match(status, /role="status"/)
-  assert.match(shell, /Environment unavailable/)
+  assert.match(shell, /Authoritative projection/)
+  assert.match(shell, /Capability unknown \/ mutations unavailable/)
+  assert.match(shell, /Commands cannot be sent or replayed/)
+  assert.match(shell, /Service availability unknown without a snapshot/)
   assert.match(shell, /Static result output remains visible/)
 })
 

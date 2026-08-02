@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { Action, StatusTone } from '../presentation'
 
 export function Status({
@@ -6,7 +7,7 @@ export function Status({
   className,
 }: {
   tone: StatusTone
-  children: string
+  children: ReactNode
   className?: string
 }) {
   return (

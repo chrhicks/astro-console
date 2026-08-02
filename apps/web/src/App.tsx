@@ -1,4 +1,8 @@
+import { Effect, Fiber, Stream } from 'effect'
 import { useEffect, useRef, useState } from 'react'
+import { BootstrapClient } from './bootstrap-client'
+import { projectBootstrapState } from './bootstrap-projection'
+import { createBootstrapRuntime } from './bootstrap-runtime'
 import { unavailableProjection } from './future-adapter'
 import type { Projection } from './presentation'
 import {
@@ -27,6 +31,25 @@ export function App() {
     const onPopState = () => setRoute(currentRoute())
     addEventListener('popstate', onPopState)
     return () => removeEventListener('popstate', onPopState)
+  }, [])
+  useEffect(() => {
+    if (import.meta.env.DEV) return
+    const runtime = createBootstrapRuntime()
+    const fiber = runtime.runFork(
+      Effect.gen(function* () {
+        const client = yield* BootstrapClient
+        yield* client.states.pipe(
+          Stream.runForEach((state) =>
+            Effect.sync(() => setProjection(projectBootstrapState(state))),
+          ),
+        )
+      }),
+    )
+    return () => {
+      void runtime
+        .runPromise(Fiber.interrupt(fiber))
+        .then(() => runtime.dispose())
+    }
   }, [])
   useEffect(() => {
     if (initialRoute.current) {

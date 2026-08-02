@@ -4,6 +4,13 @@ import type { AssetId } from './routes'
 export type Workspace = 'plan' | 'observe' | 'library' | 'process'
 export type StatusTone = 'safe' | 'attention' | 'danger' | 'neutral'
 export type Availability = 'available' | 'unavailable' | 'protected'
+export type HealthFact = {
+  label: string
+  state: string
+  summary: string
+  detail: string
+  tone: StatusTone
+}
 
 export type Action = {
   label: string
@@ -61,12 +68,18 @@ export type ShellView = {
   sequenceProgress: string
   freshness: string
   controller: string
+  membership: string
+  presence: string
+  attentionOwner: string
   capability: string
   protection: string
+  health: readonly HealthFact[]
 }
 export type PlanView = {
+  detailAvailable: boolean
   title: string
   readiness: string
+  detail: string
   sequences: readonly {
     id: string
     target: string

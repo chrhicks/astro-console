@@ -89,9 +89,26 @@ export function Shell({
         </div>
         <div className="status-anchor__authority">
           <span className="status-anchor__controller">{view.controller}</span>
+          <span className="status-anchor__membership">{view.membership}</span>
+          <span className="status-anchor__presence">{view.presence}</span>
+          <span className="status-anchor__attention-owner">
+            {view.attentionOwner}
+          </span>
           <span className="status-anchor__service">{view.service}</span>
           <span className="status-anchor__capability">{view.capability}</span>
           <span className="status-anchor__protection">{view.protection}</span>
+        </div>
+        <div className="status-anchor__health" aria-label="Service health">
+          {view.health.map((fact) => (
+            <Status key={fact.label} tone={fact.tone}>
+              <span className="status-anchor__health-detail">
+                {fact.detail}
+              </span>
+              <span className="status-anchor__health-summary">
+                {fact.summary}
+              </span>
+            </Status>
+          ))}
         </div>
       </section>
       {result && (
