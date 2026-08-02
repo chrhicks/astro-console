@@ -25,35 +25,19 @@ reading table. The default context is only `docs/v2/ux-design-guidance.md` and
 
 ### Subagents - delegation and context preservation
 
-Use the `coder` agent as the default implementation path for coding tasks in this project.
-
-- For code changes, start by delegating the implementation work to the `coder` subagent.
-- Give `coder` the concrete task, affected files or areas, and any verification expectations.
-- Objectively review their work and re-task them with feedback until you're satisfied with the work.
-- Treat `CODING_STANDARDS.md` as the style authority for that work.
-
-Use `ui-validator` as the default subagent for desktop UI smoke validation and screenshot-backed verification.
-
-- Delegate `agent-browser` work, `npm run dev:inspect` flows, fake Seestar scenario checks, and Electron renderer validation to `ui-validator` when the task is primarily about verifying UI behavior rather than implementing code.
-- Give `ui-validator` the exact scenarios or UI states to validate, the evidence you want captured, and any specific DOM assertions or screenshots needed.
-- Keep implementation in the primary agent or `glm-coder`; `ui-validator` is for validation only and should not be used as the coding path.
-
-Use the `designer` subagent after every UI-affecting change in V2 or the web implementation.
-
-- Treat Designer review as a required validation gate, not a final-polish pass. Batch only tightly coupled UI edits into one reviewable slice, then re-run the review after fixes.
-- Give `designer` the affected routes/components, change classification, source projection or fixture, canonical owner/freshness/action state, exact walkthrough, and known limitations.
-- Require screenshot-backed evidence at wide desktop, compact desktop, and 390 px phone where applicable. The review must cover semantic truth, hierarchy, awkward states, responsive behavior, keyboard/accessibility, overflow, and console health.
-- `designer` is validation-only: it must report prioritized findings and never implement the fixes. P0/P1 findings block UI completion.
+* Use the `coder` agent as the default implementation path for coding tasks in this project.
+* Use `ui-validator` as the default subagent for desktop UI smoke validation and screenshot-backed verification.
+* Use the `designer` subagent after every UI-affecting change in V2 or the web implementation.
 
 ### Executor
 
-We try to use what is available in the`executor`  MCP when possible, its a way for you to programmatically interact with tools giving you consistent and reliable usage over something like CLI commands.
+We try to use what is available in the `executor`  MCP when possible, its a way for you to programmatically interact with tools giving you consistent and reliable usage over something like CLI commands.
 
 ### Continuum
 
 The `continuum` mcp (thru executor) allows you to do
 
-- manage memory - use this frequently. It's the only way for you to remember things in the future: decisions, learnings, gotchas, troublesheeting, changelogs, etc.
+- manage memory - use this frequently. It's the only way for you to remember things in the future: decisions, learnings, gotchas, troubleshooting, changelogs, etc.
 - tasks - a way to keep track of your work. For capturing requirements for yourself or subagents you invoke. Think typical project management stuff like: Epics, Tasks, Plans, Checklists, etc.
 
 ### LED Panel - Communicating current activity
@@ -61,7 +45,7 @@ The `continuum` mcp (thru executor) allows you to do
 The `led-panel` mcp (through executor) allows you communicate to an LED Panel (currently LaMetric TIME). Use this semi-regularly for major progress steps.
 - your current mood (permanent, default, dismissable)
 - what you are a subagent is currently working on (persistent, dismissable) - think planning -> executing -> step 1 -> step N -> finalizing -> alert user
-- to get the users attention (peristent, dismissible, audio)
+- to get the users attention (persistent, dismissible, audio)
 - otherwise use it for fun whenever you fancy you could do something creative/playful with it throughout your work
 
 ## Local Web Dev Inspection

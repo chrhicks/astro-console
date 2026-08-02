@@ -24,6 +24,7 @@ import { isSqliteBusy } from "./publisher-service.ts"
 import { processorConfig } from "./processor-config.ts"
 import { createProcessorService, runProcessorFromEnvironment } from "./processor-service.ts"
 import { ingestSourceAsset } from "./source-ingest.ts"
+import { applicationShell } from "./application-shell.ts"
 
 function createLocalWebService(databasePath?: Parameters<typeof createRuntimeService>[0], identityResolver?: Parameters<typeof createRuntimeService>[1], brandAssetPath?: Parameters<typeof createRuntimeService>[2], processSaveStorage?: Parameters<typeof createRuntimeService>[3], downloadGrants?: Parameters<typeof createRuntimeService>[4]) {
   return createRuntimeService(databasePath, identityResolver, brandAssetPath, processSaveStorage, downloadGrants, { fixture: "m27" })
@@ -204,11 +205,11 @@ test("numbered SQLite migrations upgrade a legacy database and reject a newer sc
   const databasePath = join(mkdtempSync(join(tmpdir(), "astro-migrations-")), "state.sqlite")
   const legacy = new DatabaseSync(databasePath); legacy.exec("CREATE TABLE state (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE events (cursor INTEGER PRIMARY KEY,type TEXT NOT NULL,snapshot TEXT NOT NULL); CREATE TABLE receipts (idempotency_key TEXT PRIMARY KEY,response TEXT NOT NULL); CREATE TABLE outbox (id TEXT PRIMARY KEY,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL); CREATE TABLE control_requests (client_id TEXT PRIMARY KEY,person_id TEXT NOT NULL); CREATE TABLE memberships (external_subject TEXT PRIMARY KEY,person_id TEXT NOT NULL,role TEXT NOT NULL); CREATE TABLE library_assets (asset_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,role TEXT NOT NULL,format TEXT NOT NULL,availability TEXT NOT NULL,comparison_group_id TEXT NOT NULL,captured_at TEXT NOT NULL,updated_at TEXT NOT NULL,sharpness REAL NOT NULL,detail TEXT NOT NULL);"); legacy.close()
   const service = createLocalWebService(databasePath)
-  assert.equal((service.database.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 19); assert.equal((service.database.prepare("SELECT count(*) AS count FROM workspace_projections").get() as { count: number }).count, 2); assert.equal((service.database.prepare("SELECT count(*) AS count FROM pragma_table_info('outbox') WHERE name='claim_token'").get() as { count: number }).count, 1)
+  assert.equal((service.database.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 20); assert.equal((service.database.prepare("SELECT count(*) AS count FROM workspace_projections").get() as { count: number }).count, 2); assert.equal((service.database.prepare("SELECT count(*) AS count FROM pragma_table_info('outbox') WHERE name='claim_token'").get() as { count: number }).count, 1)
   service.close()
   const freshPath = join(mkdtempSync(join(tmpdir(), "astro-fresh-migrations-")), "state.sqlite")
   const fresh = createRuntimeService(freshPath)
-  assert.equal((fresh.database.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 19); assert.equal((fresh.database.prepare("SELECT count(*) AS count FROM pragma_table_info('observing_plans') WHERE name='run_eligible'").get() as { count: number }).count, 1)
+  assert.equal((fresh.database.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 20); assert.equal((fresh.database.prepare("SELECT count(*) AS count FROM pragma_table_info('observing_plans') WHERE name='run_eligible'").get() as { count: number }).count, 1)
   fresh.close()
   const fixturePath = join(mkdtempSync(join(tmpdir(), "astro-legacy-plan-")), "state.sqlite")
   const seeded = createLocalWebService(fixturePath)
@@ -225,7 +226,7 @@ test("numbered SQLite migrations upgrade a legacy database and reject a newer sc
   recorded15.close()
   const repaired = createLocalWebService(recorded15Path)
   const repairedPlan = JSON.parse((repaired.database.prepare("SELECT value FROM workspace_projections WHERE name='plan'").get() as { value: string }).value)
-  assert.equal(repairedPlan.sequences.length, 2); assert.deepEqual(repairedPlan.limitations, []); assert.equal((repaired.database.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 19)
+  assert.equal(repairedPlan.sequences.length, 2); assert.deepEqual(repairedPlan.limitations, []); assert.equal((repaired.database.prepare("SELECT max(version) AS version FROM schema_migrations").get() as { version: number }).version, 20)
   repaired.close()
   const newer = new DatabaseSync(databasePath); newer.prepare("INSERT INTO schema_migrations VALUES (?,?)").run(99, "2026-07-24T00:00:00.000Z"); newer.close()
   assert.throws(() => createLocalWebService(databasePath), /newer than this release/)
@@ -339,7 +340,7 @@ test("operational endpoints expose bounded admitted health without internal deta
   const ready = await fetch(`${base}/api/health/ready`).then((response) => response.json())
   assert.deepEqual(ready, { status: "ready", service: "ready", database: "ready", rig: "unknown", tunnel: "unknown", activeRun: "none", message: "Service and local database are ready; rig and tunnel are not connected in this fixture." })
   const operations = await fetch(`${base}/api/health/operations`).then((response) => response.json())
-  assert.equal(operations.release, "local-web-fixture"); assert.equal(operations.schemaVersion, 19); assert.equal(operations.sqlite.journalMode, "wal"); assert.equal(operations.disk, "unknown"); assert.equal(operations.rig, "unknown"); assert.equal(JSON.stringify(operations).includes("/"), false)
+  assert.equal(operations.release, "local-web-fixture"); assert.equal(operations.schemaVersion, 20); assert.equal(operations.sqlite.journalMode, "wal"); assert.equal(operations.disk, "unknown"); assert.equal(operations.rig, "unknown"); assert.equal(JSON.stringify(operations).includes("/"), false)
   const denied = createLocalWebService(":memory:", () => ({ personId: "viewer", clientId: "viewer", capability: "readOnly" })); const deniedListener = await denied.listen()
   assert.equal((await fetch(`http://127.0.0.1:${deniedListener.port}/api/health/operations`)).status, 403); assert.equal((await fetch(`http://127.0.0.1:${deniedListener.port}/api/health/ready`)).status, 200)
   await deniedListener.close(); denied.close()
@@ -1110,4 +1111,42 @@ test("a missing packaged brand asset is a bounded 404 rather than a server failu
   t.after(async () => { await listener.close(); service.close() })
   const response = await fetch(`http://127.0.0.1:${listener.port}/assets/brand/alignment-aperture-light.svg`)
   assert.equal(response.status, 404); assert.equal(await response.text(), "Brand asset unavailable")
+})
+
+test("generated fixture shell has executable browser JavaScript", () => {
+  const script = applicationShell({ fixture: true }).match(/<script>([\s\S]*)<\/script>/)?.[1]
+  assert.notEqual(script, undefined); new Function(script); assert.match(script, /Preflight · fake run is preparing/); assert.match(script, /Acquire · fake run is centering/); assert.match(script, /Verify · fake run is checking/); assert.doesNotMatch(script, /Capture · M27 is continuing/)
+})
+
+test("fake run resolution and consequence-aware edits persist only durable fake state", async (t) => {
+  const databasePath = join(mkdtempSync(join(tmpdir(), "astro-final-phase-two-")), "state.sqlite")
+  const start = async (key: string, path = databasePath) => {
+    const service = createLocalWebService(path); const listener = await service.listen(); const base = `http://127.0.0.1:${listener.port}`
+    const plan = await fetch(`${base}/api/workspaces/plan`).then((response) => response.json()); const sequences = plan.sequences.map(({ viability, ...sequence }: { readonly viability: string }) => sequence)
+    const draft = await fetch(`${base}/api/commands/save-plan-draft`, { method: "POST", body: JSON.stringify({ planId: plan.planId, expectedPlanRevision: plan.revision, idempotencyKey: `${key}-draft`, sequences }) }).then((response) => response.json())
+    await fetch(`${base}/api/commands/accept-run-definition`, { method: "POST", body: JSON.stringify({ _tag: "AcceptRunDefinition", planId: draft.plan.planId, expectedPlanRevision: draft.plan.revision, expectedLeaseRevision: draft.snapshot.control.revision, idempotencyKey: `${key}-definition` }) })
+    await fetch(`${base}/api/commands/start-run`, { method: "POST", body: JSON.stringify({ _tag: "StartRunFromPlan", planId: draft.plan.planId, expectedPlanRevision: draft.plan.revision, expectedLeaseRevision: draft.snapshot.control.revision, idempotencyKey: `${key}-start` }) })
+    return { service, listener, base }
+  }
+  const first = await start("final-edit"); t.after(async () => { await first.listener.close(); first.service.close() })
+  const snapshot = await fetch(`${first.base}/api/snapshot`).then((response) => response.json())
+  const previewResponse = await fetch(`${first.base}/api/commands/preview-run-mutation`, { method: "POST", body: JSON.stringify({ _tag: "PreviewRunMutation", mutation: "reprioritizeSecond", expectedLeaseRevision: snapshot.control.revision, expectedRunRevision: snapshot.run.revision, idempotencyKey: "final-preview" }) }); assert.equal(previewResponse.status, 202); const preview = await previewResponse.json()
+  assert.equal(preview.preview.classification, "nonDisruptive")
+  const expired = await fetch(`${first.base}/api/commands/preview-run-mutation`, { method: "POST", body: JSON.stringify({ _tag: "PreviewRunMutation", mutation: "shortenSecond", expectedLeaseRevision: snapshot.control.revision, expectedRunRevision: snapshot.run.revision, idempotencyKey: "final-expired-preview" }) }).then((response) => response.json()); first.service.database.prepare("UPDATE run_mutation_previews SET expires_at=? WHERE preview_id=?").run("2000-01-01T00:00:00.000Z", expired.preview.previewId)
+  const expiredApply = await fetch(`${first.base}/api/commands/apply-run-mutation`, { method: "POST", body: JSON.stringify({ _tag: "ApplyRunMutation", previewId: expired.preview.previewId, expectedLeaseRevision: snapshot.control.revision, expectedRunRevision: snapshot.run.revision, idempotencyKey: "final-expired-apply" }) }); assert.equal(expiredApply.status, 409); assert.equal((await expiredApply.json()).reason, "PreviewExpired")
+  const applied = await fetch(`${first.base}/api/commands/apply-run-mutation`, { method: "POST", body: JSON.stringify({ _tag: "ApplyRunMutation", previewId: preview.preview.previewId, expectedLeaseRevision: snapshot.control.revision, expectedRunRevision: snapshot.run.revision, idempotencyKey: "final-apply" }) })
+  assert.equal(applied.status, 202); const afterApplied = await applied.json(); assert.equal(afterApplied.snapshot.run.activeSequenceIndex, 0); assert.equal(afterApplied.snapshot.run.appliedMutations.length, 1)
+  const disruptive = await fetch(`${first.base}/api/commands/preview-run-mutation`, { method: "POST", body: JSON.stringify({ _tag: "PreviewRunMutation", mutation: "discardCurrent", expectedLeaseRevision: afterApplied.snapshot.control.revision, expectedRunRevision: afterApplied.snapshot.run.revision, idempotencyKey: "final-disruptive-preview" }) }).then((response) => response.json())
+  const denied = await fetch(`${first.base}/api/commands/apply-run-mutation`, { method: "POST", body: JSON.stringify({ _tag: "ApplyRunMutation", previewId: disruptive.preview.previewId, expectedLeaseRevision: afterApplied.snapshot.control.revision, expectedRunRevision: afterApplied.snapshot.run.revision, idempotencyKey: "final-disruptive-denied" }) }); assert.equal(denied.status, 403)
+  const mismatchedApproval = await fetch(`${first.base}/api/commands/approve-disruptive-run-mutation`, { method: "POST", body: JSON.stringify({ _tag: "ApproveDisruptiveRunMutation", previewId: disruptive.preview.previewId, approvalToken: "wrong-token", expectedLeaseRevision: afterApplied.snapshot.control.revision, expectedRunRevision: afterApplied.snapshot.run.revision, idempotencyKey: "final-disruptive-mismatch" }) }); assert.equal(mismatchedApproval.status, 403); assert.equal((await mismatchedApproval.json()).reason, "ApprovalMismatch")
+  const approved = await fetch(`${first.base}/api/commands/approve-disruptive-run-mutation`, { method: "POST", body: JSON.stringify({ _tag: "ApproveDisruptiveRunMutation", previewId: disruptive.preview.previewId, approvalToken: disruptive.approvalToken, expectedLeaseRevision: afterApplied.snapshot.control.revision, expectedRunRevision: afterApplied.snapshot.run.revision, idempotencyKey: "final-disruptive-approved" }) }).then((response) => response.json())
+  assert.equal(approved.snapshot.run.activeSequenceIndex, 1); assert.equal(approved.snapshot.run.phase, "preflight"); assert.equal((first.service.database.prepare("SELECT count(*) AS count FROM outbox").get() as { count: number }).count, 0)
+  const retry = await fetch(`${first.base}/api/commands/retry-fake-phase`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: approved.snapshot.control.revision, expectedRunRevision: approved.snapshot.run.revision, idempotencyKey: "final-retry" }) }).then((response) => response.json())
+  assert.equal(retry.snapshot.run.retryPhase, "preflight")
+  const retryAgain = await fetch(`${first.base}/api/commands/retry-fake-phase`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: retry.snapshot.control.revision, expectedRunRevision: retry.snapshot.run.revision, idempotencyKey: "final-retry-again" }) }); assert.equal(retryAgain.status, 409)
+  const parked = await fetch(`${first.base}/api/commands/request-fake-park`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: retry.snapshot.control.revision, expectedRunRevision: retry.snapshot.run.revision, idempotencyKey: "final-park" }) }).then((response) => response.json()); assert.equal(parked.snapshot.run.phase, "parkRequested")
+  await first.listener.close(); first.service.close()
+  const recovered = createLocalWebService(databasePath); const recoveredSnapshot = await recovered.database.prepare("SELECT value FROM state WHERE key='run'").get() as { value: string }; assert.equal(JSON.parse(recoveredSnapshot.value).phase, "parkRequested"); recovered.close()
+  const skip = await start("final-skip", join(mkdtempSync(join(tmpdir(), "astro-final-skip-")), "state.sqlite")); t.after(async () => { await skip.listener.close(); skip.service.close() }); const skipSnapshot = await fetch(`${skip.base}/api/snapshot`).then((response) => response.json()); const skipped = await fetch(`${skip.base}/api/commands/skip-fake-sequence`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: skipSnapshot.control.revision, expectedRunRevision: skipSnapshot.run.revision, idempotencyKey: "final-skip-once" }) }).then((response) => response.json()); assert.equal(skipped.snapshot.run.activeSequenceIndex, 1); assert.equal(skipped.snapshot.run.revision, skipSnapshot.run.revision + 1); assert.equal((skip.service.database.prepare("SELECT count(*) AS count FROM events WHERE type='FakeSequenceSkipped'").get() as { count: number }).count, 1)
+  const stopped = await start("final-stop", join(mkdtempSync(join(tmpdir(), "astro-final-stop-")), "state.sqlite")); t.after(async () => { await stopped.listener.close(); stopped.service.close() }); const stopSnapshot = await fetch(`${stopped.base}/api/snapshot`).then((response) => response.json()); const stop = await fetch(`${stopped.base}/api/commands/stop-run`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: stopSnapshot.control.revision, expectedRunRevision: stopSnapshot.run.revision, idempotencyKey: "final-stop-once" }) }).then((response) => response.json()); assert.equal(stop.snapshot.run.phase, "stopped"); assert.equal(stop.snapshot.run.revision, stopSnapshot.run.revision + 1); assert.equal((stopped.service.database.prepare("SELECT count(*) AS count FROM events WHERE type='RunStopped'").get() as { count: number }).count, 1); const blockedPolicy = await fetch(`${stopped.base}/api/commands/request-fake-park`, { method: "POST", body: JSON.stringify({ expectedLeaseRevision: stop.snapshot.control.revision, expectedRunRevision: stop.snapshot.run.revision, idempotencyKey: "final-stop-policy" }) }); assert.equal(blockedPolicy.status, 409)
 })

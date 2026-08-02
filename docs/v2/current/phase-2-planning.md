@@ -1,6 +1,6 @@
 # Phase 2 Implementation Planning
 
-Status: **next V2.0 phase — Plan and Managed Runs**
+Status: **complete July 30, 2026 — Plan and Managed Runs, fake-executor proof only**
 
 This document plans execution of Phase 2 in the durable
 [V2 delivery plan](delivery-plan.md). It is not an alternative backlog and it
@@ -287,3 +287,70 @@ state. The 390 px phone remains read-only. Local-web build and integration
 tests pass **64/64**. Designer re-review passed at wide, compact, and 390 px
 phone widths, including keyboard pause/resume, no horizontal overflow, and
 console health.
+
+## Fifth And Final Slice: Deterministic Run Resolution And Consequence-Aware Edits
+
+Status: **complete July 30, 2026 — fake-executor proof only**
+
+This final Phase 2 packet closes the remaining managed-run policy and
+active-run-edit outcomes in one coherent fake-only slice. A current desktop
+controller can stop a fake run, skip its current fake sequence, retry one
+bounded fake phase from its recorded checkpoint, or end with a durable
+`parkRequested` policy. `parkRequested` is a terminal policy result, never a
+claim that a mount moved or parked.
+
+`ActiveRun` remains the durable owner of sequence disposition, bounded retry
+allowance, terminal result, and applied mutations. Only persisted fake or
+fixture `RunDefinition` runs are eligible. Every policy intent carries the
+current run and lease revisions plus an idempotency key; accepted actions
+advance the run revision once, persist one fact, and publish one authoritative
+SSE update. Browser refresh, navigation, disconnect, and workspace changes
+cannot alter execution.
+
+The active-run mutation surface is intentionally closed rather than a general
+editor. A service-generated `RunMutationPreview` classifies only these supplied
+fake changes: reprioritize the unstarted second sequence (`nonDisruptive`),
+shorten or remove that unstarted sequence (`notice`), or discard the current
+fake sequence progress and advance to the next (`disruptive`). The service
+returns the normalized change, exact fake consequences, eligibility, expiry,
+and approval requirement. A controller applies eligible non-disruptive or
+notice previews once; a disruptive preview requires approval bound to the
+displayed consequences. Applied mutations are durable; previews are expiring
+operation state, not accepted history.
+
+Focused verification must prove real SQLite/HTTP/SSE/restart persistence for
+stop, skip, one bounded retry, and `parkRequested`; source-less or non-fake runs
+remain ineligible. It must prove typed lease/run/preview/idempotency failures,
+one revision and event per accepted action, no automatic advance after terminal
+resolution, non-disruptive future edits leaving the current fake sequence
+unchanged, and disruptive approval exactly matching the previewed consequence.
+It must also prove zero outbox work, provider calls, device commands, capture
+evidence, or Solar activity.
+
+The fixture-visible desktop surfaces show only the policy or mutation action
+eligible in the current fake state and state the fake consequence directly.
+Phone remains read-only; the shell does not duplicate Observe or Plan actions.
+Wide desktop, compact desktop, and 390 px phone validation plus Designer review
+are required.
+
+Deferred beyond Phase 2: physical stop/park, real acquisition recovery,
+`SkipAcquireTarget`, plate-solve retry, provider-backed checkpoints, general
+run-editing, and all Solar work. Those need the Phase 3 evidence and provider
+boundaries; this slice completes managed-run semantics only.
+
+### Recorded Evidence
+
+The local-web service records fake-only stop, sequence skip, one bounded phase
+retry, and terminal `parkRequested` policy outcomes durably. A persisted
+`RunMutationPreview` classifies the three closed fake changes, expires before
+application, and binds disruptive approval to its displayed consequence.
+Accepted policy actions and applied mutations advance the run once, emit one
+authoritative SSE fact, survive restart, and create no outbox work, provider
+call, device command, capture evidence, or Solar activity.
+
+The fixture desktop shows only eligible policy actions with direct fake-only
+consequences and separates a mutation preview from its apply or approval step.
+Phone remains read-only. Local-web build and integration tests pass **66/66**.
+Designer re-review passed at wide, compact, and 390 px phone widths, including
+truthful preflight projection, keyboard disruptive-preview activation, approval
+visibility, no horizontal overflow, and no page errors.
