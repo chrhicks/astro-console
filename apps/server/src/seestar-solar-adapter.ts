@@ -21,8 +21,9 @@ type SolarDevice = Pick<
   | 'startView'
   | 'stopStack'
   | 'stopView'
-  | 'rawClient'
->
+> & {
+  readonly rawClient: Pick<SeestarDevice['rawClient'], 'subscribeToPushEvents'>
+}
 
 export function createSeestarSolarAdapter(
   config: Extract<RigWorkerConfig, { readonly mode: 'seestar' }>,

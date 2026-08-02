@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   existsSync,
+  createReadStream,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -39,7 +40,6 @@ import {
 } from './sqlite-resilience.ts'
 import { createR2Provider } from './r2-provider.ts'
 import { createR2DownloadGrantIssuer } from './r2-download-grant.ts'
-import { createDownloadGrantIssuer } from './download-grant-config.ts'
 import { createDownloadGrantService } from './download-grant-service.ts'
 import { isSqliteBusy } from './publisher-service.ts'
 import { createProcessorService, runProcessor } from './processor-service.ts'
@@ -69,6 +69,81 @@ function createFixtureService(
     downloadGrants,
     { fixture: 'm27' },
   )
+}
+
+function first<Value>(values: ReadonlyArray<Value>) {
+  const value = values[0]
+  assert.ok(value !== undefined)
+  return value
+}
+
+const CountRow = Schema.Struct({ count: Schema.Int })
+const EventRow = Schema.Struct({ checksum: Schema.String })
+const StatusRow = Schema.Struct({ state: Schema.String })
+const ProjectionRow = Schema.Struct({ value: Schema.String })
+const MigrationRow = Schema.Struct({ version: Schema.Int })
+const EventTypeRow = Schema.Struct({ type: Schema.String })
+const RunDefinitionEvidenceRow = Schema.Struct({ definition: Schema.String })
+const AssetAvailabilityRow = Schema.Struct({ availability: Schema.String })
+const AssetDetailRow = Schema.Struct({ detail: Schema.String })
+const PublicationRow = Schema.Struct({ object_key: Schema.String })
+const SourceOrphanRow = Schema.Struct({
+  path: Schema.String,
+  checksum: Schema.String,
+})
+const SolarIntentRow = Schema.Struct({
+  name: Schema.String,
+  owner_person_id: Schema.String,
+  owner_client_id: Schema.String,
+  state: Schema.String,
+})
+const SolarEvidenceRow = Schema.Struct({
+  state: Schema.String,
+  message: Schema.String,
+})
+const OutboxRow = Schema.Struct({
+  kind: Schema.String,
+  payload: Schema.String,
+  state: Schema.String,
+  attempts: Schema.Int,
+})
+const ClaimedOutboxRow = Schema.Struct({
+  state: Schema.String,
+  claim_token: Schema.NullOr(Schema.String),
+  claimed_by: Schema.NullOr(Schema.String),
+  claim_until: Schema.NullOr(Schema.String),
+})
+const OutboxAttemptRow = Schema.Struct({
+  state: Schema.String,
+  attempts: Schema.Int,
+})
+
+const DispatchedOutboxRow = Schema.Struct({
+  id: Schema.String,
+  state: Schema.String,
+  claim_token: Schema.NullOr(Schema.String),
+  ack_at: Schema.NullOr(Schema.String),
+  attempts: Schema.Int,
+})
+const RunDefinitionRow = Schema.Struct({
+  source_plan_revision: Schema.Int,
+  definition: Schema.String,
+})
+
+function databaseRow<Row>(
+  schema: Schema.Schema<Row> & Schema.ConstraintDecoder<unknown>,
+  row: unknown,
+): Row {
+  return Schema.decodeUnknownSync(schema)(row)
+}
+
+async function nextEvent(
+  reader: ReadableStreamDefaultReader<Uint8Array> | undefined,
+) {
+  assert.ok(reader !== undefined)
+  const event = await reader.read()
+  assert.ok(event.value !== undefined)
+  return new TextDecoder().decode(event.value)
 }
 
 test('focused executable configurations decode defaults and conditional branches', async () => {
@@ -281,30 +356,33 @@ test('focused executable configurations decode defaults and conditional branches
 
 function assertNoM27Fixture(database: DatabaseSync) {
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       database
         .prepare("SELECT count(*) AS count FROM state WHERE value LIKE '%m27%'")
-        .get() as { count: number }
+        .get(),
     ).count,
     0,
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       database
         .prepare(
           "SELECT count(*) AS count FROM library_assets WHERE asset_id LIKE '%m27%'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     0,
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       database
         .prepare(
           "SELECT count(*) AS count FROM workspace_projections WHERE value LIKE '%m27%'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     0,
   )
@@ -332,9 +410,9 @@ function publisherFixture(idempotencyKey: string) {
     idempotencyKey,
     outputs: [{ sourceId: 'final', representation: 'final' }],
   })
-  if (saved.outcome !== 'accepted')
+  if (saved.outcome !== 'accepted' || !('assetIds' in saved))
     throw new Error('publisher fixture save did not accept')
-  return { root, outputs, service, saved }
+  return { root, outputs, service, saved, assetId: first(saved.assetIds) }
 }
 
 test('manifest processor is disabled by default and only saves bounded configured source outputs', () => {
@@ -416,38 +494,43 @@ test('manifest processor is disabled by default and only saves bounded configure
   assert.equal(accepted.outcome, 'accepted')
   if (accepted.outcome !== 'accepted')
     throw new Error('processor save did not accept')
+  if (!('assetIds' in accepted))
+    throw new Error('processor save did not create assets')
   assert.equal(accepted.assetIds.length, 1)
   assert.deepEqual(processor.runOnce(), accepted)
   processor.close()
   const inspected = createLocalWebService(databasePath)
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       inspected.database
         .prepare(
           "SELECT count(*) AS count FROM outbox WHERE kind='PublishAsset'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     1,
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       inspected.database
         .prepare(
           "SELECT count(*) AS count FROM source_ingest_events WHERE asset_id='asset-source-solar-001'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     1,
   )
   assert.equal(existsSync(join(originals, 'asset-source-solar-001.tiff')), true)
   const savedDetail = JSON.parse(
-    (
+    databaseRow(
+      AssetDetailRow,
       inspected.database
         .prepare(
           "SELECT detail FROM library_assets WHERE asset_id LIKE 'asset-process-%'",
         )
-        .get() as { detail: string }
+        .get(),
     ).detail,
   )
   assert.deepEqual(savedDetail.lineage, {
@@ -455,12 +538,13 @@ test('manifest processor is disabled by default and only saves bounded configure
     runId: 'solar-run-001',
     solveAttemptId: 'solar-solve-001',
   })
-  const before = (
+  const before = databaseRow(
+    CountRow,
     inspected.database
       .prepare(
         "SELECT count(*) AS count FROM library_assets WHERE asset_id LIKE 'asset-process-%'",
       )
-      .get() as { count: number }
+      .get(),
   ).count
   inspected.close()
   writeFileSync(
@@ -485,22 +569,24 @@ test('manifest processor is disabled by default and only saves bounded configure
   mismatched.close()
   const mismatchInspection = createLocalWebService(databasePath)
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       mismatchInspection.database
         .prepare(
           "SELECT count(*) AS count FROM library_assets WHERE asset_id LIKE 'asset-process-%'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     before,
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       mismatchInspection.database
         .prepare(
           "SELECT count(*) AS count FROM outbox WHERE kind='PublishAsset'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     1,
   )
@@ -547,22 +633,24 @@ test('manifest processor is disabled by default and only saves bounded configure
   linked.close()
   const final = createLocalWebService(databasePath)
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       final.database
         .prepare(
           "SELECT count(*) AS count FROM library_assets WHERE asset_id LIKE 'asset-process-%'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     before,
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       final.database
         .prepare(
           "SELECT count(*) AS count FROM outbox WHERE kind='PublishAsset'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     1,
   )
@@ -595,24 +683,31 @@ test('source ingest records transaction-failure originals as checksum-backed orp
       lineage: { runId: 'solar-run-001', solveAttemptId: 'solar-solve-001' },
       idempotencyKey: 'source-orphan-001',
     },
-    { personId: 'owner', role: 'owner', capability: 'controlCapable' },
+    {
+      personId: 'owner',
+      clientId: 'source-ingest-test',
+      role: 'owner',
+      capability: 'controlCapable',
+    },
   )
   assert.deepEqual(result, {
     outcome: 'rejected',
     reason: 'MaterializationFailed',
   })
-  const orphan = database
-    .prepare('SELECT path,checksum FROM source_ingest_orphans')
-    .get() as { path: string; checksum: string }
+  const orphan = databaseRow(
+    SourceOrphanRow,
+    database.prepare('SELECT path,checksum FROM source_ingest_orphans').get(),
+  )
   assert.equal(existsSync(orphan.path), true)
   assert.match(orphan.checksum, /^[0-9a-f]{64}$/)
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       database
         .prepare(
           "SELECT count(*) AS count FROM library_assets WHERE asset_id='asset-source-orphan-001'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     0,
   )
@@ -643,8 +738,7 @@ test('R2 publisher configuration and signed fake transport fail closed without n
     bytes: artifactBytes.byteLength,
     checksum: createHash('sha256').update(artifactBytes).digest('hex'),
   }
-  const requests: Array<{ readonly url: string; readonly init: RequestInit }> =
-    []
+  const requests: Array<{ readonly url: URL; readonly init: RequestInit }> = []
   const provider = createR2Provider(
     { ...config, credentialsPath },
     async (url, init) => {
@@ -665,14 +759,14 @@ test('R2 publisher configuration and signed fake transport fail closed without n
     checksum: 'abc',
     bytes: 3,
   })
-  const putHeaders = requests[0]?.init.headers as Record<string, string>
-  assert.match(String(putHeaders.authorization), /^AWS4-HMAC-SHA256 /)
-  assert.equal(putHeaders['x-amz-content-sha256'], artifact.checksum)
-  assert.equal(putHeaders['x-amz-meta-asset-id'], 'asset')
-  assert.equal(putHeaders['x-amz-meta-checksum'], artifact.checksum)
-  assert.equal(putHeaders['content-length'], String(artifact.bytes))
+  const putHeaders = new Headers(requests[0]?.init.headers)
+  assert.match(String(putHeaders.get('authorization')), /^AWS4-HMAC-SHA256 /)
+  assert.equal(putHeaders.get('x-amz-content-sha256'), artifact.checksum)
+  assert.equal(putHeaders.get('x-amz-meta-asset-id'), 'asset')
+  assert.equal(putHeaders.get('x-amz-meta-checksum'), artifact.checksum)
+  assert.equal(putHeaders.get('content-length'), String(artifact.bytes))
   assert.equal(
-    putHeaders['content-disposition'],
+    putHeaders.get('content-disposition'),
     'attachment; filename="asset.tiff"',
   )
   assert.equal(
@@ -751,6 +845,60 @@ test('R2 publisher configuration and signed fake transport fail closed without n
   )
 })
 
+test('R2 publisher cancels a paused file body without leaving its source stream open', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-r2-cancel-'))
+  const credentialsPath = join(root, 'credentials.json')
+  const artifactPath = join(root, 'asset.tiff')
+  writeFileSync(
+    credentialsPath,
+    JSON.stringify({ accessKeyId: 'key', secretAccessKey: 'secret' }),
+  )
+  writeFileSync(artifactPath, Buffer.alloc(3 * 64 * 1024, 7))
+  const artifact = {
+    path: artifactPath,
+    bytes: 3 * 64 * 1024,
+    checksum: createHash('sha256')
+      .update(readFileSync(artifactPath))
+      .digest('hex'),
+  }
+  const source = createReadStream(artifactPath, { highWaterMark: 64 * 1024 })
+  const closed = new Promise<void>((resolve) => source.once('close', resolve))
+  let releaseFetch: (() => void) | undefined
+  const released = new Promise<void>((resolve) => {
+    releaseFetch = resolve
+  })
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+  const provider = createR2Provider(
+    {
+      accountId: '503286fc7e5e8545c172105f991efef1',
+      bucket: 'astro-console-artifacts',
+      endpoint:
+        'https://503286fc7e5e8545c172105f991efef1.r2.cloudflarestorage.com',
+      credentialsPath,
+    },
+    async (_url, init) => {
+      if (!(init.body instanceof ReadableStream))
+        throw new Error('R2 PUT body was not streamed')
+      reader = init.body.getReader()
+      await released
+      return new Response(undefined, { status: 200 })
+    },
+    { fileStream: () => source },
+  )
+  const put = provider.put('published/run/finals/asset.tiff', artifact, {
+    assetId: 'asset',
+    checksum: artifact.checksum,
+  })
+  while (reader === undefined) await Promise.resolve()
+  const chunk = await reader.read()
+  assert.equal(chunk.done, false)
+  assert.equal(source.readableFlowing, false)
+  await reader.cancel()
+  await closed
+  releaseFetch?.()
+  await put
+})
+
 test('authorized Library downloads issue an Asset-ID grant and redirect without projecting bearer data', async (t) => {
   let now = new Date('2026-07-28T12:00:00.000Z')
   let issuerUnavailable = false
@@ -758,7 +906,7 @@ test('authorized Library downloads issue an Asset-ID grant and redirect without 
     readonly objectKey: string
     readonly expiresAt: string
   }> = []
-  const admission = (request?: IncomingMessage) =>
+  const admission = (request?: Pick<IncomingMessage, 'headers'>) =>
     request?.headers.authorization === 'Bearer viewer'
       ? {
           personId: 'viewer',
@@ -1063,28 +1211,33 @@ test('Process Save materializes configured sources before one Asset, lineage, re
   assert.equal(accepted.assetIds.length, 2)
   assert.equal(readdirSync(outputs).length, 2)
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare('SELECT count(*) AS count FROM process_asset_events')
-        .get() as { count: number }
+        .get(),
     ).count,
     2,
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare(
           "SELECT count(*) AS count FROM outbox WHERE kind='PublishAsset'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     2,
   )
-  const event = service.database
-    .prepare('SELECT checksum FROM process_asset_events WHERE asset_id=?')
-    .get(accepted.assetIds[0]) as { checksum: string }
+  const event = databaseRow(
+    EventRow,
+    service.database
+      .prepare('SELECT checksum FROM process_asset_events WHERE asset_id=?')
+      .get(first(accepted.assetIds)),
+  )
   const savedName = readdirSync(outputs).find((name) =>
-    name.startsWith(accepted.assetIds[0]),
+    name.startsWith(first(accepted.assetIds)),
   )
   assert.equal(
     event.checksum,
@@ -1094,9 +1247,12 @@ test('Process Save materializes configured sources before one Asset, lineage, re
   )
   assert.deepEqual(service.saveProcess(command), accepted)
   assert.equal(readdirSync(outputs).length, 2)
-  const detail = service.database
-    .prepare('SELECT detail FROM library_assets WHERE asset_id=?')
-    .get(accepted.assetIds[0]) as { detail: string }
+  const detail = databaseRow(
+    AssetDetailRow,
+    service.database
+      .prepare('SELECT detail FROM library_assets WHERE asset_id=?')
+      .get(first(accepted.assetIds)),
+  )
   assert.doesNotMatch(
     detail.detail,
     new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
@@ -1154,20 +1310,22 @@ test('Process Save rejects symlinks and records transaction-failure bytes as rem
     reason: 'MaterializationFailed',
   })
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare(
           "SELECT count(*) AS count FROM library_assets WHERE asset_id LIKE 'asset-process-%'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     0,
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare('SELECT count(*) AS count FROM process_save_orphans')
-        .get() as { count: number }
+        .get(),
     ).count,
     1,
   )
@@ -1206,38 +1364,42 @@ test('Process Save leaves no success metadata when later filesystem materializat
     reason: 'MaterializationFailed',
   })
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare(
           "SELECT count(*) AS count FROM library_assets WHERE asset_id LIKE 'asset-process-%'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     0,
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare('SELECT count(*) AS count FROM process_save_receipts')
-        .get() as { count: number }
+        .get(),
     ).count,
     0,
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare(
           "SELECT count(*) AS count FROM outbox WHERE kind='PublishAsset'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     0,
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare('SELECT count(*) AS count FROM process_save_orphans')
-        .get() as { count: number }
+        .get(),
     ).count,
     1,
   )
@@ -1251,18 +1413,19 @@ test('Process Save leaves no success metadata when later filesystem materializat
 })
 
 test('publisher worker verifies fake provider metadata, retries idempotently, and keeps Library detail safe', async () => {
-  const { root, outputs, service, saved } = publisherFixture('publisher-save')
-  const checksum = (
+  const { root, outputs, service, assetId } = publisherFixture('publisher-save')
+  const checksum = databaseRow(
+    EventRow,
     service.database
       .prepare('SELECT checksum FROM process_asset_events WHERE asset_id=?')
-      .get(saved.assetIds[0]) as { checksum: string }
+      .get(assetId),
   ).checksum
   service.database
     .prepare(
       'INSERT INTO asset_publications (asset_id,checksum,state,updated_at,object_key) VALUES (?,?,?,?,?)',
     )
     .run(
-      saved.assetIds[0],
+      assetId,
       checksum,
       'temporarilyUnavailable',
       new Date().toISOString(),
@@ -1297,9 +1460,12 @@ test('publisher worker verifies fake provider metadata, retries idempotently, an
   )
   assert.equal(await worker.pass(), 'failed')
   assert.equal(
-    service.database
-      .prepare('SELECT availability FROM library_assets WHERE asset_id=?')
-      .get(saved.assetIds[0]).availability,
+    databaseRow(
+      AssetAvailabilityRow,
+      service.database
+        .prepare('SELECT availability FROM library_assets WHERE asset_id=?')
+        .get(assetId),
+    ).availability,
     'failedPublication',
   )
   mismatch = false
@@ -1308,18 +1474,24 @@ test('publisher worker verifies fake provider metadata, retries idempotently, an
   assert.equal(puts, 2)
   assert.equal(objects.size, 1)
   assert.equal(
-    service.database
-      .prepare('SELECT object_key FROM asset_publications WHERE asset_id=?')
-      .get(saved.assetIds[0]).object_key,
+    databaseRow(
+      PublicationRow,
+      service.database
+        .prepare('SELECT object_key FROM asset_publications WHERE asset_id=?')
+        .get(assetId),
+    ).object_key,
     [...objects.keys()][0],
   )
   assert.match(
     [...objects.keys()][0] ?? '',
     /^published\/run-m27-001\/finals\//,
   )
-  const detail = service.database
-    .prepare('SELECT detail FROM library_assets WHERE asset_id=?')
-    .get(saved.assetIds[0]).detail as string
+  const detail = databaseRow(
+    AssetDetailRow,
+    service.database
+      .prepare('SELECT detail FROM library_assets WHERE asset_id=?')
+      .get(assetId),
+  ).detail
   assert.match(detail, /published/)
   assert.doesNotMatch(
     detail,
@@ -1330,7 +1502,7 @@ test('publisher worker verifies fake provider metadata, retries idempotently, an
 })
 
 test('publisher worker fails closed on conflicting durable publication checksum', async () => {
-  const { outputs, service, saved } = publisherFixture(
+  const { outputs, service, assetId } = publisherFixture(
     'publisher-conflict-save',
   )
   service.database
@@ -1338,7 +1510,7 @@ test('publisher worker fails closed on conflicting durable publication checksum'
       'INSERT INTO asset_publications (asset_id,checksum,state,updated_at,object_key) VALUES (?,?,?,?,?)',
     )
     .run(
-      saved.assetIds[0],
+      assetId,
       'conflicting-checksum',
       'temporarilyUnavailable',
       new Date().toISOString(),
@@ -1358,22 +1530,28 @@ test('publisher worker fails closed on conflicting durable publication checksum'
   assert.equal(await worker.pass(), 'failed')
   assert.equal(puts, 0)
   assert.equal(
-    service.database
-      .prepare('SELECT state FROM asset_publications WHERE asset_id=?')
-      .get(saved.assetIds[0]).state,
+    databaseRow(
+      StatusRow,
+      service.database
+        .prepare('SELECT state FROM asset_publications WHERE asset_id=?')
+        .get(assetId),
+    ).state,
     'failedPublication',
   )
   assert.equal(
-    service.database
-      .prepare("SELECT state FROM outbox WHERE kind='PublishAsset'")
-      .get().state,
+    databaseRow(
+      StatusRow,
+      service.database
+        .prepare("SELECT state FROM outbox WHERE kind='PublishAsset'")
+        .get(),
+    ).state,
     'failed',
   )
   service.close()
 })
 
 test('publisher worker lease expiry and stale acknowledgements cannot project stale provider work', async () => {
-  const { outputs, service, saved } = publisherFixture('publisher-lease-save')
+  const { outputs, service, assetId } = publisherFixture('publisher-lease-save')
   const keys: string[] = []
   let stale = true
   const worker = createPublisherWorker(
@@ -1401,17 +1579,23 @@ test('publisher worker lease expiry and stale acknowledgements cannot project st
   )
   assert.equal(await worker.pass(), 'superseded')
   assert.equal(await worker.pass('replacement'), 'published')
-  const row = service.database
-    .prepare("SELECT state,attempts FROM outbox WHERE kind='PublishAsset'")
-    .get() as { state: string; attempts: number }
+  const row = databaseRow(
+    OutboxAttemptRow,
+    service.database
+      .prepare("SELECT state,attempts FROM outbox WHERE kind='PublishAsset'")
+      .get(),
+  )
   assert.equal(row.state, 'dispatched')
   assert.equal(row.attempts, 2)
   assert.equal(keys.length, 2)
   assert.equal(keys[0], keys[1])
   assert.equal(
-    service.database
-      .prepare('SELECT availability FROM library_assets WHERE asset_id=?')
-      .get(saved.assetIds[0]).availability,
+    databaseRow(
+      AssetAvailabilityRow,
+      service.database
+        .prepare('SELECT availability FROM library_assets WHERE asset_id=?')
+        .get(assetId),
+    ).availability,
     'published',
   )
   service.close()
@@ -1422,11 +1606,11 @@ test('SQLite acceptance atomically persists fixture run, event, and receipt with
     join(mkdtempSync(join(tmpdir(), 'astro-local-')), 'state.sqlite'),
   )
   const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
     service.close()
   })
-  const base = `http://127.0.0.1:${listener.port}`
   const snapshot = await fetch(`${base}/api/snapshot`).then((response) =>
     response.json(),
   )
@@ -1444,26 +1628,23 @@ test('SQLite acceptance atomically persists fixture run, event, and receipt with
   assert.equal(accepted.status, 202)
   assert.equal((await accepted.json()).outcome, 'accepted')
   assert.equal(
-    (
-      service.database
-        .prepare('SELECT count(*) AS count FROM events')
-        .get() as { count: number }
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM events').get(),
     ).count,
     1,
   )
   assert.equal(
-    (
-      service.database
-        .prepare('SELECT count(*) AS count FROM receipts')
-        .get() as { count: number }
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM receipts').get(),
     ).count,
     1,
   )
   assert.equal(
-    (
-      service.database
-        .prepare('SELECT count(*) AS count FROM outbox')
-        .get() as { count: number }
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
     ).count,
     0,
   )
@@ -1488,28 +1669,31 @@ test('numbered SQLite migrations upgrade a legacy database and reject a newer sc
   legacy.close()
   const service = createFixtureService(databasePath)
   assert.equal(
-    (
+    databaseRow(
+      MigrationRow,
       service.database
         .prepare('SELECT max(version) AS version FROM schema_migrations')
-        .get() as { version: number }
+        .get(),
     ).version,
     20,
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare('SELECT count(*) AS count FROM workspace_projections')
-        .get() as { count: number }
+        .get(),
     ).count,
     2,
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare(
           "SELECT count(*) AS count FROM pragma_table_info('outbox') WHERE name='claim_token'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     1,
   )
@@ -1520,20 +1704,22 @@ test('numbered SQLite migrations upgrade a legacy database and reject a newer sc
   )
   const fresh = createLocalWebService(freshPath)
   assert.equal(
-    (
+    databaseRow(
+      MigrationRow,
       fresh.database
         .prepare('SELECT max(version) AS version FROM schema_migrations')
-        .get() as { version: number }
+        .get(),
     ).version,
     20,
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       fresh.database
         .prepare(
           "SELECT count(*) AS count FROM pragma_table_info('observing_plans') WHERE name='run_eligible'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     1,
   )
@@ -1580,10 +1766,11 @@ test('numbered SQLite migrations upgrade a legacy database and reject a newer sc
   seeded.close()
   const migratedFixture = createFixtureService(fixturePath)
   const migratedPlan = JSON.parse(
-    (
+    databaseRow(
+      ProjectionRow,
       migratedFixture.database
         .prepare("SELECT value FROM workspace_projections WHERE name='plan'")
-        .get() as { value: string }
+        .get(),
     ).value,
   )
   assert.equal(migratedPlan.sequences.length, 2)
@@ -1630,19 +1817,21 @@ test('numbered SQLite migrations upgrade a legacy database and reject a newer sc
   recorded15.close()
   const repaired = createFixtureService(recorded15Path)
   const repairedPlan = JSON.parse(
-    (
+    databaseRow(
+      ProjectionRow,
       repaired.database
         .prepare("SELECT value FROM workspace_projections WHERE name='plan'")
-        .get() as { value: string }
+        .get(),
     ).value,
   )
   assert.equal(repairedPlan.sequences.length, 2)
   assert.deepEqual(repairedPlan.limitations, [])
   assert.equal(
-    (
+    databaseRow(
+      MigrationRow,
       repaired.database
         .prepare('SELECT max(version) AS version FROM schema_migrations')
-        .get() as { version: number }
+        .get(),
     ).version,
     20,
   )
@@ -1691,7 +1880,7 @@ test('disabled rig worker exits without creating or mutating its database', asyn
   )
   const worker = createRigWorkerService(
     { mode: 'disabled', databasePath },
-    { startM27Capture: async () => true },
+    undefined,
   )
   assert.equal(await worker.runOnce(), 'disabled')
   assert.deepEqual(await worker.run(), {
@@ -1741,10 +1930,9 @@ test('non-fixture origin, workers, and service databases migrate without M27 Pla
   assert.equal(start.status, 409)
   assert.equal((await start.json()).reason, 'PlanUnavailable')
   assert.equal(
-    (
-      origin.database.prepare('SELECT count(*) AS count FROM events').get() as {
-        count: number
-      }
+    databaseRow(
+      CountRow,
+      origin.database.prepare('SELECT count(*) AS count FROM events').get(),
     ).count,
     0,
   )
@@ -1842,18 +2030,18 @@ test('owner-only Solar test intent persists separate pending work and Stack-evid
     { outcome: 'rejected', reason: 'InvalidInput' },
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare('SELECT count(*) AS count FROM solar_test_intents')
-        .get() as { count: number }
+        .get(),
     ).count,
     0,
   )
   assert.equal(
-    (
-      service.database
-        .prepare('SELECT count(*) AS count FROM outbox')
-        .get() as { count: number }
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
     ).count,
     0,
   )
@@ -1868,30 +2056,36 @@ test('owner-only Solar test intent persists separate pending work and Stack-evid
     throw new Error('Expected Solar test intent acceptance')
   assert.equal(accepted.state, 'awaitingAdapter')
   assert.equal(accepted.evidence, 'awaitingStackEvidence')
-  const intent = service.database
-    .prepare(
-      'SELECT name,owner_person_id,owner_client_id,state FROM solar_test_intents WHERE intent_id=?',
-    )
-    .get(accepted.intentId) as {
-    name: string
-    owner_person_id: string
-    owner_client_id: string
-    state: string
-  }
+  const intent = databaseRow(
+    SolarIntentRow,
+    service.database
+      .prepare(
+        'SELECT name,owner_person_id,owner_client_id,state FROM solar_test_intents WHERE intent_id=?',
+      )
+      .get(accepted.intentId),
+  )
   assert.equal(intent.name, input.name)
   assert.equal(intent.owner_person_id, 'owner')
   assert.equal(intent.owner_client_id, 'desktop')
   assert.equal(intent.state, 'awaitingAdapter')
-  const evidence = service.database
-    .prepare('SELECT state,message FROM solar_test_evidence WHERE intent_id=?')
-    .get(accepted.intentId) as { state: string; message: string }
+  const evidence = databaseRow(
+    SolarEvidenceRow,
+    service.database
+      .prepare(
+        'SELECT state,message FROM solar_test_evidence WHERE intent_id=?',
+      )
+      .get(accepted.intentId),
+  )
   assert.equal(evidence.state, 'awaitingStackEvidence')
   assert.match(evidence.message, /Stack evidence/)
-  const outbox = service.database
-    .prepare(
-      "SELECT kind,payload,state,attempts FROM outbox WHERE kind='StartSolarTestObservation'",
-    )
-    .get() as { kind: string; payload: string; state: string; attempts: number }
+  const outbox = databaseRow(
+    OutboxRow,
+    service.database
+      .prepare(
+        "SELECT kind,payload,state,attempts FROM outbox WHERE kind='StartSolarTestObservation'",
+      )
+      .get(),
+  )
   assert.equal(outbox.kind, 'StartSolarTestObservation')
   assert.equal(outbox.state, 'pending')
   assert.equal(outbox.attempts, 0)
@@ -1926,12 +2120,13 @@ test('owner-only Solar test intent persists separate pending work and Stack-evid
     { outcome: 'rejected', reason: 'InvalidInput' },
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare(
           "SELECT count(*) AS count FROM outbox WHERE kind='StartSolarTestObservation'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     1,
   )
@@ -1958,11 +2153,14 @@ test('owner-only Solar test intent persists separate pending work and Stack-evid
     }),
     accepted,
   )
-  const recoveredOutbox = recovered.database
-    .prepare(
-      "SELECT state,attempts FROM outbox WHERE kind='StartSolarTestObservation'",
-    )
-    .get() as { state: string; attempts: number }
+  const recoveredOutbox = databaseRow(
+    OutboxAttemptRow,
+    recovered.database
+      .prepare(
+        "SELECT state,attempts FROM outbox WHERE kind='StartSolarTestObservation'",
+      )
+      .get(),
+  )
   assert.equal(recoveredOutbox.state, 'pending')
   assert.equal(recoveredOutbox.attempts, 0)
   recovered.close()
@@ -2000,7 +2198,7 @@ test('Solar test CLI runner consumes decoded configuration', () => {
   )
   const result = runSolarTestIntent({ ...base, subject: 'solar-owner-subject' })
   assert.equal(result.outcome, 'accepted')
-  if (result.outcome !== 'accepted')
+  if (result.outcome !== 'accepted' || !('intentId' in result))
     throw new Error('Expected Solar CLI acceptance')
   const stopped = runSolarTestIntent({
     databasePath,
@@ -2010,15 +2208,23 @@ test('Solar test CLI runner consumes decoded configuration', () => {
   assert.deepEqual(stopped, { outcome: 'accepted' })
   const inspected = createFixtureService(databasePath)
   assert.equal(
-    inspected.database
-      .prepare('SELECT state FROM solar_test_intents WHERE intent_id=?')
-      .get(result.intentId).state,
+    databaseRow(
+      StatusRow,
+      inspected.database
+        .prepare('SELECT state FROM solar_test_intents WHERE intent_id=?')
+        .get(result.intentId),
+    ).state,
     'stopping',
   )
   assert.equal(
-    inspected.database
-      .prepare("SELECT state FROM outbox WHERE kind='StopSolarTestObservation'")
-      .get().state,
+    databaseRow(
+      StatusRow,
+      inspected.database
+        .prepare(
+          "SELECT state FROM outbox WHERE kind='StopSolarTestObservation'",
+        )
+        .get(),
+    ).state,
     'pending',
   )
   inspected.close()
@@ -2289,7 +2495,7 @@ test('verified Access assertions map durable memberships without trusting reques
     )
 })
 
-test('production admission rechecks normalized bootstrap policy and revokes removed viewer subjects', async (t) => {
+test('production admission rechecks normalized bootstrap policy and revokes removed viewer subjects', async () => {
   const databasePath = join(
     mkdtempSync(join(tmpdir(), 'astro-production-access-')),
     'state.sqlite',
@@ -2348,7 +2554,7 @@ test('production admission rechecks normalized bootstrap policy and revokes remo
   const admitted = createProductionAccessAdmission(config)
   const request = {
     headers: { 'cf-access-jwt-assertion': claim('viewer@example.com') },
-  } as IncomingMessage
+  }
   assert.deepEqual(await admitted(request), {
     personId: 'viewer',
     clientId: 'access:viewer-subject',
@@ -2356,24 +2562,26 @@ test('production admission rechecks normalized bootstrap policy and revokes remo
     role: 'viewer',
   })
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       new DatabaseSync(databasePath)
         .prepare(
           "SELECT count(*) AS count FROM memberships WHERE external_subject='viewer-subject'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     1,
   )
   const revoked = createProductionAccessAdmission({ ...config, bootstrap: [] })
   assert.equal(await revoked(request), undefined)
+  const bootstrap = first(config.bootstrap)
   assert.throws(
     () =>
       createProductionAccessAdmission({
         ...config,
         bootstrap: [
-          { ...config.bootstrap[0] },
-          { ...config.bootstrap[0], email: 'viewer@example.com' },
+          { ...bootstrap },
+          { ...bootstrap, email: 'viewer@example.com' },
         ],
       }),
     /unique/,
@@ -2439,7 +2647,7 @@ test('production admission reloads a removed membership bootstrap file before th
   const token = `${header}.${payload}.${sign('RSA-SHA256', Buffer.from(`${header}.${payload}`), keys.privateKey).toString('base64url')}`
   const request = {
     headers: { 'cf-access-jwt-assertion': token },
-  } as IncomingMessage
+  }
   assert.equal((await admission(request))?.personId, 'reload-owner')
   unlinkSync(bootstrapPath)
   now += 1_000
@@ -2589,7 +2797,7 @@ test('a configured non-fixture owner has role-based operations and grant authori
         'owner@example.com',
       ),
     },
-  } as IncomingMessage)
+  })
   assert.deepEqual(phoneIdentity, {
     personId: 'observatory-primary',
     clientId: 'access:owner-phone-subject',
@@ -2658,8 +2866,9 @@ test('production Access JWKS admission refreshes by kid, bounds cache use, and f
       { email: 'owner@example.com', personId: 'rotating-owner', role: 'owner' },
     ],
   })
-  const request = (token: string) =>
-    ({ headers: { 'cf-access-jwt-assertion': token } }) as IncomingMessage
+  const request = (token: string) => ({
+    headers: { 'cf-access-jwt-assertion': token },
+  })
   assert.equal(
     (await admission(request(claim('old-kid', oldKeys))))?.personId,
     'rotating-owner',
@@ -2710,7 +2919,6 @@ test('a rig worker dispatches only a Solar test and records provider acknowledge
   )
   const service = createFixtureService(databasePath)
   const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
     service.close()
@@ -2747,25 +2955,25 @@ test('a rig worker dispatches only a Solar test and records provider acknowledge
     'none',
   ])
   assert.equal(calls, 1)
-  let row = service.database
-    .prepare(
-      "SELECT id,state,claim_token,ack_at,attempts FROM outbox WHERE kind='StartSolarTestObservation'",
-    )
-    .get() as {
-    id: string
-    state: string
-    claim_token: string | null
-    ack_at: string | null
-    attempts: number
-  }
+  const row = databaseRow(
+    DispatchedOutboxRow,
+    service.database
+      .prepare(
+        "SELECT id,state,claim_token,ack_at,attempts FROM outbox WHERE kind='StartSolarTestObservation'",
+      )
+      .get(),
+  )
   assert.equal(row.state, 'dispatched')
   assert.equal(row.claim_token, null)
   assert.notEqual(row.ack_at, null)
   assert.equal(row.attempts, 1)
   assert.equal(
-    service.database
-      .prepare('SELECT state FROM solar_test_intents WHERE intent_id=?')
-      .get(intent.intentId).state,
+    databaseRow(
+      StatusRow,
+      service.database
+        .prepare('SELECT state FROM solar_test_intents WHERE intent_id=?')
+        .get(intent.intentId),
+    ).state,
     'providerAcknowledged',
   )
   assert.equal(
@@ -2777,9 +2985,12 @@ test('a rig worker dispatches only a Solar test and records provider acknowledge
     true,
   )
   assert.equal(
-    service.database
-      .prepare('SELECT state FROM solar_test_intents WHERE intent_id=?')
-      .get(intent.intentId).state,
+    databaseRow(
+      StatusRow,
+      service.database
+        .prepare('SELECT state FROM solar_test_intents WHERE intent_id=?')
+        .get(intent.intentId),
+    ).state,
     'stackObserved',
   )
   assert.equal(calls, 1)
@@ -2812,17 +3023,23 @@ test('a rig worker dispatches only a Solar test and records provider acknowledge
   )
   assert.equal(await uncertainWorker.runOnce(), 'uncertain')
   assert.equal(
-    service.database
-      .prepare('SELECT state FROM solar_test_intents WHERE intent_id=?')
-      .get(uncertainIntent.intentId).state,
+    databaseRow(
+      StatusRow,
+      service.database
+        .prepare('SELECT state FROM solar_test_intents WHERE intent_id=?')
+        .get(uncertainIntent.intentId),
+    ).state,
     'manualRecovery',
   )
   assert.equal(
-    service.database
-      .prepare(
-        "SELECT state FROM outbox WHERE kind='StartSolarTestObservation' AND state='uncertain'",
-      )
-      .get().state,
+    databaseRow(
+      StatusRow,
+      service.database
+        .prepare(
+          "SELECT state FROM outbox WHERE kind='StartSolarTestObservation' AND state='uncertain'",
+        )
+        .get(),
+    ).state,
     'uncertain',
   )
   uncertainWorker.close()
@@ -2847,15 +3064,21 @@ test('a rig worker dispatches only a Solar test and records provider acknowledge
     .run('2000-01-01T00:00:00.000Z')
   assert.equal(await worker.runOnce(), 'none')
   assert.equal(
-    service.database
-      .prepare('SELECT state FROM solar_test_intents WHERE intent_id=?')
-      .get(expiredIntent.intentId).state,
+    databaseRow(
+      StatusRow,
+      service.database
+        .prepare('SELECT state FROM solar_test_intents WHERE intent_id=?')
+        .get(expiredIntent.intentId),
+    ).state,
     'manualRecovery',
   )
   assert.equal(
-    service.database
-      .prepare('SELECT state FROM solar_test_recovery WHERE intent_id=?')
-      .get(expiredIntent.intentId).state,
+    databaseRow(
+      StatusRow,
+      service.database
+        .prepare('SELECT state FROM solar_test_recovery WHERE intent_id=?')
+        .get(expiredIntent.intentId),
+    ).state,
     'manualRecovery',
   )
   worker.close()
@@ -2879,7 +3102,8 @@ test('rig outbox dispatch leaves a claimed PublishAsset for its publisher', asyn
     idempotencyKey: 'outbox-isolation-save',
     outputs: [{ sourceId: 'final', representation: 'final' }],
   })
-  if (saved.outcome !== 'accepted') throw new Error('save did not accept')
+  if (saved.outcome !== 'accepted' || !('assetIds' in saved))
+    throw new Error('save did not accept')
   service.database
     .prepare(
       "UPDATE outbox SET state='claimed',claim_token='publisher-token',claimed_by='publisher-worker',claim_until=? WHERE kind='PublishAsset'",
@@ -2898,16 +3122,14 @@ test('rig outbox dispatch leaves a claimed PublishAsset for its publisher', asyn
     close: () => undefined,
   })
   assert.equal(await rig.runOnce(), 'none')
-  const isolated = service.database
-    .prepare(
-      "SELECT state,claim_token,claimed_by,claim_until FROM outbox WHERE kind='PublishAsset'",
-    )
-    .get() as {
-    state: string
-    claim_token: string | null
-    claimed_by: string | null
-    claim_until: string | null
-  }
+  const isolated = databaseRow(
+    ClaimedOutboxRow,
+    service.database
+      .prepare(
+        "SELECT state,claim_token,claimed_by,claim_until FROM outbox WHERE kind='PublishAsset'",
+      )
+      .get(),
+  )
   assert.equal(isolated.state, 'claimed')
   assert.equal(isolated.claim_token, 'publisher-token')
   assert.equal(isolated.claimed_by, 'publisher-worker')
@@ -2922,9 +3144,14 @@ test('rig outbox dispatch leaves a claimed PublishAsset for its publisher', asyn
         assert.equal(file.checksum, metadata.checksum)
       },
       head: async () => {
-        const checksum = service.database
-          .prepare('SELECT checksum FROM process_asset_events WHERE asset_id=?')
-          .get(saved.assetIds[0]) as { checksum: string }
+        const checksum = databaseRow(
+          EventRow,
+          service.database
+            .prepare(
+              'SELECT checksum FROM process_asset_events WHERE asset_id=?',
+            )
+            .get(first(saved.assetIds)),
+        )
         return { checksum: checksum.checksum, bytes: 15 }
       },
     },
@@ -2932,9 +3159,12 @@ test('rig outbox dispatch leaves a claimed PublishAsset for its publisher', asyn
   assert.equal(await publisher.pass(), 'published')
   assert.equal(uploads, 1)
   assert.equal(
-    service.database
-      .prepare("SELECT state FROM outbox WHERE kind='PublishAsset'")
-      .get().state,
+    databaseRow(
+      StatusRow,
+      service.database
+        .prepare("SELECT state FROM outbox WHERE kind='PublishAsset'")
+        .get(),
+    ).state,
     'dispatched',
   )
   rig.close()
@@ -2981,12 +3211,13 @@ test('enabled worker without an adapter reports liveness without claiming fixtur
     lastHeartbeat: '2026-07-25T12:00:00.000Z',
   })
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare(
           "SELECT count(*) AS count FROM outbox WHERE kind='StartM27Capture'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     0,
   )
@@ -3072,12 +3303,13 @@ test('current controller resumes only the paused revision and replays idempotent
     409,
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare(
           "SELECT count(*) AS count FROM outbox WHERE kind IN ('StartM27Capture','StopStack','ResumeStack','StopRun')",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     0,
   )
@@ -3164,10 +3396,11 @@ test('a non-RunDefinition active run cannot use the bounded pause path', async (
     'capture',
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare('SELECT count(*) AS count FROM run_intervention_receipts')
-        .get() as { count: number }
+        .get(),
     ).count,
     0,
   )
@@ -3225,12 +3458,13 @@ test('current controller terminally stops an active fixture run without hardware
     409,
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare(
           "SELECT count(*) AS count FROM outbox WHERE kind IN ('StartM27Capture','StopStack','ResumeStack','StopRun')",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     0,
   )
@@ -3307,26 +3541,25 @@ test('startup backfills shared-control state for a legacy local database without
   assert.equal(snapshot.control.holderClientId, 'desktop-owner')
   assert.equal(snapshot.control.revision, 1)
   assert.equal(
-    (
-      service.database
-        .prepare('SELECT count(*) AS count FROM events')
-        .get() as { count: number }
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM events').get(),
     ).count,
     1,
   )
   assert.equal(
-    (
-      service.database
-        .prepare('SELECT count(*) AS count FROM receipts')
-        .get() as { count: number }
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM receipts').get(),
     ).count,
     1,
   )
   assert.equal(
-    (
+    databaseRow(
+      StatusRow,
       service.database
         .prepare("SELECT state FROM outbox WHERE id='legacy-outbox'")
-        .get() as { state: string }
+        .get(),
     ).state,
     'cancelled',
   )
@@ -3394,10 +3627,9 @@ test('persisted exhausted correction keeps evidence visible without issuing work
     'Review recovery in Observe before any new command.',
   )
   assert.equal(
-    (
-      service.database
-        .prepare('SELECT count(*) AS count FROM outbox')
-        .get() as { count: number }
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
     ).count,
     0,
   )
@@ -3434,10 +3666,9 @@ test('decoded adapter observation updates service evidence and malformed input f
     undefined,
   )
   assert.equal(
-    (
-      service.database
-        .prepare('SELECT count(*) AS count FROM outbox')
-        .get() as { count: number }
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
     ).count,
     0,
   )
@@ -3468,9 +3699,9 @@ test('Seestar Stack push adapter decodes SDK events, projects availability, and 
     { Event: 'Stack', stacked_frame: '43', percent: '62' },
     '2026-07-24T02:10:00.000Z',
   )
-  assert.equal(accepted?.evidence.stack.availability, 'available')
-  assert.equal(accepted?.evidence.stack.frameCount, 43)
-  const projected = new TextDecoder().decode((await reader?.read()).value)
+  assert.equal(accepted?.evidence.stack?.availability, 'available')
+  assert.equal(accepted?.evidence.stack?.frameCount, 43)
+  const projected = await nextEvent(reader)
   assert.match(projected, /Stack event received/)
   const before = accepted?.evidence.frameId
   assert.equal(
@@ -3490,13 +3721,12 @@ test('Seestar Stack push adapter decodes SDK events, projects availability, and 
     '2026-07-24T02:12:00.000Z',
   )
   assert.equal(failed?.evidence.frameId, before)
-  assert.equal(failed?.evidence.stack.availability, 'unavailable')
+  assert.equal(failed?.evidence.stack?.availability, 'unavailable')
   assert.match(failed?.evidence.stack.message ?? '', /camera transport lost/)
   assert.equal(
-    (
-      service.database
-        .prepare('SELECT count(*) AS count FROM outbox')
-        .get() as { count: number }
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
     ).count,
     0,
   )
@@ -3732,26 +3962,23 @@ test('fixture run acceptance does not depend on unserviceable hardware outbox wo
   )
   assert.equal(after.run.phase, 'capture')
   assert.equal(
-    (
-      service.database
-        .prepare('SELECT count(*) AS count FROM events')
-        .get() as { count: number }
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM events').get(),
     ).count,
     1,
   )
   assert.equal(
-    (
-      service.database
-        .prepare('SELECT count(*) AS count FROM receipts')
-        .get() as { count: number }
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM receipts').get(),
     ).count,
     1,
   )
   assert.equal(
-    (
-      service.database
-        .prepare('SELECT count(*) AS count FROM outbox')
-        .get() as { count: number }
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
     ).count,
     0,
   )
@@ -3802,10 +4029,9 @@ test('HTTP boundary rejects stale and server-configured phone intents without st
   )
   assert.equal(phone.status, 403)
   assert.equal(
-    (
-      service.database
-        .prepare('SELECT count(*) AS count FROM events')
-        .get() as { count: number }
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM events').get(),
     ).count,
     0,
   )
@@ -3872,10 +4098,9 @@ test('authenticated workspace projections preserve future intent, bounded Librar
   )
   assert.equal(snapshot.run, null)
   assert.equal(
-    (
-      service.database
-        .prepare('SELECT count(*) AS count FROM events')
-        .get() as { count: number }
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM events').get(),
     ).count,
     0,
   )
@@ -3954,7 +4179,7 @@ test('SQLite-backed plan drafts persist deterministic verdicts, revision guards,
   })
   assert.equal(startSavedDraft.status, 409)
   assert.equal((await startSavedDraft.json()).reason, 'PlanUnavailable')
-  const event = new TextDecoder().decode((await reader?.read()).value)
+  const event = await nextEvent(reader)
   assert.match(event, /event: PlanDraftSaved/)
   assert.match(event, /data: \{"snapshotVersion"/)
   const replay = await fetch(`${base}/api/commands/save-plan-draft`, {
@@ -3963,12 +4188,13 @@ test('SQLite-backed plan drafts persist deterministic verdicts, revision guards,
   })
   assert.equal(replay.status, 200)
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare(
           "SELECT count(*) AS count FROM events WHERE type='PlanDraftSaved'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     1,
   )
@@ -4261,7 +4487,7 @@ test('SQLite accepts one immutable RunDefinition from a ready persisted plan and
   assert.equal(result.runDefinition.executor, 'fake')
   assert.equal(result.runDefinition.sourcePlanRevision, draft.plan.revision)
   assert.equal(result.snapshot.plan.runEligible, true)
-  const event = new TextDecoder().decode((await reader?.read()).value)
+  const event = await nextEvent(reader)
   assert.match(event, /event: RunDefinitionAccepted/)
   const replay = await fetch(`${base}/api/commands/accept-run-definition`, {
     method: 'POST',
@@ -4337,30 +4563,31 @@ test('SQLite accepts one immutable RunDefinition from a ready persisted plan and
   assert.equal(notReady.status, 409)
   assert.equal((await notReady.json()).reason, 'PlanNotReady')
   const definition = JSON.parse(
-    (
+    databaseRow(
+      RunDefinitionEvidenceRow,
       service.database
         .prepare(
           'SELECT definition FROM run_definitions WHERE run_definition_id=?',
         )
-        .get(result.runDefinition.id) as { definition: string }
+        .get(result.runDefinition.id),
     ).definition,
   )
   assert.equal(definition.plan.sequences[0].capture, sequences[0].capture)
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare(
           "SELECT count(*) AS count FROM events WHERE type='RunDefinitionAccepted'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     1,
   )
   assert.equal(
-    (
-      service.database
-        .prepare('SELECT count(*) AS count FROM outbox')
-        .get() as { count: number }
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
     ).count,
     0,
   )
@@ -4373,14 +4600,14 @@ test('SQLite accepts one immutable RunDefinition from a ready persisted plan and
   await listener.close()
   service.close()
   const recovered = createFixtureService(databasePath)
-  const recoveredDefinition = recovered.database
-    .prepare(
-      'SELECT source_plan_revision,definition FROM run_definitions WHERE run_definition_id=?',
-    )
-    .get(result.runDefinition.id) as {
-    source_plan_revision: number
-    definition: string
-  }
+  const recoveredDefinition = databaseRow(
+    RunDefinitionRow,
+    recovered.database
+      .prepare(
+        'SELECT source_plan_revision,definition FROM run_definitions WHERE run_definition_id=?',
+      )
+      .get(result.runDefinition.id),
+  )
   assert.equal(recoveredDefinition.source_plan_revision, draft.plan.revision)
   assert.equal(
     JSON.parse(recoveredDefinition.definition).id,
@@ -4389,7 +4616,7 @@ test('SQLite accepts one immutable RunDefinition from a ready persisted plan and
   recovered.close()
 })
 
-test('an accepted fake RunDefinition advances two immutable sequences through durable service-owned phases', async (t) => {
+test('an accepted fake RunDefinition advances two immutable sequences through durable service-owned phases', async () => {
   const databasePath = join(
     mkdtempSync(join(tmpdir(), 'astro-fake-run-')),
     'state.sqlite',
@@ -4449,10 +4676,11 @@ test('an accepted fake RunDefinition advances two immutable sequences through du
   assert.equal(nonHolderStart.status, 403)
   assert.equal((await nonHolderStart.json()).reason, 'ControlLeaseLost')
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare("SELECT count(*) AS count FROM events WHERE type='RunStarted'")
-        .get() as { count: number }
+        .get(),
     ).count,
     0,
   )
@@ -4470,10 +4698,7 @@ test('an accepted fake RunDefinition advances two immutable sequences through du
     startedRun.target,
     accepted.runDefinition.plan.sequences[0].target,
   )
-  assert.match(
-    new TextDecoder().decode((await reader?.read()).value),
-    /event: RunStarted/,
-  )
+  assert.match(await nextEvent(reader), /event: RunStarted/)
   assert.equal(
     (
       await fetch(`${base}/api/commands/start-run`, {
@@ -4493,15 +4718,9 @@ test('an accepted fake RunDefinition advances two immutable sequences through du
     409,
   )
   assert.equal(service.advanceFakeRun()?.run.phase, 'acquire')
-  assert.match(
-    new TextDecoder().decode((await reader?.read()).value),
-    /event: RunPreflightCompleted/,
-  )
+  assert.match(await nextEvent(reader), /event: RunPreflightCompleted/)
   assert.equal(service.advanceFakeRun()?.run.phase, 'capture')
-  assert.match(
-    new TextDecoder().decode((await reader?.read()).value),
-    /event: RunAcquireCompleted/,
-  )
+  assert.match(await nextEvent(reader), /event: RunAcquireCompleted/)
   const beforePause = await fetch(`${base}/api/snapshot`).then((response) =>
     response.json(),
   )
@@ -4519,10 +4738,7 @@ test('an accepted fake RunDefinition advances two immutable sequences through du
   const pausedBody = await paused.json()
   assert.equal(pausedBody.snapshot.run.phase, 'paused')
   assert.equal(pausedBody.snapshot.run.resumablePhase, 'capture')
-  assert.match(
-    new TextDecoder().decode((await reader?.read()).value),
-    /event: RunPaused/,
-  )
+  assert.match(await nextEvent(reader), /event: RunPaused/)
   assert.equal(
     (
       await fetch(`${base}/api/commands/pause-run`, {
@@ -4540,10 +4756,11 @@ test('an accepted fake RunDefinition advances two immutable sequences through du
   assert.equal((await idempotencyConflict.json()).reason, 'IdempotencyConflict')
   assert.equal(service.advanceFakeRun(), undefined)
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare("SELECT count(*) AS count FROM events WHERE type='RunPaused'")
-        .get() as { count: number }
+        .get(),
     ).count,
     1,
   )
@@ -4599,7 +4816,7 @@ test('an accepted fake RunDefinition advances two immutable sequences through du
   assert.equal(recovered.advanceFakeRun()?.run.phase, 'verify')
   assert.equal(recovered.advanceFakeRun()?.run.phase, 'completed')
   assert.match(
-    new TextDecoder().decode((await recoveredReader?.read()).value),
+    await nextEvent(recoveredReader),
     /event: RunResumed|event: RunCaptureCompleted/,
   )
   const completed = await fetch(`${recoveredBase}/api/snapshot`).then(
@@ -4610,20 +4827,20 @@ test('an accepted fake RunDefinition advances two immutable sequences through du
   assert.equal(completed.run.revision, 11)
   assert.equal(recovered.advanceFakeRun(), undefined)
   assert.equal(
-    (
-      recovered.database
-        .prepare('SELECT count(*) AS count FROM outbox')
-        .get() as { count: number }
+    databaseRow(
+      CountRow,
+      recovered.database.prepare('SELECT count(*) AS count FROM outbox').get(),
     ).count,
     0,
   )
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       recovered.database
         .prepare(
           "SELECT count(*) AS count FROM events WHERE type='RunCompleted'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     1,
   )
@@ -4860,7 +5077,7 @@ test('SSE sends a snapshot before durable cursor catch-up and never replays a co
   const stream = await fetch(`${base}/api/events`)
   const reader = stream.body?.getReader()
   assert.notEqual(reader, undefined)
-  const first = new TextDecoder().decode((await reader?.read()).value)
+  const first = await nextEvent(reader)
   assert.match(first, /event: snapshot/)
   const started = await fetch(`${base}/api/commands/start-run`, {
     method: 'POST',
@@ -4873,7 +5090,7 @@ test('SSE sends a snapshot before durable cursor catch-up and never replays a co
     }),
   })
   assert.equal(started.status, 202)
-  const next = new TextDecoder().decode((await reader?.read()).value)
+  const next = await nextEvent(reader)
   assert.match(next, /event: RunStarted/)
   await reader?.cancel()
   await listener.close()
@@ -4905,18 +5122,17 @@ test('browser reconnect installs a current snapshot and its stale shell offers n
   assert.equal(started.status, 202)
   const reconnectStream = await fetch(`${base}/api/events`)
   const reconnectReader = reconnectStream.body?.getReader()
-  const reconnect = new TextDecoder().decode(
-    (await reconnectReader?.read()).value,
-  )
+  const reconnect = await nextEvent(reconnectReader)
   assert.match(reconnect, /event: snapshot/)
   assert.match(reconnect, /"phase":"capture"/)
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       service.database
         .prepare(
           "SELECT count(*) AS count FROM outbox WHERE kind='StartM27Capture'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     0,
   )
@@ -5023,10 +5239,11 @@ test('expired reconnect grace survives restart, releases control to nobody, and 
   assert.equal(snapshot.control.revision, 4)
   assert.equal(snapshot.run.phase, 'capture')
   assert.equal(
-    (
+    databaseRow(
+      EventTypeRow,
       recovered.database
         .prepare('SELECT type FROM events ORDER BY cursor DESC LIMIT 1')
-        .get() as { type: string }
+        .get(),
     ).type,
     'ControlGraceExpired',
   )
@@ -5109,10 +5326,9 @@ test('two server-configured desktops transfer control without stopping the accep
   assert.equal(after.control.holderClientId, 'desktop-ada')
   assert.equal(after.run.phase, 'capture')
   assert.equal(
-    (
-      owner.database.prepare('SELECT count(*) AS count FROM outbox').get() as {
-        count: number
-      }
+    databaseRow(
+      CountRow,
+      owner.database.prepare('SELECT count(*) AS count FROM outbox').get(),
     ).count,
     0,
   )
@@ -5233,7 +5449,7 @@ test('generated fixture shell has executable browser JavaScript', () => {
   const script = applicationShell({ fixture: true }).match(
     /<script>([\s\S]*)<\/script>/,
   )?.[1]
-  assert.notEqual(script, undefined)
+  if (script === undefined) throw new Error('Fixture shell script is missing')
   new Function(script)
   assert.match(script, /Preflight · fake run is preparing/)
   assert.match(script, /Acquire · fake run is centering/)
@@ -5413,10 +5629,11 @@ test('fake run resolution and consequence-aware edits persist only durable fake 
   assert.equal(approved.snapshot.run.activeSequenceIndex, 1)
   assert.equal(approved.snapshot.run.phase, 'preflight')
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       first.service.database
         .prepare('SELECT count(*) AS count FROM outbox')
-        .get() as { count: number }
+        .get(),
     ).count,
     0,
   )
@@ -5453,9 +5670,10 @@ test('fake run resolution and consequence-aware edits persist only durable fake 
   await first.listener.close()
   first.service.close()
   const recovered = createFixtureService(databasePath)
-  const recoveredSnapshot = (await recovered.database
-    .prepare("SELECT value FROM state WHERE key='run'")
-    .get()) as { value: string }
+  const recoveredSnapshot = databaseRow(
+    ProjectionRow,
+    recovered.database.prepare("SELECT value FROM state WHERE key='run'").get(),
+  )
   assert.equal(JSON.parse(recoveredSnapshot.value).phase, 'parkRequested')
   recovered.close()
   const skip = await start(
@@ -5480,12 +5698,13 @@ test('fake run resolution and consequence-aware edits persist only durable fake 
   assert.equal(skipped.snapshot.run.activeSequenceIndex, 1)
   assert.equal(skipped.snapshot.run.revision, skipSnapshot.run.revision + 1)
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       skip.service.database
         .prepare(
           "SELECT count(*) AS count FROM events WHERE type='FakeSequenceSkipped'",
         )
-        .get() as { count: number }
+        .get(),
     ).count,
     1,
   )
@@ -5511,10 +5730,11 @@ test('fake run resolution and consequence-aware edits persist only durable fake 
   assert.equal(stop.snapshot.run.phase, 'stopped')
   assert.equal(stop.snapshot.run.revision, stopSnapshot.run.revision + 1)
   assert.equal(
-    (
+    databaseRow(
+      CountRow,
       stopped.service.database
         .prepare("SELECT count(*) AS count FROM events WHERE type='RunStopped'")
-        .get() as { count: number }
+        .get(),
     ).count,
     1,
   )

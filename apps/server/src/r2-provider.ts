@@ -10,7 +10,10 @@ const Credentials = Schema.Struct({
   accessKeyId: Schema.NonEmptyString,
   secretAccessKey: Schema.NonEmptyString,
 })
-type Fetcher = (input: URL, init: RequestInit) => Promise<Response>
+type Fetcher = (
+  input: URL,
+  init: RequestInit & { readonly duplex?: 'half' },
+) => Promise<Response>
 
 export function createR2Provider(
   config: Pick<
@@ -18,6 +21,9 @@ export function createR2Provider(
     'accountId' | 'bucket' | 'endpoint' | 'credentialsPath'
   >,
   fetcher: Fetcher = fetch,
+  dependencies: {
+    readonly fileStream?: (path: string) => Readable
+  } = {},
 ): PublisherProvider {
   let rawCredentials: unknown
   try {
@@ -96,21 +102,24 @@ export function createR2Provider(
         `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${createHash('sha256').update(canonicalRequest).digest('hex')}`,
       )
       .digest('hex')
-    const response = await fetcher(url, {
-      method,
-      headers: {
-        ...headers,
-        authorization: `AWS4-HMAC-SHA256 Credential=${credentials.accessKeyId}/${scope}, SignedHeaders=${signedHeaders.join(';')}, Signature=${signature}`,
-      },
-      ...(file === undefined
-        ? {}
+    const authorizedHeaders = {
+      ...headers,
+      authorization: `AWS4-HMAC-SHA256 Credential=${credentials.accessKeyId}/${scope}, SignedHeaders=${signedHeaders.join(';')}, Signature=${signature}`,
+    }
+    const response = await fetcher(
+      url,
+      file === undefined
+        ? { method, headers: authorizedHeaders }
         : {
-            body: Readable.toWeb(
-              createReadStream(file.path, { highWaterMark: 64 * 1024 }),
+            method,
+            headers: authorizedHeaders,
+            body: fileBody(
+              dependencies.fileStream?.(file.path) ??
+                createReadStream(file.path, { highWaterMark: 64 * 1024 }),
             ),
             duplex: 'half',
-          }),
-    })
+          },
+    )
     if (!response.ok)
       throw new Error(`R2 ${method} failed with ${response.status}`)
     return response
@@ -132,4 +141,23 @@ export function createR2Provider(
 
 function hmac(key: string | Buffer, value: string) {
   return createHmac('sha256', key).update(value).digest()
+}
+
+function fileBody(stream: Readable) {
+  const iterator = stream[Symbol.asyncIterator]()
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const chunk = await iterator.next()
+      if (chunk.done) return controller.close()
+      if (!(chunk.value instanceof Uint8Array))
+        return controller.error(
+          new Error('R2 publisher received a text file chunk'),
+        )
+      controller.enqueue(chunk.value)
+    },
+    async cancel() {
+      await iterator.return?.()
+      stream.destroy()
+    },
+  })
 }

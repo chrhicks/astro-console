@@ -121,19 +121,23 @@ export function createRigWorkerService(
 }
 
 export async function runRigWorker(config: RigWorkerConfig) {
-  let recordStack:
-    | ((intentId: string, event: unknown, observedAt: string) => boolean)
-    | undefined
+  const stackReceiver: {
+    recordStack?: (
+      intentId: string,
+      event: unknown,
+      observedAt: string,
+    ) => boolean
+  } = {}
   const adapter =
     config.mode === 'disabled'
       ? undefined
       : createSeestarSolarAdapter(config, {
           onStack: (intentId, event, observedAt) => {
-            recordStack?.(intentId, event, observedAt)
+            stackReceiver.recordStack?.(intentId, event, observedAt)
           },
         })
   const worker = createRigWorkerService(config, adapter)
-  recordStack = worker.recordSolarStackEvidence
+  stackReceiver.recordStack = worker.recordSolarStackEvidence
   if (config.mode === 'disabled') return worker.run()
   const controller = new AbortController()
   const stop = () => controller.abort()

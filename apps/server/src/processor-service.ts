@@ -58,7 +58,6 @@ export function createProcessorService(
     config.databasePath,
   )
   const runOnce = (): ProcessorResult => {
-    let raw: unknown
     let text: string
     try {
       if (statSync(config.manifestPath).size > 65_536)
@@ -67,12 +66,15 @@ export function createProcessorService(
     } catch {
       return { outcome: 'rejected', reason: 'ManifestUnavailable' }
     }
+    let manifest: typeof Manifest.Type | undefined
     try {
-      raw = Schema.decodeUnknownSync(Manifest)(JSON.parse(text))
+      manifest = Schema.decodeUnknownSync(Manifest)(JSON.parse(text))
     } catch {
       return { outcome: 'rejected', reason: 'InvalidManifest' }
     }
-    const sources = sourceMapping(raw.sources)
+    if (manifest === undefined)
+      return { outcome: 'rejected', reason: 'InvalidManifest' }
+    const sources = sourceMapping(manifest.sources)
     if (sources === undefined)
       return { outcome: 'rejected', reason: 'InvalidManifest' }
     const membershipRaw: unknown = database
@@ -85,7 +87,7 @@ export function createProcessorService(
       undefined
     )
       return { outcome: 'rejected', reason: 'OwnerUnavailable' }
-    if (raw.sourceIngest !== undefined) {
+    if (manifest.sourceIngest !== undefined) {
       const ingested = ingestSourceAsset(
         database,
         {
@@ -93,7 +95,7 @@ export function createProcessorService(
           originalsRoot: config.originalsRoot,
           sources,
         },
-        raw.sourceIngest,
+        manifest.sourceIngest,
         {
           personId: config.ownerPersonId,
           clientId: 'processor-manifest',
@@ -110,7 +112,7 @@ export function createProcessorService(
         outputsRoot: config.outputsRoot,
         sources,
       },
-      raw,
+      manifest,
       {
         personId: config.ownerPersonId,
         clientId: 'processor-manifest',

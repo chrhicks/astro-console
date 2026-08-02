@@ -1,4 +1,7 @@
 import { Config, ConfigProvider, Effect, Option } from 'effect'
+import type { ProcessorConfig } from './processor-config.ts'
+import type { R2PublisherConfig } from './publisher-config.ts'
+import type { RigWorkerConfig } from './rig-worker-config.ts'
 
 const optional = (name: string) => Config.option(Config.string(name))
 const text = (name: string, fallback?: string) =>
@@ -13,6 +16,29 @@ const validText = (value: string, message: string) =>
   value && !/[\r\n]/.test(value)
     ? Effect.succeed(value)
     : configFailure(message)
+
+export type OriginServerConfig = {
+  readonly runtime: {
+    readonly databasePath: string
+    readonly release: string
+    readonly port: number
+    readonly host: string
+  }
+  readonly admission:
+    | { readonly mode: 'development'; readonly client: string }
+    | {
+        readonly mode: 'production'
+        readonly issuer: string
+        readonly audience: string
+        readonly jwksUrl: string
+        readonly bootstrapPath: string
+        readonly clientContext: 'desktop' | 'phone'
+        readonly cacheTtlMs: number
+      }
+  readonly fixture: string | undefined
+  readonly downloadGrant:
+    { readonly url: string; readonly secretPath: string } | undefined
+}
 
 export const originServerConfig = Config.all({
   admissionMode: text('ASTRO_ADMISSION_MODE', 'development'),
@@ -31,41 +57,44 @@ export const originServerConfig = Config.all({
   downloadGrantUrl: optional('ASTRO_DOWNLOAD_GRANT_URL'),
   downloadGrantSecretPath: optional('ASTRO_DOWNLOAD_GRANT_SHARED_SECRET_PATH'),
 }).pipe(
-  Config.mapOrFail((input) => {
-    if (input.bind !== '127.0.0.1' && input.bind !== '0.0.0.0')
-      return configFailure('ASTRO_LOCAL_WEB_BIND must be 127.0.0.1 or 0.0.0.0')
-    if (!/^\d+$/.test(input.port) || Number(input.port) > 65_535)
-      return configFailure(
-        'ASTRO_LOCAL_WEB_PORT must be an integer from 0 to 65535',
+  Config.mapOrFail(
+    (input): Effect.Effect<OriginServerConfig, Config.ConfigError> => {
+      if (input.bind !== '127.0.0.1' && input.bind !== '0.0.0.0')
+        return configFailure(
+          'ASTRO_LOCAL_WEB_BIND must be 127.0.0.1 or 0.0.0.0',
+        )
+      if (!/^\d+$/.test(input.port) || Number(input.port) > 65_535)
+        return configFailure(
+          'ASTRO_LOCAL_WEB_PORT must be an integer from 0 to 65535',
+        )
+      if (!/^\d+$/.test(input.cacheTtl))
+        return configFailure(
+          'Production admission requires Access issuer, audience, HTTPS JWKS URL, bootstrap path, client context, and integer JWKS cache TTL',
+        )
+      if (Option.isSome(input.fixture) && input.fixture.value !== 'm27')
+        return configFailure('ASTRO_LOCAL_WEB_FIXTURE must be m27 when set')
+      if (
+        Option.isNone(input.downloadGrantUrl) &&
+        Option.isNone(input.downloadGrantSecretPath)
+      ) {
+        return originServer(input)
+      }
+      if (
+        Option.isNone(input.downloadGrantUrl) ||
+        Option.isNone(input.downloadGrantSecretPath) ||
+        input.downloadGrantUrl.value !==
+          'http://download-grant:8791/internal/download-grants' ||
+        !/^\/run\/secrets\/[A-Za-z0-9._-]+$/.test(
+          input.downloadGrantSecretPath.value,
+        )
       )
-    if (!/^\d+$/.test(input.cacheTtl))
-      return configFailure(
-        'Production admission requires Access issuer, audience, HTTPS JWKS URL, bootstrap path, client context, and integer JWKS cache TTL',
-      )
-    if (Option.isSome(input.fixture) && input.fixture.value !== 'm27')
-      return configFailure('ASTRO_LOCAL_WEB_FIXTURE must be m27 when set')
-    if (
-      Option.isNone(input.downloadGrantUrl) &&
-      Option.isNone(input.downloadGrantSecretPath)
-    ) {
+        return configFailure(
+          'Download grants require an internal URL and mounted shared secret',
+        )
       return originServer(input)
-    }
-    if (
-      Option.isNone(input.downloadGrantUrl) ||
-      Option.isNone(input.downloadGrantSecretPath) ||
-      input.downloadGrantUrl.value !==
-        'http://download-grant:8791/internal/download-grants' ||
-      !/^\/run\/secrets\/[A-Za-z0-9._-]+$/.test(
-        input.downloadGrantSecretPath.value,
-      )
-    )
-      return configFailure(
-        'Download grants require an internal URL and mounted shared secret',
-      )
-    return originServer(input)
-  }),
+    },
+  ),
 )
-export type OriginServerConfig = typeof originServerConfig.Type
 
 function originServer(input: {
   readonly admissionMode: string
@@ -98,7 +127,7 @@ function originServer(input: {
         return yield* configFailure(
           'Fixture admission requires loopback development binding',
         )
-      return {
+      return yield* Effect.succeed<OriginServerConfig>({
         runtime: {
           databasePath,
           release,
@@ -115,7 +144,7 @@ function originServer(input: {
                 secretPath: input.downloadGrantSecretPath.value,
               }
             : undefined,
-      }
+      })
     }
     if (input.admissionMode !== 'production')
       return yield* configFailure(
@@ -133,6 +162,11 @@ function originServer(input: {
       return yield* configFailure(
         'Production admission requires Access issuer, audience, HTTPS JWKS URL, bootstrap path, client context, and integer JWKS cache TTL',
       )
+    const clientContext = input.clientContext.value
+    if (clientContext !== 'desktop' && clientContext !== 'phone')
+      return yield* configFailure(
+        'Production admission requires a desktop or phone client context',
+      )
     if (
       !URL.canParse(input.jwksUrl.value) ||
       new URL(input.jwksUrl.value).protocol !== 'https:'
@@ -142,7 +176,7 @@ function originServer(input: {
       return yield* configFailure(
         'CF Access JWKS cache TTL must be between 1000 and 3600000 ms',
       )
-    return {
+    return yield* Effect.succeed<OriginServerConfig>({
       runtime: {
         databasePath,
         release,
@@ -155,7 +189,7 @@ function originServer(input: {
         audience: input.audience.value,
         jwksUrl: input.jwksUrl.value,
         bootstrapPath: input.bootstrapPath.value,
-        clientContext: input.clientContext.value,
+        clientContext,
         cacheTtlMs: Number(input.cacheTtl),
       },
       fixture: Option.getOrUndefined(input.fixture),
@@ -167,7 +201,7 @@ function originServer(input: {
               secretPath: input.downloadGrantSecretPath.value,
             }
           : undefined,
-    }
+    })
   })
 }
 
@@ -177,34 +211,38 @@ export const rigWorkerEnvironmentConfig = Config.all({
   mode: text('ASTRO_RIG_WORKER_MODE', 'disabled'),
   pemPath: optional('ASTRO_SEESTAR_PEM_PATH'),
 }).pipe(
-  Config.mapOrFail((input) => {
-    if (!input.databasePath || /[\r\n]/.test(input.databasePath))
-      return configFailure('Rig worker requires ASTRO_LOCAL_WEB_DB')
-    if (input.mode === 'disabled')
-      return Effect.succeed({
-        mode: 'disabled',
-        databasePath: input.databasePath,
-      })
-    if (input.mode !== 'seestar')
-      return configFailure('ASTRO_RIG_WORKER_MODE must be disabled or seestar')
-    if (Option.isNone(input.host) || input.host.value !== '192.168.4.63')
-      return configFailure(
-        'Seestar worker requires ASTRO_SEESTAR_HOST=192.168.4.63',
+  Config.mapOrFail(
+    (input): Effect.Effect<RigWorkerConfig, Config.ConfigError> => {
+      if (!input.databasePath || /[\r\n]/.test(input.databasePath))
+        return configFailure('Rig worker requires ASTRO_LOCAL_WEB_DB')
+      if (input.mode === 'disabled')
+        return Effect.succeed({
+          mode: 'disabled',
+          databasePath: input.databasePath,
+        })
+      if (input.mode !== 'seestar')
+        return configFailure(
+          'ASTRO_RIG_WORKER_MODE must be disabled or seestar',
+        )
+      if (Option.isNone(input.host) || input.host.value !== '192.168.4.63')
+        return configFailure(
+          'Seestar worker requires ASTRO_SEESTAR_HOST=192.168.4.63',
+        )
+      if (
+        Option.isNone(input.pemPath) ||
+        !input.pemPath.value ||
+        /[\r\n]/.test(input.pemPath.value)
       )
-    if (
-      Option.isNone(input.pemPath) ||
-      !input.pemPath.value ||
-      /[\r\n]/.test(input.pemPath.value)
-    )
-      return configFailure('Seestar worker requires ASTRO_SEESTAR_PEM_PATH')
-    return Effect.succeed({
-      mode: 'seestar',
-      databasePath: input.databasePath,
-      rigId: 'seestar-s30',
-      host: input.host.value,
-      pemPath: input.pemPath.value,
-    })
-  }),
+        return configFailure('Seestar worker requires ASTRO_SEESTAR_PEM_PATH')
+      return Effect.succeed({
+        mode: 'seestar',
+        databasePath: input.databasePath,
+        rigId: 'seestar-s30',
+        host: input.host.value,
+        pemPath: input.pemPath.value,
+      })
+    },
+  ),
 )
 
 export const publisherEnvironmentConfig = Config.all({
@@ -215,31 +253,35 @@ export const publisherEnvironmentConfig = Config.all({
   endpoint: text('R2_ENDPOINT'),
   outputsRoot: text('ASTRO_PUBLISHER_OUTPUTS_ROOT'),
 }).pipe(
-  Config.mapOrFail((input) => {
-    if (!/^[a-f0-9]{32}$/.test(input.accountId))
-      return configFailure(
-        'R2 account ID must be 32 lowercase hexadecimal characters',
+  Config.mapOrFail(
+    (input): Effect.Effect<R2PublisherConfig, Config.ConfigError> => {
+      if (!/^[a-f0-9]{32}$/.test(input.accountId))
+        return configFailure(
+          'R2 account ID must be 32 lowercase hexadecimal characters',
+        )
+      if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(input.bucket))
+        return configFailure('R2 bucket name is invalid')
+      if (
+        input.endpoint !== `https://${input.accountId}.r2.cloudflarestorage.com`
       )
-    if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(input.bucket))
-      return configFailure('R2 bucket name is invalid')
-    if (
-      input.endpoint !== `https://${input.accountId}.r2.cloudflarestorage.com`
-    )
-      return configFailure('R2 endpoint must be the account S3 endpoint')
-    if (!/^\/run\/secrets\/[A-Za-z0-9._-]+$/.test(input.credentialsPath))
-      return configFailure('R2 credential path must be a mounted secret')
-    if (
-      !input.databasePath.startsWith('/var/lib/astro-console/') ||
-      !/^\/var\/lib\/astro-console\/outputs(?:\/|$)/.test(input.outputsRoot) ||
-      [input.databasePath, input.outputsRoot].some((path) =>
-        /[\r\n]|(?:^|\/)\.\.(?:\/|$)/.test(path),
+        return configFailure('R2 endpoint must be the account S3 endpoint')
+      if (!/^\/run\/secrets\/[A-Za-z0-9._-]+$/.test(input.credentialsPath))
+        return configFailure('R2 credential path must be a mounted secret')
+      if (
+        !input.databasePath.startsWith('/var/lib/astro-console/') ||
+        !/^\/var\/lib\/astro-console\/outputs(?:\/|$)/.test(
+          input.outputsRoot,
+        ) ||
+        [input.databasePath, input.outputsRoot].some((path) =>
+          /[\r\n]|(?:^|\/)\.\.(?:\/|$)/.test(path),
+        )
       )
-    )
-      return configFailure(
-        'Publisher paths must be absolute app-owned container paths',
-      )
-    return Effect.succeed(input)
-  }),
+        return configFailure(
+          'Publisher paths must be absolute app-owned container paths',
+        )
+      return Effect.succeed(input)
+    },
+  ),
 )
 
 export const processorEnvironmentConfig = Config.all({
@@ -251,51 +293,55 @@ export const processorEnvironmentConfig = Config.all({
   ownerPersonId: optional('ASTRO_PROCESSOR_OWNER_PERSON_ID'),
   sourcesRoot: optional('ASTRO_PROCESSOR_SOURCES_ROOT'),
 }).pipe(
-  Config.mapOrFail((input) => {
-    if (input.mode === 'disabled') return Effect.succeed({ mode: 'disabled' })
-    if (input.mode !== 'manifest')
-      return configFailure('ASTRO_PROCESSOR_MODE must be disabled or manifest')
-    if (
-      Option.isNone(input.databasePath) ||
-      Option.isNone(input.sourcesRoot) ||
-      Option.isNone(input.originalsRoot) ||
-      Option.isNone(input.outputsRoot) ||
-      Option.isNone(input.manifestPath) ||
-      Option.isNone(input.ownerPersonId)
-    )
-      return configFailure(
-        'Manifest processor requires database, source root, originals root, output root, manifest path, and owner person ID',
+  Config.mapOrFail(
+    (input): Effect.Effect<ProcessorConfig, Config.ConfigError> => {
+      if (input.mode === 'disabled') return Effect.succeed({ mode: 'disabled' })
+      if (input.mode !== 'manifest')
+        return configFailure(
+          'ASTRO_PROCESSOR_MODE must be disabled or manifest',
+        )
+      if (
+        Option.isNone(input.databasePath) ||
+        Option.isNone(input.sourcesRoot) ||
+        Option.isNone(input.originalsRoot) ||
+        Option.isNone(input.outputsRoot) ||
+        Option.isNone(input.manifestPath) ||
+        Option.isNone(input.ownerPersonId)
       )
-    const databasePath = input.databasePath.value
-    const sourcesRoot = input.sourcesRoot.value
-    const originalsRoot = input.originalsRoot.value
-    const outputsRoot = input.outputsRoot.value
-    const manifestPath = input.manifestPath.value
-    const ownerPersonId = input.ownerPersonId.value
-    if (
-      !databasePath.startsWith('/var/lib/astro-console/') ||
-      !sourcesRoot.startsWith('/var/lib/astro-console/') ||
-      !originalsRoot.startsWith('/var/lib/astro-console/') ||
-      !outputsRoot.startsWith('/var/lib/astro-console/') ||
-      !manifestPath.startsWith('/run/config/') ||
-      /[\r\n]|(?:^|\/)\.\.(?:\/|$)/.test(
-        `${databasePath}/${sourcesRoot}/${originalsRoot}/${outputsRoot}/${manifestPath}`,
-      ) ||
-      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(ownerPersonId)
-    )
-      return configFailure(
-        'Manifest processor paths must be app-owned and manifest host-managed',
+        return configFailure(
+          'Manifest processor requires database, source root, originals root, output root, manifest path, and owner person ID',
+        )
+      const databasePath = input.databasePath.value
+      const sourcesRoot = input.sourcesRoot.value
+      const originalsRoot = input.originalsRoot.value
+      const outputsRoot = input.outputsRoot.value
+      const manifestPath = input.manifestPath.value
+      const ownerPersonId = input.ownerPersonId.value
+      if (
+        !databasePath.startsWith('/var/lib/astro-console/') ||
+        !sourcesRoot.startsWith('/var/lib/astro-console/') ||
+        !originalsRoot.startsWith('/var/lib/astro-console/') ||
+        !outputsRoot.startsWith('/var/lib/astro-console/') ||
+        !manifestPath.startsWith('/run/config/') ||
+        /[\r\n]|(?:^|\/)\.\.(?:\/|$)/.test(
+          `${databasePath}/${sourcesRoot}/${originalsRoot}/${outputsRoot}/${manifestPath}`,
+        ) ||
+        !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(ownerPersonId)
       )
-    return Effect.succeed({
-      mode: 'manifest',
-      databasePath,
-      sourcesRoot,
-      originalsRoot,
-      outputsRoot,
-      manifestPath,
-      ownerPersonId,
-    })
-  }),
+        return configFailure(
+          'Manifest processor paths must be app-owned and manifest host-managed',
+        )
+      return Effect.succeed({
+        mode: 'manifest',
+        databasePath,
+        sourcesRoot,
+        originalsRoot,
+        outputsRoot,
+        manifestPath,
+        ownerPersonId,
+      })
+    },
+  ),
 )
 
 export const downloadGrantSignerConfig = Config.all({
@@ -330,6 +376,18 @@ export const downloadGrantSignerConfig = Config.all({
   }),
 )
 
+export type SolarCliConfig = {
+  readonly databasePath: string
+  readonly subject: string
+  readonly command:
+    | { readonly action: 'stop'; readonly intentId: string }
+    | {
+        readonly action: 'submit'
+        readonly name: string
+        readonly idempotencyKey: string
+      }
+}
+
 export const solarCliConfig = Config.all({
   action: text('ASTRO_SOLAR_TEST_ACTION', 'submit'),
   confirm: text('ASTRO_SOLAR_TEST_CONFIRM'),
@@ -339,45 +397,46 @@ export const solarCliConfig = Config.all({
   name: optional('ASTRO_SOLAR_TEST_NAME'),
   subject: text('ASTRO_SOLAR_TEST_SUBJECT'),
 }).pipe(
-  Config.mapOrFail((input) => {
-    if (input.confirm !== 'submit-solar-test')
-      return configFailure(
-        'Solar test intent requires ASTRO_SOLAR_TEST_CONFIRM=submit-solar-test',
+  Config.mapOrFail(
+    (input): Effect.Effect<SolarCliConfig, Config.ConfigError> => {
+      if (input.confirm !== 'submit-solar-test')
+        return configFailure(
+          'Solar test intent requires ASTRO_SOLAR_TEST_CONFIRM=submit-solar-test',
+        )
+      if (input.action !== 'submit' && input.action !== 'stop')
+        return configFailure('ASTRO_SOLAR_TEST_ACTION must be submit or stop')
+      const required = input.action === 'stop' ? input.intentId : input.name
+      if (
+        Option.isNone(required) ||
+        !required.value ||
+        /[\r\n]/.test(required.value)
       )
-    if (input.action !== 'submit' && input.action !== 'stop')
-      return configFailure('ASTRO_SOLAR_TEST_ACTION must be submit or stop')
-    const required = input.action === 'stop' ? input.intentId : input.name
-    if (
-      Option.isNone(required) ||
-      !required.value ||
-      /[\r\n]/.test(required.value)
-    )
-      return configFailure(
-        `Solar test intent requires ${input.action === 'stop' ? 'ASTRO_SOLAR_TEST_INTENT_ID' : 'ASTRO_SOLAR_TEST_NAME'}`,
+        return configFailure(
+          `Solar test intent requires ${input.action === 'stop' ? 'ASTRO_SOLAR_TEST_INTENT_ID' : 'ASTRO_SOLAR_TEST_NAME'}`,
+        )
+      if (input.action === 'stop')
+        return Effect.succeed({
+          databasePath: input.databasePath,
+          subject: input.subject,
+          command: { action: 'stop' as const, intentId: required.value },
+        })
+      if (
+        Option.isNone(input.idempotencyKey) ||
+        !input.idempotencyKey.value ||
+        /[\r\n]/.test(input.idempotencyKey.value)
       )
-    if (input.action === 'stop')
+        return configFailure(
+          'Solar test intent requires ASTRO_SOLAR_TEST_IDEMPOTENCY_KEY',
+        )
       return Effect.succeed({
         databasePath: input.databasePath,
         subject: input.subject,
-        command: { action: 'stop' as const, intentId: required.value },
+        command: {
+          action: 'submit' as const,
+          name: required.value,
+          idempotencyKey: input.idempotencyKey.value,
+        },
       })
-    if (
-      Option.isNone(input.idempotencyKey) ||
-      !input.idempotencyKey.value ||
-      /[\r\n]/.test(input.idempotencyKey.value)
-    )
-      return configFailure(
-        'Solar test intent requires ASTRO_SOLAR_TEST_IDEMPOTENCY_KEY',
-      )
-    return Effect.succeed({
-      databasePath: input.databasePath,
-      subject: input.subject,
-      command: {
-        action: 'submit' as const,
-        name: required.value,
-        idempotencyKey: input.idempotencyKey.value,
-      },
-    })
-  }),
+    },
+  ),
 )
-export type SolarCliConfig = typeof solarCliConfig.Type

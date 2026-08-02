@@ -33,8 +33,8 @@ export function createDownloadGrantService(
   if (secret.length < 32 || /[\r\n]/.test(secret))
     throw new Error('Download grant shared secret is invalid')
   const issuer = dependencies.issuer ?? createR2DownloadGrantIssuer(config)
-  return createServer(
-    async (request: IncomingMessage, response: ServerResponse) => {
+  return createServer((request: IncomingMessage, response: ServerResponse) => {
+    void (async () => {
       if (
         request.method !== 'POST' ||
         request.url !== '/internal/download-grants' ||
@@ -59,8 +59,8 @@ export function createDownloadGrantService(
       } catch {
         response.writeHead(400).end()
       }
-    },
-  )
+    })()
+  })
 }
 if (process.argv[1]?.endsWith('download-grant-service.ts')) {
   runExecutable('download-grant signer', async () => {

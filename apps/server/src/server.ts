@@ -129,7 +129,7 @@ export type LocalIdentity = {
   readonly role?: 'owner' | 'viewer'
 }
 export type RequestAdmission = (
-  request?: IncomingMessage,
+  request?: Pick<IncomingMessage, 'headers'>,
 ) => LocalIdentity | undefined | Promise<LocalIdentity | undefined>
 export type SolarTestIntentResult =
   | {
@@ -268,7 +268,7 @@ export type JwksKeyResolver = {
   refresh(): Promise<void>
 }
 function accessToken(
-  request: IncomingMessage | undefined,
+  request: Pick<IncomingMessage, 'headers'> | undefined,
 ): AccessToken | undefined {
   const token = request?.headers['cf-access-jwt-assertion']
   if (typeof token !== 'string' || token.length > 8_192) return undefined
@@ -412,7 +412,7 @@ async function verifiedAccessClaims(
     readonly audience: string
     readonly keyResolver: JwksKeyResolver
   },
-  request: IncomingMessage | undefined,
+  request: Pick<IncomingMessage, 'headers'> | undefined,
 ) {
   const token = accessToken(request)
   if (token === undefined || !validClaims(config, token.claims))
@@ -444,9 +444,9 @@ export function createProductionAccessAdmission(config: {
     if (!claims || claims.email === undefined) return undefined
     const policy = config.bootstrapResolver?.load() ?? staticPolicy
     if (policy === undefined) return undefined
-    const entry = policy.find(
-      (item) => item.email === normalizedEmail(claims.email),
-    )
+    const email = claims.email
+    if (email === undefined) return undefined
+    const entry = policy.find((item) => item.email === normalizedEmail(email))
     if (!entry) return undefined
     const membership = new DatabaseSync(config.databasePath)
     try {
@@ -521,6 +521,18 @@ type Run = {
   readonly retryPhase?: 'preflight' | 'acquire' | 'capture' | 'verify'
   readonly appliedMutations?: ReadonlyArray<RunMutation>
 }
+function resumableRunPhase(
+  phase: RunPhase,
+):
+  | Exclude<RunPhase, 'paused' | 'completed' | 'stopped' | 'parkRequested'>
+  | undefined {
+  return phase === 'preflight' ||
+    phase === 'acquire' ||
+    phase === 'capture' ||
+    phase === 'verify'
+    ? phase
+    : undefined
+}
 type Evidence = {
   readonly frameId: string
   readonly capturedAt: string
@@ -528,7 +540,7 @@ type Evidence = {
   readonly desired: string
   readonly solved: string
   readonly uncertaintyArcsec: number
-  readonly stack: {
+  readonly stack?: {
     readonly availability: 'available' | 'unavailable'
     readonly observedAt: string
     readonly frameCount: number
@@ -1027,6 +1039,7 @@ const StoredSnapshot = Schema.Struct({
     revision: Schema.Int,
     target: Schema.String,
     readiness: Schema.Literals(['ready', 'unavailable']),
+    runEligible: Schema.Boolean,
   }),
   control: Schema.Struct({
     holderClientId: Schema.NullOr(Schema.String),
@@ -1131,6 +1144,16 @@ const operatorMessages = {
   RunPaused: 'Pause was accepted by the service.',
   RunResumed: 'Resume was accepted by the service.',
   RunStopped: 'Stop was accepted by the service. This run cannot be resumed.',
+  FakeSequenceSkipped: 'The remaining fake sequence was skipped.',
+  FakePhaseRetried: 'The fake phase will retry once.',
+  FakeParkRequested: 'Fake park was requested; no mount moved.',
+  RunMutationApplied: 'The fake-run mutation was applied.',
+  PreviewUnavailable: 'The requested fake-run preview is unavailable.',
+  PreviewExpired: 'The requested fake-run preview expired.',
+  ApprovalRequired: 'This fake-run mutation requires approval.',
+  ApprovalMismatch: 'The fake-run approval does not match the preview.',
+  RetryExhausted: 'The fake phase has already retried once.',
+  PolicyUnavailable: 'This fake-run policy is unavailable.',
 } satisfies Record<FailureReason | ControlEvent, string>
 
 export function createLocalWebService(
@@ -1243,7 +1266,7 @@ export function createLocalWebService(
         : runInterventionCommand(
             response,
             input,
-            PauseRun,
+            Schema.decodeUnknownSync(PauseRun),
             'pause',
             database,
             identity,
@@ -1260,7 +1283,7 @@ export function createLocalWebService(
         : runInterventionCommand(
             response,
             input,
-            ResumeRun,
+            Schema.decodeUnknownSync(ResumeRun),
             'resume',
             database,
             identity,
@@ -1381,14 +1404,16 @@ export function createLocalWebService(
               'Listen host must be loopback or the private Compose network',
             ),
           )
-        const server = createServer(handler).listen(port, host, () => {
+        const server = createServer((request, response) => {
+          void handler(request, response)
+        }).listen(port, host, () => {
           const address = server.address()
           if (address === null || typeof address === 'string')
             return reject(new Error('Local server did not bind a TCP port'))
           resolve({
             port: address.port,
             close: () =>
-              new Promise((done) => {
+              new Promise<void>((done) => {
                 server.closeAllConnections()
                 server.close(() => done())
               }),
@@ -2832,7 +2857,7 @@ function state(
           JSON.parse(storedPlan.projection),
         )
   const plan =
-    projection === undefined
+    storedPlan === undefined || projection === undefined
       ? {
           id: 'uninitialized',
           revision: 0,
@@ -2866,7 +2891,15 @@ function state(
     run: stored.run,
     dispatch: 'none',
     dispatchAction: 'none',
-    evidence: stored.evidence,
+    evidence: {
+      ...stored.evidence,
+      stack: stored.evidence.stack ?? {
+        availability: 'unavailable',
+        observedAt: stored.evidence.capturedAt,
+        frameCount: 0,
+        message: 'No Stack observation has been received.',
+      },
+    },
   }
 }
 function expireReconnectGrace(db: DatabaseSync) {
@@ -3083,8 +3116,12 @@ function nextFakeRunTransition(
       },
     }
   if (run.phase !== 'verify') return undefined
-  const completed = run.completedSequenceCount + 1
-  const next = definition.plan.sequences[run.activeSequenceIndex + 1]
+  const completedSequenceCount = run.completedSequenceCount
+  const activeSequenceIndex = run.activeSequenceIndex
+  if (completedSequenceCount === undefined || activeSequenceIndex === undefined)
+    return undefined
+  const completed = completedSequenceCount + 1
+  const next = definition.plan.sequences[activeSequenceIndex + 1]
   if (next === undefined)
     return {
       eventType: 'RunCompleted',
@@ -3106,7 +3143,7 @@ function nextFakeRunTransition(
       progress: Math.floor(
         (completed / definition.plan.sequences.length) * 100,
       ),
-      activeSequenceIndex: run.activeSequenceIndex + 1,
+      activeSequenceIndex: activeSequenceIndex + 1,
       completedSequenceCount: completed,
     },
   }
@@ -3117,7 +3154,7 @@ function runInterventionCommand<
 >(
   response: ServerResponse,
   raw: unknown | undefined,
-  schema: Schema.Schema<Input>,
+  decode: (raw: unknown) => Input,
   intent: 'pause' | 'resume',
   db: DatabaseSync,
   identity: LocalIdentity,
@@ -3125,13 +3162,8 @@ function runInterventionCommand<
 ) {
   if (raw === undefined) return json(response, 400, reject('InvalidInput').body)
   try {
-    const result = acceptRunIntervention(
-      db,
-      Schema.decodeUnknownSync(schema)(raw),
-      intent,
-      identity,
-    )
-    if (result.event !== undefined)
+    const result = acceptRunIntervention(db, decode(raw), intent, identity)
+    if ('event' in result && result.event !== undefined)
       publish(result.event.type, result.event.cursor)
     return json(response, result.status, result.body)
   } catch {
@@ -3218,20 +3250,25 @@ function acceptRunIntervention(
   }
   const run = current.run
   if (run === null) return reject('RunRevisionConflict')
-  const nextRun: Run =
-    intent === 'pause'
-      ? {
-          ...run,
-          revision: run.revision + 1,
-          phase: 'paused',
-          resumablePhase: run.phase,
-        }
-      : {
-          ...run,
-          revision: run.revision + 1,
-          phase: run.resumablePhase ?? 'paused',
-          resumablePhase: undefined,
-        }
+  let nextRun: Run
+  if (intent === 'pause') {
+    const resumablePhase = resumableRunPhase(run.phase)
+    if (resumablePhase === undefined) return reject('AlreadyTerminal')
+    nextRun = {
+      ...run,
+      revision: run.revision + 1,
+      phase: 'paused',
+      resumablePhase,
+    }
+  } else {
+    const { resumablePhase, ...resumed } = run
+    if (resumablePhase === undefined) return reject('ResumePhaseUnavailable')
+    nextRun = {
+      ...resumed,
+      revision: run.revision + 1,
+      phase: resumablePhase,
+    }
+  }
   const eventType: ControlEvent =
     intent === 'pause' ? 'RunPaused' : 'RunResumed'
   db.exec('BEGIN IMMEDIATE')
@@ -3284,7 +3321,7 @@ function fakePolicyCommand(
       path,
       identity,
     )
-    if (result.event !== undefined)
+    if ('event' in result && result.event !== undefined)
       publish(result.event.type, result.event.cursor)
     return json(response, result.status, result.body)
   } catch {
@@ -3362,7 +3399,11 @@ function acceptFakePolicy(
   )
     return reject('AlreadyTerminal')
   if (run.phase === 'paused') return reject('PolicyUnavailable')
-  const nextSequence = sequences[run.activeSequenceIndex + 1]
+  const activeSequenceIndex = run.activeSequenceIndex
+  const completedSequenceCount = run.completedSequenceCount
+  if (activeSequenceIndex === undefined || completedSequenceCount === undefined)
+    return reject('PolicyUnavailable')
+  const nextSequence = sequences[activeSequenceIndex + 1]
   if (path === '/api/commands/retry-fake-phase' && run.retryPhase !== undefined)
     return reject('RetryExhausted')
   const nextRun: Run =
@@ -3375,7 +3416,7 @@ function acceptFakePolicy(
               revision: run.revision + 1,
               phase: 'completed',
               progress: 100,
-              completedSequenceCount: run.completedSequenceCount + 1,
+              completedSequenceCount: completedSequenceCount + 1,
             }
           : {
               ...run,
@@ -3383,10 +3424,10 @@ function acceptFakePolicy(
               phase: 'preflight',
               target: nextSequence.target,
               progress: Math.floor(
-                ((run.completedSequenceCount + 1) / sequences.length) * 100,
+                ((completedSequenceCount + 1) / sequences.length) * 100,
               ),
-              activeSequenceIndex: run.activeSequenceIndex + 1,
-              completedSequenceCount: run.completedSequenceCount + 1,
+              activeSequenceIndex: activeSequenceIndex + 1,
+              completedSequenceCount: completedSequenceCount + 1,
             }
         : path === '/api/commands/retry-fake-phase'
           ? { ...run, revision: run.revision + 1, retryPhase: run.phase }
@@ -3437,17 +3478,6 @@ function acceptFakePolicy(
   }
 }
 
-type MutationPreviewRow = {
-  readonly preview_id: string
-  readonly run_id: string
-  readonly run_revision: number
-  readonly owner_person_id: string
-  readonly mutation: string
-  readonly consequences: string
-  readonly classification: string
-  readonly expires_at: string
-  readonly applied_at: string | null
-}
 const StoredMutationPreview = Schema.Struct({
   preview_id: Schema.String,
   run_id: Schema.String,
@@ -3624,7 +3654,7 @@ function applyRunMutationCommand(
       approved,
       identity,
     )
-    if (result.event !== undefined)
+    if ('event' in result && result.event !== undefined)
       publish(result.event.type, result.event.cursor)
     return json(response, result.status, result.body)
   } catch {
@@ -3719,7 +3749,9 @@ function applyRunMutation(
           revision: run.revision + 1,
           phase: 'preflight',
           target: mutationNextTarget(db, run),
-          progress: Math.floor(((run.completedSequenceCount + 1) / 2) * 100),
+          progress: Math.floor(
+            (((run.completedSequenceCount ?? 0) + 1) / 2) * 100,
+          ),
           activeSequenceIndex: (run.activeSequenceIndex ?? 0) + 1,
           completedSequenceCount: (run.completedSequenceCount ?? 0) + 1,
           appliedMutations: [
@@ -4016,7 +4048,7 @@ function runCommand(
   return decodedCommand(
     response,
     raw,
-    StartRun,
+    Schema.decodeUnknownSync(StartRun),
     (input) => acceptRun(db, input, identity),
     publish,
   )
@@ -4293,7 +4325,7 @@ function controlCommand(
   return decodedCommand(
     response,
     raw,
-    ControlCommand,
+    Schema.decodeUnknownSync(ControlCommand),
     (input) => acceptControl(db, path, input, identity),
     publish,
   )
@@ -4301,7 +4333,7 @@ function controlCommand(
 function decodedCommand<Input>(
   response: ServerResponse,
   raw: unknown | undefined,
-  schema: Schema.Schema<Input>,
+  decode: (raw: unknown) => Input,
   run: (input: Input) => {
     readonly status: number
     readonly body: CommandResult
@@ -4311,7 +4343,7 @@ function decodedCommand<Input>(
 ) {
   if (raw === undefined) return json(response, 400, reject('InvalidInput').body)
   try {
-    const result = run(Schema.decodeUnknownSync(schema)(raw))
+    const result = run(decode(raw))
     if (result.event !== undefined)
       publish(result.event.type, result.event.cursor)
     return json(response, result.status, result.body)

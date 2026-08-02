@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0"
   },
   "dependencies": {
     "@astro-console/v2-contracts": "file:../../packages/v2-contracts",
@@ -11,12 +11,17 @@
     "seestar-sdk": "file:../../sdk"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.15.18",
+    "eslint": "^10.8.0",
     "prettier": "^3.6.2",
-    "tsx": "^4.20.3"
+    "tsx": "^4.20.3",
+    "typescript": "5.8.3",
+    "typescript-eslint": "^8.65.0"
   },
   "scripts": {
-    "build": "node --experimental-strip-types --check src/server.ts && node --experimental-strip-types --check src/application-shell.ts && node --experimental-strip-types --check src/download-grant-config.ts && node --experimental-strip-types --check src/download-grant-service.ts && node --experimental-strip-types --check src/environment-config.ts && node --experimental-strip-types --check src/executable.ts && node --experimental-strip-types --check src/source-ingest.ts && node --experimental-strip-types --check src/processor-config.ts && node --experimental-strip-types --check src/processor-service.ts && node --experimental-strip-types --check src/publisher-worker.ts && node --experimental-strip-types --check src/publisher-config.ts && node --experimental-strip-types --check src/r2-provider.ts && node --experimental-strip-types --check src/r2-download-grant.ts && node --experimental-strip-types --check src/publisher-service.ts && node --experimental-strip-types --check src/sqlite-resilience.ts && node --experimental-strip-types --check src/rig-worker.ts && node --experimental-strip-types --check src/seestar-solar-adapter.ts && node --experimental-strip-types --check src/solar-test.ts",
+    "build": "npm run typecheck && node scripts/check-source.mjs",
+    "check": "npm run format:check && npm run lint && npm run build && npm run test",
     "dev": "node --experimental-strip-types src/server.ts",
     "dev:inspect": "node scripts/dev-inspect.mjs",
     "rig-worker": "node --experimental-strip-types src/rig-worker.ts",
@@ -24,9 +29,11 @@
     "download-grant": "node --experimental-strip-types src/download-grant-service.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "lint": "eslint .",
     "processor": "node --experimental-strip-types src/processor-service.ts",
     "solar-test": "node --experimental-strip-types src/solar-test.ts",
     "backup:preflight": "node --experimental-strip-types scripts/backup-preflight.ts",
-    "test": "tsx --test src/server.integration.test.ts"
+    "test": "tsx --test src/server.integration.test.ts",
+    "typecheck": "tsc --project tsconfig.json"
   }
 }

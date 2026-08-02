@@ -91,7 +91,7 @@ export function createPublisherWorker(
     }
   }
   const publish = async (claimed: typeof ClaimedWork.Type, token: string) => {
-    let work: typeof Work.Type
+    let work: typeof Work.Type | undefined
     let asset: typeof Asset.Type
     try {
       work = Schema.decodeUnknownSync(Work)(JSON.parse(claimed.payload))
@@ -100,6 +100,7 @@ export function createPublisherWorker(
           'SELECT asset_id,role,format,detail FROM library_assets WHERE asset_id=?',
         )
         .get(work.assetId)
+      if (work === undefined) throw new Error('Publisher work was not decoded')
       asset = Schema.decodeUnknownSync(Asset)(raw)
       const detail = Schema.decodeUnknownSync(AssetDetail)(
         JSON.parse(asset.detail),
