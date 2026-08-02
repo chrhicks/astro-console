@@ -19,6 +19,7 @@
     "check": "npm run format:check && npm run lint && npm run build && npm run test"
   },
   "dependencies": {
+    "@astro-console/v2-contracts": "file:../../packages/v2-contracts",
     "@vitejs/plugin-react": "4.4.1",
     "react": "19.1.0",
     "react-dom": "19.1.0",

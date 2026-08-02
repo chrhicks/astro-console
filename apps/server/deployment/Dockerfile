@@ -3,7 +3,7 @@ WORKDIR /app
 COPY packages/v2-contracts/package.json packages/v2-contracts/package-lock.json ./packages/v2-contracts/
 RUN npm ci --prefix packages/v2-contracts
 COPY packages/v2-contracts ./packages/v2-contracts
-RUN ./packages/v2-contracts/node_modules/.bin/tsc --project packages/v2-contracts/tsconfig.json --noEmit false --outDir /app/contracts-dist && rm /app/contracts-dist/index.js
+RUN npm run build --prefix packages/v2-contracts
 
 FROM node:22.22.2-bookworm-slim@sha256:9f6d5975c7dca860947d3915877f85607946403fc55349f39b4bc3688448bb6e AS sdk-build
 WORKDIR /app
@@ -16,8 +16,7 @@ FROM node:22.22.2-bookworm-slim@sha256:9f6d5975c7dca860947d3915877f85607946403fc
 WORKDIR /app
 COPY packages/v2-contracts/package.json packages/v2-contracts/package-lock.json ./packages/v2-contracts/
 RUN npm ci --prefix packages/v2-contracts --omit=dev
-COPY packages/v2-contracts/src ./packages/v2-contracts/src
-COPY --from=contracts-build /app/contracts-dist ./packages/v2-contracts/src
+COPY --from=contracts-build /app/packages/v2-contracts/dist ./packages/v2-contracts/dist
 COPY sdk/package.json sdk/package-lock.json ./sdk/
 RUN npm ci --prefix sdk --omit=dev
 COPY --from=sdk-build /app/sdk/dist ./sdk/dist

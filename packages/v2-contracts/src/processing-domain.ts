@@ -1,5 +1,5 @@
-import { Data, Schema } from "effect"
-import { ProcessingArtifactSelection, ProcessingParameter } from "./commands.js"
+import { Data, Schema } from 'effect'
+import { ProcessingArtifactSelection, ProcessingParameter } from './commands.js'
 import {
   AssetId,
   AssetRevision,
@@ -12,19 +12,22 @@ import {
   ProcessingOutputId,
   ProcessingRevision,
   ProcessingSessionId,
-} from "./primitives.js"
+} from './primitives.js'
 
 export const ProcessingSourceRef = Schema.Struct({
   assetId: AssetId,
   assetRevision: AssetRevision,
-  role: Schema.Literals(["original", "linearMaster"]),
+  role: Schema.Literals(['original', 'linearMaster']),
   checksum: Schema.NonEmptyString,
   locallyAvailable: Schema.Boolean,
 })
 
 export const ProcessingImageRef = Schema.TaggedUnion({
   SourceAsset: { assetId: AssetId, checksum: Schema.NonEmptyString },
-  DerivedOutput: { outputId: ProcessingOutputId, checksum: Schema.NonEmptyString },
+  DerivedOutput: {
+    outputId: ProcessingOutputId,
+    checksum: Schema.NonEmptyString,
+  },
 })
 
 export const AppliedProcessingOperation = Schema.Struct({
@@ -46,8 +49,10 @@ export const ProcessingPreviewSpec = Schema.Struct({
   parameters: Schema.Array(ProcessingParameter),
   input: ProcessingImageRef,
   baseHistoryPosition: NonNegativeInt,
-  state: Schema.Literals(["queued", "computing", "ready", "failed"]),
-  progress: Schema.optionalKey(Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
+  state: Schema.Literals(['queued', 'computing', 'ready', 'failed']),
+  progress: Schema.optionalKey(
+    Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+  ),
   previewOutputId: Schema.optionalKey(ProcessingOutputId),
   suggestionFindingId: Schema.optionalKey(FindingId),
 })
@@ -60,7 +65,7 @@ export const ProcessingAttempt = Schema.Struct({
   parameters: Schema.Array(ProcessingParameter),
   input: ProcessingImageRef,
   baseHistoryPosition: NonNegativeInt,
-  state: Schema.Literals(["queued", "running"]),
+  state: Schema.Literals(['queued', 'running']),
   retryOfAttemptId: Schema.optionalKey(AttemptId),
 })
 
@@ -88,8 +93,8 @@ export const AssistantFinding = Schema.Struct({
 export const ProcessingSession = Schema.Struct({
   sessionId: ProcessingSessionId,
   revision: ProcessingRevision,
-  lifecycle: Schema.Literals(["active", "unfinished", "discarded"]),
-  phase: Schema.Literals(["build", "develop"]),
+  lifecycle: Schema.Literals(['active', 'unfinished', 'discarded']),
+  phase: Schema.Literals(['build', 'develop']),
   sources: Schema.NonEmptyArray(ProcessingSourceRef),
   baseImage: Schema.optionalKey(ProcessingImageRef),
   history: Schema.Array(AppliedProcessingOperation),
@@ -99,71 +104,132 @@ export const ProcessingSession = Schema.Struct({
   failedAttempt: Schema.optionalKey(FailedProcessingAttemptRecord),
   assistantFindings: Schema.Array(AssistantFinding),
   savedAssetIds: Schema.Array(AssetId),
-}).check(Schema.makeFilter((session) => {
-  if (session.historyPosition > session.history.length) {
-    return { path: ["historyPosition"], issue: "history position must not exceed applied history length" }
-  }
-  if (session.phase === "develop" && session.baseImage === undefined) {
-    return { path: ["baseImage"], issue: "Develop requires a durable base image" }
-  }
-  if (session.lifecycle === "discarded" && (session.preview !== undefined || session.activeAttempt !== undefined)) {
-    return { path: ["lifecycle"], issue: "discarded sessions cannot retain preview or active attempt state" }
-  }
-}))
+}).check(
+  Schema.makeFilter((session) => {
+    if (session.historyPosition > session.history.length) {
+      return {
+        path: ['historyPosition'],
+        issue: 'history position must not exceed applied history length',
+      }
+    }
+    if (session.phase === 'develop' && session.baseImage === undefined) {
+      return {
+        path: ['baseImage'],
+        issue: 'Develop requires a durable base image',
+      }
+    }
+    if (
+      session.lifecycle === 'discarded' &&
+      (session.preview !== undefined || session.activeAttempt !== undefined)
+    ) {
+      return {
+        path: ['lifecycle'],
+        issue:
+          'discarded sessions cannot retain preview or active attempt state',
+      }
+    }
+  }),
+)
 
-export interface ProcessingSession extends Schema.Schema.Type<typeof ProcessingSession> {}
+export interface ProcessingSession extends Schema.Schema.Type<
+  typeof ProcessingSession
+> {}
 
 export const ProcessingWork = Schema.TaggedUnion({
-  BuildLinearMaster: { sessionId: ProcessingSessionId, sourceAssetIds: Schema.NonEmptyArray(AssetId) },
-  ComputePreview: { sessionId: ProcessingSessionId, previewId: PreviewId, input: ProcessingImageRef },
-  RunAppliedOperation: { sessionId: ProcessingSessionId, attemptId: AttemptId, input: ProcessingImageRef },
-  RetryProcessingStage: { sessionId: ProcessingSessionId, attemptId: AttemptId, checkpointId: CheckpointId, input: ProcessingImageRef },
-  MaterializeProcessingArtifacts: { sessionId: ProcessingSessionId, operationId: OperationId, artifacts: Schema.NonEmptyArray(ProcessingArtifactSelection) },
-  CleanupDiscardedSession: { sessionId: ProcessingSessionId, protectedAssetIds: Schema.Array(AssetId) },
+  BuildLinearMaster: {
+    sessionId: ProcessingSessionId,
+    sourceAssetIds: Schema.NonEmptyArray(AssetId),
+  },
+  ComputePreview: {
+    sessionId: ProcessingSessionId,
+    previewId: PreviewId,
+    input: ProcessingImageRef,
+  },
+  RunAppliedOperation: {
+    sessionId: ProcessingSessionId,
+    attemptId: AttemptId,
+    input: ProcessingImageRef,
+  },
+  RetryProcessingStage: {
+    sessionId: ProcessingSessionId,
+    attemptId: AttemptId,
+    checkpointId: CheckpointId,
+    input: ProcessingImageRef,
+  },
+  MaterializeProcessingArtifacts: {
+    sessionId: ProcessingSessionId,
+    operationId: OperationId,
+    artifacts: Schema.NonEmptyArray(ProcessingArtifactSelection),
+  },
+  CleanupDiscardedSession: {
+    sessionId: ProcessingSessionId,
+    protectedAssetIds: Schema.Array(AssetId),
+  },
 })
 
 export type StartProcessingDecision = Data.TaggedEnum<{
-  Started: { readonly session: ProcessingSession; readonly work?: typeof ProcessingWork.Type }
-  Rejected: { readonly reason: "SourceAssetUnavailable" | "SourceSelectionInvalid" | "SourceRoleUnsupported" }
+  Started: {
+    readonly session: ProcessingSession
+    readonly work?: typeof ProcessingWork.Type
+  }
+  Rejected: {
+    readonly reason:
+      | 'SourceAssetUnavailable'
+      | 'SourceSelectionInvalid'
+      | 'SourceRoleUnsupported'
+  }
 }>
 
-export const StartProcessingDecision = Data.taggedEnum<StartProcessingDecision>()
+export const StartProcessingDecision =
+  Data.taggedEnum<StartProcessingDecision>()
 
 export const decideStartProcessingSession = (
   sessionId: typeof ProcessingSessionId.Type,
   sources: ReadonlyArray<typeof ProcessingSourceRef.Type>,
 ): StartProcessingDecision => {
   const first = sources[0]
-  if (first === undefined) return StartProcessingDecision.Rejected({ reason: "SourceSelectionInvalid" })
-  if (sources.some((source) => !source.locallyAvailable)) return StartProcessingDecision.Rejected({ reason: "SourceAssetUnavailable" })
-  if (sources.every((source) => source.role === "original")) {
+  if (first === undefined)
+    return StartProcessingDecision.Rejected({
+      reason: 'SourceSelectionInvalid',
+    })
+  if (sources.some((source) => !source.locallyAvailable))
+    return StartProcessingDecision.Rejected({
+      reason: 'SourceAssetUnavailable',
+    })
+  if (sources.every((source) => source.role === 'original')) {
     const sourceIds = sources.map((source) => source.assetId)
     const [, ...rest] = sources
     return StartProcessingDecision.Started({
       session: ProcessingSession.make({
         sessionId,
         revision: ProcessingRevision.make(0),
-        lifecycle: "active",
-        phase: "build",
+        lifecycle: 'active',
+        phase: 'build',
         sources: [first, ...rest],
         history: [],
         historyPosition: NonNegativeInt.make(0),
         assistantFindings: [],
         savedAssetIds: [],
       }),
-      work: ProcessingWork.cases.BuildLinearMaster.make({ sessionId, sourceAssetIds: [first.assetId, ...sourceIds.slice(1)] }),
+      work: ProcessingWork.cases.BuildLinearMaster.make({
+        sessionId,
+        sourceAssetIds: [first.assetId, ...sourceIds.slice(1)],
+      }),
     })
   }
-  if (sources.length === 1 && first.role === "linearMaster") {
+  if (sources.length === 1 && first.role === 'linearMaster') {
     const source = first
     return StartProcessingDecision.Started({
       session: ProcessingSession.make({
         sessionId,
         revision: ProcessingRevision.make(0),
-        lifecycle: "active",
-        phase: "develop",
+        lifecycle: 'active',
+        phase: 'develop',
         sources: [source],
-        baseImage: ProcessingImageRef.cases.SourceAsset.make({ assetId: source.assetId, checksum: source.checksum }),
+        baseImage: ProcessingImageRef.cases.SourceAsset.make({
+          assetId: source.assetId,
+          checksum: source.checksum,
+        }),
         history: [],
         historyPosition: NonNegativeInt.make(0),
         assistantFindings: [],
@@ -171,83 +237,129 @@ export const decideStartProcessingSession = (
       }),
     })
   }
-  return StartProcessingDecision.Rejected({ reason: "SourceRoleUnsupported" })
+  return StartProcessingDecision.Rejected({ reason: 'SourceRoleUnsupported' })
 }
 
-export const currentProcessingImage = (session: ProcessingSession): typeof ProcessingImageRef.Type | undefined => {
+export const currentProcessingImage = (
+  session: ProcessingSession,
+): typeof ProcessingImageRef.Type | undefined => {
   if (session.historyPosition === 0) return session.baseImage
   return session.history[session.historyPosition - 1]?.output
 }
 
 export type ProcessingTransition = Data.TaggedEnum<{
   BuildCompleted: { readonly session: ProcessingSession }
-  PreviewQueued: { readonly session: ProcessingSession; readonly work: typeof ProcessingWork.Type }
+  PreviewQueued: {
+    readonly session: ProcessingSession
+    readonly work: typeof ProcessingWork.Type
+  }
   PreviewCompleted: { readonly session: ProcessingSession }
   PreviewFailed: { readonly session: ProcessingSession }
-  ApplyStarted: { readonly session: ProcessingSession; readonly work: typeof ProcessingWork.Type }
+  ApplyStarted: {
+    readonly session: ProcessingSession
+    readonly work: typeof ProcessingWork.Type
+  }
   ApplyCompleted: { readonly session: ProcessingSession }
   ApplyFailed: { readonly session: ProcessingSession }
-  RetryStarted: { readonly session: ProcessingSession; readonly work: typeof ProcessingWork.Type }
+  RetryStarted: {
+    readonly session: ProcessingSession
+    readonly work: typeof ProcessingWork.Type
+  }
   HistoryMoved: { readonly session: ProcessingSession }
   LeftUnfinished: { readonly session: ProcessingSession }
-  Discarded: { readonly session: ProcessingSession; readonly work: typeof ProcessingWork.Type }
+  Discarded: {
+    readonly session: ProcessingSession
+    readonly work: typeof ProcessingWork.Type
+  }
   Rejected: {
     readonly reason:
-      | "SessionDiscarded"
-      | "CurrentImageUnavailable"
-      | "PreviewInputSuperseded"
-      | "PreviewSequenceSuperseded"
-      | "PreviewNotReady"
-      | "ProcessingAttemptBusy"
-      | "AttemptSuperseded"
-      | "UndoUnavailable"
-      | "RedoUnavailable"
-      | "ProcessingStepNotFailed"
-      | "RetryInputChanged"
-      | "AssistantFindingUnavailable"
-      | "AssistantFindingSuperseded"
-      | "DiscardConfirmationMismatch"
-      | "BuildCompletionSuperseded"
+      | 'SessionDiscarded'
+      | 'CurrentImageUnavailable'
+      | 'PreviewInputSuperseded'
+      | 'PreviewSequenceSuperseded'
+      | 'PreviewNotReady'
+      | 'ProcessingAttemptBusy'
+      | 'AttemptSuperseded'
+      | 'UndoUnavailable'
+      | 'RedoUnavailable'
+      | 'ProcessingStepNotFailed'
+      | 'RetryInputChanged'
+      | 'AssistantFindingUnavailable'
+      | 'AssistantFindingSuperseded'
+      | 'DiscardConfirmationMismatch'
+      | 'BuildCompletionSuperseded'
   }
 }>
 
 export const ProcessingTransition = Data.taggedEnum<ProcessingTransition>()
 
-const revised = (previous: ProcessingSession, next: Omit<ProcessingSession, "revision">): ProcessingSession =>
-  ProcessingSession.make({ ...next, revision: ProcessingRevision.make(previous.revision + 1) })
+const revised = (
+  previous: ProcessingSession,
+  next: Omit<ProcessingSession, 'revision'>,
+): ProcessingSession =>
+  ProcessingSession.make({
+    ...next,
+    revision: ProcessingRevision.make(previous.revision + 1),
+  })
 
 export const completeLinearMasterBuild = (
   session: ProcessingSession,
   outputId: typeof ProcessingOutputId.Type,
   outputChecksum: string,
 ): ProcessingTransition => {
-  if (session.lifecycle === "discarded" || session.phase !== "build" || session.baseImage !== undefined) {
-    return ProcessingTransition.Rejected({ reason: "BuildCompletionSuperseded" })
+  if (
+    session.lifecycle === 'discarded' ||
+    session.phase !== 'build' ||
+    session.baseImage !== undefined
+  ) {
+    return ProcessingTransition.Rejected({
+      reason: 'BuildCompletionSuperseded',
+    })
   }
   return ProcessingTransition.BuildCompleted({
     session: revised(session, {
       ...session,
-      phase: "develop",
-      baseImage: ProcessingImageRef.cases.DerivedOutput.make({ outputId, checksum: outputChecksum }),
+      phase: 'develop',
+      baseImage: ProcessingImageRef.cases.DerivedOutput.make({
+        outputId,
+        checksum: outputChecksum,
+      }),
     }),
   })
 }
 
 export const queueProcessingPreview = (
   session: ProcessingSession,
-  preview: Omit<typeof ProcessingPreviewSpec.Type, "input" | "state">,
+  preview: Omit<typeof ProcessingPreviewSpec.Type, 'input' | 'state'>,
 ): ProcessingTransition => {
-  if (session.lifecycle === "discarded") return ProcessingTransition.Rejected({ reason: "SessionDiscarded" })
+  if (session.lifecycle === 'discarded')
+    return ProcessingTransition.Rejected({ reason: 'SessionDiscarded' })
   const input = currentProcessingImage(session)
-  if (input === undefined) return ProcessingTransition.Rejected({ reason: "CurrentImageUnavailable" })
-  if (preview.baseHistoryPosition !== session.historyPosition) return ProcessingTransition.Rejected({ reason: "PreviewInputSuperseded" })
-  if (session.preview !== undefined && preview.clientPreviewSequence <= session.preview.clientPreviewSequence) {
-    return ProcessingTransition.Rejected({ reason: "PreviewSequenceSuperseded" })
+  if (input === undefined)
+    return ProcessingTransition.Rejected({ reason: 'CurrentImageUnavailable' })
+  if (preview.baseHistoryPosition !== session.historyPosition)
+    return ProcessingTransition.Rejected({ reason: 'PreviewInputSuperseded' })
+  if (
+    session.preview !== undefined &&
+    preview.clientPreviewSequence <= session.preview.clientPreviewSequence
+  ) {
+    return ProcessingTransition.Rejected({
+      reason: 'PreviewSequenceSuperseded',
+    })
   }
-  const queued = ProcessingPreviewSpec.make({ ...preview, input, state: "queued", progress: 0 })
+  const queued = ProcessingPreviewSpec.make({
+    ...preview,
+    input,
+    state: 'queued',
+    progress: 0,
+  })
   return ProcessingTransition.PreviewQueued({
     session: revised(session, { ...session, preview: queued }),
-    work: ProcessingWork.cases.ComputePreview.make({ sessionId: session.sessionId, previewId: preview.previewId, input }),
+    work: ProcessingWork.cases.ComputePreview.make({
+      sessionId: session.sessionId,
+      previewId: preview.previewId,
+      input,
+    }),
   })
 }
 
@@ -258,10 +370,20 @@ export const queueAssistantSuggestionPreview = (
   previewId: typeof PreviewId.Type,
   clientPreviewSequence: number,
 ): ProcessingTransition => {
-  const finding = session.assistantFindings.find((candidate) => candidate.findingId === findingId)
-  if (finding === undefined) return ProcessingTransition.Rejected({ reason: "AssistantFindingUnavailable" })
-  if (finding.version !== findingVersion || !sameProcessingImage(finding.input, currentProcessingImage(session))) {
-    return ProcessingTransition.Rejected({ reason: "AssistantFindingSuperseded" })
+  const finding = session.assistantFindings.find(
+    (candidate) => candidate.findingId === findingId,
+  )
+  if (finding === undefined)
+    return ProcessingTransition.Rejected({
+      reason: 'AssistantFindingUnavailable',
+    })
+  if (
+    finding.version !== findingVersion ||
+    !sameProcessingImage(finding.input, currentProcessingImage(session))
+  ) {
+    return ProcessingTransition.Rejected({
+      reason: 'AssistantFindingSuperseded',
+    })
   }
   return queueProcessingPreview(session, {
     previewId,
@@ -281,17 +403,22 @@ export const completeProcessingPreview = (
 ): ProcessingTransition => {
   const preview = session.preview
   if (
-    preview === undefined
-    || preview.previewId !== previewId
-    || preview.baseHistoryPosition !== session.historyPosition
-    || (preview.state !== "queued" && preview.state !== "computing")
+    preview === undefined ||
+    preview.previewId !== previewId ||
+    preview.baseHistoryPosition !== session.historyPosition ||
+    (preview.state !== 'queued' && preview.state !== 'computing')
   ) {
-    return ProcessingTransition.Rejected({ reason: "PreviewInputSuperseded" })
+    return ProcessingTransition.Rejected({ reason: 'PreviewInputSuperseded' })
   }
   return ProcessingTransition.PreviewCompleted({
     session: revised(session, {
       ...session,
-      preview: ProcessingPreviewSpec.make({ ...preview, state: "ready", progress: 1, previewOutputId: outputId }),
+      preview: ProcessingPreviewSpec.make({
+        ...preview,
+        state: 'ready',
+        progress: 1,
+        previewOutputId: outputId,
+      }),
     }),
   })
 }
@@ -302,18 +429,21 @@ export const failProcessingPreview = (
 ): ProcessingTransition => {
   const preview = session.preview
   if (
-    preview === undefined
-    || preview.previewId !== previewId
-    || preview.baseHistoryPosition !== session.historyPosition
-    || (preview.state !== "queued" && preview.state !== "computing")
+    preview === undefined ||
+    preview.previewId !== previewId ||
+    preview.baseHistoryPosition !== session.historyPosition ||
+    (preview.state !== 'queued' && preview.state !== 'computing')
   ) {
-    return ProcessingTransition.Rejected({ reason: "PreviewInputSuperseded" })
+    return ProcessingTransition.Rejected({ reason: 'PreviewInputSuperseded' })
   }
   const { previewOutputId: _output, ...unchangedPreview } = preview
   return ProcessingTransition.PreviewFailed({
     session: revised(session, {
       ...session,
-      preview: ProcessingPreviewSpec.make({ ...unchangedPreview, state: "failed" }),
+      preview: ProcessingPreviewSpec.make({
+        ...unchangedPreview,
+        state: 'failed',
+      }),
     }),
   })
 }
@@ -324,13 +454,18 @@ export const startProcessingApply = (
   operationId: typeof OperationId.Type,
   previewId: typeof PreviewId.Type,
 ): ProcessingTransition => {
-  if (session.activeAttempt !== undefined) return ProcessingTransition.Rejected({ reason: "ProcessingAttemptBusy" })
+  if (session.activeAttempt !== undefined)
+    return ProcessingTransition.Rejected({ reason: 'ProcessingAttemptBusy' })
   const preview = session.preview
-  if (preview?.state !== "ready" || preview.previewOutputId === undefined) return ProcessingTransition.Rejected({ reason: "PreviewNotReady" })
-  if (preview.previewId !== previewId) return ProcessingTransition.Rejected({ reason: "PreviewInputSuperseded" })
+  if (preview?.state !== 'ready' || preview.previewOutputId === undefined)
+    return ProcessingTransition.Rejected({ reason: 'PreviewNotReady' })
+  if (preview.previewId !== previewId)
+    return ProcessingTransition.Rejected({ reason: 'PreviewInputSuperseded' })
   const input = currentProcessingImage(session)
-  if (input === undefined) return ProcessingTransition.Rejected({ reason: "CurrentImageUnavailable" })
-  if (preview.baseHistoryPosition !== session.historyPosition) return ProcessingTransition.Rejected({ reason: "PreviewInputSuperseded" })
+  if (input === undefined)
+    return ProcessingTransition.Rejected({ reason: 'CurrentImageUnavailable' })
+  if (preview.baseHistoryPosition !== session.historyPosition)
+    return ProcessingTransition.Rejected({ reason: 'PreviewInputSuperseded' })
   const attempt = ProcessingAttempt.make({
     attemptId,
     operationId,
@@ -339,11 +474,15 @@ export const startProcessingApply = (
     parameters: preview.parameters,
     input,
     baseHistoryPosition: preview.baseHistoryPosition,
-    state: "queued",
+    state: 'queued',
   })
   return ProcessingTransition.ApplyStarted({
     session: revised(session, { ...session, activeAttempt: attempt }),
-    work: ProcessingWork.cases.RunAppliedOperation.make({ sessionId: session.sessionId, attemptId, input }),
+    work: ProcessingWork.cases.RunAppliedOperation.make({
+      sessionId: session.sessionId,
+      attemptId,
+      input,
+    }),
   })
 }
 
@@ -355,7 +494,8 @@ export const completeProcessingApply = (
   checkpointId: typeof CheckpointId.Type,
 ): ProcessingTransition => {
   const attempt = session.activeAttempt
-  if (attempt === undefined || attempt.attemptId !== attemptId) return ProcessingTransition.Rejected({ reason: "AttemptSuperseded" })
+  if (attempt === undefined || attempt.attemptId !== attemptId)
+    return ProcessingTransition.Rejected({ reason: 'AttemptSuperseded' })
   const kept = session.history.slice(0, attempt.baseHistoryPosition)
   const operation = AppliedProcessingOperation.make({
     operationId: attempt.operationId,
@@ -364,10 +504,19 @@ export const completeProcessingApply = (
     toolId: attempt.toolId,
     parameters: attempt.parameters,
     input: attempt.input,
-    output: ProcessingImageRef.cases.DerivedOutput.make({ outputId, checksum: outputChecksum }),
+    output: ProcessingImageRef.cases.DerivedOutput.make({
+      outputId,
+      checksum: outputChecksum,
+    }),
     checkpointId,
   })
-  const { activeAttempt: _active, preview: _preview, failedAttempt: _failed, revision: _revision, ...unchanged } = session
+  const {
+    activeAttempt: _active,
+    preview: _preview,
+    failedAttempt: _failed,
+    revision: _revision,
+    ...unchanged
+  } = session
   return ProcessingTransition.ApplyCompleted({
     session: revised(session, {
       ...unchanged,
@@ -385,7 +534,7 @@ export const failProcessingApply = (
 ): ProcessingTransition => {
   const attempt = session.activeAttempt
   if (attempt === undefined || attempt.attemptId !== attemptId) {
-    return ProcessingTransition.Rejected({ reason: "AttemptSuperseded" })
+    return ProcessingTransition.Rejected({ reason: 'AttemptSuperseded' })
   }
   const failedAttempt = FailedProcessingAttemptRecord.make({
     attemptId: attempt.attemptId,
@@ -404,24 +553,41 @@ export const failProcessingApply = (
   })
 }
 
-export const moveHardenedProcessingHistory = (session: ProcessingSession, direction: "undo" | "redo"): ProcessingTransition => {
-  if (session.activeAttempt !== undefined) return ProcessingTransition.Rejected({ reason: "ProcessingAttemptBusy" })
-  if (direction === "undo" && session.historyPosition === 0) return ProcessingTransition.Rejected({ reason: "UndoUnavailable" })
-  if (direction === "redo" && session.historyPosition === session.history.length) return ProcessingTransition.Rejected({ reason: "RedoUnavailable" })
+export const moveHardenedProcessingHistory = (
+  session: ProcessingSession,
+  direction: 'undo' | 'redo',
+): ProcessingTransition => {
+  if (session.activeAttempt !== undefined)
+    return ProcessingTransition.Rejected({ reason: 'ProcessingAttemptBusy' })
+  if (direction === 'undo' && session.historyPosition === 0)
+    return ProcessingTransition.Rejected({ reason: 'UndoUnavailable' })
+  if (
+    direction === 'redo' &&
+    session.historyPosition === session.history.length
+  )
+    return ProcessingTransition.Rejected({ reason: 'RedoUnavailable' })
   const { preview: _preview, revision: _revision, ...unchanged } = session
   return ProcessingTransition.HistoryMoved({
     session: revised(session, {
       ...unchanged,
-      historyPosition: NonNegativeInt.make(direction === "undo" ? session.historyPosition - 1 : session.historyPosition + 1),
+      historyPosition: NonNegativeInt.make(
+        direction === 'undo'
+          ? session.historyPosition - 1
+          : session.historyPosition + 1,
+      ),
     }),
   })
 }
 
-export const leaveProcessingSessionUnfinished = (session: ProcessingSession): ProcessingTransition => {
-  if (session.lifecycle === "discarded") return ProcessingTransition.Rejected({ reason: "SessionDiscarded" })
-  if (session.activeAttempt !== undefined) return ProcessingTransition.Rejected({ reason: "ProcessingAttemptBusy" })
+export const leaveProcessingSessionUnfinished = (
+  session: ProcessingSession,
+): ProcessingTransition => {
+  if (session.lifecycle === 'discarded')
+    return ProcessingTransition.Rejected({ reason: 'SessionDiscarded' })
+  if (session.activeAttempt !== undefined)
+    return ProcessingTransition.Rejected({ reason: 'ProcessingAttemptBusy' })
   return ProcessingTransition.LeftUnfinished({
-    session: revised(session, { ...session, lifecycle: "unfinished" }),
+    session: revised(session, { ...session, lifecycle: 'unfinished' }),
   })
 }
 
@@ -431,11 +597,16 @@ export const retryHardenedProcessingStage = (
   assignedAttemptId: typeof AttemptId.Type,
   checkpointId: typeof CheckpointId.Type,
 ): ProcessingTransition => {
-  if (session.activeAttempt !== undefined) return ProcessingTransition.Rejected({ reason: "ProcessingAttemptBusy" })
+  if (session.activeAttempt !== undefined)
+    return ProcessingTransition.Rejected({ reason: 'ProcessingAttemptBusy' })
   const failed = session.failedAttempt
-  if (failed === undefined) return ProcessingTransition.Rejected({ reason: "ProcessingStepNotFailed" })
-  if (failed.attemptId !== failedAttemptId || failed.checkpointId !== checkpointId) {
-    return ProcessingTransition.Rejected({ reason: "RetryInputChanged" })
+  if (failed === undefined)
+    return ProcessingTransition.Rejected({ reason: 'ProcessingStepNotFailed' })
+  if (
+    failed.attemptId !== failedAttemptId ||
+    failed.checkpointId !== checkpointId
+  ) {
+    return ProcessingTransition.Rejected({ reason: 'RetryInputChanged' })
   }
   const attempt = ProcessingAttempt.make({
     attemptId: assignedAttemptId,
@@ -445,7 +616,7 @@ export const retryHardenedProcessingStage = (
     parameters: failed.parameters,
     input: failed.input,
     baseHistoryPosition: failed.baseHistoryPosition,
-    state: "queued",
+    state: 'queued',
     retryOfAttemptId: failed.attemptId,
   })
   const { failedAttempt: _failed, revision: _revision, ...unchanged } = session
@@ -465,13 +636,32 @@ export const discardHardenedProcessingSession = (
   confirmationId: string,
   expectedConfirmationId: string,
 ): ProcessingTransition => {
-  if (confirmationId !== expectedConfirmationId) return ProcessingTransition.Rejected({ reason: "DiscardConfirmationMismatch" })
-  if (session.lifecycle === "discarded") return ProcessingTransition.Rejected({ reason: "SessionDiscarded" })
-  if (session.activeAttempt !== undefined) return ProcessingTransition.Rejected({ reason: "ProcessingAttemptBusy" })
-  const { preview: _preview, activeAttempt: _attempt, failedAttempt: _failed, revision: _revision, ...unchanged } = session
+  if (confirmationId !== expectedConfirmationId)
+    return ProcessingTransition.Rejected({
+      reason: 'DiscardConfirmationMismatch',
+    })
+  if (session.lifecycle === 'discarded')
+    return ProcessingTransition.Rejected({ reason: 'SessionDiscarded' })
+  if (session.activeAttempt !== undefined)
+    return ProcessingTransition.Rejected({ reason: 'ProcessingAttemptBusy' })
+  const {
+    preview: _preview,
+    activeAttempt: _attempt,
+    failedAttempt: _failed,
+    revision: _revision,
+    ...unchanged
+  } = session
   return ProcessingTransition.Discarded({
-    session: revised(session, { ...unchanged, lifecycle: "discarded", history: [], historyPosition: NonNegativeInt.make(0) }),
-    work: ProcessingWork.cases.CleanupDiscardedSession.make({ sessionId: session.sessionId, protectedAssetIds: session.savedAssetIds }),
+    session: revised(session, {
+      ...unchanged,
+      lifecycle: 'discarded',
+      history: [],
+      historyPosition: NonNegativeInt.make(0),
+    }),
+    work: ProcessingWork.cases.CleanupDiscardedSession.make({
+      sessionId: session.sessionId,
+      protectedAssetIds: session.savedAssetIds,
+    }),
   })
 }
 
@@ -481,11 +671,13 @@ function sameProcessingImage(
 ): boolean {
   if (right === undefined) return false
   return ProcessingImageRef.match(left, {
-    SourceAsset: ({ assetId, checksum }) => ProcessingImageRef.guards.SourceAsset(right)
-      && right.assetId === assetId
-      && right.checksum === checksum,
-    DerivedOutput: ({ outputId, checksum }) => ProcessingImageRef.guards.DerivedOutput(right)
-      && right.outputId === outputId
-      && right.checksum === checksum,
+    SourceAsset: ({ assetId, checksum }) =>
+      ProcessingImageRef.guards.SourceAsset(right) &&
+      right.assetId === assetId &&
+      right.checksum === checksum,
+    DerivedOutput: ({ outputId, checksum }) =>
+      ProcessingImageRef.guards.DerivedOutput(right) &&
+      right.outputId === outputId &&
+      right.checksum === checksum,
   })
 }

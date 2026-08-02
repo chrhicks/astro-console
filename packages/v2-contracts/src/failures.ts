@@ -1,107 +1,118 @@
-import { Schema } from "effect"
-import { CommandId, OperationId, SnapshotVersion } from "./primitives.js"
+import { Schema } from 'effect'
+import { CommandId, OperationId, SnapshotVersion } from './primitives.js'
 
-const AuthenticationReason = Schema.Literals(["Unauthenticated", "MembershipRequired"])
+const AuthenticationReason = Schema.Literals([
+  'Unauthenticated',
+  'MembershipRequired',
+])
 
 const AuthorizationReason = Schema.Literals([
-  "OwnerRequired",
-  "ClientReadOnly",
-  "AssetAccessDenied",
-  "ControlLeaseRequired",
-  "ControlLeaseConflict",
-  "ControlLeaseLost",
-  "AlreadyController",
-  "ControlRequestAlreadyPending",
-  "ControlRequestExpired",
-  "ControlTargetUnavailable",
+  'OwnerRequired',
+  'ClientReadOnly',
+  'AssetAccessDenied',
+  'ControlLeaseRequired',
+  'ControlLeaseConflict',
+  'ControlLeaseLost',
+  'AlreadyController',
+  'ControlRequestAlreadyPending',
+  'ControlRequestExpired',
+  'ControlTargetUnavailable',
 ])
 
 const FreshnessReason = Schema.Literals([
-  "PlanRevisionConflict",
-  "RunRevisionConflict",
-  "AcquireRevisionConflict",
-  "ProcessingSessionRevisionConflict",
-  "AssetRevisionConflict",
-  "ReconnectRequired",
-  "ActiveRunConflict",
+  'PlanRevisionConflict',
+  'RunRevisionConflict',
+  'AcquireRevisionConflict',
+  'ProcessingSessionRevisionConflict',
+  'AssetRevisionConflict',
+  'ReconnectRequired',
+  'ActiveRunConflict',
 ])
 
 const InvalidInputReason = Schema.Literals([
-  "ProposedChangeInvalid",
-  "RecoveryParametersInvalid",
-  "CorrectionParametersInvalid",
-  "ToolParameterInvalid",
-  "SourceSelectionInvalid",
-  "SourceRoleUnsupported",
-  "SaveSelectionInvalid",
-  "DiscardConfirmationMismatch",
-  "ApprovalMismatch",
+  'ProposedChangeInvalid',
+  'RecoveryParametersInvalid',
+  'CorrectionParametersInvalid',
+  'ToolParameterInvalid',
+  'SourceSelectionInvalid',
+  'SourceRoleUnsupported',
+  'SaveSelectionInvalid',
+  'DiscardConfirmationMismatch',
+  'ApprovalMismatch',
 ])
 
 const IneligibleReason = Schema.Literals([
-  "PlanNotReady",
-  "CriticalStateUnknown",
-  "MutationRequiresApproval",
-  "MutationIneligible",
-  "AcquireNotPaused",
-  "RecoveryBudgetUnavailable",
-  "SkipIneligible",
-  "NoFallbackWork",
-  "CorrectionIneligible",
-  "PolarMeasurementIneligible",
-  "PolarToleranceNotMet",
-  "ProcessingStepIneligible",
-  "UndoUnavailable",
-  "RedoUnavailable",
-  "ProcessingStepNotFailed",
-  "RetryInputChanged",
-  "DispositionRequired",
-  "RepresentationAlreadyPublished",
-  "StorageRepresentationIneligible",
+  'PlanNotReady',
+  'CriticalStateUnknown',
+  'MutationRequiresApproval',
+  'MutationIneligible',
+  'AcquireNotPaused',
+  'RecoveryBudgetUnavailable',
+  'SkipIneligible',
+  'NoFallbackWork',
+  'CorrectionIneligible',
+  'PolarMeasurementIneligible',
+  'PolarToleranceNotMet',
+  'ProcessingStepIneligible',
+  'UndoUnavailable',
+  'RedoUnavailable',
+  'ProcessingStepNotFailed',
+  'RetryInputChanged',
+  'DispositionRequired',
+  'RepresentationAlreadyPublished',
+  'StorageRepresentationIneligible',
 ])
 
 const ReferenceReason = Schema.Literals([
-  "MutationPreviewExpired",
-  "CorrectionProposalExpired",
-  "CorrectionProposalMismatch",
-  "MeasurementSuperseded",
-  "PreviewUnavailable",
-  "PreviewSuperseded",
-  "PreviewInputSuperseded",
-  "PreviewFailed",
-  "AssistantFindingUnavailable",
-  "AssistantFindingSuperseded",
-  "CheckpointIneligible",
-  "ProcessingSessionUnavailable",
-  "SourceAssetUnavailable",
-  "ProcessingOutputUnavailable",
-  "DestinationUnavailable",
-  "AssetNotFound",
-  "AssetRepresentationUnavailable",
-  "LocalOriginalUnavailable",
-  "LocalSourceUnavailable",
+  'MutationPreviewExpired',
+  'CorrectionProposalExpired',
+  'CorrectionProposalMismatch',
+  'MeasurementSuperseded',
+  'PreviewUnavailable',
+  'PreviewSuperseded',
+  'PreviewInputSuperseded',
+  'PreviewFailed',
+  'AssistantFindingUnavailable',
+  'AssistantFindingSuperseded',
+  'CheckpointIneligible',
+  'ProcessingSessionUnavailable',
+  'SourceAssetUnavailable',
+  'ProcessingOutputUnavailable',
+  'DestinationUnavailable',
+  'AssetNotFound',
+  'AssetRepresentationUnavailable',
+  'LocalOriginalUnavailable',
+  'LocalSourceUnavailable',
 ])
 
 const CapabilityReason = Schema.Literals([
-  "CapabilityUnavailable",
-  "RigStateUnsafe",
-  "ToolUnavailable",
-  "ProcessingServiceUnavailable",
-  "PublisherUnavailable",
-  "R2Unavailable",
+  'CapabilityUnavailable',
+  'RigStateUnsafe',
+  'ToolUnavailable',
+  'ProcessingServiceUnavailable',
+  'PublisherUnavailable',
+  'R2Unavailable',
 ])
 
 const ResourceReason = Schema.Literals([
-  "StorageReserveProtected",
-  "DownloadConcurrencyLimited",
-  "ProcessingTransitionBusy",
+  'StorageReserveProtected',
+  'DownloadConcurrencyLimited',
+  'ProcessingTransitionBusy',
 ])
 
 export const FailureDetail = Schema.TaggedUnion({
   RevisionDetail: { expected: Schema.Int, actual: Schema.Int },
   FieldDetail: { field: Schema.NonEmptyString, problem: Schema.NonEmptyString },
-  ReferenceDetail: { referenceType: Schema.NonEmptyString, referenceId: Schema.NonEmptyString },
-  ResourceDetail: { resource: Schema.NonEmptyString, measured: Schema.Finite, limit: Schema.Finite, unit: Schema.NonEmptyString },
+  ReferenceDetail: {
+    referenceType: Schema.NonEmptyString,
+    referenceId: Schema.NonEmptyString,
+  },
+  ResourceDetail: {
+    resource: Schema.NonEmptyString,
+    measured: Schema.Finite,
+    limit: Schema.Finite,
+    unit: Schema.NonEmptyString,
+  },
   DiagnosticDetail: { diagnosticRef: Schema.NonEmptyString },
 })
 
@@ -116,7 +127,10 @@ const CommonFailureFields = {
 }
 
 export const CommandFailure = Schema.TaggedUnion({
-  AuthenticationFailure: { ...CommonFailureFields, reason: AuthenticationReason },
+  AuthenticationFailure: {
+    ...CommonFailureFields,
+    reason: AuthenticationReason,
+  },
   AuthorizationFailure: { ...CommonFailureFields, reason: AuthorizationReason },
   FreshnessConflict: { ...CommonFailureFields, reason: FreshnessReason },
   InvalidInput: { ...CommonFailureFields, reason: InvalidInputReason },
@@ -140,6 +154,8 @@ export const OperationFailure = Schema.Struct({
   diagnosticRef: Schema.optionalKey(Schema.NonEmptyString),
 })
 
-export interface OperationFailure extends Schema.Schema.Type<typeof OperationFailure> {}
+export interface OperationFailure extends Schema.Schema.Type<
+  typeof OperationFailure
+> {}
 
 export const commandFailureFamilies = Object.keys(CommandFailure.cases)

@@ -1,10 +1,23 @@
-import { Effect, Schema } from "effect"
-import { AtomicCommit, makeAtomicServerSimulation } from "./atomic-server-simulation.js"
-import { Command, CommandEnvelope } from "./commands.js"
-import { DomainEventEnvelope } from "./events.js"
-import { CommandFailure } from "./failures.js"
-import { ActorContext, CommandGateDecision, IdempotencyState, evaluateCommandGate } from "./gate.js"
-import { IdempotencyClassification, IdempotencyReceipt, IdempotencyRequest, classifyIdempotency } from "./idempotency.js"
+import { Effect, Schema } from 'effect'
+import {
+  AtomicCommit,
+  makeAtomicServerSimulation,
+} from './atomic-server-simulation.js'
+import { Command, CommandEnvelope } from './commands.js'
+import { DomainEventEnvelope } from './events.js'
+import { CommandFailure } from './failures.js'
+import {
+  ActorContext,
+  CommandGateDecision,
+  IdempotencyState,
+  evaluateCommandGate,
+} from './gate.js'
+import {
+  IdempotencyClassification,
+  IdempotencyReceipt,
+  IdempotencyRequest,
+  classifyIdempotency,
+} from './idempotency.js'
 import {
   CommandResultRef,
   ClientId,
@@ -13,7 +26,7 @@ import {
   NormalizedInputHash,
   RunId,
   SnapshotVersion,
-} from "./primitives.js"
+} from './primitives.js'
 import {
   ActiveRunState,
   RunDefinition,
@@ -22,18 +35,22 @@ import {
   StartRunDecision,
   ValidatedObservingPlan,
   decideStartRun,
-} from "./run.js"
+} from './run.js'
 
 export const RunStartProjection = Schema.Struct({
   snapshotVersion: SnapshotVersion,
   eventCursor: EventCursor,
-  activeRun: Schema.optionalKey(Schema.Struct({
-    definition: RunDefinition,
-    state: ActiveRunState,
-  })),
+  activeRun: Schema.optionalKey(
+    Schema.Struct({
+      definition: RunDefinition,
+      state: ActiveRunState,
+    }),
+  ),
 })
 
-export interface RunStartProjection extends Schema.Schema.Type<typeof RunStartProjection> {}
+export interface RunStartProjection extends Schema.Schema.Type<
+  typeof RunStartProjection
+> {}
 
 export const RunStartResponse = Schema.Struct({
   replayed: Schema.Boolean,
@@ -42,35 +59,37 @@ export const RunStartResponse = Schema.Struct({
   projection: RunStartProjection,
 })
 
-export interface RunStartResponse extends Schema.Schema.Type<typeof RunStartResponse> {}
+export interface RunStartResponse extends Schema.Schema.Type<
+  typeof RunStartResponse
+> {}
 
 export class CommandRejected extends Schema.TaggedErrorClass<CommandRejected>()(
-  "ServerSimulation.CommandRejected",
+  'ServerSimulation.CommandRejected',
   { failure: CommandFailure },
 ) {}
 
 export class RunStartRejected extends Schema.TaggedErrorClass<RunStartRejected>()(
-  "ServerSimulation.RunStartRejected",
+  'ServerSimulation.RunStartRejected',
   {
     reason: Schema.Literals([
-      "PlanNotReady",
-      "PlanLimitationsNotAccepted",
-      "PlanRevisionConflict",
-      "ActiveRunConflict",
-      "CriticalStateUnknown",
-      "PreconditionExpired",
+      'PlanNotReady',
+      'PlanLimitationsNotAccepted',
+      'PlanRevisionConflict',
+      'ActiveRunConflict',
+      'CriticalStateUnknown',
+      'PreconditionExpired',
     ]),
     explanations: Schema.Array(Schema.String),
   },
 ) {}
 
 export class CommandAlreadyPending extends Schema.TaggedErrorClass<CommandAlreadyPending>()(
-  "ServerSimulation.CommandAlreadyPending",
+  'ServerSimulation.CommandAlreadyPending',
   {},
 ) {}
 
 export class SimulationInvariantViolation extends Schema.TaggedErrorClass<SimulationInvariantViolation>()(
-  "ServerSimulation.InvariantViolation",
+  'ServerSimulation.InvariantViolation',
   { message: Schema.NonEmptyString },
 ) {}
 
@@ -126,28 +145,34 @@ type RunStartServiceError =
   | SimulationInvariantViolation
 type RunStartCommit = AtomicCommit<RunStartSimulationState, RunStartResponse>
 
-export const makeRunStartServerSimulation = Effect.fn("ServerSimulation.makeRunStart")(
-  function* (config: RunStartSimulationConfig) {
-    const simulation = yield* makeAtomicServerSimulation(
-      config.initialState,
-      (state) => state.outbox,
-    )
+export const makeRunStartServerSimulation = Effect.fn(
+  'ServerSimulation.makeRunStart',
+)(function* (config: RunStartSimulationConfig) {
+  const simulation = yield* makeAtomicServerSimulation(
+    config.initialState,
+    (state) => state.outbox,
+  )
 
-    const startRun: RunStartServerSimulation["startRun"] = Effect.fn("ServerSimulation.startRun")(function* (
-      rawRequest: unknown,
-      actor: MemberActor,
-    ) {
-      const envelope = yield* Schema.decodeUnknownEffect(CommandEnvelope)(rawRequest)
-      const command = yield* Schema.decodeUnknownEffect(Command.cases.StartRunFromPlan)(envelope.command)
+  const startRun: RunStartServerSimulation['startRun'] = Effect.fn(
+    'ServerSimulation.startRun',
+  )(function* (rawRequest: unknown, actor: MemberActor) {
+    const envelope =
+      yield* Schema.decodeUnknownEffect(CommandEnvelope)(rawRequest)
+    const command = yield* Schema.decodeUnknownEffect(
+      Command.cases.StartRunFromPlan,
+    )(envelope.command)
 
-      return yield* simulation.transact((current) => Effect.gen(function* () {
+    return yield* simulation.transact((current) =>
+      Effect.gen(function* () {
         const request = IdempotencyRequest.make({
           idempotencyKey: command.idempotencyKey,
           personId: actor.personId,
-          commandTag: "StartRunFromPlan",
+          commandTag: 'StartRunFromPlan',
           normalizedInputHash: normalizedInputHash(command),
         })
-        const receipt = current.receipts.find((candidate) => candidate.idempotencyKey === request.idempotencyKey)
+        const receipt = current.receipts.find(
+          (candidate) => candidate.idempotencyKey === request.idempotencyKey,
+        )
         const idempotency = classifyIdempotency(request, receipt)
         const gate = evaluateCommandGate({
           envelope,
@@ -162,19 +187,30 @@ export const makeRunStartServerSimulation = Effect.fn("ServerSimulation.makeRunS
           idempotency: gateIdempotency(idempotency),
         })
 
-        return yield* acceptGateDecision(gate, current, envelope, command, request, receipt, config.acceptedAt)
-      }))
-    })
+        return yield* acceptGateDecision(
+          gate,
+          current,
+          envelope,
+          command,
+          request,
+          receipt,
+          config.acceptedAt,
+        )
+      }),
+    )
+  })
 
-    return {
-      startRun,
-      readState: simulation.readState,
-      dispatchOutbox: simulation.dispatchOutbox,
-    } satisfies RunStartServerSimulation
-  },
-)
+  return {
+    startRun,
+    readState: simulation.readState,
+    dispatchOutbox: simulation.dispatchOutbox,
+  } satisfies RunStartServerSimulation
+})
 
-type MemberActor = Extract<typeof ActorContext.Type, { readonly _tag: "Member" }>
+type MemberActor = Extract<
+  typeof ActorContext.Type,
+  { readonly _tag: 'Member' }
+>
 type StartRunCommand = typeof Command.cases.StartRunFromPlan.Type
 
 function acceptStart(
@@ -189,13 +225,16 @@ function acceptStart(
     command,
     plan: current.plan,
     readiness: current.readiness,
-    ...(current.activeRun === undefined ? {} : { activeRunId: current.activeRun.state.runId }),
+    ...(current.activeRun === undefined
+      ? {}
+      : { activeRunId: current.activeRun.state.runId }),
     assignedRunId: runId,
     acceptedAt,
   })
 
   return StartRunDecision.$match(decision, {
-    Rejected: ({ reason, explanations }) => Effect.fail(new RunStartRejected({ reason, explanations })),
+    Rejected: ({ reason, explanations }) =>
+      Effect.fail(new RunStartRejected({ reason, explanations })),
     Started: ({ definition, state, work }) => {
       const resultRef = CommandResultRef.make(`result-${envelope.commandId}`)
       const snapshotVersion = SnapshotVersion.make(current.snapshotVersion + 1)
@@ -205,25 +244,31 @@ function acceptStart(
         snapshotVersion,
         eventCursor,
         activeRun: { definition, state },
-        receipts: [...current.receipts, IdempotencyReceipt.cases.Recorded.make({
-          ...request,
-          resultRef,
-        })],
+        receipts: [
+          ...current.receipts,
+          IdempotencyReceipt.cases.Recorded.make({
+            ...request,
+            resultRef,
+          }),
+        ],
         results: [...current.results, { resultRef, runId }],
-        events: [...current.events, DomainEventEnvelope.make({
-          eventId: `event-${eventCursor}`,
-          aggregateKind: "ActiveRun",
-          aggregateId: runId,
-          aggregateRevision: state.revision,
-          occurredAt: acceptedAt,
-          commandId: envelope.commandId,
-          event: {
-            _tag: "RunStarted",
-            runId,
-            sourcePlanId: definition.sourcePlanId,
-          },
-          schemaVersion: 1,
-        })],
+        events: [
+          ...current.events,
+          DomainEventEnvelope.make({
+            eventId: `event-${eventCursor}`,
+            aggregateKind: 'ActiveRun',
+            aggregateId: runId,
+            aggregateRevision: state.revision,
+            occurredAt: acceptedAt,
+            commandId: envelope.commandId,
+            event: {
+              _tag: 'RunStarted',
+              runId,
+              sourcePlanId: definition.sourcePlanId,
+            },
+            schemaVersion: 1,
+          }),
+        ],
         outbox: [...current.outbox, work],
       }
       return Effect.succeed({
@@ -244,22 +289,39 @@ function replayStart(
   receipt: typeof IdempotencyReceipt.Type | undefined,
 ): Effect.Effect<RunStartResponse, SimulationInvariantViolation> {
   if (receipt === undefined) {
-    return Effect.fail(new SimulationInvariantViolation({ message: "Recorded idempotency result has no receipt" }))
+    return Effect.fail(
+      new SimulationInvariantViolation({
+        message: 'Recorded idempotency result has no receipt',
+      }),
+    )
   }
 
   return IdempotencyReceipt.match(receipt, {
-    Pending: () => Effect.fail(new SimulationInvariantViolation({ message: "Recorded idempotency result is still pending" })),
+    Pending: () =>
+      Effect.fail(
+        new SimulationInvariantViolation({
+          message: 'Recorded idempotency result is still pending',
+        }),
+      ),
     Recorded: ({ resultRef }) => {
-      const result = current.results.find((candidate) => candidate.resultRef === resultRef)
+      const result = current.results.find(
+        (candidate) => candidate.resultRef === resultRef,
+      )
       if (result === undefined) {
-        return Effect.fail(new SimulationInvariantViolation({ message: "Recorded idempotency result is unavailable" }))
+        return Effect.fail(
+          new SimulationInvariantViolation({
+            message: 'Recorded idempotency result is unavailable',
+          }),
+        )
       }
-      return Effect.succeed(RunStartResponse.make({
-        replayed: true,
-        resultRef,
-        runId: result.runId,
-        projection: project(current),
-      }))
+      return Effect.succeed(
+        RunStartResponse.make({
+          replayed: true,
+          resultRef,
+          runId: result.runId,
+          projection: project(current),
+        }),
+      )
     },
   })
 }
@@ -274,11 +336,13 @@ function acceptGateDecision(
   acceptedAt: string,
 ): Effect.Effect<RunStartCommit, RunStartServiceError> {
   return CommandGateDecision.$match(gate, {
-    Accepted: () => acceptStart(current, envelope, command, request, acceptedAt),
+    Accepted: () =>
+      acceptStart(current, envelope, command, request, acceptedAt),
     ReplayPending: () => Effect.fail(new CommandAlreadyPending()),
-    ReplayRecorded: () => replayStart(current, receipt).pipe(
-      Effect.map((result): RunStartCommit => ({ state: current, result })),
-    ),
+    ReplayRecorded: () =>
+      replayStart(current, receipt).pipe(
+        Effect.map((result): RunStartCommit => ({ state: current, result })),
+      ),
     Rejected: ({ failure }) => Effect.fail(new CommandRejected({ failure })),
   })
 }
@@ -291,24 +355,29 @@ function project(state: RunStartSimulationState): RunStartProjection {
   })
 }
 
-function gateIdempotency(classification: IdempotencyClassification): typeof IdempotencyState.Type {
+function gateIdempotency(
+  classification: IdempotencyClassification,
+): typeof IdempotencyState.Type {
   return IdempotencyClassification.$match(classification, {
     Fresh: () => IdempotencyState.cases.Fresh.make({}),
-    PendingMatch: ({ operationId }) => operationId === undefined
-      ? IdempotencyState.cases.PendingMatch.make({})
-      : IdempotencyState.cases.PendingMatch.make({ operationId }),
+    PendingMatch: ({ operationId }) =>
+      operationId === undefined
+        ? IdempotencyState.cases.PendingMatch.make({})
+        : IdempotencyState.cases.PendingMatch.make({ operationId }),
     RecordedMatch: () => IdempotencyState.cases.RecordedMatch.make({}),
     Conflict: () => IdempotencyState.cases.Conflict.make({}),
   })
 }
 
 function normalizedInputHash(command: StartRunCommand) {
-  return NormalizedInputHash.make(JSON.stringify([
-    "StartRunFromPlan.v1",
-    command.planId,
-    command.expectedPlanRevision,
-    command.expectedLeaseRevision,
-    command.preconditionToken,
-    [...command.acceptedPlanLimitationIds].sort(),
-  ]))
+  return NormalizedInputHash.make(
+    JSON.stringify([
+      'StartRunFromPlan.v1',
+      command.planId,
+      command.expectedPlanRevision,
+      command.expectedLeaseRevision,
+      command.preconditionToken,
+      [...command.acceptedPlanLimitationIds].sort(),
+    ]),
+  )
 }

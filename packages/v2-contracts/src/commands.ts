@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Schema } from 'effect'
 import {
   AcquireFreshness,
   AssetFreshness,
@@ -20,7 +20,7 @@ import {
   ProposalId,
   RepresentationId,
   RunFreshness,
-} from "./primitives.js"
+} from './primitives.js'
 
 const RunAndLeaseFreshness = {
   ...RunFreshness,
@@ -39,28 +39,40 @@ const SourceSelection = {
 export const RunSequenceDefinition = Schema.Struct({
   sequenceId: Schema.NonEmptyString,
   targetName: Schema.NonEmptyString,
-  rightAscensionHours: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 24 })),
-  declinationDegrees: Schema.Finite.check(Schema.isBetween({ minimum: -90, maximum: 90 })),
+  rightAscensionHours: Schema.Finite.check(
+    Schema.isBetween({ minimum: 0, maximum: 24 }),
+  ),
+  declinationDegrees: Schema.Finite.check(
+    Schema.isBetween({ minimum: -90, maximum: 90 }),
+  ),
   exposureSeconds: Schema.Finite.check(Schema.isGreaterThan(0)),
   frameCount: Schema.Int.check(Schema.isGreaterThan(0)),
-  gain: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
+  gain: Schema.optionalKey(
+    Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+  ),
   binning: Schema.Int.check(Schema.isGreaterThan(0)),
   filterName: Schema.optionalKey(Schema.NonEmptyString),
   earliestStart: Schema.optionalKey(Schema.NonEmptyString),
   latestEnd: Schema.optionalKey(Schema.NonEmptyString),
-  minimumAltitudeDegrees: Schema.Finite.check(Schema.isBetween({ minimum: -90, maximum: 90 })),
-  horizonClearanceDegrees: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+  minimumAltitudeDegrees: Schema.Finite.check(
+    Schema.isBetween({ minimum: -90, maximum: 90 }),
+  ),
+  horizonClearanceDegrees: Schema.Finite.check(
+    Schema.isGreaterThanOrEqualTo(0),
+  ),
   recenterThresholdArcsec: Schema.Finite.check(Schema.isGreaterThan(0)),
   maxSolveAttempts: Schema.Int.check(Schema.isGreaterThan(0)),
   maxCaptureRetries: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  acquireFailure: Schema.Literals(["pause", "skip", "stop"]),
-  captureFailure: Schema.Literals(["retry", "pause", "skip", "stop"]),
+  acquireFailure: Schema.Literals(['pause', 'skip', 'stop']),
+  captureFailure: Schema.Literals(['retry', 'pause', 'skip', 'stop']),
   estimatedDurationSeconds: Schema.Finite.check(Schema.isGreaterThan(0)),
   estimatedStorageBytes: Schema.Int.check(Schema.isGreaterThan(0)),
   priority: NonNegativeInt,
 })
 
-export interface RunSequenceDefinition extends Schema.Schema.Type<typeof RunSequenceDefinition> {}
+export interface RunSequenceDefinition extends Schema.Schema.Type<
+  typeof RunSequenceDefinition
+> {}
 
 export const RunMutation = Schema.TaggedUnion({
   AppendFutureSequence: {
@@ -74,7 +86,9 @@ export const RunMutation = Schema.TaggedUnion({
   },
   UpdateFutureSequence: {
     sequenceId: Schema.NonEmptyString,
-    exposureSeconds: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThan(0))),
+    exposureSeconds: Schema.optionalKey(
+      Schema.Finite.check(Schema.isGreaterThan(0)),
+    ),
     frameCount: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
     priority: Schema.optionalKey(NonNegativeInt),
   },
@@ -111,50 +125,52 @@ export const ProcessingDestination = Schema.TaggedUnion({
 
 export const ProcessingArtifactSelection = Schema.Struct({
   outputId: ProcessingOutputId,
-  format: Schema.Literals(["fits", "tiff", "png", "jpeg"]),
-  role: Schema.Literals(["linearMaster", "intermediate", "final", "preview"]),
+  format: Schema.Literals(['fits', 'tiff', 'png', 'jpeg']),
+  role: Schema.Literals(['linearMaster', 'intermediate', 'final', 'preview']),
 })
 
 export const ProcessingSwitchDisposition = Schema.TaggedUnion({
   LeaveUnfinished: {},
-  SaveAndSwitch: { artifacts: Schema.NonEmptyArray(ProcessingArtifactSelection) },
+  SaveAndSwitch: {
+    artifacts: Schema.NonEmptyArray(ProcessingArtifactSelection),
+  },
   DiscardAndSwitch: { confirmationId: Schema.NonEmptyString },
 })
 
 export const acceptedCommandTags = [
-  "StartRunFromPlan",
-  "PreviewRunMutation",
-  "ApplyRunMutation",
-  "ApproveDisruptiveRunMutation",
-  "PauseRun",
-  "ResumeRun",
-  "StopRun",
-  "RequestControl",
-  "GrantControl",
-  "DeclineControl",
-  "ReleaseControl",
-  "TakeControl",
-  "RetryPlateSolveWithParameters",
-  "SkipAcquireTarget",
-  "ApprovePointingCorrection",
-  "RevisePointingCorrection",
-  "CapturePolarAlignmentMeasurement",
-  "AcceptPolarAlignmentEvidence",
-  "StartProcessingSession",
-  "ResumeProcessingSession",
-  "SyncProcessingPreview",
-  "ApplyProcessingPreview",
-  "UndoProcessingStep",
-  "RedoProcessingStep",
-  "PreviewAssistantSuggestion",
-  "MarkAssistantFindingViewed",
-  "RetryProcessingStep",
-  "SwitchProcessingContext",
-  "SaveProcessingArtifacts",
-  "DiscardProcessingSession",
-  "RequestAssetDownload",
-  "RepublishAssetRepresentation",
-  "OpenAssetInProcess",
+  'StartRunFromPlan',
+  'PreviewRunMutation',
+  'ApplyRunMutation',
+  'ApproveDisruptiveRunMutation',
+  'PauseRun',
+  'ResumeRun',
+  'StopRun',
+  'RequestControl',
+  'GrantControl',
+  'DeclineControl',
+  'ReleaseControl',
+  'TakeControl',
+  'RetryPlateSolveWithParameters',
+  'SkipAcquireTarget',
+  'ApprovePointingCorrection',
+  'RevisePointingCorrection',
+  'CapturePolarAlignmentMeasurement',
+  'AcceptPolarAlignmentEvidence',
+  'StartProcessingSession',
+  'ResumeProcessingSession',
+  'SyncProcessingPreview',
+  'ApplyProcessingPreview',
+  'UndoProcessingStep',
+  'RedoProcessingStep',
+  'PreviewAssistantSuggestion',
+  'MarkAssistantFindingViewed',
+  'RetryProcessingStep',
+  'SwitchProcessingContext',
+  'SaveProcessingArtifacts',
+  'DiscardProcessingSession',
+  'RequestAssetDownload',
+  'RepublishAssetRepresentation',
+  'OpenAssetInProcess',
 ] as const
 
 export const CommandTag = Schema.Literals(acceptedCommandTags)
@@ -330,8 +346,11 @@ export const CommandEnvelope = Schema.Struct({
   command: Command,
 })
 
-export interface CommandEnvelope extends Schema.Schema.Type<typeof CommandEnvelope> {}
+export interface CommandEnvelope extends Schema.Schema.Type<
+  typeof CommandEnvelope
+> {}
 
-export const commandRequiresIdempotency = (command: Command) => "idempotencyKey" in command
+export const commandRequiresIdempotency = (command: Command) =>
+  'idempotencyKey' in command
 
 export const commandTags = Object.keys(Command.cases)

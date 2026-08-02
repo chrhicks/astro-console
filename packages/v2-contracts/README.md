@@ -55,11 +55,11 @@ npm test
 
 The filename communicates what a passing test establishes:
 
-| Pattern | Meaning |
-| --- | --- |
-| `*.test.ts` | Focused schema, pure decision, invariant, or regression test |
-| `*.proof.test.ts` | Deterministic future-server simulation proving a consequential accepted scenario across service boundaries |
-| `*.integration.test.ts` | Test using a real implementation boundary such as SQLite, filesystem, worker, CLI, or provider adapter |
+| Pattern                 | Meaning                                                                                                    |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `*.test.ts`             | Focused schema, pure decision, invariant, or regression test                                               |
+| `*.proof.test.ts`       | Deterministic future-server simulation proving a consequential accepted scenario across service boundaries |
+| `*.integration.test.ts` | Test using a real implementation boundary such as SQLite, filesystem, worker, CLI, or provider adapter     |
 
 A proof test must begin with an untrusted command or service transition and
 assert the important accepted or rejected outcome across:

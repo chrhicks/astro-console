@@ -1,12 +1,12 @@
-import { Data, Schema } from "effect"
-import { CommandTag } from "./commands.js"
+import { Data, Schema } from 'effect'
+import { CommandTag } from './commands.js'
 import {
   CommandResultRef,
   IdempotencyKey,
   NormalizedInputHash,
   OperationId,
   PersonId,
-} from "./primitives.js"
+} from './primitives.js'
 
 const ReceiptIdentity = {
   idempotencyKey: IdempotencyKey,
@@ -30,7 +30,9 @@ export type IdempotencyReceipt = typeof IdempotencyReceipt.Type
 
 export const IdempotencyRequest = Schema.Struct(ReceiptIdentity)
 
-export interface IdempotencyRequest extends Schema.Schema.Type<typeof IdempotencyRequest> {}
+export interface IdempotencyRequest extends Schema.Schema.Type<
+  typeof IdempotencyRequest
+> {}
 
 export type IdempotencyClassification = Data.TaggedEnum<{
   Fresh: {}
@@ -39,7 +41,8 @@ export type IdempotencyClassification = Data.TaggedEnum<{
   Conflict: {}
 }>
 
-export const IdempotencyClassification = Data.taggedEnum<IdempotencyClassification>()
+export const IdempotencyClassification =
+  Data.taggedEnum<IdempotencyClassification>()
 
 export const classifyIdempotency = (
   request: IdempotencyRequest,
@@ -47,16 +50,19 @@ export const classifyIdempotency = (
 ): IdempotencyClassification => {
   if (receipt === undefined) return IdempotencyClassification.Fresh()
 
-  const matches = receipt.idempotencyKey === request.idempotencyKey
-    && receipt.personId === request.personId
-    && receipt.commandTag === request.commandTag
-    && receipt.normalizedInputHash === request.normalizedInputHash
+  const matches =
+    receipt.idempotencyKey === request.idempotencyKey &&
+    receipt.personId === request.personId &&
+    receipt.commandTag === request.commandTag &&
+    receipt.normalizedInputHash === request.normalizedInputHash
 
   if (!matches) return IdempotencyClassification.Conflict()
   return IdempotencyReceipt.match(receipt, {
-    Pending: ({ operationId }): IdempotencyClassification => operationId === undefined
-      ? IdempotencyClassification.PendingMatch({})
-      : IdempotencyClassification.PendingMatch({ operationId }),
-    Recorded: (): IdempotencyClassification => IdempotencyClassification.RecordedMatch(),
+    Pending: ({ operationId }): IdempotencyClassification =>
+      operationId === undefined
+        ? IdempotencyClassification.PendingMatch({})
+        : IdempotencyClassification.PendingMatch({ operationId }),
+    Recorded: (): IdempotencyClassification =>
+      IdempotencyClassification.RecordedMatch(),
   })
 }

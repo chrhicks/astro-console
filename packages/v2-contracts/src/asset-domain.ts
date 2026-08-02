@@ -1,4 +1,4 @@
-import { Data, Schema } from "effect"
+import { Data, Schema } from 'effect'
 import {
   AssetId,
   AssetRevision,
@@ -8,10 +8,16 @@ import {
   ProcessingRevision,
   ProcessingSessionId,
   RepresentationId,
-} from "./primitives.js"
-import { ProcessingImageRef, ProcessingSession } from "./processing-domain.js"
+} from './primitives.js'
+import { ProcessingImageRef, ProcessingSession } from './processing-domain.js'
 
-export const AssetFormat = Schema.Literals(["cameraRaw", "fits", "tiff", "png", "jpeg"])
+export const AssetFormat = Schema.Literals([
+  'cameraRaw',
+  'fits',
+  'tiff',
+  'png',
+  'jpeg',
+])
 
 export const AssetLineage = Schema.Struct({
   comparisonGroupId: Schema.NonEmptyString,
@@ -26,7 +32,7 @@ export const DeliveryRepresentation = Schema.TaggedUnion({
     representationId: RepresentationId,
     operationId: OperationId,
     format: AssetFormat,
-    purpose: Schema.Literals(["remoteDownload", "republication"]),
+    purpose: Schema.Literals(['remoteDownload', 'republication']),
   },
   Published: {
     representationId: RepresentationId,
@@ -50,45 +56,94 @@ export const DeliveryRepresentation = Schema.TaggedUnion({
 export const LibraryAsset = Schema.Struct({
   assetId: AssetId,
   revision: AssetRevision,
-  role: Schema.Literals(["original", "linearMaster", "intermediate", "final", "preview", "diagnostic"]),
+  role: Schema.Literals([
+    'original',
+    'linearMaster',
+    'intermediate',
+    'final',
+    'preview',
+    'diagnostic',
+  ]),
   format: AssetFormat,
   checksum: Schema.NonEmptyString,
   localAvailable: Schema.Boolean,
   lineage: AssetLineage,
   representations: Schema.Array(DeliveryRepresentation),
-}).check(Schema.makeFilter((asset) => {
-  const representationIds = asset.representations.map((representation) => representation.representationId)
-  if (new Set(representationIds).size !== representationIds.length) {
-    return { path: ["representations"], issue: "representation identities must be unique within an asset" }
-  }
-  if (asset.representations.some((representation) => representation.format !== asset.format)) {
-    return { path: ["representations"], issue: "representation format must match its asset" }
-  }
-  if (new Set(asset.lineage.sourceAssetIds).size !== asset.lineage.sourceAssetIds.length) {
-    return { path: ["lineage", "sourceAssetIds"], issue: "source asset identities must be unique" }
-  }
-  if (new Set(asset.lineage.operationIds).size !== asset.lineage.operationIds.length) {
-    return { path: ["lineage", "operationIds"], issue: "lineage operation identities must be unique" }
-  }
-  if ((asset.lineage.processingSessionId === undefined) !== (asset.lineage.processingOutputId === undefined)) {
-    return { path: ["lineage"], issue: "processing session and output identities must be recorded together" }
-  }
-}))
+}).check(
+  Schema.makeFilter((asset) => {
+    const representationIds = asset.representations.map(
+      (representation) => representation.representationId,
+    )
+    if (new Set(representationIds).size !== representationIds.length) {
+      return {
+        path: ['representations'],
+        issue: 'representation identities must be unique within an asset',
+      }
+    }
+    if (
+      asset.representations.some(
+        (representation) => representation.format !== asset.format,
+      )
+    ) {
+      return {
+        path: ['representations'],
+        issue: 'representation format must match its asset',
+      }
+    }
+    if (
+      new Set(asset.lineage.sourceAssetIds).size !==
+      asset.lineage.sourceAssetIds.length
+    ) {
+      return {
+        path: ['lineage', 'sourceAssetIds'],
+        issue: 'source asset identities must be unique',
+      }
+    }
+    if (
+      new Set(asset.lineage.operationIds).size !==
+      asset.lineage.operationIds.length
+    ) {
+      return {
+        path: ['lineage', 'operationIds'],
+        issue: 'lineage operation identities must be unique',
+      }
+    }
+    if (
+      (asset.lineage.processingSessionId === undefined) !==
+      (asset.lineage.processingOutputId === undefined)
+    ) {
+      return {
+        path: ['lineage'],
+        issue:
+          'processing session and output identities must be recorded together',
+      }
+    }
+  }),
+)
 
 export interface LibraryAsset extends Schema.Schema.Type<typeof LibraryAsset> {}
 
 export const StagedArtifact = Schema.Struct({
   assetId: AssetId,
   outputId: ProcessingOutputId,
-  role: Schema.Literals(["linearMaster", "intermediate", "final", "preview"]),
-  format: Schema.Literals(["fits", "tiff", "png", "jpeg"]),
+  role: Schema.Literals(['linearMaster', 'intermediate', 'final', 'preview']),
+  format: Schema.Literals(['fits', 'tiff', 'png', 'jpeg']),
   checksum: Schema.NonEmptyString,
   permanentBytesReady: Schema.Boolean,
 })
 
 export type SaveCompletionDecision = Data.TaggedEnum<{
-  Saved: { readonly session: ProcessingSession; readonly assets: ReadonlyArray<LibraryAsset> }
-  Rejected: { readonly reason: "SaveSelectionInvalid" | "ArtifactBytesNotReady" | "ProcessingOutputUnavailable" | "AssetIdentityConflict" }
+  Saved: {
+    readonly session: ProcessingSession
+    readonly assets: ReadonlyArray<LibraryAsset>
+  }
+  Rejected: {
+    readonly reason:
+      | 'SaveSelectionInvalid'
+      | 'ArtifactBytesNotReady'
+      | 'ProcessingOutputUnavailable'
+      | 'AssetIdentityConflict'
+  }
 }>
 
 export const SaveCompletionDecision = Data.taggedEnum<SaveCompletionDecision>()
@@ -99,51 +154,71 @@ export const completeProcessingSave = (
   staged: ReadonlyArray<typeof StagedArtifact.Type>,
   existingAssetIds: ReadonlyArray<typeof AssetId.Type> = [],
 ): SaveCompletionDecision => {
-  if (staged.length === 0) return SaveCompletionDecision.Rejected({ reason: "SaveSelectionInvalid" })
+  if (staged.length === 0)
+    return SaveCompletionDecision.Rejected({ reason: 'SaveSelectionInvalid' })
   const stagedAssetIds = staged.map((artifact) => artifact.assetId)
-  const unavailableAssetIds = new Set([...existingAssetIds, ...session.savedAssetIds])
+  const unavailableAssetIds = new Set([
+    ...existingAssetIds,
+    ...session.savedAssetIds,
+  ])
   if (
-    new Set(stagedAssetIds).size !== stagedAssetIds.length
-    || stagedAssetIds.some((assetId) => unavailableAssetIds.has(assetId))
+    new Set(stagedAssetIds).size !== stagedAssetIds.length ||
+    stagedAssetIds.some((assetId) => unavailableAssetIds.has(assetId))
   ) {
-    return SaveCompletionDecision.Rejected({ reason: "AssetIdentityConflict" })
+    return SaveCompletionDecision.Rejected({ reason: 'AssetIdentityConflict' })
   }
   if (staged.some((artifact) => !artifact.permanentBytesReady)) {
-    return SaveCompletionDecision.Rejected({ reason: "ArtifactBytesNotReady" })
+    return SaveCompletionDecision.Rejected({ reason: 'ArtifactBytesNotReady' })
   }
-  const historyOutputs = new Set(session.history.map((entry) => entry.output.outputId))
-  const baseOutputId = session.baseImage !== undefined && ProcessingImageRef.guards.DerivedOutput(session.baseImage)
-    ? session.baseImage.outputId
-    : undefined
-  if (staged.some((artifact) => artifact.role === "linearMaster"
-    ? artifact.outputId !== baseOutputId
-    : !historyOutputs.has(artifact.outputId))) {
-    return SaveCompletionDecision.Rejected({ reason: "ProcessingOutputUnavailable" })
+  const historyOutputs = new Set(
+    session.history.map((entry) => entry.output.outputId),
+  )
+  const baseOutputId =
+    session.baseImage !== undefined &&
+    ProcessingImageRef.guards.DerivedOutput(session.baseImage)
+      ? session.baseImage.outputId
+      : undefined
+  if (
+    staged.some((artifact) =>
+      artifact.role === 'linearMaster'
+        ? artifact.outputId !== baseOutputId
+        : !historyOutputs.has(artifact.outputId),
+    )
+  ) {
+    return SaveCompletionDecision.Rejected({
+      reason: 'ProcessingOutputUnavailable',
+    })
   }
   const sourceAssetIds = session.sources.map((source) => source.assetId)
   const [firstSource, ...otherSources] = sourceAssetIds
-  if (firstSource === undefined) return SaveCompletionDecision.Rejected({ reason: "SaveSelectionInvalid" })
-  const assets = staged.map((artifact) => LibraryAsset.make({
-    assetId: artifact.assetId,
-    revision: AssetRevision.make(0),
-    role: artifact.role,
-    format: artifact.format,
-    checksum: artifact.checksum,
-    localAvailable: true,
-    lineage: {
-      comparisonGroupId,
-      sourceAssetIds: [firstSource, ...otherSources],
-      processingSessionId: session.sessionId,
-      processingOutputId: artifact.outputId,
-      operationIds: operationLineageForOutput(session, artifact.outputId),
-    },
-    representations: [],
-  }))
+  if (firstSource === undefined)
+    return SaveCompletionDecision.Rejected({ reason: 'SaveSelectionInvalid' })
+  const assets = staged.map((artifact) =>
+    LibraryAsset.make({
+      assetId: artifact.assetId,
+      revision: AssetRevision.make(0),
+      role: artifact.role,
+      format: artifact.format,
+      checksum: artifact.checksum,
+      localAvailable: true,
+      lineage: {
+        comparisonGroupId,
+        sourceAssetIds: [firstSource, ...otherSources],
+        processingSessionId: session.sessionId,
+        processingOutputId: artifact.outputId,
+        operationIds: operationLineageForOutput(session, artifact.outputId),
+      },
+      representations: [],
+    }),
+  )
   return SaveCompletionDecision.Saved({
     session: ProcessingSession.make({
       ...session,
       revision: ProcessingRevision.make(session.revision + 1),
-      savedAssetIds: [...session.savedAssetIds, ...assets.map((asset) => asset.assetId)],
+      savedAssetIds: [
+        ...session.savedAssetIds,
+        ...assets.map((asset) => asset.assetId),
+      ],
     }),
     assets,
   })
@@ -153,8 +228,12 @@ function operationLineageForOutput(
   session: ProcessingSession,
   outputId: typeof ProcessingOutputId.Type,
 ): ReadonlyArray<typeof OperationId.Type> {
-  const outputIndex = session.history.findIndex((entry) => entry.output.outputId === outputId)
-  return session.history.slice(0, outputIndex + 1).map((entry) => entry.operationId)
+  const outputIndex = session.history.findIndex(
+    (entry) => entry.output.outputId === outputId,
+  )
+  return session.history
+    .slice(0, outputIndex + 1)
+    .map((entry) => entry.operationId)
 }
 
 export const AssetDeliveryWork = Schema.TaggedUnion({
@@ -173,17 +252,24 @@ export const AssetDeliveryWork = Schema.TaggedUnion({
 })
 
 export type RepublicationStartDecision = Data.TaggedEnum<{
-  Started: { readonly asset: LibraryAsset; readonly work: typeof AssetDeliveryWork.Type }
-  Reused: { readonly asset: LibraryAsset; readonly operationId: typeof OperationId.Type }
+  Started: {
+    readonly asset: LibraryAsset
+    readonly work: typeof AssetDeliveryWork.Type
+  }
+  Reused: {
+    readonly asset: LibraryAsset
+    readonly operationId: typeof OperationId.Type
+  }
   Rejected: {
     readonly reason:
-      | "LocalSourceUnavailable"
-      | "SourceChecksumChanged"
-      | "RepresentationAlreadyPublished"
+      | 'LocalSourceUnavailable'
+      | 'SourceChecksumChanged'
+      | 'RepresentationAlreadyPublished'
   }
 }>
 
-export const RepublicationStartDecision = Data.taggedEnum<RepublicationStartDecision>()
+export const RepublicationStartDecision =
+  Data.taggedEnum<RepublicationStartDecision>()
 
 export const decideRepublishAsset = (
   asset: LibraryAsset,
@@ -192,35 +278,50 @@ export const decideRepublishAsset = (
   sourceChecksum: string,
   nowEpochMs: number,
 ): RepublicationStartDecision => {
-  if (!asset.localAvailable) return RepublicationStartDecision.Rejected({ reason: "LocalSourceUnavailable" })
-  if (asset.checksum !== sourceChecksum) return RepublicationStartDecision.Rejected({ reason: "SourceChecksumChanged" })
-  const existing = asset.representations.find((candidate) => candidate.representationId === representationId)
+  if (!asset.localAvailable)
+    return RepublicationStartDecision.Rejected({
+      reason: 'LocalSourceUnavailable',
+    })
+  if (asset.checksum !== sourceChecksum)
+    return RepublicationStartDecision.Rejected({
+      reason: 'SourceChecksumChanged',
+    })
+  const existing = asset.representations.find(
+    (candidate) => candidate.representationId === representationId,
+  )
   if (
-    existing !== undefined
-    && DeliveryRepresentation.guards.Preparing(existing)
-    && existing.purpose === "republication"
+    existing !== undefined &&
+    DeliveryRepresentation.guards.Preparing(existing) &&
+    existing.purpose === 'republication'
   ) {
-    return RepublicationStartDecision.Reused({ asset, operationId: existing.operationId })
+    return RepublicationStartDecision.Reused({
+      asset,
+      operationId: existing.operationId,
+    })
   }
   if (
-    existing !== undefined
-    && DeliveryRepresentation.guards.Published(existing)
-    && existing.expiresAtEpochMs > nowEpochMs
+    existing !== undefined &&
+    DeliveryRepresentation.guards.Published(existing) &&
+    existing.expiresAtEpochMs > nowEpochMs
   ) {
-    return RepublicationStartDecision.Rejected({ reason: "RepresentationAlreadyPublished" })
+    return RepublicationStartDecision.Rejected({
+      reason: 'RepresentationAlreadyPublished',
+    })
   }
   const preparing = DeliveryRepresentation.cases.Preparing.make({
     representationId,
     operationId,
     format: asset.format,
-    purpose: "republication",
+    purpose: 'republication',
   })
   return RepublicationStartDecision.Started({
     asset: LibraryAsset.make({
       ...asset,
       revision: AssetRevision.make(asset.revision + 1),
       representations: [
-        ...asset.representations.filter((candidate) => candidate.representationId !== representationId),
+        ...asset.representations.filter(
+          (candidate) => candidate.representationId !== representationId,
+        ),
         preparing,
       ],
     }),
@@ -235,66 +336,103 @@ export const decideRepublishAsset = (
 
 export type DownloadRoutingDecision = Data.TaggedEnum<{
   StreamLocal: { readonly assetId: typeof AssetId.Type }
-  PublishedRepresentationEligible: { readonly representationId: typeof RepresentationId.Type }
-  PreparationStarted: { readonly asset: LibraryAsset; readonly work: typeof AssetDeliveryWork.Type }
+  PublishedRepresentationEligible: {
+    readonly representationId: typeof RepresentationId.Type
+  }
+  PreparationStarted: {
+    readonly asset: LibraryAsset
+    readonly work: typeof AssetDeliveryWork.Type
+  }
   PreparationPending: { readonly operationId: typeof OperationId.Type }
-  Rejected: { readonly reason: "LocalOriginalUnavailable" | "AssetRepresentationUnavailable" }
+  Rejected: {
+    readonly reason:
+      'LocalOriginalUnavailable' | 'AssetRepresentationUnavailable'
+  }
 }>
 
-export const DownloadRoutingDecision = Data.taggedEnum<DownloadRoutingDecision>()
+export const DownloadRoutingDecision =
+  Data.taggedEnum<DownloadRoutingDecision>()
 
 export interface DownloadRoutingInput {
   readonly asset: LibraryAsset
-  readonly accessPath: "lan" | "remote"
+  readonly accessPath: 'lan' | 'remote'
   readonly requestedRepresentationId?: typeof RepresentationId.Type
   readonly nowEpochMs: number
   readonly assignedRepresentationId: typeof RepresentationId.Type
   readonly assignedOperationId: typeof OperationId.Type
 }
 
-export const decideAssetDownload = (input: DownloadRoutingInput): DownloadRoutingDecision => {
-  if (input.accessPath === "lan") {
+export const decideAssetDownload = (
+  input: DownloadRoutingInput,
+): DownloadRoutingDecision => {
+  if (input.accessPath === 'lan') {
     return input.asset.localAvailable
       ? DownloadRoutingDecision.StreamLocal({ assetId: input.asset.assetId })
-      : DownloadRoutingDecision.Rejected({ reason: "LocalOriginalUnavailable" })
+      : DownloadRoutingDecision.Rejected({
+          reason: 'LocalOriginalUnavailable',
+        })
   }
-  const selected = input.requestedRepresentationId === undefined
-    ? input.asset.representations.find((representation) =>
-      DeliveryRepresentation.guards.Published(representation) && representation.expiresAtEpochMs > input.nowEpochMs)
-      ?? input.asset.representations.find((representation) =>
-        DeliveryRepresentation.guards.Preparing(representation) && representation.purpose === "remoteDownload")
-    : input.asset.representations.find((representation) => representation.representationId === input.requestedRepresentationId)
+  const selected =
+    input.requestedRepresentationId === undefined
+      ? (input.asset.representations.find(
+          (representation) =>
+            DeliveryRepresentation.guards.Published(representation) &&
+            representation.expiresAtEpochMs > input.nowEpochMs,
+        ) ??
+        input.asset.representations.find(
+          (representation) =>
+            DeliveryRepresentation.guards.Preparing(representation) &&
+            representation.purpose === 'remoteDownload',
+        ))
+      : input.asset.representations.find(
+          (representation) =>
+            representation.representationId === input.requestedRepresentationId,
+        )
   if (selected !== undefined) {
     return DeliveryRepresentation.match(selected, {
-      Preparing: ({ operationId }) => DownloadRoutingDecision.PreparationPending({ operationId }),
-      Published: ({ representationId, expiresAtEpochMs }) => expiresAtEpochMs > input.nowEpochMs
-        ? DownloadRoutingDecision.PublishedRepresentationEligible({ representationId })
-        : startPreparation(input),
+      Preparing: ({ operationId }) =>
+        DownloadRoutingDecision.PreparationPending({ operationId }),
+      Published: ({ representationId, expiresAtEpochMs }) =>
+        expiresAtEpochMs > input.nowEpochMs
+          ? DownloadRoutingDecision.PublishedRepresentationEligible({
+              representationId,
+            })
+          : startPreparation(input),
       Expired: () => startPreparation(input),
       Failed: () => startPreparation(input),
     })
   }
   if (input.requestedRepresentationId !== undefined) {
-    return DownloadRoutingDecision.Rejected({ reason: "AssetRepresentationUnavailable" })
+    return DownloadRoutingDecision.Rejected({
+      reason: 'AssetRepresentationUnavailable',
+    })
   }
   return startPreparation(input)
 }
 
-function startPreparation(input: DownloadRoutingInput): DownloadRoutingDecision {
-  if (!input.asset.localAvailable) return DownloadRoutingDecision.Rejected({ reason: "LocalOriginalUnavailable" })
-  const representationId = input.requestedRepresentationId ?? input.assignedRepresentationId
+function startPreparation(
+  input: DownloadRoutingInput,
+): DownloadRoutingDecision {
+  if (!input.asset.localAvailable)
+    return DownloadRoutingDecision.Rejected({
+      reason: 'LocalOriginalUnavailable',
+    })
+  const representationId =
+    input.requestedRepresentationId ?? input.assignedRepresentationId
   const representation = DeliveryRepresentation.cases.Preparing.make({
     representationId,
     operationId: input.assignedOperationId,
     format: input.asset.format,
-    purpose: "remoteDownload",
+    purpose: 'remoteDownload',
   })
   return DownloadRoutingDecision.PreparationStarted({
     asset: LibraryAsset.make({
       ...input.asset,
       revision: AssetRevision.make(input.asset.revision + 1),
       representations: [
-        ...input.asset.representations.filter((candidate) => candidate.representationId !== representationId),
+        ...input.asset.representations.filter(
+          (candidate) => candidate.representationId !== representationId,
+        ),
         representation,
       ],
     }),
@@ -310,10 +448,14 @@ function startPreparation(input: DownloadRoutingInput): DownloadRoutingDecision 
 export type PublicationCompletionDecision = Data.TaggedEnum<{
   Published: { readonly asset: LibraryAsset }
   AlreadyPublished: { readonly asset: LibraryAsset }
-  Rejected: { readonly reason: "PublicationOperationSuperseded" | "InvalidPublicationExpiry" }
+  Rejected: {
+    readonly reason:
+      'PublicationOperationSuperseded' | 'InvalidPublicationExpiry'
+  }
 }>
 
-export const PublicationCompletionDecision = Data.taggedEnum<PublicationCompletionDecision>()
+export const PublicationCompletionDecision =
+  Data.taggedEnum<PublicationCompletionDecision>()
 
 export const completeAssetPublication = (
   asset: LibraryAsset,
@@ -322,22 +464,31 @@ export const completeAssetPublication = (
   nowEpochMs = 0,
 ): PublicationCompletionDecision => {
   const completed = asset.representations.find(
-    (representation) => DeliveryRepresentation.guards.Published(representation) && representation.operationId === operationId,
+    (representation) =>
+      DeliveryRepresentation.guards.Published(representation) &&
+      representation.operationId === operationId,
   )
   if (
-    completed !== undefined
-    && DeliveryRepresentation.guards.Published(completed)
-    && completed.expiresAtEpochMs === expiresAtEpochMs
+    completed !== undefined &&
+    DeliveryRepresentation.guards.Published(completed) &&
+    completed.expiresAtEpochMs === expiresAtEpochMs
   ) {
     return PublicationCompletionDecision.AlreadyPublished({ asset })
   }
   if (expiresAtEpochMs <= nowEpochMs) {
-    return PublicationCompletionDecision.Rejected({ reason: "InvalidPublicationExpiry" })
+    return PublicationCompletionDecision.Rejected({
+      reason: 'InvalidPublicationExpiry',
+    })
   }
   const preparing = asset.representations.find(
-    (representation) => DeliveryRepresentation.guards.Preparing(representation) && representation.operationId === operationId,
+    (representation) =>
+      DeliveryRepresentation.guards.Preparing(representation) &&
+      representation.operationId === operationId,
   )
-  if (preparing === undefined) return PublicationCompletionDecision.Rejected({ reason: "PublicationOperationSuperseded" })
+  if (preparing === undefined)
+    return PublicationCompletionDecision.Rejected({
+      reason: 'PublicationOperationSuperseded',
+    })
   const published = DeliveryRepresentation.cases.Published.make({
     representationId: preparing.representationId,
     operationId,
@@ -349,7 +500,10 @@ export const completeAssetPublication = (
       ...asset,
       revision: AssetRevision.make(asset.revision + 1),
       representations: [
-        ...asset.representations.filter((representation) => representation.representationId !== preparing.representationId),
+        ...asset.representations.filter(
+          (representation) =>
+            representation.representationId !== preparing.representationId,
+        ),
         published,
       ],
     }),
@@ -359,10 +513,11 @@ export const completeAssetPublication = (
 export type PublicationFailureDecision = Data.TaggedEnum<{
   Failed: { readonly asset: LibraryAsset }
   AlreadyFailed: { readonly asset: LibraryAsset }
-  Rejected: { readonly reason: "PublicationOperationSuperseded" }
+  Rejected: { readonly reason: 'PublicationOperationSuperseded' }
 }>
 
-export const PublicationFailureDecision = Data.taggedEnum<PublicationFailureDecision>()
+export const PublicationFailureDecision =
+  Data.taggedEnum<PublicationFailureDecision>()
 
 export const failAssetPublication = (
   asset: LibraryAsset,
@@ -370,15 +525,22 @@ export const failAssetPublication = (
   diagnosticRef: string,
 ): PublicationFailureDecision => {
   const completedFailure = asset.representations.find(
-    (representation) => DeliveryRepresentation.guards.Failed(representation)
-      && representation.operationId === operationId
-      && representation.diagnosticRef === diagnosticRef,
+    (representation) =>
+      DeliveryRepresentation.guards.Failed(representation) &&
+      representation.operationId === operationId &&
+      representation.diagnosticRef === diagnosticRef,
   )
-  if (completedFailure !== undefined) return PublicationFailureDecision.AlreadyFailed({ asset })
+  if (completedFailure !== undefined)
+    return PublicationFailureDecision.AlreadyFailed({ asset })
   const preparing = asset.representations.find(
-    (representation) => DeliveryRepresentation.guards.Preparing(representation) && representation.operationId === operationId,
+    (representation) =>
+      DeliveryRepresentation.guards.Preparing(representation) &&
+      representation.operationId === operationId,
   )
-  if (preparing === undefined) return PublicationFailureDecision.Rejected({ reason: "PublicationOperationSuperseded" })
+  if (preparing === undefined)
+    return PublicationFailureDecision.Rejected({
+      reason: 'PublicationOperationSuperseded',
+    })
   const failed = DeliveryRepresentation.cases.Failed.make({
     representationId: preparing.representationId,
     operationId,
@@ -390,7 +552,10 @@ export const failAssetPublication = (
       ...asset,
       revision: AssetRevision.make(asset.revision + 1),
       representations: asset.representations.map((representation) =>
-        representation.representationId === preparing.representationId ? failed : representation),
+        representation.representationId === preparing.representationId
+          ? failed
+          : representation,
+      ),
     }),
   })
 }
@@ -398,19 +563,28 @@ export const failAssetPublication = (
 export type RepresentationExpiryDecision = Data.TaggedEnum<{
   Expired: { readonly asset: LibraryAsset }
   Unchanged: { readonly asset: LibraryAsset }
-  Rejected: { readonly reason: "RepresentationUnavailable" }
+  Rejected: { readonly reason: 'RepresentationUnavailable' }
 }>
 
-export const RepresentationExpiryDecision = Data.taggedEnum<RepresentationExpiryDecision>()
+export const RepresentationExpiryDecision =
+  Data.taggedEnum<RepresentationExpiryDecision>()
 
 export const expireAssetRepresentation = (
   asset: LibraryAsset,
   representationId: typeof RepresentationId.Type,
   observedAtEpochMs: number,
 ): RepresentationExpiryDecision => {
-  const representation = asset.representations.find((candidate) => candidate.representationId === representationId)
-  if (representation === undefined) return RepresentationExpiryDecision.Rejected({ reason: "RepresentationUnavailable" })
-  if (!DeliveryRepresentation.guards.Published(representation) || representation.expiresAtEpochMs > observedAtEpochMs) {
+  const representation = asset.representations.find(
+    (candidate) => candidate.representationId === representationId,
+  )
+  if (representation === undefined)
+    return RepresentationExpiryDecision.Rejected({
+      reason: 'RepresentationUnavailable',
+    })
+  if (
+    !DeliveryRepresentation.guards.Published(representation) ||
+    representation.expiresAtEpochMs > observedAtEpochMs
+  ) {
     return RepresentationExpiryDecision.Unchanged({ asset })
   }
   const expired = DeliveryRepresentation.cases.Expired.make({
@@ -423,7 +597,9 @@ export const expireAssetRepresentation = (
       ...asset,
       revision: AssetRevision.make(asset.revision + 1),
       representations: [
-        ...asset.representations.filter((candidate) => candidate.representationId !== representationId),
+        ...asset.representations.filter(
+          (candidate) => candidate.representationId !== representationId,
+        ),
         expired,
       ],
     }),
@@ -432,36 +608,58 @@ export const expireAssetRepresentation = (
 
 export const LibraryComparison = Schema.Struct({
   comparisonGroupId: Schema.NonEmptyString,
-  entries: Schema.NonEmptyArray(Schema.Struct({
-    assetId: AssetId,
-    role: LibraryAsset.fields.role,
-    format: AssetFormat,
-    checksum: Schema.NonEmptyString,
-    sourceAssetIds: Schema.NonEmptyArray(AssetId),
-    processingSessionId: Schema.optionalKey(Schema.NonEmptyString),
-    processingOutputId: Schema.optionalKey(ProcessingOutputId),
-    operationIds: Schema.Array(OperationId),
-  })),
+  entries: Schema.NonEmptyArray(
+    Schema.Struct({
+      assetId: AssetId,
+      role: LibraryAsset.fields.role,
+      format: AssetFormat,
+      checksum: Schema.NonEmptyString,
+      sourceAssetIds: Schema.NonEmptyArray(AssetId),
+      processingSessionId: Schema.optionalKey(Schema.NonEmptyString),
+      processingOutputId: Schema.optionalKey(ProcessingOutputId),
+      operationIds: Schema.Array(OperationId),
+    }),
+  ),
 })
 
 export type LibraryComparisonDecision = Data.TaggedEnum<{
   Ready: { readonly comparison: typeof LibraryComparison.Type }
-  Rejected: { readonly reason: "ComparisonNeedsMultipleAssets" | "DuplicateAssetSelection" | "AssetsUnrelated" }
+  Rejected: {
+    readonly reason:
+      | 'ComparisonNeedsMultipleAssets'
+      | 'DuplicateAssetSelection'
+      | 'AssetsUnrelated'
+  }
 }>
 
-export const LibraryComparisonDecision = Data.taggedEnum<LibraryComparisonDecision>()
+export const LibraryComparisonDecision =
+  Data.taggedEnum<LibraryComparisonDecision>()
 
-export const buildLibraryComparison = (assets: ReadonlyArray<LibraryAsset>): LibraryComparisonDecision => {
-  if (assets.length < 2) return LibraryComparisonDecision.Rejected({ reason: "ComparisonNeedsMultipleAssets" })
+export const buildLibraryComparison = (
+  assets: ReadonlyArray<LibraryAsset>,
+): LibraryComparisonDecision => {
+  if (assets.length < 2)
+    return LibraryComparisonDecision.Rejected({
+      reason: 'ComparisonNeedsMultipleAssets',
+    })
   if (new Set(assets.map((asset) => asset.assetId)).size !== assets.length) {
-    return LibraryComparisonDecision.Rejected({ reason: "DuplicateAssetSelection" })
+    return LibraryComparisonDecision.Rejected({
+      reason: 'DuplicateAssetSelection',
+    })
   }
   const [first, ...rest] = assets
-  if (first === undefined) return LibraryComparisonDecision.Rejected({ reason: "ComparisonNeedsMultipleAssets" })
-  if (rest.some((asset) =>
-    asset.lineage.comparisonGroupId !== first.lineage.comparisonGroupId
-    || !sameIds(asset.lineage.sourceAssetIds, first.lineage.sourceAssetIds))) {
-    return LibraryComparisonDecision.Rejected({ reason: "AssetsUnrelated" })
+  if (first === undefined)
+    return LibraryComparisonDecision.Rejected({
+      reason: 'ComparisonNeedsMultipleAssets',
+    })
+  if (
+    rest.some(
+      (asset) =>
+        asset.lineage.comparisonGroupId !== first.lineage.comparisonGroupId ||
+        !sameIds(asset.lineage.sourceAssetIds, first.lineage.sourceAssetIds),
+    )
+  ) {
+    return LibraryComparisonDecision.Rejected({ reason: 'AssetsUnrelated' })
   }
   return LibraryComparisonDecision.Ready({
     comparison: LibraryComparison.make({
@@ -478,38 +676,79 @@ function comparisonEntry(asset: LibraryAsset) {
     format: asset.format,
     checksum: asset.checksum,
     sourceAssetIds: asset.lineage.sourceAssetIds,
-    ...(asset.lineage.processingSessionId === undefined ? {} : { processingSessionId: asset.lineage.processingSessionId }),
-    ...(asset.lineage.processingOutputId === undefined ? {} : { processingOutputId: asset.lineage.processingOutputId }),
+    ...(asset.lineage.processingSessionId === undefined
+      ? {}
+      : { processingSessionId: asset.lineage.processingSessionId }),
+    ...(asset.lineage.processingOutputId === undefined
+      ? {}
+      : { processingOutputId: asset.lineage.processingOutputId }),
     operationIds: asset.lineage.operationIds,
   }
 }
 
-function sameIds(left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index])
+function sameIds(
+  left: ReadonlyArray<string>,
+  right: ReadonlyArray<string>,
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  )
 }
 
 export type OpenAssetInProcessDecision = Data.TaggedEnum<{
-  Start: { readonly assetId: typeof AssetId.Type; readonly phase: "build" | "develop" }
-  Resume: { readonly sessionId: ProcessingSession["sessionId"] }
-  Rejected: { readonly reason: "SourceAssetUnavailable" | "SourceRoleUnsupported" | "ProcessingSessionUnavailable" | "ProcessingSessionSourceMismatch" }
+  Start: {
+    readonly assetId: typeof AssetId.Type
+    readonly phase: 'build' | 'develop'
+  }
+  Resume: { readonly sessionId: ProcessingSession['sessionId'] }
+  Rejected: {
+    readonly reason:
+      | 'SourceAssetUnavailable'
+      | 'SourceRoleUnsupported'
+      | 'ProcessingSessionUnavailable'
+      | 'ProcessingSessionSourceMismatch'
+  }
 }>
 
-export const OpenAssetInProcessDecision = Data.taggedEnum<OpenAssetInProcessDecision>()
+export const OpenAssetInProcessDecision =
+  Data.taggedEnum<OpenAssetInProcessDecision>()
 
 export const decideOpenAssetInProcess = (
   asset: LibraryAsset,
   unfinishedSession?: ProcessingSession,
 ): OpenAssetInProcessDecision => {
-  if (!asset.localAvailable) return OpenAssetInProcessDecision.Rejected({ reason: "SourceAssetUnavailable" })
+  if (!asset.localAvailable)
+    return OpenAssetInProcessDecision.Rejected({
+      reason: 'SourceAssetUnavailable',
+    })
   if (unfinishedSession !== undefined) {
-    if (unfinishedSession.lifecycle !== "unfinished") {
-      return OpenAssetInProcessDecision.Rejected({ reason: "ProcessingSessionUnavailable" })
+    if (unfinishedSession.lifecycle !== 'unfinished') {
+      return OpenAssetInProcessDecision.Rejected({
+        reason: 'ProcessingSessionUnavailable',
+      })
     }
-    return unfinishedSession.sources.some((source) => source.assetId === asset.assetId)
-      ? OpenAssetInProcessDecision.Resume({ sessionId: unfinishedSession.sessionId })
-      : OpenAssetInProcessDecision.Rejected({ reason: "ProcessingSessionSourceMismatch" })
+    return unfinishedSession.sources.some(
+      (source) => source.assetId === asset.assetId,
+    )
+      ? OpenAssetInProcessDecision.Resume({
+          sessionId: unfinishedSession.sessionId,
+        })
+      : OpenAssetInProcessDecision.Rejected({
+          reason: 'ProcessingSessionSourceMismatch',
+        })
   }
-  if (asset.role === "original") return OpenAssetInProcessDecision.Start({ assetId: asset.assetId, phase: "build" })
-  if (asset.role === "linearMaster") return OpenAssetInProcessDecision.Start({ assetId: asset.assetId, phase: "develop" })
-  return OpenAssetInProcessDecision.Rejected({ reason: "SourceRoleUnsupported" })
+  if (asset.role === 'original')
+    return OpenAssetInProcessDecision.Start({
+      assetId: asset.assetId,
+      phase: 'build',
+    })
+  if (asset.role === 'linearMaster')
+    return OpenAssetInProcessDecision.Start({
+      assetId: asset.assetId,
+      phase: 'develop',
+    })
+  return OpenAssetInProcessDecision.Rejected({
+    reason: 'SourceRoleUnsupported',
+  })
 }
