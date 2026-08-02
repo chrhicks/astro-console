@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **Phases 0, 0.5, and 1 complete; Phase 2 is next in the durable V2.0 roadmap**
+Status: **Phases 0, 0.5, 1, and 2 complete; Production Convergence is next; Phase 3 follows**
 
 This directory is organized to keep normal working context small. Do not read
 the entire V2 tree by default.
@@ -15,8 +15,8 @@ Read these in order when starting or resuming V2 work:
    deferred boundaries.
 3. [V2 delivery plan](current/delivery-plan.md) — durable end-to-end V2.0
    scope and phase exit criteria.
-4. [Phase 2 implementation planning](current/phase-2-planning.md) — the next
-   phase's bounded slice method.
+4. [Phase 3 implementation planning](current/phase-3-planning.md) — the prepared
+   next product phase after Production Convergence.
 
 That is the complete default context. Load another document only when the task
 requires its specific detail.
@@ -33,6 +33,7 @@ requires its specific detail.
 | Executable Effect Schema candidates and fixtures | [V2 contracts package](../../packages/v2-contracts/README.md) |
 | End-to-end V2.0 scope, phases, and exit criteria | [V2 delivery plan](current/delivery-plan.md) |
 | Phase 2 slice selection and execution method | [Phase 2 implementation planning](current/phase-2-planning.md) |
+| Phase 3 slice selection and execution method | [Phase 3 implementation planning](current/phase-3-planning.md) |
 | Ideas outside V2.0 | [Post-V2.0 notes](current/v2-post-v2.0-notes.md) |
 | Phase 1 production UI implementation | Accepted [visual style guide](current/visual-style-guide.md), [UI component library](current/ui-component-library.md), and [UI build contract](current/ui-build-contract.md) |
 | Why Phase 0.5 made a specific visual decision | [Phase 0.5 design-system archive](archive/phase-0.5/README.md) — historical only; do not use for active implementation authority |
@@ -61,9 +62,13 @@ completed regrade is recorded in the
 the selected V2 reference.
 
 Phase 1 is closed: the local-web and host-verification evidence are recorded,
-and the branch-wide quality regression has landed its bounded fixes. The
-durable delivery plan now carries V2.0 forward; Phase 2 (Plan and Managed Runs)
-is next and proceeds in bounded vertical slices.
+and the branch-wide quality regression has landed its bounded fixes. Phase 2
+(Plan and Managed Runs) is also closed with fake-only managed-run evidence.
+Production Convergence now promotes that infrastructure and the accepted
+Nightbook UI into `apps/server` and `apps/web`, preserving one version-matched
+rig-local origin. Its five sequential Continuum Epics begin at
+`tkt-ezxr1fsb`. Phase 3 (Observe, Acquire, and Capture) follows convergence and
+still proceeds only in separately accepted bounded vertical slices.
 
 ## Context Rules
 

@@ -1,6 +1,6 @@
-# Phase 2 Planning Handoff
+# Production Convergence Handoff
 
-Status: **Phase 1 closed — select one Phase 2 vertical slice before implementation**
+Status: **Phases 1 and 2 closed — complete Production Convergence before accepting a Phase 3 implementation slice**
 
 ## Completed Host-Verification Bundle
 
@@ -25,20 +25,35 @@ passed at wide, compact, and 390 px phone widths.
 `4308796` is now on `main`; `v2` has no unique desktop or SDK paths. Phase 1
 does not authorize further cleanup by default.
 
-## Next Session: Plan One Phase 2 Slice
+## Next Session: Begin Production Convergence
 
-The first four Phase 2 slices are complete: [Multi-Sequence Draft and
+Phase 2 is closed. Its five completed slices are [Multi-Sequence Draft and
 Deterministic Validation](phase-2-planning.md#first-slice-multi-sequence-draft-and-deterministic-validation),
 [Immutable RunDefinition Acceptance](phase-2-planning.md#second-slice-immutable-rundefinition-acceptance),
 [Bounded Fake Execution](phase-2-planning.md#third-slice-bounded-fake-execution-of-an-accepted-rundefinition),
-and [Bounded Pause and Resume](phase-2-planning.md#fourth-slice-bounded-pause-and-resume-of-a-fake-active-run).
+[Bounded Pause and Resume](phase-2-planning.md#fourth-slice-bounded-pause-and-resume-of-a-fake-active-run),
+and [Deterministic Run Resolution and Consequence-Aware Edits](phase-2-planning.md#fifth-and-final-slice-deterministic-run-resolution-and-consequence-aware-edits).
 They prove deterministic Plan persistence/projection, a revisioned immutable
 RunDefinition snapshot, a two-sequence fake executor through completion, and
-durable pause/resume of a fake active run. The next packet should select the
-smallest missing Phase 2 managed-run outcome without inferring a device or
-provider boundary. Do not infer authorization for a physical Solar run,
-processing workflow, off-host recovery, storage-health operations, or browser
-controls beyond that accepted slice.
+durable fake-run pause/resume, resolution policies, and consequence-aware
+edits. The prepared next packet is [Read-Only Decision-Grade Preflight](phase-3-planning.md#first-slice-read-only-decision-grade-preflight).
+It remains prepared but is not the next implementation target. First complete
+the five sequential Production Convergence Epics:
+
+1. `tkt-ezxr1fsb` — promote the proven server.
+2. `tkt-n9yoieoz` — create the production Nightbook web application.
+3. `tkt-uuom4upo` — establish the decoded snapshot, SSE, capability, command,
+   and failure seam.
+4. `tkt-qffwfa47` — ship web and server from one version-matched origin.
+5. `tkt-zcsucxyx` — migrate proven workspace slices and retire experimental
+   implementation paths.
+
+Each Epic is blocked by its predecessor and contains its own ordered child
+implementation tasks. Convergence preserves existing proof boundaries and does
+not authorize a provider read, device command, physical capture, processing
+workflow, off-host recovery, or storage-health operation. After convergence,
+the preflight packet must still be accepted before implementation; it authorizes
+only a current provider read and truthful checklist projection.
 
 The user accepts NVMe live/recent data plus the SSD backup as current
 same-host resilience. Off-host recovery is not current Phase 1 scope.
@@ -46,7 +61,7 @@ same-host resilience. Off-host recovery is not current Phase 1 scope.
 ## Verified Baseline
 
 - `apps/v2-local-web` type checks and its SQLite/HTTP/SSE/worker/filesystem
-  integration suite pass **64/64**. The suite covers the retained local-web
+  integration suite pass **66/66**. The suite covers the retained local-web
   foundation, Process Save/publisher boundary, and the deliberately installed
   deterministic M27 fixture without creating generic hardware work. Normal
   origin, rig-worker, Solar CLI, publisher, and processor database opening
@@ -72,6 +87,17 @@ same-host resilience. Off-host recovery is not current Phase 1 scope.
   managed-run intervention: it creates no provider call, device command,
   outbox work, or capture evidence. The desktop Observe fixture exposes the
   eligible Pause/Resume control; the phone remains read-only.
+- A current desktop controller can resolve only a fake or fixture active run
+  through durable stop, sequence skip, one bounded retry, or terminal
+  `parkRequested` policy. A closed service preview classifies three fake edits
+  and binds disruptive approval to its displayed consequence. This completes
+  Phase 2 managed-run semantics with no provider call, device command, outbox
+  work, capture evidence, or Solar activity; browser phone projection remains
+  read-only.
+- Phase 3 has no implementation evidence yet. Its prepared first slice is
+  read-only decision-grade preflight against current provider facts. Rig-worker
+  `alive` / `ready` remains liveness only and does not make preflight, capture,
+  or physical safety claims.
 - Process Save is a service API only: app-owned source IDs resolve under
   configured roots, selected bytes are checksummed and atomically promoted,
   and Asset/provenance/receipt/`PublishAsset` records commit together. Recorded
@@ -127,5 +153,6 @@ this handoff is the active authority.
 ## Read First
 
 1. [V2 Start Here](../README.md)
-2. [Phase 1 closeout](delivery-plan.md)
-3. [Infrastructure plan](../infra/README.md)
+2. [V2 delivery plan](delivery-plan.md)
+3. [Phase 3 implementation planning](phase-3-planning.md)
+4. [Infrastructure plan](../infra/README.md)

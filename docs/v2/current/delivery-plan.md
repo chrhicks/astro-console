@@ -1,6 +1,6 @@
 # Astro Console V2 Delivery Plan
 
-Status: **durable V2 completion roadmap — Phases 0, 0.5, and 1 complete; Phase 2 next**
+Status: **durable V2 completion roadmap — Phases 0, 0.5, 1, and 2 complete; Production Convergence next; Phase 3 follows**
 
 ## Keep This Plan
 
@@ -44,7 +44,7 @@ workspace projections, Process Save, private artifact delivery, same-host
 backup/restore evidence, and rig-worker liveness are complete. The detailed
 evidence and explicit proof boundaries are in the [current handoff](handoff.md).
 
-## Phase 2: Plan and Managed Runs — Next
+## Phase 2: Plan and Managed Runs — Complete
 
 ### Outcomes
 
@@ -64,7 +64,56 @@ evidence and explicit proof boundaries are in the [current handoff](handoff.md).
 - Disruptive edits require explicit consequence-aware approval.
 - Refreshing or changing workspaces does not affect execution.
 
-## Phase 3: Observe, Acquire, and Capture
+Phase 2 is complete with deterministic fake-run evidence only. It does not
+prove provider-backed preflight, acquisition, capture, recovery, stopping, or
+parking; those remain Phase 3 work.
+
+## Production Convergence — Next
+
+Production Convergence turns the completed V2 infrastructure, contract, and UI
+learning into the real implementation target before new Phase 3 behavior is
+added. It splits source responsibilities without splitting deployment or
+authority: `apps/web` becomes the Nightbook browser client, `apps/server`
+becomes the promoted rig-local authority, and the server continues to ship the
+version-matched web bundle from one logical origin.
+
+### Outcomes
+
+- Promote `apps/v2-local-web` to `apps/server` without changing its proven
+  domain behavior, persistence, worker, deployment, or proof boundaries.
+- Create `apps/web` from the accepted Nightbook presentation while excluding
+  prototype fixture ownership and browser-local durable substitutes.
+- Establish shared decoded snapshot, SSE, capability, command, and typed-failure
+  boundaries between web and server.
+- Build and serve the web bundle from the same release image and origin as the
+  authoritative service.
+- Migrate the proven Plan, managed-run Observe, Library, and current Process
+  boundaries into the production applications before retiring experimental
+  runtime paths.
+
+### Exit Criteria
+
+- Existing contract and server integration evidence remains green after the
+  server promotion.
+- The Nightbook shell loads from a real authoritative snapshot, handles
+  snapshot-first reconnect without command replay, and uses server-owned client
+  capability.
+- One versioned image serves matching web assets, API routes, streams, health,
+  and authorized downloads through the selected Compose/Cloudflare topology.
+- Plan and fake managed-run behavior, Library delivery, and current Process
+  truth are available through `apps/web` and `apps/server` with wide, compact,
+  and read-only phone validation.
+- `apps/v2-local-web` and the UI prototype are no longer active implementation
+  targets. Phase 3 work proceeds only in the production applications.
+
+Execution is tracked by five sequential Continuum Epics:
+`tkt-ezxr1fsb`, `tkt-n9yoieoz`, `tkt-uuom4upo`, `tkt-qffwfa47`, and
+`tkt-zcsucxyx`. This milestone authorizes convergence of already accepted and
+proven behavior only. It does not authorize provider-backed preflight, a device
+command, physical capture, processing workflow, or other deferred Phase 3–6
+behavior.
+
+## Phase 3: Observe, Acquire, and Capture — After Production Convergence
 
 ### Outcomes
 
