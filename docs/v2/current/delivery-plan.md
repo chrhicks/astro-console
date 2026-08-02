@@ -70,7 +70,7 @@ Phase 2 is complete with deterministic fake-run evidence only. It does not
 prove provider-backed preflight, acquisition, capture, recovery, stopping, or
 parking; those remain Phase 3 work.
 
-## Production Convergence — Next
+## Production Convergence — In Progress
 
 Production Convergence turns the completed V2 infrastructure, contract, and UI
 learning into the real implementation target before new Phase 3 behavior is
@@ -115,6 +115,16 @@ Execution is tracked by five sequential Continuum Epics:
 proven behavior only. It does not authorize provider-backed preflight, a device
 command, physical capture, processing workflow, or other deferred Phase 3–6
 behavior.
+
+Epics 1 and 2 are complete. Epic 3 has completed implementation and validation
+pending owner closeout. It supplies emitted shared contracts and a bounded
+bootstrap HTTP/SSE/control
+seam: the Effect-owned web client loads snapshot-first, reconnects without
+replaying commands, guards stale state, and consumes server-owned phone
+capability and typed command submission. Its validation used real native SSE
+and a temporary validation-only same-origin development proxy; it does not
+prove a shipped one-origin deployment. Epic 4 owns that release integration and
+the integrated local workflow.
 
 ## Phase 3: Observe, Acquire, and Capture — After Production Convergence
 

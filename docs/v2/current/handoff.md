@@ -44,7 +44,8 @@ the five sequential Production Convergence Epics:
 2. `tkt-n9yoieoz` — create the production Nightbook web application.
    **Complete.**
 3. `tkt-uuom4upo` — establish the decoded snapshot, SSE, capability, command,
-   and failure seam.
+   and failure seam. **Implementation and validation complete; pending owner
+   closeout.**
 4. `tkt-qffwfa47` — ship web and server from one version-matched origin.
 5. `tkt-zcsucxyx` — migrate proven workspace slices and retire experimental
    implementation paths.
@@ -79,13 +80,26 @@ action availability are projection-owned rather than viewport-owned; current
 phone and unavailable projections contain no mutation controls.
 
 The web package format, lint, strict typecheck, production build, bundle check,
-and **13/13** focused tests pass. Screenshot-backed Designer and browser reviews
-passed at 1440x900, 1024x768, and 390x844 with direct deep-link refresh,
+and focused tests pass. Screenshot-backed Designer and browser reviews passed
+at wide, compact, and 390 px phone widths with direct deep-link refresh,
 back/forward, keyboard focus, semantic status, no console errors, and no
-horizontal overflow. This proves the standalone presentation foundation only.
-The next Epic, `tkt-uuom4upo`, owns shared wire contracts, authoritative
-snapshot/SSE decoding, service-owned capability, command submission, and typed
-failure handling.
+horizontal overflow.
+
+## Production Client Seam Complete Pending Owner Closeout
+
+Epic 3 emits shared contracts and establishes the bounded bootstrap HTTP/SSE/
+control seam between `apps/web` and `apps/server`. The Effect-owned web client
+loads authoritative snapshots first, reconnects through a fresh snapshot with
+no command replay, and rejects stale state. The Nightbook shell is authoritative;
+phone capability is server-owned; and command submission is typed. Contracts
+pass **182** tests, server passes **71**, and web passes **37**. Designer PASS
+and real-browser/ui-validator PASS cover wide, compact, and 390 px layouts.
+
+The validation uses real native SSE plus a temporary validation-only same-origin
+proxy. It does not establish deployment integration: Epic 4 owns the actual
+one-origin shipping and integrated local workflow. This work preserves the
+existing proof boundary: it authorizes no provider read, device command,
+capture, or Phase 3 behavior.
 
 The user accepts NVMe live/recent data plus the SSD backup as current
 same-host resilience. Off-host recovery is not current Phase 1 scope.
@@ -93,7 +107,7 @@ same-host resilience. Off-host recovery is not current Phase 1 scope.
 ## Verified Baseline
 
 - `apps/server` type checks and its SQLite/HTTP/SSE/worker/filesystem
-  integration suite pass **66/66**. The suite covers the retained local-web
+  integration suite pass **71/71**. The suite covers the retained local-web
   foundation, Process Save/publisher boundary, and the deliberately installed
   deterministic M27 fixture without creating generic hardware work. Normal
   origin, rig-worker, Solar CLI, publisher, and processor database opening

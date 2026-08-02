@@ -65,10 +65,12 @@ Phase 1 is closed: the local-web and host-verification evidence are recorded,
 and the branch-wide quality regression has landed its bounded fixes. Phase 2
 (Plan and Managed Runs) is also closed with fake-only managed-run evidence.
 Production Convergence now promotes that infrastructure and the accepted
-Nightbook UI into `apps/server` and `apps/web`, preserving one version-matched
-rig-local origin. The first two of its five sequential Continuum Epics,
-`tkt-ezxr1fsb` and `tkt-n9yoieoz`, are complete; the real decoded client seam
-follows.
+Nightbook UI into `apps/server` and `apps/web`. The first two of its five
+sequential Continuum Epics, `tkt-ezxr1fsb` and `tkt-n9yoieoz`, are complete.
+Epic 3, `tkt-uuom4upo`, has completed implementation and validation and awaits
+owner closeout. It establishes the shared emitted contracts and bounded
+bootstrap HTTP/SSE/control seam; Epic 4 still owns shipping web and server from
+one version-matched rig-local origin and the integrated local workflow.
 Phase 3 (Observe, Acquire, and Capture) follows convergence and still proceeds
 only in separately accepted bounded vertical slices.
 
