@@ -1074,6 +1074,7 @@ test('authorized Library downloads issue an Asset-ID grant and redirect without 
 
 test('download signer keeps mount configuration bounded and rejects unauthenticated or invalid internal requests', async (t) => {
   const secret = 'x'.repeat(32)
+  let rejectIssuer = false
   const signer = createDownloadGrantService(
     {
       bucket: 'astro-console-artifacts',
@@ -1085,8 +1086,10 @@ test('download signer keeps mount configuration bounded and rejects unauthentica
     {
       secret,
       issuer: {
-        issue: async () =>
-          'https://r2.example/published/asset?X-Amz-Signature=private',
+        issue: async () => {
+          if (rejectIssuer) throw new Error('issuer unavailable')
+          return 'https://r2.example/published/asset?X-Amz-Signature=private'
+        },
       },
     },
   )
@@ -1133,6 +1136,15 @@ test('download signer keeps mount configuration bounded and rejects unauthentica
   )
   assert.equal(issued.status, 200)
   assert.equal(issued.headers.get('cache-control'), 'no-store')
+  rejectIssuer = true
+  const rejected = await request(
+    JSON.stringify({
+      objectKey: 'published/a',
+      expiresAt: '2026-07-28T12:05:00.000Z',
+    }),
+    `Bearer ${secret}`,
+  )
+  assert.equal(rejected.status, 503)
 })
 
 test('publisher classifies only SQLite busy and locked errors as transient', () => {
@@ -1550,6 +1562,99 @@ test('publisher worker fails closed on conflicting durable publication checksum'
   service.close()
 })
 
+test('publisher worker durably settles malformed work, asset identities, and unreadable files', async () => {
+  const malformed = publisherFixture('publisher-malformed-save')
+  malformed.service.database
+    .prepare("UPDATE outbox SET payload='not-json' WHERE kind='PublishAsset'")
+    .run()
+  let puts = 0
+  const malformedWorker = createPublisherWorker(
+    malformed.service.database,
+    { outputsRoot: malformed.outputs },
+    {
+      put: async () => {
+        puts += 1
+      },
+      head: async () => undefined,
+    },
+  )
+  assert.equal(await malformedWorker.pass(), 'failed')
+  assert.equal(puts, 0)
+  assert.equal(
+    databaseRow(
+      StatusRow,
+      malformed.service.database
+        .prepare("SELECT state FROM outbox WHERE kind='PublishAsset'")
+        .get(),
+    ).state,
+    'failed',
+  )
+  malformed.service.close()
+
+  const malformedAsset = publisherFixture('publisher-malformed-asset-save')
+  const malformedAssetId = 'not-an-asset'
+  malformedAsset.service.database
+    .prepare(
+      'UPDATE library_assets SET asset_id=?,detail=replace(detail,?,?) WHERE asset_id=?',
+    )
+    .run(
+      malformedAssetId,
+      malformedAsset.assetId,
+      malformedAssetId,
+      malformedAsset.assetId,
+    )
+  malformedAsset.service.database
+    .prepare("UPDATE outbox SET payload=? WHERE kind='PublishAsset'")
+    .run(JSON.stringify({ assetId: malformedAssetId, checksum: 'ignored' }))
+  const malformedAssetWorker = createPublisherWorker(
+    malformedAsset.service.database,
+    { outputsRoot: malformedAsset.outputs },
+    {
+      put: async () => {
+        puts += 1
+      },
+      head: async () => undefined,
+    },
+  )
+  assert.equal(await malformedAssetWorker.pass(), 'failed')
+  assert.equal(puts, 0)
+  assert.equal(
+    databaseRow(
+      StatusRow,
+      malformedAsset.service.database
+        .prepare("SELECT state FROM outbox WHERE kind='PublishAsset'")
+        .get(),
+    ).state,
+    'failed',
+  )
+  malformedAsset.service.close()
+
+  const unreadable = publisherFixture('publisher-unreadable-save')
+  unlinkSync(join(unreadable.outputs, `${unreadable.assetId}.tiff`))
+  const unreadableWorker = createPublisherWorker(
+    unreadable.service.database,
+    { outputsRoot: unreadable.outputs },
+    {
+      put: async () => {
+        puts += 1
+      },
+      head: async () => undefined,
+    },
+  )
+  assert.equal(await unreadableWorker.pass(), 'failed')
+  assert.equal(puts, 0)
+  assert.equal(
+    databaseRow(
+      StatusRow,
+      unreadable.service.database
+        .prepare("SELECT state FROM outbox WHERE kind='PublishAsset'")
+        .get(),
+    ).state,
+    'failed',
+  )
+  unreadable.service.close()
+})
+
 test('publisher worker lease expiry and stale acknowledgements cannot project stale provider work', async () => {
   const { outputs, service, assetId } = publisherFixture('publisher-lease-save')
   const keys: string[] = []
@@ -1598,6 +1703,53 @@ test('publisher worker lease expiry and stale acknowledgements cannot project st
     ).availability,
     'published',
   )
+  service.close()
+})
+
+test('publisher worker preserves a publication persistence failure and recovers the committed claim', async () => {
+  const { outputs, service } = publisherFixture('publisher-persistence-save')
+  let puts = 0
+  const worker = createPublisherWorker(
+    service.database,
+    { outputsRoot: outputs },
+    {
+      put: async () => {
+        puts += 1
+      },
+      head: async () => ({
+        checksum: createHash('sha256')
+          .update('publication-bytes')
+          .digest('hex'),
+        bytes: 17,
+      }),
+    },
+  )
+  service.database.exec(`
+    CREATE TRIGGER reject_publication
+    BEFORE INSERT ON asset_publications
+    BEGIN
+      SELECT RAISE(ABORT, 'publication persistence failed');
+    END
+  `)
+  await assert.rejects(worker.pass(), /publication persistence failed/)
+  assert.equal(puts, 0)
+  assert.equal(
+    databaseRow(
+      ClaimedOutboxRow,
+      service.database
+        .prepare(
+          "SELECT state,claim_token,claimed_by,claim_until FROM outbox WHERE kind='PublishAsset'",
+        )
+        .get(),
+    ).state,
+    'claimed',
+  )
+  service.database.exec('DROP TRIGGER reject_publication')
+  service.database
+    .prepare("UPDATE outbox SET claim_until='2000-01-01T00:00:00.000Z'")
+    .run()
+  assert.equal(await worker.pass(), 'published')
+  assert.equal(puts, 1)
   service.close()
 })
 
@@ -1936,7 +2088,6 @@ test('non-fixture origin, workers, and service databases migrate without M27 Pla
     ).count,
     0,
   )
-  await new Promise<void>((resolve) => setTimeout(resolve, 300))
   assert.equal((await fetch(`${base}/api/snapshot`)).status, 200)
   const publisher = openPublisherDatabase(
     join(root, 'publisher.sqlite'),
@@ -5572,6 +5723,32 @@ test('fake run resolution and consequence-aware edits persist only durable fake 
   const afterApplied = await applied.json()
   assert.equal(afterApplied.snapshot.run.activeSequenceIndex, 0)
   assert.equal(afterApplied.snapshot.run.appliedMutations.length, 1)
+  const replayed = await fetch(
+    `${first.base}/api/commands/apply-run-mutation`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        _tag: 'ApplyRunMutation',
+        previewId: preview.preview.previewId,
+        expectedLeaseRevision: snapshot.control.revision,
+        expectedRunRevision: snapshot.run.revision,
+        idempotencyKey: 'final-apply',
+      }),
+    },
+  )
+  assert.equal(replayed.status, 200)
+  assert.deepEqual(await replayed.json(), afterApplied)
+  assert.equal(
+    databaseRow(
+      CountRow,
+      first.service.database
+        .prepare(
+          "SELECT count(*) AS count FROM events WHERE type='RunMutationApplied'",
+        )
+        .get(),
+    ).count,
+    1,
+  )
   const disruptive = await fetch(
     `${first.base}/api/commands/preview-run-mutation`,
     {

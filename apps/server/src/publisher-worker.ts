@@ -52,7 +52,9 @@ export function createPublisherWorker(
   const pass = async (workerId = 'publisher-worker') => {
     const token = randomUUID()
     const now = new Date().toISOString()
+    let transactionOpen = false
     database.exec('BEGIN IMMEDIATE')
+    transactionOpen = true
     try {
       database
         .prepare(
@@ -67,6 +69,7 @@ export function createPublisherWorker(
       const work = Schema.decodeUnknownSync(Schema.optional(ClaimedWork))(raw)
       if (work === undefined) {
         database.exec('COMMIT')
+        transactionOpen = false
         return 'none' as const
       }
       const claimed = database
@@ -81,18 +84,24 @@ export function createPublisherWorker(
         )
       if (claimed.changes !== 1) {
         database.exec('COMMIT')
+        transactionOpen = false
         return 'none' as const
       }
       database.exec('COMMIT')
+      transactionOpen = false
       return await publish(work, token)
     } catch (error) {
-      database.exec('ROLLBACK')
+      if (transactionOpen)
+        try {
+          database.exec('ROLLBACK')
+        } catch {}
       throw error
     }
   }
   const publish = async (claimed: typeof ClaimedWork.Type, token: string) => {
     let work: typeof Work.Type | undefined
-    let asset: typeof Asset.Type
+    let asset: typeof Asset.Type | undefined
+    let detail: typeof AssetDetail.Type | undefined
     try {
       work = Schema.decodeUnknownSync(Work)(JSON.parse(claimed.payload))
       const raw: unknown = database
@@ -100,49 +109,88 @@ export function createPublisherWorker(
           'SELECT asset_id,role,format,detail FROM library_assets WHERE asset_id=?',
         )
         .get(work.assetId)
-      if (work === undefined) throw new Error('Publisher work was not decoded')
       asset = Schema.decodeUnknownSync(Asset)(raw)
-      const detail = Schema.decodeUnknownSync(AssetDetail)(
-        JSON.parse(asset.detail),
+      detail = Schema.decodeUnknownSync(AssetDetail)(JSON.parse(asset.detail))
+    } catch {
+      return settleFailure(
+        claimed.id,
+        token,
+        work?.assetId,
+        'temporarilyUnavailable',
+        'publisher provider failed',
       )
-      if (detail.assetId !== asset.asset_id)
-        return settleFailure(
-          claimed.id,
-          token,
-          asset.asset_id,
-          'failedPublication',
-          'asset detail identity mismatch',
-        )
+    }
+    if (work === undefined || asset === undefined || detail === undefined)
+      return settleFailure(
+        claimed.id,
+        token,
+        work?.assetId,
+        'temporarilyUnavailable',
+        'publisher provider failed',
+      )
+    if (detail.assetId !== asset.asset_id)
+      return settleFailure(
+        claimed.id,
+        token,
+        asset.asset_id,
+        'failedPublication',
+        'asset detail identity mismatch',
+      )
+    let file: PublisherFile
+    try {
       const path = outputPath(storage.outputsRoot, asset)
-      const file = await checksumFile(path)
-      if (file.checksum !== work.checksum)
-        return settleFailure(
-          claimed.id,
-          token,
-          asset.asset_id,
-          'failedPublication',
-          'local checksum mismatch',
-        )
+      file = await checksumFile(path)
+    } catch {
+      return settleFailure(
+        claimed.id,
+        token,
+        work.assetId,
+        'temporarilyUnavailable',
+        'publisher provider failed',
+      )
+    }
+    if (file.checksum !== work.checksum)
+      return settleFailure(
+        claimed.id,
+        token,
+        asset.asset_id,
+        'failedPublication',
+        'local checksum mismatch',
+      )
+    let publication: typeof Publication.Type | undefined
+    try {
       const publicationRaw: unknown = database
         .prepare(
           'SELECT checksum,object_key,state FROM asset_publications WHERE asset_id=?',
         )
         .get(asset.asset_id)
-      const publication = Schema.decodeUnknownSync(
-        Schema.optional(Publication),
-      )(publicationRaw)
-      if (publication !== undefined && publication.checksum !== work.checksum)
-        return settleFailure(
-          claimed.id,
-          token,
-          asset.asset_id,
-          'failedPublication',
-          'publication checksum conflict',
-        )
-      const key = publication?.object_key
-        ? publication.object_key
-        : publicationKey(asset, detail.lineage.runId, work.checksum)
-      database.exec('BEGIN IMMEDIATE')
+      publication = Schema.decodeUnknownSync(Schema.optional(Publication))(
+        publicationRaw,
+      )
+    } catch {
+      return settleFailure(
+        claimed.id,
+        token,
+        work.assetId,
+        'temporarilyUnavailable',
+        'publisher provider failed',
+      )
+    }
+    if (publication !== undefined && publication.checksum !== work.checksum)
+      return settleFailure(
+        claimed.id,
+        token,
+        asset.asset_id,
+        'failedPublication',
+        'publication checksum conflict',
+      )
+    const key = publication?.object_key
+      ? publication.object_key
+      : publicationKey(asset, detail.lineage.runId, work.checksum)
+    let transactionOpen = false
+    database.exec('BEGIN IMMEDIATE')
+    transactionOpen = true
+    try {
       database
         .prepare(
           'INSERT INTO asset_publications (asset_id,checksum,object_key,state,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(asset_id) DO UPDATE SET checksum=excluded.checksum,object_key=excluded.object_key,state=excluded.state,updated_at=excluded.updated_at WHERE asset_publications.checksum=excluded.checksum',
@@ -155,29 +203,40 @@ export function createPublisherWorker(
           new Date().toISOString(),
         )
       database.exec('COMMIT')
+      transactionOpen = false
+    } catch (error) {
+      if (transactionOpen)
+        try {
+          database.exec('ROLLBACK')
+        } catch {}
+      throw error
+    }
+    let verified:
+      { readonly checksum: string; readonly bytes: number } | undefined
+    try {
       await provider.put(key, file, {
         assetId: asset.asset_id,
         checksum: work.checksum,
       })
-      const verified = await provider.head(key)
-      if (verified?.checksum !== work.checksum || verified.bytes !== file.bytes)
-        return settleFailure(
-          claimed.id,
-          token,
-          asset.asset_id,
-          'failedPublication',
-          'provider verification failed',
-        )
-      return settlePublished(claimed.id, token, asset, work.checksum)
+      verified = await provider.head(key)
     } catch {
       return settleFailure(
         claimed.id,
         token,
-        work?.assetId,
+        asset.asset_id,
         'temporarilyUnavailable',
         'publisher provider failed',
       )
     }
+    if (verified?.checksum !== work.checksum || verified.bytes !== file.bytes)
+      return settleFailure(
+        claimed.id,
+        token,
+        asset.asset_id,
+        'failedPublication',
+        'provider verification failed',
+      )
+    return settlePublished(claimed.id, token, asset, work.checksum)
   }
   const settlePublished = (
     outboxId: string,

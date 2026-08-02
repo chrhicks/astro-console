@@ -1079,6 +1079,7 @@ const CommandResultSchema = Schema.Union([
         'FakeSequenceSkipped',
         'FakePhaseRetried',
         'FakeParkRequested',
+        'RunMutationApplied',
       ]),
     ),
     message: Schema.optionalKey(Schema.String),
@@ -3678,8 +3679,6 @@ function applyRunMutation(
     current.control.holderClientId !== identity.clientId
   )
     return reject('ControlLeaseLost')
-  if (run === null || input.expectedRunRevision !== run.revision)
-    return reject('RunRevisionConflict')
   const semanticKey = createHash('sha256')
     .update(
       JSON.stringify({
@@ -3710,6 +3709,8 @@ function applyRunMutation(
           ),
         }
       : reject('IdempotencyConflict')
+  if (run === null || input.expectedRunRevision !== run.revision)
+    return reject('RunRevisionConflict')
   const rowRaw: unknown = db
     .prepare(
       'SELECT preview_id,run_id,run_revision,owner_person_id,mutation,consequences,classification,expires_at,applied_at FROM run_mutation_previews WHERE preview_id=?',

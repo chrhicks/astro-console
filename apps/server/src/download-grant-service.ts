@@ -47,8 +47,13 @@ export function createDownloadGrantService(
         if (Buffer.byteLength(text) > 16_384)
           return response.writeHead(413).end()
       }
+      let input: typeof Request.Type
       try {
-        const input = Schema.decodeUnknownSync(Request)(JSON.parse(text))
+        input = Schema.decodeUnknownSync(Request)(JSON.parse(text))
+      } catch {
+        return response.writeHead(400).end()
+      }
+      try {
         const url = await issuer.issue(input)
         response
           .writeHead(200, {
@@ -57,7 +62,7 @@ export function createDownloadGrantService(
           })
           .end(JSON.stringify({ url }))
       } catch {
-        response.writeHead(400).end()
+        response.writeHead(503).end()
       }
     })()
   })
