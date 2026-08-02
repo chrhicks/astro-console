@@ -14,10 +14,19 @@ import {
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
+import { Script, createContext } from 'node:vm'
 import type { IncomingMessage } from 'node:http'
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { ConfigProvider, Effect, Schema } from 'effect'
-import { AcquireSnapshot, RunSnapshot } from '@astro-console/v2-contracts'
+import {
+  AcquireSnapshot,
+  BootstrapHttpFailureEnvelope,
+  BootstrapHttpSuccessEnvelope,
+  BootstrapSseEventEnvelope,
+  CommandHttpFailureEnvelope,
+  CommandHttpSuccessEnvelope,
+  RunSnapshot,
+} from '@astro-console/v2-contracts'
 import {
   createOriginAdmission,
   createJwksKeyResolver,
@@ -70,6 +79,74 @@ function createFixtureService(
     { fixture: 'm27' },
   )
 }
+
+async function bootstrapSnapshot(url: string, init?: RequestInit) {
+  const response = await fetch(url, init)
+  const body: unknown = await response.json()
+  return Schema.decodeUnknownSync(BootstrapHttpSuccessEnvelope)(body).data
+}
+
+test('bootstrap and bounded control transport decode shared contracts before mutation', async (t) => {
+  const service = createFixtureService()
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const snapshot = Schema.decodeUnknownSync(BootstrapHttpSuccessEnvelope)(
+    await fetch(`${base}/api/snapshot`).then((response) => response.json()),
+  )
+  assert.equal(snapshot.ok, true)
+  assert.equal(snapshot.data.health.storage.state, 'unknown')
+  const stream = await fetch(`${base}/api/events`)
+  const reader = stream.body?.getReader()
+  if (reader === undefined) throw new Error('SSE response has no body')
+  const first = new TextDecoder().decode((await reader.read()).value)
+  const id = first.match(/^id: (\d+)$/m)?.[1]
+  const data = first.match(/^data: (.+)$/m)?.[1]
+  if (id === undefined || data === undefined)
+    throw new Error('SSE projection envelope is incomplete')
+  const event = Schema.decodeUnknownSync(BootstrapSseEventEnvelope)({
+    id: Number(id),
+    event: 'ProjectionChanged',
+    data: JSON.parse(data),
+  })
+  assert.equal(event.id, event.data.eventCursor)
+  const before = databaseRow(
+    CountRow,
+    service.database.prepare('SELECT count(*) AS count FROM events').get(),
+  ).count
+  const malformed = Schema.decodeUnknownSync(CommandHttpFailureEnvelope)(
+    await fetch(`${base}/api/commands/control`, {
+      method: 'POST',
+      body: JSON.stringify({ commandId: 'control-malformed' }),
+    }).then((response) => response.json()),
+  )
+  assert.equal(malformed.failure._tag, 'InvalidInput')
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM events').get(),
+    ).count,
+    before,
+  )
+  const accepted = Schema.decodeUnknownSync(CommandHttpSuccessEnvelope)(
+    await fetch(`${base}/api/commands/control`, {
+      method: 'POST',
+      body: JSON.stringify({
+        commandId: 'control-request',
+        command: {
+          _tag: 'RequestControl',
+          expectedLeaseRevision: 1,
+          idempotencyKey: 'control-request',
+        },
+      }),
+    }).then((response) => response.json()),
+  )
+  assert.equal(accepted.data.eventCursor, before + 1)
+  await reader.cancel()
+})
 
 function first<Value>(values: ReadonlyArray<Value>) {
   const value = values[0]
@@ -1763,13 +1840,11 @@ test('SQLite acceptance atomically persists fixture run, event, and receipt with
     await listener.close()
     service.close()
   })
-  const snapshot = await fetch(`${base}/api/snapshot`).then((response) =>
-    response.json(),
-  )
+  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
   const command = {
     _tag: 'StartRunFromPlan',
     planId: 'plan-m27',
-    expectedPlanRevision: snapshot.plan.revision,
+    expectedPlanRevision: 3,
     expectedLeaseRevision: snapshot.control.revision,
     idempotencyKey: 'm27-accept-1',
   }
@@ -2057,14 +2132,11 @@ test('non-fixture origin, workers, and service databases migrate without M27 Pla
     origin.close()
   })
   const base = `http://127.0.0.1:${listener.port}`
-  const snapshot = await fetch(`${base}/api/snapshot`).then((response) =>
-    response.json(),
-  )
+  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
   const ready = await fetch(`${base}/api/health/ready`).then((response) =>
     response.json(),
   )
-  assert.equal(snapshot.plan.readiness, 'unavailable')
-  assert.equal(snapshot.plan.id, 'uninitialized')
+  assert.equal(snapshot.activeRun._tag, 'None')
   assert.equal(ready.status, 'unavailable')
   const shell = await fetch(`${base}/`).then((response) => response.text())
   assert.doesNotMatch(shell, /M27|Run plan/)
@@ -2500,8 +2572,12 @@ test('request-context admission rejects before snapshot, stream, query, or mutat
     await listener.close()
     service.close()
   })
-  for (const path of ['/api/snapshot', '/api/events', '/api/library'])
+  for (const path of ['/api/events', '/api/library'])
     assert.equal((await fetch(`${base}${path}`)).status, 401)
+  const snapshotFailure = Schema.decodeUnknownSync(
+    BootstrapHttpFailureEnvelope,
+  )(await fetch(`${base}/api/snapshot`).then((response) => response.json()))
+  assert.equal(snapshotFailure.failure._tag, 'AuthenticationFailure')
   assert.equal(
     (
       await fetch(`${base}/api/commands/start-run`, {
@@ -2514,13 +2590,20 @@ test('request-context admission rejects before snapshot, stream, query, or mutat
     ).status,
     401,
   )
-  const admitted = await fetch(`${base}/api/snapshot`, {
+  const commandFailure = Schema.decodeUnknownSync(CommandHttpFailureEnvelope)(
+    await fetch(`${base}/api/commands/control`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }).then((response) => response.json()),
+  )
+  assert.equal(commandFailure.failure._tag, 'AuthenticationFailure')
+  const admitted = await bootstrapSnapshot(`${base}/api/snapshot`, {
     headers: {
       authorization: 'Bearer verified-owner',
       'x-client-capability': 'readOnly',
     },
-  }).then((response) => response.json())
-  assert.equal(admitted.identity.capability, 'controlCapable')
+  })
+  assert.equal(admitted.membership.capability, 'controlCapable')
 })
 
 test('verified Access assertions map durable memberships without trusting request authority', async (t) => {
@@ -2600,15 +2683,15 @@ test('verified Access assertions map durable memberships without trusting reques
     'cf-access-jwt-assertion': token,
     'x-client-capability': 'controlCapable',
   })
-  const owner = await fetch(`${base}/api/snapshot`, {
+  const owner = await bootstrapSnapshot(`${base}/api/snapshot`, {
     headers: authorized(claim('access-owner')),
-  }).then((response) => response.json())
-  assert.equal(owner.identity.personId, 'owner-chicks')
-  assert.equal(owner.identity.capability, 'controlCapable')
-  const viewer = await fetch(`${base}/api/snapshot`, {
+  })
+  assert.equal(owner.membership.personId, 'owner-chicks')
+  assert.equal(owner.membership.capability, 'controlCapable')
+  const viewer = await bootstrapSnapshot(`${base}/api/snapshot`, {
     headers: authorized(claim('access-viewer')),
-  }).then((response) => response.json())
-  assert.equal(viewer.identity.capability, 'readOnly')
+  })
+  assert.equal(viewer.membership.capability, 'readOnly')
   assert.equal(
     (
       await fetch(`${base}/api/commands/start-run`, {
@@ -2882,12 +2965,12 @@ test('a configured non-fixture owner has role-based operations and grant authori
   const viewerHeaders = {
     'cf-access-jwt-assertion': claim('viewer-subject', 'viewer@example.com'),
   }
-  const ownerSnapshot = await fetch(`${base}/api/snapshot`, {
+  const ownerSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`, {
     headers: ownerHeaders,
-  }).then((response) => response.json())
-  assert.equal(ownerSnapshot.identity.personId, 'observatory-primary')
-  assert.equal(ownerSnapshot.identity.role, 'owner')
-  assert.equal(ownerSnapshot.identity.capability, 'controlCapable')
+  })
+  assert.equal(ownerSnapshot.membership.personId, 'observatory-primary')
+  assert.equal(ownerSnapshot.membership.role, 'owner')
+  assert.equal(ownerSnapshot.membership.capability, 'controlCapable')
   assert.equal(
     (await fetch(`${base}/api/health/operations`, { headers: ownerHeaders }))
       .status,
@@ -3505,12 +3588,10 @@ test('resume preserves accepted fixture capture without hardware dispatch', asyn
     })
   }
   await resume('fixture-resume')
-  const snapshot = await fetch(`${base}/api/snapshot`).then((response) =>
-    response.json(),
-  )
-  assert.equal(snapshot.run.phase, 'capture')
-  assert.equal(snapshot.dispatch, 'none')
-  assert.equal(snapshot.dispatchAction, 'none')
+  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(snapshot.activeRun._tag, 'Active')
+  if (snapshot.activeRun._tag === 'Active')
+    assert.equal(snapshot.activeRun.run.phase, 'capture')
 })
 
 test('a non-RunDefinition active run cannot use the bounded pause path', async (t) => {
@@ -3541,11 +3622,10 @@ test('a non-RunDefinition active run cannot use the bounded pause path', async (
   })
   assert.equal(paused.status, 409)
   assert.equal((await paused.json()).reason, 'RunRevisionConflict')
-  assert.equal(
-    (await fetch(`${base}/api/snapshot`).then((response) => response.json()))
-      .run.phase,
-    'capture',
-  )
+  const current = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(current.activeRun._tag, 'Active')
+  if (current.activeRun._tag === 'Active')
+    assert.equal(current.activeRun.run.phase, 'capture')
   assert.equal(
     databaseRow(
       CountRow,
@@ -3619,16 +3699,10 @@ test('current controller terminally stops an active fixture run without hardware
     ).count,
     0,
   )
-  const snapshot = await fetch(`${base}/api/snapshot`).then((response) =>
-    response.json(),
-  )
-  assert.equal(snapshot.run.phase, 'stopped')
-  assert.equal(snapshot.dispatch, 'none')
-  assert.equal(snapshot.dispatchAction, 'none')
-  assert.match(
-    snapshot.evidence.correction.protection,
-    /accepted capture continues/,
-  )
+  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(snapshot.activeRun._tag, 'Active')
+  if (snapshot.activeRun._tag === 'Active')
+    assert.equal(snapshot.activeRun.run.phase, 'stopped')
   const html = await fetch(`${base}/`).then((response) => response.text())
   assert.match(
     html,
@@ -3683,12 +3757,14 @@ test('startup backfills shared-control state for a legacy local database without
     await listener.close()
     service.close()
   })
-  const snapshot = await fetch(
+  const snapshot = await bootstrapSnapshot(
     `http://127.0.0.1:${listener.port}/api/snapshot`,
-  ).then((response) => response.json())
+  )
   assert.equal(snapshot.snapshotVersion, 7)
   assert.equal(snapshot.eventCursor, 11)
-  assert.equal(snapshot.run.id, 'run-accepted-before-control')
+  assert.equal(snapshot.activeRun._tag, 'Active')
+  if (snapshot.activeRun._tag === 'Active')
+    assert.equal(snapshot.activeRun.run.runId, 'run-accepted-before-control')
   assert.equal(snapshot.control.holderClientId, 'desktop-owner')
   assert.equal(snapshot.control.revision, 1)
   assert.equal(
@@ -3767,16 +3843,16 @@ test('persisted exhausted correction keeps evidence visible without issuing work
   ])
   const projected = new TextDecoder().decode(changed?.value)
   assert.match(projected, /ProjectionChanged/)
-  assert.match(projected, /Correction budget 3 of 3 exhausted/)
-  const snapshot = await fetch(`${base}/api/snapshot`).then((response) =>
-    response.json(),
+  const persisted = JSON.parse(
+    databaseRow(
+      ProjectionRow,
+      service.database
+        .prepare("SELECT value FROM state WHERE key='evidence'")
+        .get(),
+    ).value,
   )
-  assert.equal(snapshot.evidence.frameId, 'frame-m27-042')
-  assert.equal(snapshot.evidence.correction.state, 'exhausted')
-  assert.equal(
-    snapshot.evidence.correction.action,
-    'Review recovery in Observe before any new command.',
-  )
+  assert.equal(persisted.frameId, 'frame-m27-042')
+  assert.equal(persisted.correction.state, 'exhausted')
   assert.equal(
     databaseRow(
       CountRow,
@@ -3853,7 +3929,7 @@ test('Seestar Stack push adapter decodes SDK events, projects availability, and 
   assert.equal(accepted?.evidence.stack?.availability, 'available')
   assert.equal(accepted?.evidence.stack?.frameCount, 43)
   const projected = await nextEvent(reader)
-  assert.match(projected, /Stack event received/)
+  assert.match(projected, /event: ProjectionChanged/)
   const before = accepted?.evidence.frameId
   assert.equal(
     service.ingestSeestarStackPush(
@@ -4040,12 +4116,8 @@ test('Library detail uses stable identities and snapshot delivery remains catalo
     (await fetch(`${base}/api/library/assets/asset-m27-999`)).status,
     404,
   )
-  const snapshot = await fetch(`${base}/api/snapshot`).then((response) =>
-    response.json(),
-  )
-  assert.equal(snapshot.evidence.frameId, 'frame-m27-042')
-  assert.equal(snapshot.evidence.correction.action, 'none')
-  assert.equal('results' in snapshot, false)
+  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(snapshot.activeRun._tag, 'None')
   assert.equal(JSON.stringify(snapshot).includes('asset-m27-'), false)
   const html = await fetch(`${base}/`).then((response) => response.text())
   assert.match(html, /id="library-results"/)
@@ -4108,10 +4180,10 @@ test('fixture run acceptance does not depend on unserviceable hardware outbox wo
     }),
   })
   assert.equal(accepted.status, 202)
-  const after = await fetch(`${base}/api/snapshot`).then((response) =>
-    response.json(),
-  )
-  assert.equal(after.run.phase, 'capture')
+  const after = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(after.activeRun._tag, 'Active')
+  if (after.activeRun._tag === 'Active')
+    assert.equal(after.activeRun.run.phase, 'capture')
   assert.equal(
     databaseRow(
       CountRow,
@@ -4244,10 +4316,8 @@ test('authenticated workspace projections preserve future intent, bounded Librar
   assert.equal(process.preview.state, 'synchronized')
   assert.equal(process.history.at(-1).state, 'current')
   assert.match(process.protection, /Apply, Save/)
-  const snapshot = await fetch(`${base}/api/snapshot`).then((response) =>
-    response.json(),
-  )
-  assert.equal(snapshot.run, null)
+  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(snapshot.activeRun._tag, 'None')
   assert.equal(
     databaseRow(
       CountRow,
@@ -4314,10 +4384,7 @@ test('SQLite-backed plan drafts persist deterministic verdicts, revision guards,
   })
   assert.equal(ready.status, 202)
   assert.equal((await ready.json()).plan.readiness, 'ready')
-  const savedSnapshot = await fetch(`${base}/api/snapshot`).then((response) =>
-    response.json(),
-  )
-  assert.equal(savedSnapshot.plan.runEligible, false)
+  const savedSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
   const startSavedDraft = await fetch(`${base}/api/commands/start-run`, {
     method: 'POST',
     body: JSON.stringify({
@@ -4331,7 +4398,7 @@ test('SQLite-backed plan drafts persist deterministic verdicts, revision guards,
   assert.equal(startSavedDraft.status, 409)
   assert.equal((await startSavedDraft.json()).reason, 'PlanUnavailable')
   const event = await nextEvent(reader)
-  assert.match(event, /event: PlanDraftSaved/)
+  assert.match(event, /event: ProjectionChanged/)
   assert.match(event, /data: \{"snapshotVersion"/)
   const replay = await fetch(`${base}/api/commands/save-plan-draft`, {
     method: 'POST',
@@ -4639,7 +4706,7 @@ test('SQLite accepts one immutable RunDefinition from a ready persisted plan and
   assert.equal(result.runDefinition.sourcePlanRevision, draft.plan.revision)
   assert.equal(result.snapshot.plan.runEligible, true)
   const event = await nextEvent(reader)
-  assert.match(event, /event: RunDefinitionAccepted/)
+  assert.match(event, /event: ProjectionChanged/)
   const replay = await fetch(`${base}/api/commands/accept-run-definition`, {
     method: 'POST',
     body: JSON.stringify(command),
@@ -4743,9 +4810,8 @@ test('SQLite accepts one immutable RunDefinition from a ready persisted plan and
     0,
   )
   assert.equal(
-    (await fetch(`${base}/api/snapshot`).then((response) => response.json()))
-      .run,
-    null,
+    (await bootstrapSnapshot(`${base}/api/snapshot`)).activeRun._tag,
+    'None',
   )
   await reader?.cancel()
   await listener.close()
@@ -4849,7 +4915,7 @@ test('an accepted fake RunDefinition advances two immutable sequences through du
     startedRun.target,
     accepted.runDefinition.plan.sequences[0].target,
   )
-  assert.match(await nextEvent(reader), /event: RunStarted/)
+  assert.match(await nextEvent(reader), /event: ProjectionChanged/)
   assert.equal(
     (
       await fetch(`${base}/api/commands/start-run`, {
@@ -4869,16 +4935,17 @@ test('an accepted fake RunDefinition advances two immutable sequences through du
     409,
   )
   assert.equal(service.advanceFakeRun()?.run.phase, 'acquire')
-  assert.match(await nextEvent(reader), /event: RunPreflightCompleted/)
+  assert.match(await nextEvent(reader), /event: ProjectionChanged/)
   assert.equal(service.advanceFakeRun()?.run.phase, 'capture')
-  assert.match(await nextEvent(reader), /event: RunAcquireCompleted/)
-  const beforePause = await fetch(`${base}/api/snapshot`).then((response) =>
-    response.json(),
-  )
+  assert.match(await nextEvent(reader), /event: ProjectionChanged/)
+  const beforePause = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(beforePause.activeRun._tag, 'Active')
+  if (beforePause.activeRun._tag !== 'Active')
+    throw new Error('Fake run is missing before pause')
   const pause = {
     _tag: 'PauseRun',
     expectedLeaseRevision: beforePause.control.revision,
-    expectedRunRevision: beforePause.run.revision,
+    expectedRunRevision: beforePause.activeRun.run.revision,
     idempotencyKey: 'fake-run-pause',
   }
   const paused = await fetch(`${base}/api/commands/pause-run`, {
@@ -4889,7 +4956,7 @@ test('an accepted fake RunDefinition advances two immutable sequences through du
   const pausedBody = await paused.json()
   assert.equal(pausedBody.snapshot.run.phase, 'paused')
   assert.equal(pausedBody.snapshot.run.resumablePhase, 'capture')
-  assert.match(await nextEvent(reader), /event: RunPaused/)
+  assert.match(await nextEvent(reader), /event: ProjectionChanged/)
   assert.equal(
     (
       await fetch(`${base}/api/commands/pause-run`, {
@@ -4924,21 +4991,19 @@ test('an accepted fake RunDefinition advances two immutable sequences through du
   const recoveredStream = await fetch(`${recoveredBase}/api/events`)
   const recoveredReader = recoveredStream.body?.getReader()
   await recoveredReader?.read()
-  const afterRestart = await fetch(`${recoveredBase}/api/snapshot`).then(
-    (response) => response.json(),
-  )
-  assert.equal(afterRestart.run.phase, 'paused')
-  assert.equal(afterRestart.run.resumablePhase, 'capture')
-  assert.equal(afterRestart.run.activeSequenceIndex, 0)
-  assert.equal(afterRestart.run.completedSequenceCount, 0)
-  assert.equal(afterRestart.run.sourceDefinitionId, accepted.runDefinition.id)
+  const afterRestart = await bootstrapSnapshot(`${recoveredBase}/api/snapshot`)
+  assert.equal(afterRestart.activeRun._tag, 'Active')
+  if (afterRestart.activeRun._tag !== 'Active')
+    throw new Error('Paused fake run is missing after restart')
+  assert.equal(afterRestart.activeRun.run.phase, 'paused')
+  assert.equal(afterRestart.activeRun.run.completedSequenceCount, 0)
   assert.equal(recovered.advanceFakeRun(), undefined)
   const notPaused = await fetch(`${recoveredBase}/api/commands/resume-run`, {
     method: 'POST',
     body: JSON.stringify({
       _tag: 'ResumeRun',
       expectedLeaseRevision: afterRestart.control.revision,
-      expectedRunRevision: afterRestart.run.revision - 1,
+      expectedRunRevision: afterRestart.activeRun.run.revision - 1,
       idempotencyKey: 'fake-run-stale-resume',
     }),
   })
@@ -4949,7 +5014,7 @@ test('an accepted fake RunDefinition advances two immutable sequences through du
     body: JSON.stringify({
       _tag: 'ResumeRun',
       expectedLeaseRevision: afterRestart.control.revision,
-      expectedRunRevision: afterRestart.run.revision,
+      expectedRunRevision: afterRestart.activeRun.run.revision,
       idempotencyKey: 'fake-run-resume',
     }),
   })
@@ -4957,25 +5022,24 @@ test('an accepted fake RunDefinition advances two immutable sequences through du
   assert.equal((await resumed.json()).snapshot.run.phase, 'capture')
   assert.equal(recovered.advanceFakeRun()?.run.phase, 'verify')
   assert.equal(recovered.advanceFakeRun()?.run.phase, 'preflight')
-  const secondSequence = await fetch(`${recoveredBase}/api/snapshot`).then(
-    (response) => response.json(),
+  const secondSequence = await bootstrapSnapshot(
+    `${recoveredBase}/api/snapshot`,
   )
-  assert.equal(secondSequence.run.activeSequenceIndex, 1)
-  assert.equal(secondSequence.run.completedSequenceCount, 1)
+  assert.equal(secondSequence.activeRun._tag, 'Active')
+  if (secondSequence.activeRun._tag === 'Active')
+    assert.equal(secondSequence.activeRun.run.completedSequenceCount, 1)
   assert.equal(recovered.advanceFakeRun()?.run.phase, 'acquire')
   assert.equal(recovered.advanceFakeRun()?.run.phase, 'capture')
   assert.equal(recovered.advanceFakeRun()?.run.phase, 'verify')
   assert.equal(recovered.advanceFakeRun()?.run.phase, 'completed')
-  assert.match(
-    await nextEvent(recoveredReader),
-    /event: RunResumed|event: RunCaptureCompleted/,
-  )
-  const completed = await fetch(`${recoveredBase}/api/snapshot`).then(
-    (response) => response.json(),
-  )
-  assert.equal(completed.run.phase, 'completed')
-  assert.equal(completed.run.completedSequenceCount, 2)
-  assert.equal(completed.run.revision, 11)
+  assert.match(await nextEvent(recoveredReader), /event: ProjectionChanged/)
+  const completed = await bootstrapSnapshot(`${recoveredBase}/api/snapshot`)
+  assert.equal(completed.activeRun._tag, 'Active')
+  if (completed.activeRun._tag === 'Active') {
+    assert.equal(completed.activeRun.run.phase, 'completed')
+    assert.equal(completed.activeRun.run.completedSequenceCount, 2)
+    assert.equal(completed.activeRun.run.revision, 11)
+  }
   assert.equal(recovered.advanceFakeRun(), undefined)
   assert.equal(
     databaseRow(
@@ -5015,10 +5079,10 @@ test('fixture installation restores only a missing M27 plan record and keeps a s
   const restoredBase = `http://127.0.0.1:${restoredListener.port}`
   assert.equal(
     (
-      await fetch(`${restoredBase}/api/snapshot`).then((response) =>
+      await fetch(`${restoredBase}/api/workspaces/plan`).then((response) =>
         response.json(),
       )
-    ).plan.id,
+    ).planId,
     'plan-m27',
   )
   const restoredShell = await fetch(`${restoredBase}/`).then((response) =>
@@ -5065,11 +5129,8 @@ test('fixture installation restores only a missing M27 plan record and keeps a s
     await recoveredListener.close()
     recovered.close()
   })
-  const snapshot = await fetch(`${recoveredBase}/api/snapshot`).then(
-    (response) => response.json(),
-  )
-  assert.equal(snapshot.plan.readiness, 'ready')
-  assert.equal(snapshot.plan.runEligible, false)
+  const snapshot = await bootstrapSnapshot(`${recoveredBase}/api/snapshot`)
+  assert.equal(snapshot.activeRun._tag, 'None')
   const shell = await fetch(`${recoveredBase}/`).then((response) =>
     response.text(),
   )
@@ -5097,10 +5158,10 @@ test('a request query cannot select phone or controller capability', async (t) =
   const service = createFixtureService()
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
-  const queried = await fetch(`${base}/api/snapshot?mode=phone`, {
+  const queried = await bootstrapSnapshot(`${base}/api/snapshot?mode=phone`, {
     headers: { 'x-client-capability': 'readOnly' },
-  }).then((response) => response.json())
-  assert.equal(queried.identity.capability, 'controlCapable')
+  })
+  assert.equal(queried.membership.capability, 'controlCapable')
   const phoneService = createFixtureService(':memory:', () => ({
     personId: 'owner-chicks',
     clientId: 'phone-monitor',
@@ -5113,10 +5174,10 @@ test('a request query cannot select phone or controller capability', async (t) =
     await phoneListener.close()
     phoneService.close()
   })
-  const trustedPhone = await fetch(
+  const trustedPhone = await bootstrapSnapshot(
     `http://127.0.0.1:${phoneListener.port}/api/snapshot?mode=desktop`,
-  ).then((response) => response.json())
-  assert.equal(trustedPhone.identity.capability, 'readOnly')
+  )
+  assert.equal(trustedPhone.membership.capability, 'readOnly')
   const html = await fetch(`http://127.0.0.1:${phoneListener.port}/`).then(
     (response) => response.text(),
   )
@@ -5134,10 +5195,7 @@ test('a request query cannot select phone or controller capability', async (t) =
     html,
     /if\(label==='Run plan'\)return document\.createComment\('Run plan deferred'\)/,
   )
-  assert.match(
-    html,
-    /function eventProjection\(event\)\{const payload=JSON\.parse\(event\.data\);return payload\.snapshot\|\|payload\}/,
-  )
+  assert.match(html, /function bootstrapProjection\(data\)/)
   assert.match(html, /if\(innerWidth<=600\)return/)
   assert.match(
     html,
@@ -5229,7 +5287,7 @@ test('SSE sends a snapshot before durable cursor catch-up and never replays a co
   const reader = stream.body?.getReader()
   assert.notEqual(reader, undefined)
   const first = await nextEvent(reader)
-  assert.match(first, /event: snapshot/)
+  assert.match(first, /event: ProjectionChanged/)
   const started = await fetch(`${base}/api/commands/start-run`, {
     method: 'POST',
     body: JSON.stringify({
@@ -5242,7 +5300,7 @@ test('SSE sends a snapshot before durable cursor catch-up and never replays a co
   })
   assert.equal(started.status, 202)
   const next = await nextEvent(reader)
-  assert.match(next, /event: RunStarted/)
+  assert.match(next, /event: ProjectionChanged/)
   await reader?.cancel()
   await listener.close()
   service.close()
@@ -5274,7 +5332,7 @@ test('browser reconnect installs a current snapshot and its stale shell offers n
   const reconnectStream = await fetch(`${base}/api/events`)
   const reconnectReader = reconnectStream.body?.getReader()
   const reconnect = await nextEvent(reconnectReader)
-  assert.match(reconnect, /event: snapshot/)
+  assert.match(reconnect, /event: ProjectionChanged/)
   assert.match(reconnect, /"phase":"capture"/)
   assert.equal(
     databaseRow(
@@ -5382,13 +5440,15 @@ test('expired reconnect grace survives restart, releases control to nobody, and 
     await recoveredListener.close()
     recovered.close()
   })
-  const snapshot = await fetch(
+  const snapshot = await bootstrapSnapshot(
     `http://127.0.0.1:${recoveredListener.port}/api/snapshot`,
-  ).then((response) => response.json())
-  assert.equal(snapshot.control.holderClientId, null)
+  )
+  assert.equal(snapshot.control.holderClientId, undefined)
   assert.equal(snapshot.control.state, 'unheld')
   assert.equal(snapshot.control.revision, 4)
-  assert.equal(snapshot.run.phase, 'capture')
+  assert.equal(snapshot.activeRun._tag, 'Active')
+  if (snapshot.activeRun._tag === 'Active')
+    assert.equal(snapshot.activeRun.run.phase, 'capture')
   assert.equal(
     databaseRow(
       EventTypeRow,
@@ -5428,9 +5488,7 @@ test('two server-configured desktops transfer control without stopping the accep
   })
   const ownerBase = `http://127.0.0.1:${ownerListener.port}`
   const friendBase = `http://127.0.0.1:${friendListener.port}`
-  const initial = await fetch(`${ownerBase}/api/snapshot`).then((response) =>
-    response.json(),
-  )
+  const initial = await bootstrapSnapshot(`${ownerBase}/api/snapshot`)
   await fetch(`${ownerBase}/api/commands/start-run`, {
     method: 'POST',
     body: JSON.stringify({
@@ -5471,11 +5529,11 @@ test('two server-configured desktops transfer control without stopping the accep
     oldResult.message,
     'Control changed hands. Your command was not sent to the observatory; the accepted run continues.',
   )
-  const after = await fetch(`${friendBase}/api/snapshot`).then((response) =>
-    response.json(),
-  )
+  const after = await bootstrapSnapshot(`${friendBase}/api/snapshot`)
   assert.equal(after.control.holderClientId, 'desktop-ada')
-  assert.equal(after.run.phase, 'capture')
+  assert.equal(after.activeRun._tag, 'Active')
+  if (after.activeRun._tag === 'Active')
+    assert.equal(after.activeRun.run.phase, 'capture')
   assert.equal(
     databaseRow(
       CountRow,
@@ -5537,7 +5595,10 @@ test('an owner SSE projection advances when a friend writes the shared SQLite da
   ])
   const text = new TextDecoder().decode(changed?.value)
   assert.match(text, /event: ProjectionChanged/)
-  assert.match(text, /desktop-ada/)
+  assert.match(
+    text,
+    /id: 1\nevent: ProjectionChanged\ndata: \{"snapshotVersion":2,"eventCursor":1/,
+  )
   await reader?.cancel()
   await ownerListener.close()
   await friendListener.close()
@@ -5606,7 +5667,169 @@ test('generated fixture shell has executable browser JavaScript', () => {
   assert.match(script, /Acquire · fake run is centering/)
   assert.match(script, /Verify · fake run is checking/)
   assert.doesNotMatch(script, /Capture · M27 is continuing/)
+  assert.match(script, /function validBootstrap\(data\)/)
+  assert.match(script, /id!==data\.eventCursor/)
+  assert.match(script, /data\.eventCursor!==eventCursor\+1/)
+  assert.match(script, /data\.snapshotVersion<snapshotVersion/)
+  assert.match(script, /function markStale\(\)/)
+  assert.match(script, /e\.onerror=\(\)=>reconnect\(\)/)
 })
+
+test('generated shell refreshes bootstrap truth after malformed and out-of-order SSE', async () => {
+  const script = applicationShell({ fixture: true }).match(
+    /<script>([\s\S]*)<\/script>/,
+  )?.[1]
+  if (script === undefined) throw new Error('Fixture shell script is missing')
+  const nodes = new Map<string, ReturnType<typeof shellNode>>()
+  const node = (selector: string) => {
+    const existing = nodes.get(selector)
+    if (existing !== undefined) return existing
+    const created = shellNode()
+    nodes.set(selector, created)
+    return created
+  }
+  const snapshots = [
+    shellBootstrap(1, 1),
+    shellBootstrap(4, 4),
+    shellBootstrap(5, 5),
+    new Error('offline'),
+    shellBootstrap(6, 6),
+  ]
+  const fetches: Array<{ readonly path: string; readonly init?: unknown }> = []
+  const context = createContext({
+    document: {
+      querySelector: node,
+      querySelectorAll: () => [],
+      createElement: () => shellNode(),
+      createComment: () => shellNode(),
+    },
+    EventSource: class {
+      readonly listeners = new Map<string, (event: ShellEvent) => void>()
+      onerror: (() => void) | undefined
+      addEventListener(type: string, listener: (event: ShellEvent) => void) {
+        this.listeners.set(type, listener)
+      }
+    },
+    fetch: async (path: string, init?: unknown) => {
+      fetches.push({ path, ...(init === undefined ? {} : { init }) })
+      if (path === '/api/snapshot') {
+        const next = snapshots.shift()
+        if (next instanceof Error) throw next
+        return { json: async () => ({ ok: true, data: next }) }
+      }
+      return { json: async () => shellPlan }
+    },
+    crypto: { randomUUID: () => 'command-id' },
+    queueMicrotask,
+    addEventListener: () => undefined,
+    innerWidth: 1440,
+  })
+  new Script(
+    `${script};globalThis.shell={eventProjection,refreshProjection,reconnect,send}`,
+  ).runInContext(context)
+  const shell: unknown = new Script('shell').runInContext(context)
+  if (!isShellHarness(shell)) throw new Error('Shell harness is unavailable')
+  await shell.refreshProjection()
+  await settleShell()
+  const emit = (cursor: number, data: unknown) =>
+    shell.eventProjection({
+      lastEventId: String(cursor),
+      data: JSON.stringify(data),
+    })
+  emit(1, shellBootstrap(1, 1))
+  emit(2, shellBootstrap(2, 2))
+  emit(4, shellBootstrap(4, 4))
+  await settleShell()
+  emit(5, shellBootstrap(1, 5))
+  await settleShell()
+  shell.eventProjection({ lastEventId: '6', data: '{' })
+  await shell.send('/api/commands/control', {})
+  await settleShell()
+  shell.reconnect()
+  await settleShell()
+  assert.equal(nodes.get('#runfact')?.textContent, 'M27 · capture')
+  assert.equal(fetches.filter(({ path }) => path === '/api/snapshot').length, 5)
+  assert.equal(
+    fetches.some(({ init }) => init !== undefined),
+    false,
+  )
+})
+
+function shellNode() {
+  return {
+    textContent: '',
+    hidden: false,
+    disabled: false,
+    style: {},
+    className: '',
+    classList: { toggle: () => undefined },
+    replaceChildren: () => undefined,
+    append: () => undefined,
+    addEventListener: () => undefined,
+    toggleAttribute: () => undefined,
+  }
+}
+
+const shellPlan = {
+  planId: 'plan-m27',
+  revision: 1,
+  readiness: 'ready',
+  readinessSummary: 'Ready.',
+  sequences: [],
+  limitations: [],
+}
+
+function shellBootstrap(snapshotVersion: number, eventCursor: number) {
+  return {
+    snapshotVersion,
+    eventCursor,
+    generatedAt: '2026-08-02T20:00:00Z',
+    membership: {
+      personId: 'owner-chicks',
+      role: 'owner',
+      clientId: 'desktop-owner',
+      capability: 'controlCapable',
+    },
+    control: { revision: 1, state: 'held', holderClientId: 'desktop-owner' },
+    activeRun: {
+      _tag: 'Active',
+      run: {
+        runId: 'run-m27-001',
+        revision: 1,
+        phase: 'capture',
+        target: 'M27',
+        progress: 0.5,
+        completedSequenceCount: 1,
+      },
+    },
+    health: {},
+  }
+}
+
+async function settleShell() {
+  for (let index = 0; index < 10; index += 1) await Promise.resolve()
+}
+
+type ShellEvent = { readonly lastEventId: string; readonly data: string }
+
+function isShellHarness(value: unknown): value is {
+  readonly eventProjection: (event: ShellEvent) => void
+  readonly refreshProjection: () => Promise<void>
+  readonly reconnect: () => void
+  readonly send: (path: string, payload: unknown) => Promise<void>
+} {
+  if (typeof value !== 'object' || value === null) return false
+  return (
+    'eventProjection' in value &&
+    typeof value.eventProjection === 'function' &&
+    'refreshProjection' in value &&
+    typeof value.refreshProjection === 'function' &&
+    'reconnect' in value &&
+    typeof value.reconnect === 'function' &&
+    'send' in value &&
+    typeof value.send === 'function'
+  )
+}
 
 test('fake run resolution and consequence-aware edits persist only durable fake state', async (t) => {
   const databasePath = join(
@@ -5659,9 +5882,10 @@ test('fake run resolution and consequence-aware edits persist only durable fake 
     await first.listener.close()
     first.service.close()
   })
-  const snapshot = await fetch(`${first.base}/api/snapshot`).then((response) =>
-    response.json(),
-  )
+  const snapshot = await bootstrapSnapshot(`${first.base}/api/snapshot`)
+  assert.equal(snapshot.activeRun._tag, 'Active')
+  if (snapshot.activeRun._tag !== 'Active')
+    throw new Error('Run mutation requires an active run')
   const previewResponse = await fetch(
     `${first.base}/api/commands/preview-run-mutation`,
     {
@@ -5670,7 +5894,7 @@ test('fake run resolution and consequence-aware edits persist only durable fake 
         _tag: 'PreviewRunMutation',
         mutation: 'reprioritizeSecond',
         expectedLeaseRevision: snapshot.control.revision,
-        expectedRunRevision: snapshot.run.revision,
+        expectedRunRevision: snapshot.activeRun.run.revision,
         idempotencyKey: 'final-preview',
       }),
     },
@@ -5686,7 +5910,7 @@ test('fake run resolution and consequence-aware edits persist only durable fake 
         _tag: 'PreviewRunMutation',
         mutation: 'shortenSecond',
         expectedLeaseRevision: snapshot.control.revision,
-        expectedRunRevision: snapshot.run.revision,
+        expectedRunRevision: snapshot.activeRun.run.revision,
         idempotencyKey: 'final-expired-preview',
       }),
     },
@@ -5702,7 +5926,7 @@ test('fake run resolution and consequence-aware edits persist only durable fake 
         _tag: 'ApplyRunMutation',
         previewId: expired.preview.previewId,
         expectedLeaseRevision: snapshot.control.revision,
-        expectedRunRevision: snapshot.run.revision,
+        expectedRunRevision: snapshot.activeRun.run.revision,
         idempotencyKey: 'final-expired-apply',
       }),
     },
@@ -5715,7 +5939,7 @@ test('fake run resolution and consequence-aware edits persist only durable fake 
       _tag: 'ApplyRunMutation',
       previewId: preview.preview.previewId,
       expectedLeaseRevision: snapshot.control.revision,
-      expectedRunRevision: snapshot.run.revision,
+      expectedRunRevision: snapshot.activeRun.run.revision,
       idempotencyKey: 'final-apply',
     }),
   })
@@ -5731,7 +5955,7 @@ test('fake run resolution and consequence-aware edits persist only durable fake 
         _tag: 'ApplyRunMutation',
         previewId: preview.preview.previewId,
         expectedLeaseRevision: snapshot.control.revision,
-        expectedRunRevision: snapshot.run.revision,
+        expectedRunRevision: snapshot.activeRun.run.revision,
         idempotencyKey: 'final-apply',
       }),
     },
@@ -5861,19 +6085,23 @@ test('fake run resolution and consequence-aware edits persist only durable fake 
     await skip.listener.close()
     skip.service.close()
   })
-  const skipSnapshot = await fetch(`${skip.base}/api/snapshot`).then(
-    (response) => response.json(),
-  )
+  const skipSnapshot = await bootstrapSnapshot(`${skip.base}/api/snapshot`)
+  assert.equal(skipSnapshot.activeRun._tag, 'Active')
+  if (skipSnapshot.activeRun._tag !== 'Active')
+    throw new Error('Skip requires an active run')
   const skipped = await fetch(`${skip.base}/api/commands/skip-fake-sequence`, {
     method: 'POST',
     body: JSON.stringify({
       expectedLeaseRevision: skipSnapshot.control.revision,
-      expectedRunRevision: skipSnapshot.run.revision,
+      expectedRunRevision: skipSnapshot.activeRun.run.revision,
       idempotencyKey: 'final-skip-once',
     }),
   }).then((response) => response.json())
   assert.equal(skipped.snapshot.run.activeSequenceIndex, 1)
-  assert.equal(skipped.snapshot.run.revision, skipSnapshot.run.revision + 1)
+  assert.equal(
+    skipped.snapshot.run.revision,
+    skipSnapshot.activeRun.run.revision + 1,
+  )
   assert.equal(
     databaseRow(
       CountRow,
@@ -5893,19 +6121,23 @@ test('fake run resolution and consequence-aware edits persist only durable fake 
     await stopped.listener.close()
     stopped.service.close()
   })
-  const stopSnapshot = await fetch(`${stopped.base}/api/snapshot`).then(
-    (response) => response.json(),
-  )
+  const stopSnapshot = await bootstrapSnapshot(`${stopped.base}/api/snapshot`)
+  assert.equal(stopSnapshot.activeRun._tag, 'Active')
+  if (stopSnapshot.activeRun._tag !== 'Active')
+    throw new Error('Stop requires an active run')
   const stop = await fetch(`${stopped.base}/api/commands/stop-run`, {
     method: 'POST',
     body: JSON.stringify({
       expectedLeaseRevision: stopSnapshot.control.revision,
-      expectedRunRevision: stopSnapshot.run.revision,
+      expectedRunRevision: stopSnapshot.activeRun.run.revision,
       idempotencyKey: 'final-stop-once',
     }),
   }).then((response) => response.json())
   assert.equal(stop.snapshot.run.phase, 'stopped')
-  assert.equal(stop.snapshot.run.revision, stopSnapshot.run.revision + 1)
+  assert.equal(
+    stop.snapshot.run.revision,
+    stopSnapshot.activeRun.run.revision + 1,
+  )
   assert.equal(
     databaseRow(
       CountRow,

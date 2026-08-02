@@ -14,7 +14,18 @@ import {
 } from 'node:crypto'
 import { mkdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { Effect, Schema } from 'effect'
+import { Context, Effect, Layer, Schema } from 'effect'
+import {
+  BootstrapHttpFailureEnvelope,
+  BootstrapHttpSuccessEnvelope,
+  BootstrapSseEventEnvelope,
+  BootstrapSnapshot,
+  Command,
+  CommandEnvelope,
+  CommandFailure,
+  CommandHttpFailureEnvelope,
+  CommandHttpSuccessEnvelope,
+} from '@astro-console/v2-contracts'
 import { decodeSeestarPushEvent } from 'seestar-sdk'
 import {
   cleanupProcessOrphans,
@@ -634,6 +645,30 @@ type CommandResult =
       readonly reason: FailureReason
       readonly message: string
     }
+class CommandRejected extends Schema.TaggedErrorClass<CommandRejected>()(
+  'Server.CommandRejected',
+  { failure: CommandFailure },
+) {}
+class CommandInputInvalid extends Schema.TaggedErrorClass<CommandInputInvalid>()(
+  'Server.CommandInputInvalid',
+  {},
+) {}
+interface ControlCommandServiceShape {
+  readonly execute: (
+    commandId: string,
+    command: typeof controlEnvelopeCommand.Type,
+  ) => Effect.Effect<
+    {
+      readonly status: number
+      readonly body: typeof CommandHttpSuccessEnvelope.Type
+    },
+    CommandRejected | Schema.SchemaError
+  >
+}
+class ControlCommandService extends Context.Service<
+  ControlCommandService,
+  ControlCommandServiceShape
+>()('Server.ControlCommandService') {}
 type PlanReadiness = 'ready' | 'readyWithLimitations' | 'blocked'
 type DraftSequence = (typeof SavePlanDraft.Type)['sequences'][number]
 type PlanProjection = {
@@ -1183,10 +1218,10 @@ export function createLocalWebService(
   let closed = false
   let emittedCursor = 0
   const publish = (type: string, cursor: number) => {
+    void type
+    void cursor
     for (const [response, identity] of listeners)
-      response.write(
-        `id: ${cursor}\nevent: ${type}\ndata: ${JSON.stringify(snapshot(database, identity))}\n\n`,
-      )
+      response.write(sseProjection(database, identity))
   }
   const poll = setInterval(() => {
     expireReconnectGrace(database)
@@ -1212,13 +1247,23 @@ export function createLocalWebService(
     )
       return asset(response, brandAssetPath)
     if (identity === undefined)
-      return json(response, 401, reject('Unauthenticated').body)
+      return unauthenticated(response, request.method, url.pathname)
     if (request.method === 'GET' && url.pathname === '/')
       return state(database).plan.readiness !== 'unavailable'
         ? html(response, options.fixture === 'm27')
         : unavailableHtml(response)
     if (request.method === 'GET' && url.pathname === '/api/snapshot')
-      return json(response, 200, snapshot(database, identity))
+      return void Effect.runSync(
+        bootstrapSnapshot(database, identity).pipe(
+          Effect.flatMap((data) =>
+            Schema.decodeUnknownEffect(BootstrapHttpSuccessEnvelope)({
+              ok: true,
+              data,
+            }),
+          ),
+          Effect.map((body) => json(response, 200, body)),
+        ),
+      )
     if (request.method === 'GET' && url.pathname === '/api/health/ready')
       return json(response, 200, readiness(database))
     if (request.method === 'GET' && url.pathname === '/api/health/operations')
@@ -1227,6 +1272,36 @@ export function createLocalWebService(
         : json(response, 403, reject('OwnerRequired').body)
     if (request.method === 'GET' && url.pathname === '/api/events')
       return stream(request, response, database, identity, listeners)
+    if (request.method === 'POST' && url.pathname === '/api/commands/control')
+      return Effect.runPromise(
+        controlCommandFromEnvelope(
+          body(request),
+          database,
+          identity,
+          publish,
+        ).pipe(
+          Effect.catchTags({
+            'Server.CommandInputInvalid': () =>
+              Schema.decodeUnknownEffect(CommandHttpFailureEnvelope)({
+                ok: false,
+                failure: {
+                  _tag: 'InvalidInput',
+                  summary: 'The service could not read that action.',
+                },
+              }).pipe(Effect.map((body) => ({ status: 400, body }))),
+            'Server.CommandRejected': ({ failure }) =>
+              Schema.decodeUnknownEffect(CommandHttpFailureEnvelope)({
+                ok: false,
+                failure: { _tag: 'CommandRejected', failure },
+              }).pipe(
+                Effect.map((body) => ({
+                  status: commandFailureStatuses[failure._tag],
+                  body,
+                })),
+              ),
+          }),
+        ),
+      ).then(({ status, body }) => json(response, status, body))
     if (request.method === 'GET' && url.pathname === '/api/workspaces/plan')
       return workspace(response, database, 'plan')
     if (request.method === 'GET' && url.pathname === '/api/workspaces/process')
@@ -2952,6 +3027,87 @@ function snapshot(db: DatabaseSync, identity: LocalIdentity): Snapshot {
     connection: 'current',
   }
 }
+function bootstrapSnapshot(db: DatabaseSync, identity: LocalIdentity) {
+  const current = snapshot(db, identity)
+  const observedAt = current.generatedAt
+  return Schema.decodeUnknownEffect(BootstrapSnapshot)({
+    snapshotVersion: current.snapshotVersion,
+    eventCursor: current.eventCursor,
+    generatedAt: current.generatedAt,
+    membership: {
+      personId: identity.personId,
+      role: identity.role ?? 'viewer',
+      clientId: identity.clientId,
+      capability: identity.capability,
+    },
+    control: {
+      revision: current.control.revision,
+      state: current.control.state,
+      ...(current.control.holderClientId === null
+        ? {}
+        : { holderClientId: current.control.holderClientId }),
+      ...(current.control.reconnectGraceUntil === undefined
+        ? {}
+        : { reconnectGraceUntil: current.control.reconnectGraceUntil }),
+    },
+    activeRun:
+      current.run === null
+        ? { _tag: 'None' }
+        : {
+            _tag: 'Active',
+            run: {
+              runId: current.run.id,
+              revision: current.run.revision,
+              phase: current.run.phase,
+              target: current.run.target,
+              progress: current.run.progress,
+              completedSequenceCount: current.run.completedSequenceCount ?? 0,
+            },
+          },
+    health: {
+      service: { state: 'healthy', observedAt },
+      rig: {
+        state: 'unknown',
+        observedAt,
+        reason: 'No rig observation is connected.',
+      },
+      tunnel: {
+        state: 'unknown',
+        observedAt,
+        reason: 'No tunnel observation is connected.',
+      },
+      processing: {
+        state: 'unknown',
+        observedAt,
+        reason: 'Processing availability has not been observed.',
+      },
+      publication: {
+        state: 'unknown',
+        observedAt,
+        reason: 'Publication availability has not been observed.',
+      },
+      storage: {
+        state: 'unknown',
+        observedAt,
+        reason: 'Storage health has not been observed.',
+      },
+    },
+  })
+}
+function sseProjection(db: DatabaseSync, identity: LocalIdentity) {
+  const event = Effect.runSync(
+    bootstrapSnapshot(db, identity).pipe(
+      Effect.flatMap((data) =>
+        Schema.decodeUnknownEffect(BootstrapSseEventEnvelope)({
+          id: data.eventCursor,
+          event: 'ProjectionChanged',
+          data,
+        }),
+      ),
+    ),
+  )
+  return `id: ${event.id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`
+}
 function acceptRun(
   db: DatabaseSync,
   input: typeof StartRun.Type,
@@ -4352,6 +4508,123 @@ function decodedCommand<Input>(
     return json(response, 400, reject('InvalidInput').body)
   }
 }
+const controlEnvelopeCommand = Schema.Union([
+  Command.cases.RequestControl,
+  Command.cases.TakeControl,
+])
+const commandFailureStatuses = {
+  AuthenticationFailure: 401,
+  AuthorizationFailure: 403,
+  FreshnessConflict: 409,
+  InvalidInput: 400,
+  ActionIneligible: 409,
+  ReferenceUnavailable: 409,
+  CapabilityUnavailable: 409,
+  ResourceProtected: 409,
+  IdempotencyConflict: 409,
+} satisfies Record<CommandFailure['_tag'], number>
+const controlCommandLayer = (
+  db: DatabaseSync,
+  identity: LocalIdentity,
+  publish: (type: string, cursor: number) => void,
+) =>
+  Layer.succeed(
+    ControlCommandService,
+    ControlCommandService.of({
+      execute: Effect.fn('Server.ControlCommandService.execute')(function* (
+        commandId: string,
+        command: typeof controlEnvelopeCommand.Type,
+      ) {
+        const path = Command.guards.RequestControl(command)
+          ? '/api/commands/request-control'
+          : '/api/commands/take-control'
+        const result = acceptControl(db, path, command, identity)
+        if (result.body.outcome === 'rejected')
+          return yield* Effect.fail(
+            new CommandRejected({
+              failure: commandFailure(commandId, result.body),
+            }),
+          )
+        if (result.event !== undefined)
+          publish(result.event.type, result.event.cursor)
+        const data = yield* bootstrapSnapshot(db, identity)
+        const body = yield* Schema.decodeUnknownEffect(
+          CommandHttpSuccessEnvelope,
+        )({
+          ok: true,
+          data,
+        })
+        return { status: result.status, body }
+      }),
+    }),
+  )
+const controlCommandFromEnvelope = Effect.fn(
+  'Server.controlCommandFromEnvelope',
+)(
+  function* (
+    request: Promise<unknown | undefined | typeof BodyTooLarge>,
+    db: DatabaseSync,
+    identity: LocalIdentity,
+    publish: (type: string, cursor: number) => void,
+  ) {
+    void db
+    void identity
+    void publish
+    const raw = yield* Effect.promise(() => request)
+    if (raw === undefined || raw === BodyTooLarge)
+      return yield* Effect.fail(new CommandInputInvalid())
+    const envelope = yield* Schema.decodeUnknownEffect(CommandEnvelope)(
+      raw,
+    ).pipe(Effect.mapError(() => new CommandInputInvalid()))
+    const command = yield* Schema.decodeUnknownEffect(controlEnvelopeCommand)(
+      envelope.command,
+    ).pipe(Effect.mapError(() => new CommandInputInvalid()))
+    const service = yield* ControlCommandService
+    return yield* service.execute(envelope.commandId, command)
+  },
+  (effect, _request, db, identity, publish) =>
+    effect.pipe(Effect.provide(controlCommandLayer(db, identity, publish))),
+)
+function commandFailure(
+  commandId: string,
+  rejected: Extract<CommandResult, { readonly outcome: 'rejected' }>,
+): CommandFailure {
+  const common = {
+    commandId,
+    summary: rejected.message,
+    retryable: false,
+    refreshFromSnapshot: rejected.reason === 'FreshnessConflict',
+    safeAlternatives: [],
+  }
+  const failure =
+    rejected.reason === 'ClientReadOnly' ||
+    rejected.reason === 'ControlLeaseLost' ||
+    rejected.reason === 'OwnerRequired'
+      ? {
+          _tag: 'AuthorizationFailure',
+          ...common,
+          reason:
+            rejected.reason === 'ClientReadOnly'
+              ? 'ClientReadOnly'
+              : rejected.reason === 'ControlLeaseLost'
+                ? 'ControlLeaseLost'
+                : 'OwnerRequired',
+        }
+      : rejected.reason === 'IdempotencyConflict'
+        ? { _tag: 'IdempotencyConflict', ...common }
+        : rejected.reason === 'InvalidInput'
+          ? {
+              _tag: 'InvalidInput',
+              ...common,
+              reason: 'ProposedChangeInvalid',
+            }
+          : {
+              _tag: 'FreshnessConflict',
+              ...common,
+              reason: 'ReconnectRequired',
+            }
+  return Schema.decodeUnknownSync(CommandFailure)(failure)
+}
 const BodyTooLarge = Symbol('BodyTooLarge')
 function body(
   request: IncomingMessage,
@@ -4410,6 +4683,34 @@ function json(response: ServerResponse, status: number, value: unknown) {
     .writeHead(status, responseHeaders('application/json; charset=utf-8'))
     .end(JSON.stringify(value))
 }
+function unauthenticated(
+  response: ServerResponse,
+  method: string | undefined,
+  path: string,
+) {
+  if (method === 'GET' && path === '/api/snapshot')
+    return void Effect.runSync(
+      Schema.decodeUnknownEffect(BootstrapHttpFailureEnvelope)({
+        ok: false,
+        failure: {
+          _tag: 'AuthenticationFailure',
+          reason: 'Unauthenticated',
+          summary: 'A verified member identity is required.',
+        },
+      }).pipe(Effect.map((body) => json(response, 401, body))),
+    )
+  if (method === 'POST' && path === '/api/commands/control')
+    return void Effect.runSync(
+      Schema.decodeUnknownEffect(CommandHttpFailureEnvelope)({
+        ok: false,
+        failure: {
+          _tag: 'AuthenticationFailure',
+          summary: 'A verified member identity is required.',
+        },
+      }).pipe(Effect.map((body) => json(response, 401, body))),
+    )
+  return json(response, 401, reject('Unauthenticated').body)
+}
 function stream(
   request: IncomingMessage,
   response: ServerResponse,
@@ -4421,8 +4722,7 @@ function stream(
     ...responseHeaders('text/event-stream'),
     connection: 'keep-alive',
   })
-  const current = snapshot(db, identity)
-  response.write(`event: snapshot\ndata: ${JSON.stringify(current)}\n\n`)
+  response.write(sseProjection(db, identity))
   listeners.set(response, identity)
   const heartbeat = setInterval(() => response.write(`: heartbeat\n\n`), 15_000)
   heartbeat.unref()
