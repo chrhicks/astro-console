@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **Phases 0, 0.5, 1, and 2 complete; Production Convergence is next; Phase 3 follows**
+Status: **Phases 0, 0.5, 1, and 2 complete; Production Convergence is in progress; Phase 3 follows**
 
 This directory is organized to keep normal working context small. Do not read
 the entire V2 tree by default.
@@ -66,9 +66,10 @@ and the branch-wide quality regression has landed its bounded fixes. Phase 2
 (Plan and Managed Runs) is also closed with fake-only managed-run evidence.
 Production Convergence now promotes that infrastructure and the accepted
 Nightbook UI into `apps/server` and `apps/web`, preserving one version-matched
-rig-local origin. Its five sequential Continuum Epics begin at
-`tkt-ezxr1fsb`. Phase 3 (Observe, Acquire, and Capture) follows convergence and
-still proceeds only in separately accepted bounded vertical slices.
+rig-local origin. The first of its five sequential Continuum Epics,
+`tkt-ezxr1fsb`, is complete; production Nightbook web application work follows.
+Phase 3 (Observe, Acquire, and Capture) follows convergence and still proceeds
+only in separately accepted bounded vertical slices.
 
 ## Context Rules
 

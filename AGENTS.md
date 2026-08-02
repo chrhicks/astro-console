@@ -50,7 +50,7 @@ The `led-panel` mcp (through executor) allows you communicate to an LED Panel (c
 
 ## Local Web Dev Inspection
 
-Run `npm run dev:inspect` from `apps/v2-local-web` for UI validation of the
+Run `npm run dev:inspect` from `apps/server` for UI validation of the
 Phase 1 local-web slices. It starts only that service and a dedicated Chrome
 profile with CDP on port `9223`; it never attaches to or closes normal Chrome.
 

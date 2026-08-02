@@ -1,6 +1,6 @@
 # Astro Console V2 Delivery Plan
 
-Status: **durable V2 completion roadmap — Phases 0, 0.5, 1, and 2 complete; Production Convergence next; Phase 3 follows**
+Status: **durable V2 completion roadmap — Phases 0, 0.5, 1, and 2 complete; Production Convergence in progress; Phase 3 follows**
 
 ## Keep This Plan
 
@@ -79,8 +79,8 @@ version-matched web bundle from one logical origin.
 
 ### Outcomes
 
-- Promote `apps/v2-local-web` to `apps/server` without changing its proven
-  domain behavior, persistence, worker, deployment, or proof boundaries.
+- Promote the local-web implementation to `apps/server` without changing its
+  proven domain behavior, persistence, worker, deployment, or proof boundaries.
 - Create `apps/web` from the accepted Nightbook presentation while excluding
   prototype fixture ownership and browser-local durable substitutes.
 - Establish shared decoded snapshot, SSE, capability, command, and typed-failure
@@ -103,8 +103,9 @@ version-matched web bundle from one logical origin.
 - Plan and fake managed-run behavior, Library delivery, and current Process
   truth are available through `apps/web` and `apps/server` with wide, compact,
   and read-only phone validation.
-- `apps/v2-local-web` and the UI prototype are no longer active implementation
-  targets. Phase 3 work proceeds only in the production applications.
+- The local-web experimental path and UI prototype are no longer active
+  implementation targets. Phase 3 work proceeds only in the production
+  applications.
 
 Execution is tracked by five sequential Continuum Epics:
 `tkt-ezxr1fsb`, `tkt-n9yoieoz`, `tkt-uuom4upo`, `tkt-qffwfa47`, and

@@ -1,6 +1,6 @@
 # Production Convergence Handoff
 
-Status: **Phases 1 and 2 closed — complete Production Convergence before accepting a Phase 3 implementation slice**
+Status: **Phases 1 and 2 closed — Production Convergence in progress; complete it before accepting a Phase 3 implementation slice**
 
 ## Completed Host-Verification Bundle
 
@@ -25,7 +25,7 @@ passed at wide, compact, and 390 px phone widths.
 `4308796` is now on `main`; `v2` has no unique desktop or SDK paths. Phase 1
 does not authorize further cleanup by default.
 
-## Next Session: Begin Production Convergence
+## Current Work: Continue Production Convergence
 
 Phase 2 is closed. Its five completed slices are [Multi-Sequence Draft and
 Deterministic Validation](phase-2-planning.md#first-slice-multi-sequence-draft-and-deterministic-validation),
@@ -40,7 +40,7 @@ edits. The prepared next packet is [Read-Only Decision-Grade Preflight](phase-3-
 It remains prepared but is not the next implementation target. First complete
 the five sequential Production Convergence Epics:
 
-1. `tkt-ezxr1fsb` — promote the proven server.
+1. `tkt-ezxr1fsb` — promote the proven server. **Complete.**
 2. `tkt-n9yoieoz` — create the production Nightbook web application.
 3. `tkt-uuom4upo` — establish the decoded snapshot, SSE, capability, command,
    and failure seam.
@@ -60,14 +60,16 @@ same-host resilience. Off-host recovery is not current Phase 1 scope.
 
 ## Verified Baseline
 
-- `apps/v2-local-web` type checks and its SQLite/HTTP/SSE/worker/filesystem
+- `apps/server` type checks and its SQLite/HTTP/SSE/worker/filesystem
   integration suite pass **66/66**. The suite covers the retained local-web
   foundation, Process Save/publisher boundary, and the deliberately installed
   deterministic M27 fixture without creating generic hardware work. Normal
   origin, rig-worker, Solar CLI, publisher, and processor database opening
   runs migrations without seeding that fixture's Plan, Library, or Process data.
   A fresh origin instead reports a truthful `unavailable` plan projection until
-  an authorized workflow installs real state.
+  an authorized workflow installs real state. `apps/server` is the active
+  production implementation target; “local-web” remains only where it names
+  retained historical proof or fixture boundaries.
 - A ready persisted deterministic `ObservingPlan` can be accepted once as an
   immutable SQLite `RunDefinition` snapshot with a `fake` executor marker.
   The service revision-guards and idempotently replays acceptance, publishes

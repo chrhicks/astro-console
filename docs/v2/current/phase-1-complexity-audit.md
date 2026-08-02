@@ -20,7 +20,7 @@ goal is deletion and simplification, not a feature redesign.
 
 ## First Pass
 
-- `apps/v2-local-web`: duplicate abstractions, unnecessary persistence,
+- `apps/server`: duplicate abstractions, unnecessary persistence,
   migrations, retries, configuration, and background lifecycles.
 - Deployment: containers, profiles, mounts, and release steps that no longer
   correspond to a running role.
