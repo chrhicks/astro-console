@@ -1,6 +1,6 @@
 # V2 UI Build Contract
 
-Status: **Accepted Phase 1 visual implementation authority — Phase 0.5 closeout**
+Status: **Nightbook final visual implementation authority**
 
 Use this document with the product specification and the visual style guide to
 build production V2 UI from backing data. It defines the boundary between data,
@@ -17,13 +17,11 @@ semantic presentation, and reusable implementation.
 5. Validate keyboard, phone monitor, overflow, freshness, and stale-action
    rejection before component extraction.
 
-For visual implementation and review, inspect the operational
-[`phase-0.5 component companion`](../../../prototype/v2-ui/phase-0.5-component-library.html)
-and the accepted [`brand foundation`](../../../prototype/v2-ui/phase-0.5-brand-style-guide.html)
-with its versioned [Alignment Aperture V1 assets](../../../prototype/v2-ui/assets/brand/v1/README.md).
-The companion establishes the run/controller/evidence/service-truth register;
-the brand foundation establishes the mark, deep-night/field-ink material,
-evidence cyan, typography, and mono fact language.
+For visual implementation and review, inspect [`docs/v2-ui-final`](../../v2-ui-final/).
+Adapt its source composition and token system while retaining production route
+links, typed projections, and service-owned authority. Do not import its
+fixtures, theme runtime, viewport authority, local durable/mutation state, or
+button-based workspace navigation. Keep the Alignment Aperture asset.
 
 ## Data-To-UI Mapping
 

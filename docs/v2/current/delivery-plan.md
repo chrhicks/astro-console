@@ -34,8 +34,10 @@ reference. The authoritative design rules remain in
 
 ## Phase 0.5: Design-System Finalization — Complete
 
-The accepted visual style guide, UI component library, and UI build contract
-define the implementation visual language and responsive/accessibility bar.
+Phase 0.5 records remain historical semantic evidence. The active implementation
+visual language and responsive/accessibility bar are the current visual guide,
+component library, build contract, and [`docs/v2-ui-final`](../../v2-ui-final/)
+source and screenshots.
 
 ## Phase 1: Local Web Foundation — Complete
 

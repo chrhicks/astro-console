@@ -35,7 +35,7 @@ requires its specific detail.
 | Phase 2 slice selection and execution method | [Phase 2 implementation planning](current/phase-2-planning.md) |
 | Phase 3 slice selection and execution method | [Phase 3 implementation planning](current/phase-3-planning.md) |
 | Ideas outside V2.0 | [Post-V2.0 notes](current/v2-post-v2.0-notes.md) |
-| Phase 1 production UI implementation | Accepted [visual style guide](current/visual-style-guide.md), [UI component library](current/ui-component-library.md), and [UI build contract](current/ui-build-contract.md) |
+| Production UI visual implementation | Owner-corrected [visual style guide](current/visual-style-guide.md), [UI component library](current/ui-component-library.md), [UI build contract](current/ui-build-contract.md), and [`docs/v2-ui-final`](../../docs/v2-ui-final/) visual evidence |
 | Why Phase 0.5 made a specific visual decision | [Phase 0.5 design-system archive](archive/phase-0.5/README.md) — historical only; do not use for active implementation authority |
 | Accepted interaction evidence or candidate contracts | The relevant document under [accepted gates](gates/README.md) |
 | Deployment, Cloudflare, storage, security, or operations | [Infrastructure plan](infra/README.md), then only its relevant section |
@@ -66,10 +66,16 @@ and the branch-wide quality regression has landed its bounded fixes. Phase 2
 (Plan and Managed Runs) is also closed with fake-only managed-run evidence.
 Production Convergence now promotes that infrastructure and the accepted
 Nightbook UI into `apps/server` and `apps/web`, preserving one version-matched
-rig-local origin. The first of its five sequential Continuum Epics,
-`tkt-ezxr1fsb`, is complete; production Nightbook web application work follows.
+rig-local origin. The first two of its five sequential Continuum Epics,
+`tkt-ezxr1fsb` and `tkt-n9yoieoz`, are complete; the real decoded client seam
+follows.
 Phase 3 (Observe, Acquire, and Capture) follows convergence and still proceeds
 only in separately accepted bounded vertical slices.
+
+Owner clarification: `docs/v2-ui-final` represents intended `apps/web`
+production visuals. Phase 0.5 visual material is historical/semantic only;
+proof wording must distinguish final-study visual conformance from runtime
+fixture behavior.
 
 ## Context Rules
 

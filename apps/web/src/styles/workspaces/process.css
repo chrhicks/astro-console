@@ -1,0 +1,100 @@
+.process-workspace {
+  grid-template-columns: 14rem minmax(30rem, 1fr) 19rem;
+}
+.process-steps {
+  border-right: 1px solid var(--color-border-strong);
+}
+.process-steps h2 {
+  margin: var(--space-8) 0 var(--space-16);
+}
+.process-steps button {
+  display: block;
+  width: 100%;
+  margin-bottom: var(--space-8);
+  padding: var(--space-12);
+  text-align: left;
+}
+.process-canvas {
+  display: grid;
+  min-height: 30rem;
+  grid-template-rows: 2.5rem minmax(22rem, 1fr) 2rem;
+  padding: 0 var(--space-16) var(--space-16);
+  background: var(--color-surface);
+}
+.process-steps button[data-selected='true'] {
+  border-color: var(--color-primary);
+  background: var(--color-surface-current);
+}
+.process-steps > div {
+  margin-top: var(--space-24);
+}
+.process-canvas header,
+.process-canvas footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+.process-canvas footer b {
+  color: var(--color-safe);
+}
+.process-image {
+  min-height: 22rem;
+  overflow: hidden;
+  border: 1px solid var(--color-border-strong);
+}
+.process-rail {
+  border-left: 1px solid var(--color-border-strong);
+}
+.process-rail p {
+  color: var(--color-text-muted);
+}
+.policy-trace {
+  display: grid;
+  gap: var(--space-8);
+  margin: var(--space-16) 0;
+  padding: var(--space-12);
+  border: var(--border-width) solid var(--color-border-strong);
+  background: var(--color-surface-raised);
+  font-size: 0.8125rem;
+}
+@media (max-width: 1080px) and (min-width: 601px) {
+  .process-workspace {
+    grid-template-columns: 11rem minmax(0, 1fr);
+    grid-template-rows: minmax(35rem, 1fr) auto;
+    overflow-y: auto;
+  }
+  .process-rail {
+    grid-column: 1 / -1;
+    border-top: var(--border-width) solid var(--color-border-strong);
+    border-left: 0;
+  }
+}
+@media (max-width: 600px) {
+  .process-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(22rem, 1fr);
+  }
+  .process-canvas {
+    grid-row: 2;
+    min-height: 25rem;
+    grid-template-rows: auto minmax(22rem, 1fr) auto;
+  }
+  .process-canvas header,
+  .process-canvas footer {
+    display: grid;
+    gap: var(--space-4);
+    justify-content: stretch;
+  }
+  .process-canvas h1 {
+    min-width: 0;
+  }
+  .process-rail {
+    display: none;
+  }
+  .process-steps button {
+    display: none;
+  }
+}

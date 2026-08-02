@@ -1,11 +1,17 @@
 # V2 Visual Style Guide
 
-Status: **Accepted Phase 1 visual implementation authority — Phase 0.5 closeout**
+Status: **Nightbook final visual implementation authority**
 
 This guide tells an implementation agent how V2 should look and read after the
 product model is already known. It is not permission to change that model.
 
 ## Authority And Conflict Rule
+
+Owner clarification: [`docs/v2-ui-final`](../../v2-ui-final/) is the
+representative production visual authority for `apps/web`; its source and
+screenshots are visual evidence. This document conforms to that study. Phase
+0.5 prototypes remain semantic and historical evidence only, never current
+palette, type, shape, or composition authority.
 
 Read in this order: the [product specification](product-spec.md),
 [UX guidance](../ux-design-guidance.md), accepted contract/gate evidence, this
@@ -38,15 +44,20 @@ state, progress, health, evidence, and attention; no mutation controls.
 
 ## Material, Shape, And Type
 
+Canvas is Nightbook ink `#070b12`, with paper `#e6e1d7`, warm-sand primary
+`#c6ad7a`, and secondary blue-green `#3d9ca6` for focus and evidence distinction.
+Use the final token system for semantic colors, surfaces, disabled states,
+image fields, shadows, type, spacing, radii, and controls. Facts use 4px
+radii, controls are square, and contained evidence frames are about 10px.
 Canvas is dark and quiet. Use a surface for an owned working region, a softer
 surface for grouped facts/recessed context, and raised material only for a
 selected or temporary layered object. Depth signals attention order, not a
 card style. Keep Process's outer field quiet; luminosity, color, and depth
 belong to the image canvas and evidence objects.
 
-- 6px: dense facts and adjacent grouped items; 8px: controls/ordinary bounded
-  panels; 12px: major frames and modals. Rounded shapes must identify a real
-  contained object, image, overlay, or inspection layer.
+- Facts use 4px corners; controls are square; evidence and inspection frames
+  use the final study's approximately 10px corner. Rounded shapes identify a
+  real contained object, image, overlay, or inspection layer.
 - Primary and secondary operational text must be at least 12px. Faint text is
   decoration or nonessential large text only.
 - Labels are compact uppercase/letter-spaced only when they improve scanning;
@@ -55,7 +66,7 @@ belong to the image canvas and evidence objects.
 - Selection has visible placement/border/inset treatment; focus is a
   high-contrast outline. Color never supplies state alone.
 
-Semantic color: cyan current/selected evidence and focus; green verified,
+Semantic color: blue-green secondary for current/selected evidence and focus; green verified,
 complete, healthy, or safely retained; amber waiting/pressure/approval;
 red failed, blocked, destructive, or unsafe; blue read-only; violet optional
 lineage distinction. Every use also has text, icon, or structure.
@@ -98,22 +109,20 @@ and consequential-state coverage over ornamental differentiation.
 
 | Role | Reference | Use |
 | --- | --- | --- |
-| canvas | `#080c10` | application background; never a raised card substitute |
-| surface / soft / raised | `#0e141a` / `#111920` / `#151d25` | owned work / grouped facts / selected or bounded raised region |
-| line / strong line | `#26333e` / `#3a4a57` | ordinary relationship / major frame or control boundary |
-| text / muted / faint | `#e9f0f4` / `#91a0aa` / `#667680` | primary / secondary operational / decorative only |
-| accent / strong | `#67d5df` / `#a2f3f4` | current evidence, selection, focus, primary action |
-| success / attention / danger | `#7dd3a7` / `#f3bb62` / `#ff7c79` | verified / waiting-or-approval / failed-or-destructive |
-| readonly / lineage | `#8fb6ff` / `#bea4ff` | monitoring capability / optional derivation distinction |
+| core ink / paper | `#070b12` / `#e6e1d7` | canvas / primary text |
+| core primary / secondary / tertiary | `#c6ad7a` / `#3d9ca6` / `#80679c` | selected working object / focus and evidence / image depth |
+| core safe / danger / attention / neutral | `#70ae94` / `#d36e64` / `#e4a443` / `#a9aeb7` | verified / failed / waiting / neutral facts |
+| surface / raised / current | derived from ink, neutral-dark-1, and primary at `14%` | owned work / selected or bounded material / current context |
+| text / secondary / faint | paper / paper at `72%` mixed with neutral / neutral mixed with ink at `55%` | primary / operational / decorative only |
+| border / strong border | neutral-dark-1 mixed with ink at `18%` / neutral mixed with ink at `38%` | relationship / major frame or control boundary |
+| primary / secondary / image | primary-light-1 / secondary-light-1 / secondary-dark-1 mixed with ink at `38%` | selection / focus / evidence field |
 
 | Type role | Size and line height | Use |
 | --- | --- | --- |
-| screen title | 34–64px / 1.02 | one workspace question or major reference title |
-| workspace heading | 24–34px / 1.15 | native object and decision context |
-| panel heading | 15–20px / 1.25 | contained evidence or inspection subject |
-| body / action | 14px minimum / 1.45 | decisions, explanations, controls |
-| supporting operation text | 12px minimum / 1.35 | facts, labels, timestamps, bounds, provenance |
-| mono fact | 12–13px / 1.35 | offsets, progress, IDs, duration, attempt counts |
+| display | 24px / 1.15 | workspace title or major reference title |
+| heading | 20px / 1.25 | contained evidence or inspection subject |
+| body | 14px / 1.5 | decisions, explanations, controls |
+| fact | 12px / 1.35 | facts, labels, timestamps, bounds, provenance |
 
 Use a 4px base spacing rhythm: 4/8 for tightly related facts, 12/16 for a
 contained region, 20/24 for a working-object boundary, and 32/48 for a screen
@@ -125,29 +134,28 @@ removed or reduced under `prefers-reduced-motion`.
 
 ## Canonical Visual Evidence
 
-The operational visual reference is
-[`phase-0.5-component-library.html`](../../../prototype/v2-ui/phase-0.5-component-library.html).
-Implementation and review must inspect it directly for the shared status
-register, fact treatment, evidence surfaces, and workspace-native structures.
-The accepted brand/type/palette foundation and Alignment Aperture V1 mark are
-[`phase-0.5-brand-style-guide.html`](../../../prototype/v2-ui/phase-0.5-brand-style-guide.html)
-and its versioned [`brand V1 package`](../../../prototype/v2-ui/assets/brand/v1/README.md).
-Use those exact references rather than treating their visual language as a
-generic dark dashboard.
+The final study's compact horizontal status register, native rooms, and 390px
+compositions are canonical: Plan is sequence rail / sky arcs / selected facts
+/ timeline; Observe is image / decision rail / lifecycle; Library is lineage /
+selected evidence / inspector / chronology; Process is steps / image canvas /
+operation rail. Study runtime fixtures, local mutation state, theme runtime,
+and button navigation are not production behavior authority.
 
-Use the [Composite](../../../prototype/v2-ui/composite-prototype.html),
+The operational visual reference is [`docs/v2-ui-final`](../../v2-ui-final/):
+its source CSS, components, workspaces, and screenshots are direct visual and
+composition authority. Adapt them closely; do not approximate their palette,
+type, status register, evidence surfaces, native rooms, compact reflows, or
+390px monitoring compositions. Its runtime fixtures, local mutation state,
+theme runtime, and button navigation are not production behavior authority.
+
+The [Composite](../../../prototype/v2-ui/composite-prototype.html),
 [Acquire](../../../prototype/v2-ui/acquire-prototype.html),
 [Run Authority](../../../prototype/v2-ui/run-authority-prototype.html), and
-[Process](../../../prototype/v2-ui/process-prototype.html) references for
-accepted interaction semantics. Use the [clean Phase 0.5 previews](../../../prototype/v2-ui/index.html)
-and [visual component companion](../../../prototype/v2-ui/phase-0.5-component-library.html)
-for applied visual language. Neither replaces product or contract authority.
-The separate [accepted brand foundation](../../../prototype/v2-ui/phase-0.5-brand-style-guide.html)
-is direct visual implementation and review authority for palette, type,
-material, voice, accessibility, and the selected Alignment Aperture V1 mark.
-Its versioned symbol release, exports, and governance note live in
-[`prototype/v2-ui/assets/brand/v1/README.md`](../../../prototype/v2-ui/assets/brand/v1/README.md).
-It does not alter product or semantic authority and does not by itself close
-Phase 0.5.
+[Process](../../../prototype/v2-ui/process-prototype.html) references remain
+semantic and historical interaction evidence only. The Phase 0.5 previews and
+component companion are historical and must not supply active visual language.
+The Alignment Aperture V1 mark remains available from the versioned
+[`brand V1 package`](../../../prototype/v2-ui/assets/brand/v1/README.md); it is
+the mark source, not palette, type, material, or composition authority.
 The wordmark is currently an approved reference composition pending an outlined
 lettering release; future mark changes require versioned brand governance.

@@ -1,0 +1,148 @@
+.plan-workspace {
+  grid-template-columns: 17rem minmax(20rem, 1fr) 18rem;
+  grid-template-rows: auto minmax(0, 1fr) 4rem;
+}
+.plan-workspace .workspace-heading,
+.plan-timeline {
+  grid-column: 1 / 4;
+}
+.sequence-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  border-right: 1px solid var(--color-border-strong);
+}
+.sequence-list > button {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  gap: var(--space-4) var(--space-8);
+  padding: var(--space-12);
+  text-align: left;
+}
+.sequence-list strong {
+  grid-row: 1 / 3;
+  font-family: Georgia, serif;
+}
+.sequence-list small,
+.plan-inspector p {
+  color: var(--color-text-secondary);
+}
+.plan-evidence {
+  position: relative;
+  min-height: 25rem;
+  padding: var(--space-16);
+  overflow: hidden;
+}
+.sky-field {
+  position: relative;
+  height: 100%;
+  min-height: 24rem;
+  border: 1px solid var(--color-border-strong);
+  background: radial-gradient(
+    circle at 55% 30%,
+    var(--color-primary-soft),
+    var(--color-canvas) 63%
+  );
+}
+.sky-field span {
+  position: absolute;
+  bottom: var(--space-16);
+  left: var(--space-16);
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+}
+.arc {
+  position: absolute;
+  border-top: 0.2rem dashed var(--color-primary);
+  border-radius: 50%;
+}
+.arc--one {
+  top: 30%;
+  left: 8%;
+  width: 38%;
+  height: 35%;
+}
+.arc--two {
+  top: 19%;
+  left: 38%;
+  width: 35%;
+  height: 44%;
+}
+.arc--three {
+  top: 35%;
+  right: 5%;
+  width: 25%;
+  height: 30%;
+}
+.plan-inspector {
+  border-left: 1px solid var(--color-border-strong);
+}
+.plan-inspector .evidence-image {
+  height: 10rem;
+  margin: var(--space-16) 0;
+}
+.plan-timeline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-16);
+  border-top: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+}
+.plan-timeline button {
+  flex: 1;
+  padding: var(--space-4);
+  font-size: 0.75rem;
+}
+.plan-timeline small,
+.plan-timeline > span {
+  display: block;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+}
+@media (max-width: 1080px) and (min-width: 601px) {
+  .plan-workspace {
+    grid-template-columns: 13rem minmax(0, 1fr);
+    grid-template-rows: auto minmax(24rem, 1fr) auto auto;
+    overflow-y: auto;
+  }
+  .plan-workspace .workspace-heading,
+  .plan-timeline {
+    grid-column: 1 / 3;
+  }
+  .plan-inspector {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 14rem minmax(0, 1fr);
+    gap: var(--space-16);
+    border-top: var(--border-width) solid var(--color-border-strong);
+    border-left: 0;
+  }
+  .plan-inspector > span,
+  .plan-inspector > h2,
+  .plan-inspector > p {
+    grid-column: 1 / -1;
+  }
+  .plan-inspector .evidence-image {
+    height: 10rem;
+    margin: 0;
+  }
+}
+@media (max-width: 600px) {
+  .sequence-list {
+    display: none;
+  }
+  .plan-evidence {
+    min-height: 22rem;
+  }
+  .plan-timeline {
+    display: flex;
+    overflow: hidden;
+  }
+  .sky-field {
+    min-height: 20rem;
+  }
+  .plan-timeline button {
+    display: none;
+  }
+}

@@ -1,15 +1,17 @@
 # V2 UI Component Library
 
-Status: **Accepted Phase 1 visual implementation authority — Phase 0.5 closeout**
+Status: **Nightbook final visual implementation authority**
 
 This is a semantic pattern library, not a generic catalog. Promote a component
 only when it has one stable product role, owner/evidence/freshness boundary,
 state variants, accessibility behavior, responsive rule, and at least two
 proven uses. Shared styling alone is not promotion evidence.
 
-See the [clean visual companion](../../../prototype/v2-ui/phase-0.5-component-library.html)
-for the real V2 pattern language in situ; this document remains the behavioral
-and implementation authority.
+Use [`docs/v2-ui-final`](../../v2-ui-final/) for the real production visual
+composition: compact status register; Plan rail/window/inspector/timeline;
+Observe image/decision/lifecycle; Library lineage/evidence/inspector/chronology;
+and Process steps/canvas/rail. The study's fixture runtime and local mutation
+behavior are explicitly excluded from implementation authority.
 
 ## Core Patterns
 

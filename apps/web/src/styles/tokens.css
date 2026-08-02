@@ -1,0 +1,152 @@
+:root {
+  --core-ink: #070b12;
+  --core-paper: #e6e1d7;
+  --core-primary: #c6ad7a;
+  --core-secondary: #3d9ca6;
+  --core-tertiary: #80679c;
+  --core-safe: #70ae94;
+  --core-danger: #d36e64;
+  --core-attention: #e4a443;
+  --core-neutral: #a9aeb7;
+  --shade-light-1: 14%;
+  --shade-light-2: 28%;
+  --shade-dark-1: 18%;
+  --shade-dark-2: 38%;
+  --core-primary-light-1: color-mix(
+    in srgb,
+    var(--core-primary),
+    var(--core-paper) var(--shade-light-1)
+  );
+  --core-primary-dark-1: color-mix(
+    in srgb,
+    var(--core-primary),
+    var(--core-ink) var(--shade-dark-1)
+  );
+  --core-secondary-light-1: color-mix(
+    in srgb,
+    var(--core-secondary),
+    var(--core-paper) var(--shade-light-1)
+  );
+  --core-secondary-dark-1: color-mix(
+    in srgb,
+    var(--core-secondary),
+    var(--core-ink) var(--shade-dark-2)
+  );
+  --core-tertiary-dark-1: color-mix(
+    in srgb,
+    var(--core-tertiary),
+    var(--core-ink) var(--shade-dark-2)
+  );
+  --core-neutral-dark-1: color-mix(
+    in srgb,
+    var(--core-neutral),
+    var(--core-ink) var(--shade-dark-2)
+  );
+  --color-canvas: var(--core-ink);
+  --color-surface: color-mix(
+    in srgb,
+    var(--core-ink),
+    var(--core-neutral-dark-1) var(--shade-light-1)
+  );
+  --color-surface-raised: color-mix(
+    in srgb,
+    var(--color-surface),
+    var(--core-neutral-dark-1) var(--shade-light-1)
+  );
+  --color-surface-current: color-mix(
+    in srgb,
+    var(--color-surface),
+    var(--core-primary) var(--shade-light-1)
+  );
+  --color-text: var(--core-paper);
+  --color-text-secondary: color-mix(
+    in srgb,
+    var(--core-paper) 72%,
+    var(--core-neutral)
+  );
+  --color-text-muted: var(--color-text-secondary);
+  --color-text-faint: color-mix(
+    in srgb,
+    var(--core-neutral),
+    var(--core-ink) 55%
+  );
+  --color-border: color-mix(
+    in srgb,
+    var(--core-neutral-dark-1),
+    var(--core-ink) var(--shade-dark-1)
+  );
+  --color-border-strong: color-mix(
+    in srgb,
+    var(--core-neutral),
+    var(--core-ink) var(--shade-dark-2)
+  );
+  --color-disabled-text: var(--color-text-secondary);
+  --color-disabled-background: color-mix(
+    in srgb,
+    var(--color-surface-raised),
+    var(--core-ink) 35%
+  );
+  --color-disabled-border: color-mix(
+    in srgb,
+    var(--core-neutral),
+    var(--core-ink) 30%
+  );
+  --color-primary: var(--core-primary-light-1);
+  --color-primary-soft: color-mix(
+    in srgb,
+    var(--core-primary-dark-1),
+    var(--core-ink) var(--shade-dark-2)
+  );
+  --color-secondary: var(--core-secondary-light-1);
+  --color-secondary-soft: color-mix(
+    in srgb,
+    var(--core-secondary-dark-1),
+    var(--core-ink) var(--shade-dark-2)
+  );
+  --color-tertiary: var(--core-tertiary-dark-1);
+  --color-safe: var(--core-safe);
+  --color-attention: var(--core-attention);
+  --color-danger: var(--core-danger);
+  --color-neutral: var(--core-neutral);
+  --color-focus: var(--core-secondary-light-1);
+  --color-image: color-mix(
+    in srgb,
+    var(--core-secondary-dark-1),
+    var(--core-ink) var(--shade-dark-2)
+  );
+  --color-image-deep: color-mix(
+    in srgb,
+    var(--core-tertiary-dark-1),
+    var(--core-ink) var(--shade-dark-2)
+  );
+  --color-transparent: transparent;
+  --color-shadow: color-mix(
+    in srgb,
+    var(--core-ink) 88%,
+    var(--core-neutral-dark-1)
+  );
+  --shadow-panel: 0 1rem 2rem var(--color-shadow);
+  --root-font-size: 16px;
+  --font-size-display: 1.5rem;
+  --font-size-heading: 1.25rem;
+  --font-size-body: 0.875rem;
+  --font-size-fact: 0.75rem;
+  --line-height-display: 1.15;
+  --line-height-heading: 1.25;
+  --line-height-body: 1.5;
+  --line-height-fact: 1.35;
+  --space-unit: 0.25rem;
+  --space-4: calc(var(--space-unit) * 1);
+  --space-8: calc(var(--space-unit) * 2);
+  --space-12: calc(var(--space-unit) * 3);
+  --space-16: calc(var(--space-unit) * 4);
+  --space-20: calc(var(--space-unit) * 5);
+  --space-24: calc(var(--space-unit) * 6);
+  --space-32: calc(var(--space-unit) * 8);
+  --space-48: calc(var(--space-unit) * 12);
+  --radius-fact: 0.25rem;
+  --radius-control: 0;
+  --radius-frame: 0.65rem;
+  --control-min-height: 2.5rem;
+  --border-width: 1px;
+}

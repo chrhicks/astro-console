@@ -42,6 +42,7 @@ the five sequential Production Convergence Epics:
 
 1. `tkt-ezxr1fsb` — promote the proven server. **Complete.**
 2. `tkt-n9yoieoz` — create the production Nightbook web application.
+   **Complete.**
 3. `tkt-uuom4upo` — establish the decoded snapshot, SSE, capability, command,
    and failure seam.
 4. `tkt-qffwfa47` — ship web and server from one version-matched origin.
@@ -54,6 +55,37 @@ not authorize a provider read, device command, physical capture, processing
 workflow, off-host recovery, or storage-health operation. After convergence,
 the preflight packet must still be accepted before implementation; it authorizes
 only a current provider read and truthful checklist projection.
+
+## Production Web Application Complete
+
+`apps/web` is now the standalone production Nightbook client foundation. It
+uses the accepted Alignment Aperture mark, visual tokens, shell, and
+workspace-native Plan, Observe, Library, and Process compositions. Typed
+presentation interfaces keep fixture and future transport concerns outside the
+React workspaces. Route-backed workspace, Asset, processing-session, and source
+handoff locations support direct load, refresh, and browser history.
+
+Owner clarification supersedes the prior Phase 0.5 visual wording:
+`docs/v2-ui-final` is representative of intended production `apps/web`
+visuals. Its screenshots prove visual composition only; they do not prove its
+fixture runtime, local mutation behavior, or viewport-derived authority.
+
+The production bundle fails closed with a truthful unavailable/read-only
+projection. Development-only visual fixtures cover fresh, stale, disconnected,
+rejected, Observe lifecycle and recovery, Library delivery, and Process failure
+states without claiming a durable or physical result. The fixture adapter and
+theme-study runtime are absent from the production bundle. Capability and
+action availability are projection-owned rather than viewport-owned; current
+phone and unavailable projections contain no mutation controls.
+
+The web package format, lint, strict typecheck, production build, bundle check,
+and **13/13** focused tests pass. Screenshot-backed Designer and browser reviews
+passed at 1440x900, 1024x768, and 390x844 with direct deep-link refresh,
+back/forward, keyboard focus, semantic status, no console errors, and no
+horizontal overflow. This proves the standalone presentation foundation only.
+The next Epic, `tkt-uuom4upo`, owns shared wire contracts, authoritative
+snapshot/SSE decoding, service-owned capability, command submission, and typed
+failure handling.
 
 The user accepts NVMe live/recent data plus the SSD backup as current
 same-host resilience. Off-host recovery is not current Phase 1 scope.

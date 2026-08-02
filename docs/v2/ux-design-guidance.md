@@ -4,11 +4,12 @@ Status: **accepted baseline through Gate 4**
 
 Updated: July 21, 2026
 
-This is the quick-reference design authority for V2 product and prototype
+This is the semantic UX authority for V2 product and prototype
 work. The longer [current product specification](current/product-spec.md)
 supplies domain detail;
 accepted gate records supply scenario evidence. New work should follow these
-rules unless a later gate records why a rule must change.
+rules unless a later gate records why a rule must change. Concrete visual
+composition defers to [`docs/v2-ui-final`](../v2-ui-final/).
 
 ## Product Philosophy
 
