@@ -7,6 +7,11 @@ execution forks. Document these concerns only and allow the user to decide what 
 Think, 'What can i do to trim this code/feature down yet preserve the primary functionality?' as a way to help you make
 those kinds of decisions.
 
+## Communicating with the user or owner
+
+- Keep your choice of language / vocabulary - use ASD-STE100 (Simplified Technical English)
+- You can use complex language/protocols with subagents to make your requests clear and succinct
+
 ## Working within this project
 
 ### V2 documentation context
