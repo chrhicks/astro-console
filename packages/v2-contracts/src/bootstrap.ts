@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
 import { CommandFailure } from './failures.js'
+import { ObserveWorkspaceProjection } from './observe.js'
 import {
   ClientCapability,
   ClientId,
@@ -197,6 +198,7 @@ export const BootstrapSnapshot = Schema.Struct({
   membership: BootstrapMembership,
   control: BootstrapControl,
   plan: Schema.optionalKey(PlanWorkspaceProjection),
+  observe: Schema.optionalKey(ObserveWorkspaceProjection),
   activeRun: BootstrapActiveRun,
   health: BootstrapHealth,
 })

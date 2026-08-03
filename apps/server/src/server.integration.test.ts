@@ -24,6 +24,7 @@ import {
   BootstrapSseEventEnvelope,
   CommandHttpFailureEnvelope,
   CommandHttpSuccessEnvelope,
+  ObserveCommandResponse,
   PlanCommandResponse,
   RunSnapshot,
 } from '@astro-console/v2-contracts'
@@ -6710,4 +6711,248 @@ test('fake run resolution and consequence-aware edits persist only durable fake 
     },
   )
   assert.equal(blockedPolicy.status, 409)
+})
+
+test('a viewer-role current controller retains fake Observe authority while viewers and phones remain ineligible', async (t) => {
+  const service = createFixtureService(':memory:', (request) =>
+    request?.headers.authorization === 'Bearer controller'
+      ? {
+          personId: 'viewer-controller',
+          clientId: 'desktop-owner',
+          role: 'viewer' as const,
+          capability: 'controlCapable' as const,
+        }
+      : request?.headers.authorization === 'Bearer viewer'
+        ? {
+            personId: 'viewer',
+            clientId: 'viewer-desktop',
+            role: 'viewer' as const,
+            capability: 'controlCapable' as const,
+          }
+        : request?.headers.authorization === 'Bearer phone'
+          ? {
+              personId: 'viewer-phone',
+              clientId: 'desktop-owner',
+              role: 'viewer' as const,
+              capability: 'readOnly' as const,
+            }
+          : undefined,
+  )
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const controller = { authorization: 'Bearer controller' }
+  const viewer = { authorization: 'Bearer viewer' }
+  const phone = { authorization: 'Bearer phone' }
+  await fetch(`${base}/api/commands/start-run`, {
+    method: 'POST',
+    headers: controller,
+    body: JSON.stringify({
+      _tag: 'StartRunFromPlan',
+      planId: 'plan-m27',
+      expectedPlanRevision: 3,
+      expectedLeaseRevision: 1,
+      idempotencyKey: 'observe-current-run',
+    }),
+  })
+  const initial = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: controller,
+  })
+  assert.equal(initial.observe?.actions.pause._tag, 'Eligible')
+  assert.deepEqual(
+    (await bootstrapSnapshot(`${base}/api/snapshot`, { headers: viewer }))
+      .observe?.actions.pause,
+    { _tag: 'Ineligible', reason: 'controlRequired' },
+  )
+  assert.deepEqual(
+    (await bootstrapSnapshot(`${base}/api/snapshot`, { headers: phone }))
+      .observe?.actions.pause,
+    { _tag: 'Ineligible', reason: 'readOnlyClient' },
+  )
+  if (initial.observe === undefined) throw new Error('Observe run is required')
+  service.database
+    .prepare('INSERT INTO events VALUES (?,?,?)')
+    .run(999, 'FakeParkRequested', JSON.stringify({ run: { id: 'prior-run' } }))
+  const current = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: controller,
+  })
+  assert.equal(
+    current.observe?.lifecycleFacts.includes(
+      'Fake/fixture lifecycle fact: FakeParkRequested.',
+    ),
+    false,
+  )
+  const pause = await fetch(`${base}/api/observe/commands`, {
+    method: 'POST',
+    headers: controller,
+    body: JSON.stringify({
+      intent: {
+        _tag: 'PauseRun',
+        expectedLeaseRevision: initial.control.revision,
+        expectedRunRevision: initial.observe.revision,
+        idempotencyKey: 'observe-pause',
+      },
+    }),
+  })
+  assert.equal(pause.status, 202)
+  const paused = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: controller,
+  })
+  assert.equal(paused.observe?.phase, 'paused')
+  assert.equal(paused.observe?.actions.stop._tag, 'Eligible')
+  assert.equal(paused.observe?.actions.park._tag, 'Eligible')
+  assert.equal(paused.observe?.actions.skip._tag, 'Ineligible')
+  assert.equal(paused.observe?.actions.retry._tag, 'Ineligible')
+  if (paused.observe?.actions.skip._tag === 'Ineligible')
+    assert.equal(paused.observe.actions.skip.reason, 'policyUnavailable')
+  if (paused.observe === undefined)
+    throw new Error('Paused Observe run is required')
+  const phonePause = await fetch(`${base}/api/observe/commands`, {
+    method: 'POST',
+    headers: phone,
+    body: JSON.stringify({
+      intent: {
+        _tag: 'PauseRun',
+        expectedLeaseRevision: paused.control.revision,
+        expectedRunRevision: paused.observe.revision,
+        idempotencyKey: 'observe-phone-pause',
+      },
+    }),
+  })
+  assert.equal(phonePause.status, 403)
+  const parked = await fetch(`${base}/api/observe/commands`, {
+    method: 'POST',
+    headers: controller,
+    body: JSON.stringify({
+      intent: {
+        _tag: 'RequestPark',
+        expectedLeaseRevision: paused.control.revision,
+        expectedRunRevision: paused.observe.revision,
+        idempotencyKey: 'observe-park',
+      },
+    }),
+  })
+  assert.equal(parked.status, 202)
+  const terminal = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: controller,
+  })
+  assert.equal(terminal.observe?.phase, 'parkRequested')
+  assert.equal(
+    terminal.observe?.attemptFacts.includes(
+      'Park is policy only; no mount moved.',
+    ),
+    true,
+  )
+  assert.deepEqual(terminal.observe?.actions.stop, {
+    _tag: 'Ineligible',
+    reason: 'terminalRun',
+  })
+})
+
+test('Observe command transport rejects invalid and terminal actions and maps fake lifecycle actions', async (t) => {
+  const service = createFixtureService(':memory:', () => ({
+    personId: 'viewer-controller',
+    clientId: 'desktop-owner',
+    role: 'viewer' as const,
+    capability: 'controlCapable' as const,
+  }))
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const malformed = await fetch(`${base}/api/observe/commands`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
+  assert.equal(malformed.status, 400)
+  assert.equal(
+    Schema.decodeUnknownSync(ObserveCommandResponse)(await malformed.json())
+      ._tag,
+    'Rejected',
+  )
+  const plan = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (plan.plan === undefined) throw new Error('Fixture Plan is required')
+  await fetch(`${base}/api/commands/start-run`, {
+    method: 'POST',
+    body: JSON.stringify({
+      _tag: 'StartRunFromPlan',
+      planId: plan.plan.planId,
+      expectedPlanRevision: plan.plan.revision,
+      expectedLeaseRevision: plan.control.revision,
+      idempotencyKey: 'observe-transport-start',
+    }),
+  })
+  const submit = async (
+    action:
+      'PauseRun' | 'ResumeRun' | 'RetryPhase' | 'SkipSequence' | 'StopRun',
+    key: string,
+  ) => {
+    const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+    if (snapshot.observe === undefined)
+      throw new Error('Observe run is required')
+    return fetch(`${base}/api/observe/commands`, {
+      method: 'POST',
+      body: JSON.stringify({
+        intent: {
+          _tag: action,
+          expectedLeaseRevision: snapshot.control.revision,
+          expectedRunRevision: snapshot.observe.revision,
+          idempotencyKey: key,
+        },
+      }),
+    })
+  }
+  for (const [action, key] of [
+    ['PauseRun', 'observe-transport-pause'],
+    ['ResumeRun', 'observe-transport-resume'],
+    ['RetryPhase', 'observe-transport-retry'],
+    ['SkipSequence', 'observe-transport-skip'],
+  ] as const) {
+    const response = await submit(action, key)
+    assert.equal(response.status, 202)
+    assert.equal(
+      Schema.decodeUnknownSync(ObserveCommandResponse)(await response.json())
+        ._tag,
+      'Accepted',
+    )
+    if (action === 'RetryPhase') {
+      const retried = await bootstrapSnapshot(`${base}/api/snapshot`)
+      assert.deepEqual(retried.observe?.actions.retry, {
+        _tag: 'Ineligible',
+        reason: 'retryUsed',
+      })
+    }
+  }
+  const stopped = await submit('StopRun', 'observe-transport-stop')
+  assert.equal(stopped.status, 202)
+  const terminal = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(terminal.observe?.actions.retry._tag, 'Ineligible')
+  if (terminal.observe?.actions.retry._tag === 'Ineligible')
+    assert.equal(terminal.observe.actions.retry.reason, 'terminalRun')
+  const rejected = await fetch(`${base}/api/observe/commands`, {
+    method: 'POST',
+    body: JSON.stringify({
+      intent: {
+        _tag: 'RetryPhase',
+        expectedLeaseRevision: terminal.control.revision,
+        expectedRunRevision: terminal.observe?.revision,
+        idempotencyKey: 'observe-transport-terminal',
+      },
+    }),
+  })
+  assert.equal(rejected.status, 409)
+  const rejectedBody = Schema.decodeUnknownSync(ObserveCommandResponse)(
+    await rejected.json(),
+  )
+  assert.equal(rejectedBody._tag, 'Rejected')
+  if (
+    rejectedBody._tag === 'Rejected' &&
+    rejectedBody.failure._tag === 'Rejected'
+  )
+    assert.equal(rejectedBody.failure.reason, 'AlreadyTerminal')
 })

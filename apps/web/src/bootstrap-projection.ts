@@ -46,17 +46,21 @@ function projectSnapshot(
         }
       : undefined
   const fresh = freshness === 'current'
+  const hasEligibleAction = eligibleActionProjected(snapshot)
   const connection = fresh
     ? `Current bootstrap snapshot confirmed at ${snapshot.generatedAt}`
     : `${freshness === 'stale' ? 'Last-confirmed' : 'Reconnecting'} snapshot from ${snapshot.generatedAt}`
-  const protection = fresh
-    ? 'Read-only: detailed workspace and command projections are not available from bootstrap.'
-    : `Protected: ${reason ?? 'current service truth is unavailable'} Commands cannot be sent or replayed.`
+  const protection =
+    fresh && hasEligibleAction
+      ? 'Controls are service-projected and current-revision guarded.'
+      : fresh
+        ? 'Read-only: no eligible action is projected for this client.'
+        : `Protected: ${reason ?? 'current service truth is unavailable'} Commands cannot be sent or replayed.`
   const shell: ShellView = {
     service: health[0]?.detail ?? 'Service health unknown',
     environment: 'Authoritative projection',
     attention: fresh ? attention(health) : 'attention',
-    readOnly: true,
+    readOnly: !fresh || !hasEligibleAction,
     currentRun: currentRun && {
       ...currentRun,
       phase: fresh ? currentRun.phase : `Last-confirmed ${currentRun.phase}`,
@@ -75,7 +79,7 @@ function projectSnapshot(
     membership: membership(snapshot),
     presence: 'Presence unavailable from bootstrap.',
     attentionOwner: 'Attention owner unavailable from bootstrap.',
-    capability: capability(snapshot),
+    capability: capability(snapshot, fresh, hasEligibleAction),
     protection,
     health,
   }
@@ -238,6 +242,69 @@ function observe(
   target: string,
 ): ObserveView {
   const fresh = freshness === 'current'
+  const source = snapshot.observe
+  if (fresh && source !== undefined) {
+    const terminal = source.terminalOutcome
+    const eligible = Object.values(source.actions).some(
+      (action) => action._tag === 'Eligible',
+    )
+    const controlRequired = Object.values(source.actions).every(
+      (action) =>
+        action._tag === 'Ineligible' && action.reason === 'controlRequired',
+    )
+    return {
+      detailAvailable: true,
+      target: source.target,
+      phase: phaseLabel(source.phase),
+      status:
+        terminal === undefined
+          ? `Fake/fixture ${phaseLabel(source.phase).toLowerCase()} lifecycle is current.`
+          : `Fake/fixture run ${terminal}; no physical capture is claimed.`,
+      tone:
+        terminal === 'completed'
+          ? 'safe'
+          : terminal === undefined
+            ? 'attention'
+            : 'neutral',
+      evidence: `Sequence ${source.currentSequence + 1} of ${source.totalSequences}; ${source.completedSequences} completed.`,
+      annotation: 'All attempt evidence is fake/fixture only.',
+      heading:
+        terminal === undefined
+          ? eligible
+            ? 'Manage the current fake/fixture run'
+            : 'Monitor the current fake/fixture run'
+          : 'Terminal fake/fixture outcome',
+      trace: source.lifecycleFacts,
+      facts: source.attemptFacts,
+      lifecycle,
+      ...(terminal !== undefined
+        ? { recovery: 'Return to Plan to review the next accepted run.' }
+        : controlRequired
+          ? {
+              recovery:
+                'Another client holds control. This client is protected; monitor current service evidence.',
+            }
+          : !eligible
+            ? {
+                recovery:
+                  'No action is currently eligible. Monitor current service evidence.',
+              }
+            : source.phase === 'paused' && source.resumablePhase !== undefined
+              ? {
+                  recovery: `Resume returns to ${phaseLabel(source.resumablePhase)}. Stop ends this fake/fixture run; park is policy only.`,
+                }
+              : source.phase === 'parkRequested'
+                ? {
+                    recovery:
+                      'Park is policy only; no mount moved. Return to Plan when ready.',
+                  }
+                : {
+                    recovery:
+                      'Stop, skip, retry once, or request park only when currently eligible.',
+                  }),
+      source,
+    }
+  }
   return {
     detailAvailable: false,
     target,
@@ -325,10 +392,28 @@ function membership(snapshot: BootstrapSnapshot): string {
   return `${capitalize(snapshot.membership.role)} member`
 }
 
-function capability(snapshot: BootstrapSnapshot): string {
-  return snapshot.membership.capability === 'controlCapable'
-    ? 'Control-capable client / commands unavailable from bootstrap'
-    : 'Read-only client'
+function eligibleActionProjected(snapshot: BootstrapSnapshot): boolean {
+  return (
+    Object.values(snapshot.plan?.actions ?? {}).some(
+      (action) => action._tag === 'Eligible',
+    ) ||
+    Object.values(snapshot.observe?.actions ?? {}).some(
+      (action) => action._tag === 'Eligible',
+    )
+  )
+}
+
+function capability(
+  snapshot: BootstrapSnapshot,
+  fresh: boolean,
+  hasEligibleAction: boolean,
+): string {
+  if (snapshot.membership.capability === 'readOnly')
+    return 'Read-only client / no eligible action'
+  if (!fresh) return 'Control-capable client / controls protected until current'
+  return hasEligibleAction
+    ? 'Control-capable client / service-projected controls'
+    : 'Control-capable client / no eligible action'
 }
 
 function phaseLabel(phase: string): string {

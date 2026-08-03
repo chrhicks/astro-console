@@ -1,5 +1,8 @@
 import { Data } from 'effect'
-import type { PlanWorkspaceProjection } from '@astro-console/v2-contracts'
+import type {
+  ObserveWorkspaceProjection,
+  PlanWorkspaceProjection,
+} from '@astro-console/v2-contracts'
 import type { AssetId } from './routes'
 
 export type Workspace = 'plan' | 'observe' | 'library' | 'process'
@@ -113,6 +116,7 @@ export type ObserveView = {
   lifecycle: readonly string[]
   recovery?: string
   action?: Action
+  source?: ObserveWorkspaceProjection
 }
 export type LibraryAsset = {
   id: AssetId

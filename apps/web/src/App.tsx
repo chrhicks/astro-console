@@ -6,6 +6,11 @@ import {
   type PlanAction,
   type PlanCommandSubmission,
 } from './plan-command-client'
+import {
+  ObserveCommandClient,
+  type ObserveAction,
+  type ObserveCommandSubmission,
+} from './observe-command-client'
 import { IdempotencyKey } from '@astro-console/v2-contracts'
 import { projectBootstrapState } from './bootstrap-projection'
 import { createBootstrapRuntime } from './bootstrap-runtime'
@@ -37,6 +42,13 @@ export function App() {
       ) => Promise<PlanCommandSubmission>)
     | undefined
   >()
+  const [submitObserve, setSubmitObserve] = useState<
+    | ((
+        action: ObserveAction,
+        key: typeof IdempotencyKey.Type,
+      ) => Promise<ObserveCommandSubmission>)
+    | undefined
+  >()
   const workspace = routeWorkspace(route)
   const initialRoute = useRef(true)
 
@@ -57,6 +69,15 @@ export function App() {
           }),
         ),
     )
+    setSubmitObserve(
+      () => (action: ObserveAction, key: typeof IdempotencyKey.Type) =>
+        runtime.runPromise(
+          Effect.gen(function* () {
+            const client = yield* ObserveCommandClient
+            return yield* client.submit(action, key)
+          }),
+        ),
+    )
     const fiber = runtime.runFork(
       Effect.gen(function* () {
         const client = yield* BootstrapClient
@@ -69,6 +90,7 @@ export function App() {
     )
     return () => {
       setSubmitPlan(undefined)
+      setSubmitObserve(undefined)
       void runtime
         .runPromise(Fiber.interrupt(fiber))
         .then(() => runtime.dispose())
@@ -118,7 +140,15 @@ export function App() {
     route.kind === 'not-found' ? (
       <NotFound />
     ) : workspace === 'observe' ? (
-      <ObserveView view={projection.observe} />
+      <ObserveView
+        key={
+          projection.observe.source === undefined
+            ? 'unavailable'
+            : projection.observe.source.runId
+        }
+        view={projection.observe}
+        {...(submitObserve === undefined ? {} : { submit: submitObserve })}
+      />
     ) : workspace === 'library' ? (
       <LibraryView
         view={projection.library}

@@ -31,8 +31,9 @@ test('projects a fresh authoritative snapshot with distinct health facts', () =>
   )
   assert.equal(
     projection.shell.capability,
-    'Control-capable client / commands unavailable from bootstrap',
+    'Control-capable client / no eligible action',
   )
+  assert.equal(projection.shell.readOnly, true)
   assert.deepEqual(
     projection.shell.health.map((fact) => [fact.label, fact.state]),
     [
@@ -163,6 +164,44 @@ test('bootstrap projections render unavailable Observe and Process evidence with
   )
 })
 
+test('Observe renders fake lifecycle evidence and omits terminal controls', () => {
+  const projection = projectBootstrapState(
+    BootstrapClientState.Current({
+      snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)({
+        ...bootstrapFixtures.activeRun,
+        observe: {
+          runId: 'run-active-001',
+          revision: 2,
+          executor: 'fake',
+          phase: 'stopped',
+          terminalOutcome: 'stopped',
+          target: 'M27',
+          currentSequence: 0,
+          completedSequences: 0,
+          totalSequences: 2,
+          retryUsed: true,
+          lifecycleFacts: ['Fake/fixture lifecycle fact: RunStopped.'],
+          attemptFacts: ['All attempt evidence is fake/fixture only.'],
+          actions: {
+            pause: { _tag: 'Ineligible', reason: 'terminalRun' },
+            resume: { _tag: 'Ineligible', reason: 'terminalRun' },
+            stop: { _tag: 'Ineligible', reason: 'terminalRun' },
+            skip: { _tag: 'Ineligible', reason: 'terminalRun' },
+            retry: { _tag: 'Ineligible', reason: 'terminalRun' },
+            park: { _tag: 'Ineligible', reason: 'terminalRun' },
+          },
+        },
+      }),
+    }),
+  )
+  const markup = renderToStaticMarkup(
+    createElement(ObserveView, { view: projection.observe }),
+  )
+  assert.match(markup, /Current fake lifecycle evidence/)
+  assert.doesNotMatch(markup, /Current verified evidence/)
+  assert.doesNotMatch(markup, /<button/)
+})
+
 test('projects membership and server capability independently', () => {
   const viewer = projectBootstrapState(
     BootstrapClientState.Current({ snapshot: snapshot('viewer') }),
@@ -171,10 +210,209 @@ test('projects membership and server capability independently', () => {
     BootstrapClientState.Current({ snapshot: snapshot('phone') }),
   )
   assert.equal(viewer.shell.membership, 'Viewer member')
-  assert.match(viewer.shell.capability, /Control-capable client/)
+  assert.equal(
+    viewer.shell.capability,
+    'Control-capable client / no eligible action',
+  )
   assert.equal(phone.shell.membership, 'Owner member')
-  assert.equal(phone.shell.capability, 'Read-only client')
+  assert.equal(phone.shell.capability, 'Read-only client / no eligible action')
 })
+
+test('projects current controller actions and renders Manage only when eligible', () => {
+  const projection = projectBootstrapState(
+    BootstrapClientState.Current({
+      snapshot: observeSnapshot({
+        pause: { _tag: 'Eligible' },
+        resume: { _tag: 'Ineligible', reason: 'pausedRunRequired' },
+        stop: { _tag: 'Eligible' },
+        skip: { _tag: 'Eligible' },
+        retry: { _tag: 'Eligible' },
+        park: { _tag: 'Eligible' },
+      }),
+    }),
+  )
+  const markup = renderToStaticMarkup(
+    createElement(ObserveView, { view: projection.observe }),
+  )
+  assert.equal(projection.shell.readOnly, false)
+  assert.equal(
+    projection.shell.capability,
+    'Control-capable client / service-projected controls',
+  )
+  assert.equal(
+    projection.shell.protection,
+    'Controls are service-projected and current-revision guarded.',
+  )
+  assert.match(markup, /Manage the current fake\/fixture run/)
+})
+
+test('projects non-controller and phone Observe clients as monitoring-only', () => {
+  const nonController = projectBootstrapState(
+    BootstrapClientState.Current({
+      snapshot: observeSnapshot(
+        ineligibleObserveActions('controlRequired'),
+        {
+          membership: {
+            ...bootstrapFixtures.activeRun.membership,
+            clientId: 'desktop-viewer',
+          },
+          control: {
+            revision: 4,
+            state: 'held',
+            holderClientId: 'desktop-owner',
+          },
+        },
+        'paused',
+      ),
+    }),
+  )
+  const phone = projectBootstrapState(
+    BootstrapClientState.Current({
+      snapshot: observeSnapshot(ineligibleObserveActions('readOnlyClient'), {
+        membership: bootstrapFixtures.phone.membership,
+        control: bootstrapFixtures.phone.control,
+      }),
+    }),
+  )
+  const nonControllerMarkup = renderToStaticMarkup(
+    createElement(ObserveView, { view: nonController.observe }),
+  )
+  const phoneMarkup = renderToStaticMarkup(
+    createElement(ObserveView, { view: phone.observe }),
+  )
+  assert.equal(nonController.shell.readOnly, true)
+  assert.equal(
+    nonController.shell.capability,
+    'Control-capable client / no eligible action',
+  )
+  assert.match(nonControllerMarkup, /Monitor the current fake\/fixture run/)
+  assert.match(nonControllerMarkup, /Another client holds control/)
+  assert.doesNotMatch(
+    nonControllerMarkup,
+    /Manage the current fake\/fixture run/,
+  )
+  assert.equal(phone.shell.readOnly, true)
+  assert.equal(phone.shell.capability, 'Read-only client / no eligible action')
+  assert.match(phoneMarkup, /No action is currently eligible. Monitor/)
+})
+
+test('keeps stale eligible controls protected and finds Plan-only eligible actions', () => {
+  const eligibleObserve = observeSnapshot({
+    pause: { _tag: 'Eligible' },
+    resume: { _tag: 'Ineligible', reason: 'pausedRunRequired' },
+    stop: { _tag: 'Eligible' },
+    skip: { _tag: 'Eligible' },
+    retry: { _tag: 'Eligible' },
+    park: { _tag: 'Eligible' },
+  })
+  const stale = projectBootstrapState(
+    BootstrapClientState.Stale({
+      snapshot: eligibleObserve,
+      reason: 'Disconnected.',
+    }),
+  )
+  const planOnly = projectBootstrapState(
+    BootstrapClientState.Current({ snapshot: planActionSnapshot() }),
+  )
+  assert.equal(stale.shell.readOnly, true)
+  assert.equal(
+    stale.shell.capability,
+    'Control-capable client / controls protected until current',
+  )
+  assert.match(stale.shell.protection, /cannot be sent or replayed/)
+  assert.equal(planOnly.shell.readOnly, false)
+  assert.equal(
+    planOnly.shell.protection,
+    'Controls are service-projected and current-revision guarded.',
+  )
+})
+
+function observeSnapshot(
+  actions: object,
+  overrides: object = {},
+  phase = 'capture',
+) {
+  return Schema.decodeUnknownSync(BootstrapSnapshot)({
+    ...bootstrapFixtures.activeRun,
+    ...overrides,
+    observe: {
+      runId: 'run-active-001',
+      revision: 2,
+      executor: 'fake',
+      phase,
+      target: 'M27',
+      currentSequence: 0,
+      completedSequences: 0,
+      totalSequences: 2,
+      retryUsed: false,
+      lifecycleFacts: ['Fake/fixture lifecycle fact: RunStarted.'],
+      attemptFacts: ['All attempt evidence is fake/fixture only.'],
+      actions,
+    },
+  })
+}
+
+function ineligibleObserveActions(reason: string) {
+  return {
+    pause: { _tag: 'Ineligible', reason },
+    resume: { _tag: 'Ineligible', reason },
+    stop: { _tag: 'Ineligible', reason },
+    skip: { _tag: 'Ineligible', reason },
+    retry: { _tag: 'Ineligible', reason },
+    park: { _tag: 'Ineligible', reason },
+  }
+}
+
+function planActionSnapshot() {
+  return Schema.decodeUnknownSync(BootstrapSnapshot)({
+    ...bootstrapFixtures.fresh,
+    plan: {
+      planId: 'plan-m27',
+      revision: 1,
+      readiness: 'ready',
+      readinessSummary: 'Ready to accept.',
+      limitations: [],
+      sequences: [
+        {
+          sequenceId: 'seq-1',
+          target: 'M27',
+          capture: '24 × 180s · L',
+          acquisition: 'Solve and center',
+          stopCondition: '24 frames',
+          window: {
+            startsAt: '2026-07-25T21:00:00Z',
+            endsAt: '2026-07-26T01:00:00Z',
+            usableMinutes: 240,
+            peakAltitudeDeg: 68,
+            horizonClearanceDeg: 28,
+          },
+          estimatedMinutes: 180,
+          storageForecastMb: 1200,
+          horizon: 'clear',
+          storage: 'available',
+          viability: 'viable',
+        },
+      ],
+      actions: {
+        saveDraft: { _tag: 'Ineligible', reason: 'definitionAlreadyAccepted' },
+        acceptRunDefinition: { _tag: 'Eligible' },
+        startAcceptedRun: {
+          _tag: 'Ineligible',
+          reason: 'acceptedDefinitionRequired',
+        },
+        previewRunMutation: {
+          _tag: 'Ineligible',
+          reason: 'acceptedDefinitionRequired',
+        },
+        applyRunMutation: { _tag: 'Ineligible', reason: 'previewRequired' },
+        approveDisruptiveRunMutation: {
+          _tag: 'Ineligible',
+          reason: 'previewRequired',
+        },
+      },
+    },
+  })
+}
 
 test('projects active and idle run summaries without inventing workspace detail', () => {
   const active = projectBootstrapState(

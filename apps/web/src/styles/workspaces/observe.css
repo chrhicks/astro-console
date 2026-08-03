@@ -40,6 +40,12 @@
 .observe-decision dl dd {
   max-width: 60%;
 }
+.observe-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  padding: var(--space-16);
+}
 .lifecycle {
   display: flex;
   align-items: center;

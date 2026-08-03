@@ -21,6 +21,11 @@ import {
   CommandFailure,
   CommandHttpFailureEnvelope,
   CommandHttpSuccessEnvelope,
+  ObserveCommandRequest,
+  ObserveCommandResult,
+  ObserveCommandResponse,
+  ObserveIntent,
+  ObserveWorkspaceProjection,
   PlanCommandRequest,
   PlanCommandResponse,
   PlanIntent,
@@ -663,6 +668,14 @@ class PlanServiceUnavailable extends Schema.TaggedErrorClass<PlanServiceUnavaila
   'Server.PlanServiceUnavailable',
   {},
 ) {}
+class ObserveCommandInputInvalid extends Schema.TaggedErrorClass<ObserveCommandInputInvalid>()(
+  'Server.ObserveCommandInputInvalid',
+  {},
+) {}
+class ObserveServiceUnavailable extends Schema.TaggedErrorClass<ObserveServiceUnavailable>()(
+  'Server.ObserveServiceUnavailable',
+  {},
+) {}
 interface PlanCommandServiceShape {
   readonly execute: (intent: typeof PlanIntent.Type) => Effect.Effect<
     {
@@ -676,6 +689,19 @@ class PlanCommandService extends Context.Service<
   PlanCommandService,
   PlanCommandServiceShape
 >()('Server.PlanCommandService') {}
+interface ObserveCommandServiceShape {
+  readonly execute: (intent: typeof ObserveIntent.Type) => Effect.Effect<
+    {
+      readonly status: number
+      readonly body: typeof ObserveCommandResponse.Type
+    },
+    ObserveServiceUnavailable
+  >
+}
+class ObserveCommandService extends Context.Service<
+  ObserveCommandService,
+  ObserveCommandServiceShape
+>()('Server.ObserveCommandService') {}
 interface ControlCommandServiceShape {
   readonly execute: (
     commandId: string,
@@ -843,6 +869,13 @@ const OutboxClaimRow = Schema.Struct({
   payload: Schema.String,
 })
 const CountRow = Schema.Struct({ count: Schema.Int })
+const LifecycleEventRow = Schema.Struct({
+  type: Schema.String,
+  snapshot: Schema.String,
+})
+const LifecycleEventPayload = Schema.Struct({
+  run: Schema.Struct({ id: Schema.String }),
+})
 const SolarTestIntentRow = Schema.Struct({
   intent_id: Schema.String,
   name: Schema.String,
@@ -1329,6 +1362,26 @@ export function createLocalWebService(
               planServiceResponse(
                 'PlanServiceUnavailable',
                 'The Plan service is temporarily unavailable.',
+              ),
+          }),
+          Effect.map(({ status, body }) => json(response, status, body)),
+        ),
+      )
+    if (request.method === 'POST' && url.pathname === '/api/observe/commands')
+      return Effect.runPromise(
+        observeCommandFromRequest(
+          body(request),
+          database,
+          identity,
+          publish,
+        ).pipe(
+          Effect.catchTags({
+            'Server.ObserveCommandInputInvalid': () =>
+              observeInvalidResponse(database, identity),
+            'Server.ObserveServiceUnavailable': () =>
+              observeServiceResponse(
+                'ObserveServiceUnavailable',
+                'The Observe command service is temporarily unavailable.',
               ),
           }),
           Effect.map(({ status, body }) => json(response, status, body)),
@@ -3059,6 +3112,10 @@ function bootstrapSnapshot(db: DatabaseSync, identity: LocalIdentity) {
     current.plan.readiness === 'unavailable'
       ? undefined
       : bootstrapPlanWorkspaceProjection(db, identity, current)
+  const observe =
+    current.run === null
+      ? undefined
+      : observeWorkspaceProjection(db, identity, current)
   return Schema.decodeUnknownEffect(BootstrapSnapshot)({
     snapshotVersion: current.snapshotVersion,
     eventCursor: current.eventCursor,
@@ -3080,6 +3137,7 @@ function bootstrapSnapshot(db: DatabaseSync, identity: LocalIdentity) {
         : { reconnectGraceUntil: current.control.reconnectGraceUntil }),
     },
     ...(plan === undefined ? {} : { plan }),
+    ...(observe === undefined ? {} : { observe }),
     activeRun:
       current.run === null
         ? { _tag: 'None' }
@@ -3123,6 +3181,127 @@ function bootstrapSnapshot(db: DatabaseSync, identity: LocalIdentity) {
       },
     },
   })
+}
+function observeWorkspaceProjection(
+  db: DatabaseSync,
+  identity: LocalIdentity,
+  current: Snapshot,
+) {
+  const run = current.run
+  if (run === null || run.sourceDefinitionId === undefined) return undefined
+  const definitionRow = Schema.decodeUnknownSync(
+    Schema.optional(Schema.Struct({ definition: Schema.String })),
+  )(
+    db
+      .prepare(
+        'SELECT definition FROM run_definitions WHERE run_definition_id=?',
+      )
+      .get(run.sourceDefinitionId),
+  )
+  if (definitionRow === undefined) return undefined
+  const definition = Schema.decodeUnknownSync(StoredRunDefinition)(
+    JSON.parse(definitionRow.definition),
+  )
+  const controller = current.control.holderClientId === identity.clientId
+  const writable = identity.capability === 'controlCapable'
+  const terminal =
+    run.phase === 'completed' ||
+    run.phase === 'stopped' ||
+    run.phase === 'parkRequested'
+  const eligible = (
+    value: boolean,
+    reason:
+      | 'readOnlyClient'
+      | 'controlRequired'
+      | 'activeRunRequired'
+      | 'pausedRunRequired'
+      | 'terminalRun'
+      | 'retryUsed'
+      | 'policyUnavailable',
+  ) =>
+    value
+      ? { _tag: 'Eligible' as const }
+      : { _tag: 'Ineligible' as const, reason }
+  const baseReason = !writable
+    ? 'readOnlyClient'
+    : !controller
+      ? 'controlRequired'
+      : terminal
+        ? 'terminalRun'
+        : 'activeRunRequired'
+  const active = writable && controller && !terminal && run.phase !== 'paused'
+  const pausedRecovery = writable && controller && run.phase === 'paused'
+  const events = Schema.decodeUnknownSync(Schema.Array(LifecycleEventRow))(
+    db
+      .prepare(
+        "SELECT type,snapshot FROM events WHERE type IN ('RunStarted','RunPaused','RunResumed','RunStopped','FakeSequenceSkipped','FakePhaseRetried','FakeParkRequested','RunCompleted') ORDER BY cursor",
+      )
+      .all(),
+  )
+    .filter(({ snapshot }) => lifecycleEventRunId(snapshot) === run.id)
+    .map(({ type }) => `Fake/fixture lifecycle fact: ${type}.`)
+  return Schema.decodeUnknownSync(ObserveWorkspaceProjection)({
+    runId: run.id,
+    revision: run.revision,
+    executor: definition.executor,
+    phase: run.phase,
+    ...(terminal ? { terminalOutcome: run.phase } : {}),
+    target: run.target,
+    currentSequence: run.activeSequenceIndex ?? 0,
+    completedSequences: run.completedSequenceCount ?? 0,
+    totalSequences: definition.plan.sequences.length,
+    ...(run.resumablePhase === undefined
+      ? {}
+      : { resumablePhase: run.resumablePhase }),
+    retryUsed: run.retryPhase !== undefined,
+    lifecycleFacts:
+      events.length === 0 ? ['Fake/fixture lifecycle started.'] : events,
+    attemptFacts: [
+      'All lifecycle and attempt evidence is fake/fixture only; no physical capture is claimed.',
+      ...(run.retryPhase === undefined
+        ? ['No fake/fixture phase retry has been used.']
+        : [`Fake/fixture retry used for ${run.retryPhase}.`]),
+      ...(run.phase === 'parkRequested'
+        ? ['Park is policy only; no mount moved.']
+        : []),
+    ],
+    actions: {
+      pause: eligible(active, baseReason),
+      resume: eligible(
+        writable &&
+          controller &&
+          run.phase === 'paused' &&
+          run.resumablePhase !== undefined,
+        run.phase !== 'paused' ? 'pausedRunRequired' : baseReason,
+      ),
+      stop: eligible(active || pausedRecovery, baseReason),
+      skip: eligible(
+        active,
+        run.phase === 'paused' ? 'policyUnavailable' : baseReason,
+      ),
+      retry: eligible(
+        active && run.retryPhase === undefined,
+        terminal || run.phase === 'paused'
+          ? run.phase === 'paused'
+            ? 'policyUnavailable'
+            : baseReason
+          : run.retryPhase === undefined
+            ? baseReason
+            : 'retryUsed',
+      ),
+      park: eligible(active || pausedRecovery, baseReason),
+    },
+  })
+}
+function lifecycleEventRunId(snapshot: string) {
+  try {
+    const payload: unknown = JSON.parse(snapshot)
+    return Schema.is(LifecycleEventPayload)(payload)
+      ? payload.run.id
+      : undefined
+  } catch {
+    return undefined
+  }
 }
 function bootstrapPlanWorkspaceProjection(
   db: DatabaseSync,
@@ -3681,9 +3860,14 @@ function acceptRunIntervention(
   intent: 'pause' | 'resume',
   identity: LocalIdentity,
 ) {
-  if (!isOwner(identity)) return reject('OwnerRequired')
   if (identity.capability === 'readOnly') return reject('ClientReadOnly')
   if (!hasFakeRunDefinition(db)) return reject('RunRevisionConflict')
+  expireReconnectGrace(db)
+  const current = state(db)
+  if (input.expectedLeaseRevision !== current.control.revision)
+    return reject('ControlLeaseLost')
+  if (current.control.holderClientId !== identity.clientId)
+    return reject('ControlLeaseLost')
   const semanticKey = createHash('sha256')
     .update(
       JSON.stringify({
@@ -3713,25 +3897,20 @@ function acceptRunIntervention(
           ),
         }
       : reject('IdempotencyConflict')
-  expireReconnectGrace(db)
-  const current = state(db)
-  if (input.expectedLeaseRevision !== current.control.revision)
-    return reject('ControlLeaseLost')
-  if (current.control.holderClientId !== identity.clientId)
-    return reject('ControlLeaseLost')
+  if (current.run === null) return reject('RunRevisionConflict')
+  if (
+    current.run.phase === 'completed' ||
+    current.run.phase === 'stopped' ||
+    current.run.phase === 'parkRequested'
+  )
+    return reject('AlreadyTerminal')
   if (intent === 'pause') {
-    if (
-      current.run === null ||
-      input.expectedRunRevision !== current.run.revision
-    )
+    if (input.expectedRunRevision !== current.run.revision)
       return reject('RunRevisionConflict')
     if (current.run.phase === 'paused') return reject('AlreadyPaused')
-    if (current.run.phase === 'completed' || current.run.phase === 'stopped')
-      return reject('AlreadyTerminal')
   }
   if (intent === 'resume') {
-    if (current.run === null || current.run.phase !== 'paused')
-      return reject('NotPaused')
+    if (current.run.phase !== 'paused') return reject('NotPaused')
     if (input.expectedRunRevision !== current.run.revision)
       return reject('RunRevisionConflict')
     if (current.run.resumablePhase === undefined)
@@ -3823,21 +4002,16 @@ function acceptFakePolicy(
   path: string,
   identity: LocalIdentity,
 ) {
-  if (path === '/api/commands/stop-run') {
-    const existing = receipt(db, input.idempotencyKey)
-    if (existing !== undefined) return { status: 200, body: existing }
-  }
   if (identity.capability === 'readOnly') return reject('ClientReadOnly')
   if (!hasFakeRunDefinition(db)) return reject('RunRevisionConflict')
   const current = state(db)
-  const run = current.run
   if (
     input.expectedLeaseRevision !== current.control.revision ||
     current.control.holderClientId !== identity.clientId
   )
     return reject('ControlLeaseLost')
-  if (run === null || input.expectedRunRevision !== run.revision)
-    return reject('RunRevisionConflict')
+  const run = current.run
+  if (run === null) return reject('RunRevisionConflict')
   const definition =
     run.sourceDefinitionId === undefined
       ? undefined
@@ -3881,13 +4055,23 @@ function acceptFakePolicy(
           ),
         }
       : reject('IdempotencyConflict')
+  if (input.expectedRunRevision !== run.revision)
+    return reject('RunRevisionConflict')
   if (
     run.phase === 'completed' ||
     run.phase === 'stopped' ||
     run.phase === 'parkRequested'
   )
     return reject('AlreadyTerminal')
-  if (run.phase === 'paused') return reject('PolicyUnavailable')
+  if (
+    run.phase === 'paused' &&
+    path !== '/api/commands/stop-run' &&
+    path !== '/api/commands/request-fake-park'
+  )
+    return reject('PolicyUnavailable')
+  const policyPhase = resumableRunPhase(run.phase)
+  if (path === '/api/commands/retry-fake-phase' && policyPhase === undefined)
+    return reject('PolicyUnavailable')
   const activeSequenceIndex = run.activeSequenceIndex
   const completedSequenceCount = run.completedSequenceCount
   if (activeSequenceIndex === undefined || completedSequenceCount === undefined)
@@ -3895,32 +4079,35 @@ function acceptFakePolicy(
   const nextSequence = sequences[activeSequenceIndex + 1]
   if (path === '/api/commands/retry-fake-phase' && run.retryPhase !== undefined)
     return reject('RetryExhausted')
-  const nextRun: Run =
-    path === '/api/commands/stop-run'
-      ? { ...run, revision: run.revision + 1, phase: 'stopped' }
-      : path === '/api/commands/skip-fake-sequence'
-        ? nextSequence === undefined
-          ? {
-              ...run,
-              revision: run.revision + 1,
-              phase: 'completed',
-              progress: 100,
-              completedSequenceCount: completedSequenceCount + 1,
-            }
-          : {
-              ...run,
-              revision: run.revision + 1,
-              phase: 'preflight',
-              target: nextSequence.target,
-              progress: Math.floor(
-                ((completedSequenceCount + 1) / sequences.length) * 100,
-              ),
-              activeSequenceIndex: activeSequenceIndex + 1,
-              completedSequenceCount: completedSequenceCount + 1,
-            }
-        : path === '/api/commands/retry-fake-phase'
-          ? { ...run, revision: run.revision + 1, retryPhase: run.phase }
-          : { ...run, revision: run.revision + 1, phase: 'parkRequested' }
+  let nextRun: Run
+  if (path === '/api/commands/stop-run')
+    nextRun = { ...run, revision: run.revision + 1, phase: 'stopped' }
+  else if (path === '/api/commands/skip-fake-sequence')
+    nextRun =
+      nextSequence === undefined
+        ? {
+            ...run,
+            revision: run.revision + 1,
+            phase: 'completed',
+            progress: 100,
+            completedSequenceCount: completedSequenceCount + 1,
+          }
+        : {
+            ...run,
+            revision: run.revision + 1,
+            phase: 'preflight',
+            target: nextSequence.target,
+            progress: Math.floor(
+              ((completedSequenceCount + 1) / sequences.length) * 100,
+            ),
+            activeSequenceIndex: activeSequenceIndex + 1,
+            completedSequenceCount: completedSequenceCount + 1,
+          }
+  else if (path === '/api/commands/retry-fake-phase') {
+    if (policyPhase === undefined) return reject('PolicyUnavailable')
+    nextRun = { ...run, revision: run.revision + 1, retryPhase: policyPhase }
+  } else
+    nextRun = { ...run, revision: run.revision + 1, phase: 'parkRequested' }
   const eventType: ControlEvent =
     path === '/api/commands/stop-run'
       ? 'RunStopped'
@@ -5023,6 +5210,126 @@ const planCommandFromRequest = Effect.fn('Server.planCommandFromRequest')(
   },
   (effect, _request, db, identity, publish) =>
     effect.pipe(Effect.provide(planCommandLayer(db, identity, publish))),
+)
+const observeCommandLayer = (
+  db: DatabaseSync,
+  identity: LocalIdentity,
+  publish: (type: string, cursor: number) => void,
+) =>
+  Layer.succeed(
+    ObserveCommandService,
+    ObserveCommandService.of({
+      execute: Effect.fn('Server.ObserveCommandService.execute')(function* (
+        intent: typeof ObserveIntent.Type,
+      ) {
+        const response = yield* Effect.try({
+          try: () => observeIntentResponse(db, intent, identity),
+          catch: () => new ObserveServiceUnavailable(),
+        })
+        if (response.body.outcome === 'rejected') {
+          const snapshot = yield* bootstrapSnapshot(db, identity).pipe(
+            Effect.mapError(() => new ObserveServiceUnavailable()),
+          )
+          const body = yield* Schema.decodeUnknownEffect(
+            ObserveCommandResponse,
+          )({
+            _tag: 'Rejected',
+            failure: {
+              _tag: 'Rejected',
+              reason: response.body.reason,
+              summary: response.body.message,
+            },
+            snapshot,
+          }).pipe(Effect.mapError(() => new ObserveServiceUnavailable()))
+          return { status: response.status, body }
+        }
+        if ('event' in response && response.event !== undefined)
+          publish(response.event.type, response.event.cursor)
+        const body = yield* Schema.decodeUnknownEffect(ObserveCommandResponse)({
+          _tag: 'Accepted',
+          result: observeCommandResult(intent),
+        }).pipe(Effect.mapError(() => new ObserveServiceUnavailable()))
+        return { status: response.status, body }
+      }),
+    }),
+  )
+function observeIntentResponse(
+  db: DatabaseSync,
+  intent: typeof ObserveIntent.Type,
+  identity: LocalIdentity,
+) {
+  if (ObserveIntent.guards.PauseRun(intent))
+    return acceptRunIntervention(db, intent, 'pause', identity)
+  if (ObserveIntent.guards.ResumeRun(intent))
+    return acceptRunIntervention(db, intent, 'resume', identity)
+  const path = ObserveIntent.guards.StopRun(intent)
+    ? '/api/commands/stop-run'
+    : ObserveIntent.guards.SkipSequence(intent)
+      ? '/api/commands/skip-fake-sequence'
+      : ObserveIntent.guards.RetryPhase(intent)
+        ? '/api/commands/retry-fake-phase'
+        : '/api/commands/request-fake-park'
+  return acceptFakePolicy(db, intent, path, identity)
+}
+function observeCommandResult(
+  intent: typeof ObserveIntent.Type,
+): typeof ObserveCommandResult.Type {
+  const result = {
+    PauseRun: 'PauseAccepted',
+    ResumeRun: 'ResumeAccepted',
+    StopRun: 'StopAccepted',
+    SkipSequence: 'SequenceSkipped',
+    RetryPhase: 'PhaseRetryAccepted',
+    RequestPark: 'ParkRequested',
+  } satisfies Record<typeof intent._tag, string>
+  return Schema.decodeUnknownSync(ObserveCommandResult)({
+    _tag: result[intent._tag],
+  })
+}
+const observeCommandFromRequest = Effect.fn('Server.observeCommandFromRequest')(
+  function* (
+    request: Promise<unknown | undefined | typeof BodyTooLarge>,
+    db: DatabaseSync,
+    identity: LocalIdentity,
+    publish: (type: string, cursor: number) => void,
+  ) {
+    void db
+    void identity
+    void publish
+    const raw = yield* Effect.promise(() => request)
+    if (raw === undefined || raw === BodyTooLarge)
+      return yield* Effect.fail(new ObserveCommandInputInvalid())
+    const requestBody = yield* Schema.decodeUnknownEffect(
+      ObserveCommandRequest,
+    )(raw).pipe(Effect.mapError(() => new ObserveCommandInputInvalid()))
+    const service = yield* ObserveCommandService
+    return yield* service.execute(requestBody.intent)
+  },
+  (effect, _request, db, identity, publish) =>
+    effect.pipe(Effect.provide(observeCommandLayer(db, identity, publish))),
+)
+const observeServiceResponse = Effect.fn('Server.observeServiceResponse')(
+  function* (_failure: 'ObserveServiceUnavailable', summary: string) {
+    const body = yield* Schema.decodeUnknownEffect(ObserveCommandResponse)({
+      _tag: 'Unavailable',
+      failure: { _tag: 'ObserveServiceUnavailable', summary },
+    })
+    return { status: 503, body }
+  },
+)
+const observeInvalidResponse = Effect.fn('Server.observeInvalidResponse')(
+  function* (db: DatabaseSync, identity: LocalIdentity) {
+    const snapshot = yield* bootstrapSnapshot(db, identity)
+    const body = yield* Schema.decodeUnknownEffect(ObserveCommandResponse)({
+      _tag: 'Rejected',
+      failure: {
+        _tag: 'InvalidInput',
+        summary: 'The Observe command is invalid.',
+      },
+      snapshot,
+    })
+    return { status: 400, body }
+  },
 )
 const planServiceResponse = Effect.fn('Server.planServiceResponse')(function* (
   failure: 'PlanServiceUnavailable',
