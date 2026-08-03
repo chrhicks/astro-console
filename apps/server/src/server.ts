@@ -8,8 +8,7 @@ import {
   X509Certificate,
   type KeyObject,
 } from 'node:crypto'
-import { mkdirSync, readFileSync, statSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { readFileSync, statSync } from 'node:fs'
 import { Context, Effect, Exit, Layer, Option, Schema, Scope } from 'effect'
 import {
   BootstrapHttpFailureEnvelope,
@@ -51,6 +50,8 @@ import {
 import { runExecutable } from './executable.ts'
 import { OriginListener, originListenerLayer } from './origin-listener.ts'
 import { WebHost, webHostLayer } from './web-host.ts'
+import { openOriginDatabase } from './database.ts'
+import type { LocalIdentity, RequestAdmission } from './identity.ts'
 type StartRun = Extract<
   typeof PlanIntent.Type,
   { readonly _tag: 'StartAcceptedRun' }
@@ -97,16 +98,6 @@ const SolarTestIntentInput = Schema.Struct({
   ),
   idempotencyKey: Schema.NonEmptyString.check(Schema.isMaxLength(128)),
 })
-type Capability = 'controlCapable' | 'readOnly'
-export type LocalIdentity = {
-  readonly personId: string
-  readonly clientId: string
-  readonly capability: Capability
-  readonly role?: 'owner' | 'viewer'
-}
-export type RequestAdmission = (
-  request?: Pick<IncomingMessage, 'headers'>,
-) => LocalIdentity | undefined | Promise<LocalIdentity | undefined>
 export type SolarTestIntentResult =
   | {
       readonly outcome: 'accepted'
@@ -877,7 +868,6 @@ const ControlRequestRow = Schema.Struct({
 })
 const StoredRow = Schema.Struct({ value: Schema.String })
 const LatestCursorRow = Schema.Struct({ cursor: Schema.Int })
-const MigrationRow = Schema.Struct({ version: Schema.Int })
 const WorkerStatusRow = Schema.Struct({
   worker_id: Schema.String,
   state: Schema.Literals(['alive', 'stopped']),
@@ -910,7 +900,6 @@ const SolarTestWork = Schema.Struct({
   target: Schema.Literal('Sun'),
   requiredEvidence: Schema.Literal('Stack'),
 })
-const SqliteColumnRow = Schema.Struct({ name: Schema.String })
 const LibraryRole = Schema.Literals([
   'original',
   'linearMaster',
@@ -993,31 +982,6 @@ const StoredRunDefinition = Schema.Struct({
   acceptedAt: Schema.String,
   executor: Schema.Literals(['fake', 'fixture']),
   plan: PlanWorkspace,
-})
-const LegacyPlanWorkspace = Schema.Struct({
-  planId: Schema.Literal('plan-m27'),
-  revision: Schema.Int,
-  target: Schema.NonEmptyString,
-  readiness: Schema.Literal('ready'),
-  readinessSummary: Schema.String,
-  observingWindow: Schema.Struct({
-    startsAt: Schema.NonEmptyString,
-    endsAt: Schema.NonEmptyString,
-    usableMinutes: Schema.Int,
-    peakAltitudeDeg: Schema.Finite,
-    horizonClearanceDeg: Schema.Finite,
-  }),
-  sequences: Schema.Array(
-    Schema.Struct({
-      sequenceId: Schema.NonEmptyString,
-      order: Schema.optionalKey(Schema.Int),
-      target: Schema.NonEmptyString,
-      capture: Schema.NonEmptyString,
-      acquisition: Schema.NonEmptyString,
-      stopCondition: Schema.NonEmptyString,
-      viability: Schema.Literal('viable'),
-    }),
-  ),
 })
 const ObservingPlanRow = Schema.Struct({
   plan_id: Schema.String,
@@ -1223,11 +1187,7 @@ export function createLocalWebService(
     readonly webDistPath?: string
   } = {},
 ) {
-  if (databasePath !== ':memory:')
-    mkdirSync(dirname(databasePath), { recursive: true })
-  const database = new DatabaseSync(databasePath)
-  database.exec('PRAGMA journal_mode = WAL')
-  migrateDatabase(database)
+  const database = openOriginDatabase(databasePath)
   if (options.fixture !== undefined) {
     installM27Fixture(database, options.fixture !== 'plan-draft')
     if (options.fixture === 'library-published')
@@ -2011,194 +1971,7 @@ function installPublishedLibraryFixture(database: DatabaseSync) {
       'published/run-m27-001/previews/asset-m27-001-fixture.fits',
     )
 }
-export function openPublisherDatabase(
-  databasePath: string,
-  allowedRoot = '/var/lib/astro-console/',
-) {
-  return openMigrationDatabase(databasePath, allowedRoot)
-}
-export function openProcessorDatabase(
-  databasePath: string,
-  allowedRoot = '/var/lib/astro-console/',
-) {
-  return openMigrationDatabase(databasePath, allowedRoot)
-}
-export function openMigrationDatabase(
-  databasePath: string,
-  allowedRoot: string,
-) {
-  if (
-    !allowedRoot.startsWith('/') ||
-    !allowedRoot.endsWith('/') ||
-    !databasePath.startsWith(allowedRoot) ||
-    /[\r\n]|(?:^|\/)\.\.(?:\/|$)/.test(databasePath)
-  )
-    throw new Error('Database path must be app-owned')
-  mkdirSync(dirname(databasePath), { recursive: true })
-  const database = new DatabaseSync(databasePath)
-  database.exec('PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL')
-  migrateDatabase(database)
-  return database
-}
-
 const isOwner = (identity: LocalIdentity) => identity.role === 'owner'
-
-function migrateDatabase(db: DatabaseSync) {
-  db.exec(
-    'CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)',
-  )
-  const latestRaw: unknown = db
-    .prepare(
-      'SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations',
-    )
-    .get()
-  const latest = Schema.decodeUnknownSync(MigrationRow)(latestRaw).version
-  const migrations = [
-    () =>
-      db.exec(
-        'CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS events (cursor INTEGER PRIMARY KEY,type TEXT NOT NULL,snapshot TEXT NOT NULL); CREATE TABLE IF NOT EXISTS receipts (idempotency_key TEXT PRIMARY KEY,response TEXT NOT NULL); CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL); CREATE TABLE IF NOT EXISTS control_requests (client_id TEXT PRIMARY KEY,person_id TEXT NOT NULL); CREATE TABLE IF NOT EXISTS memberships (external_subject TEXT PRIMARY KEY,person_id TEXT NOT NULL,role TEXT NOT NULL); CREATE TABLE IF NOT EXISTS library_assets (asset_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,role TEXT NOT NULL,format TEXT NOT NULL,availability TEXT NOT NULL,comparison_group_id TEXT NOT NULL,captured_at TEXT NOT NULL,updated_at TEXT NOT NULL,sharpness REAL NOT NULL,detail TEXT NOT NULL);',
-      ),
-    () => migrateOutbox(db),
-    () =>
-      db.exec(
-        'CREATE TABLE IF NOT EXISTS workspace_projections (name TEXT PRIMARY KEY,value TEXT NOT NULL)',
-      ),
-    () =>
-      db.exec(
-        'CREATE TABLE IF NOT EXISTS worker_status (worker_id TEXT PRIMARY KEY,state TEXT NOT NULL,adapter_state TEXT NOT NULL,last_heartbeat TEXT NOT NULL)',
-      ),
-    () =>
-      db.exec(
-        'CREATE TABLE IF NOT EXISTS solar_test_intents (intent_id TEXT PRIMARY KEY,idempotency_key TEXT NOT NULL,name TEXT NOT NULL,owner_person_id TEXT NOT NULL,owner_client_id TEXT NOT NULL,semantic_key TEXT NOT NULL,state TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(idempotency_key,owner_person_id)); CREATE TABLE IF NOT EXISTS solar_test_evidence (intent_id TEXT PRIMARY KEY,state TEXT NOT NULL,message TEXT NOT NULL,observed_at TEXT NOT NULL)',
-      ),
-    () =>
-      db.exec(
-        'CREATE TABLE IF NOT EXISTS solar_test_provider_ack (intent_id TEXT PRIMARY KEY,acknowledged_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS solar_test_recovery (intent_id TEXT PRIMARY KEY,state TEXT NOT NULL,recorded_at TEXT NOT NULL)',
-      ),
-    () =>
-      db.exec(
-        'CREATE TABLE IF NOT EXISTS process_save_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id)); CREATE TABLE IF NOT EXISTS process_asset_events (asset_id TEXT NOT NULL,event_type TEXT NOT NULL,checksum TEXT NOT NULL); CREATE TABLE IF NOT EXISTS process_save_orphans (path TEXT PRIMARY KEY,checksum TEXT NOT NULL,recorded_at TEXT NOT NULL)',
-      ),
-    () =>
-      db.exec(
-        'CREATE TABLE IF NOT EXISTS asset_publications (asset_id TEXT PRIMARY KEY,checksum TEXT NOT NULL,state TEXT NOT NULL,updated_at TEXT NOT NULL)',
-      ),
-    () =>
-      db.exec(
-        "ALTER TABLE asset_publications ADD COLUMN object_key TEXT NOT NULL DEFAULT ''",
-      ),
-    () =>
-      db.exec(
-        "UPDATE outbox SET state='cancelled',claim_token=NULL,claimed_by=NULL,claim_until=NULL,last_error='Retired deterministic fixture hardware work',retry_after=NULL WHERE kind IN ('StartM27Capture','StopStack','ResumeStack','StopRun') AND state IN ('pending','failed','claimed')",
-      ),
-    () =>
-      db.exec(
-        'CREATE TABLE IF NOT EXISTS source_ingest_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id)); CREATE TABLE IF NOT EXISTS source_ingest_events (asset_id TEXT PRIMARY KEY,event_type TEXT NOT NULL,checksum TEXT NOT NULL); CREATE TABLE IF NOT EXISTS source_ingest_orphans (path TEXT PRIMARY KEY,checksum TEXT NOT NULL,recorded_at TEXT NOT NULL)',
-      ),
-    () => {},
-    () => {},
-    () =>
-      db.exec(
-        'CREATE TABLE IF NOT EXISTS observing_plans (plan_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,projection TEXT NOT NULL); CREATE TABLE IF NOT EXISTS observing_plan_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id))',
-      ),
-    () => {
-      db.exec(
-        'ALTER TABLE observing_plans ADD COLUMN run_eligible INTEGER NOT NULL DEFAULT 0',
-      )
-      migrateLegacyPlanWorkspace(db)
-    },
-    () => migrateLegacyPlanWorkspace(db),
-    () =>
-      db.exec(
-        'CREATE TABLE IF NOT EXISTS run_definitions (run_definition_id TEXT PRIMARY KEY,source_plan_id TEXT NOT NULL,source_plan_revision INTEGER NOT NULL,definition TEXT NOT NULL,accepted_at TEXT NOT NULL,UNIQUE(source_plan_id,source_plan_revision)); CREATE TABLE IF NOT EXISTS run_definition_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id))',
-      ),
-    () => {},
-    () =>
-      db.exec(
-        'CREATE TABLE IF NOT EXISTS run_intervention_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id))',
-      ),
-    () =>
-      db.exec(
-        'CREATE TABLE IF NOT EXISTS run_mutation_previews (preview_id TEXT PRIMARY KEY,run_id TEXT NOT NULL,run_revision INTEGER NOT NULL,owner_person_id TEXT NOT NULL,mutation TEXT NOT NULL,consequences TEXT NOT NULL,classification TEXT NOT NULL,expires_at TEXT NOT NULL,applied_at TEXT); CREATE TABLE IF NOT EXISTS run_mutation_preview_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id))',
-      ),
-    () =>
-      db.exec(
-        'CREATE TABLE IF NOT EXISTS run_start_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id))',
-      ),
-    () => {
-      db.exec(
-        "ALTER TABLE control_requests RENAME TO legacy_control_requests; CREATE TABLE control_requests (request_id TEXT PRIMARY KEY,client_id TEXT NOT NULL UNIQUE,person_id TEXT NOT NULL); INSERT INTO control_requests SELECT 'legacy-' || client_id,client_id,person_id FROM legacy_control_requests; DROP TABLE legacy_control_requests; CREATE TABLE IF NOT EXISTS control_command_receipts (idempotency_key TEXT NOT NULL,actor_person_id TEXT NOT NULL,actor_client_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,actor_person_id,actor_client_id))",
-      )
-    },
-    () => {
-      db.exec(
-        "ALTER TABLE control_requests RENAME TO legacy_control_requests; CREATE TABLE control_requests (request_id TEXT PRIMARY KEY,client_id TEXT NOT NULL UNIQUE,person_id TEXT NOT NULL,created_at TEXT NOT NULL,expires_at TEXT NOT NULL,target_control_capable INTEGER NOT NULL); INSERT INTO control_requests SELECT request_id,client_id,person_id,'1970-01-01T00:00:00.000Z','1970-01-01T00:00:00.000Z',0 FROM legacy_control_requests; DROP TABLE legacy_control_requests",
-      )
-    },
-  ] as const
-  if (latest > migrations.length)
-    throw new Error(`Database schema ${latest} is newer than this release`)
-  for (let index = latest; index < migrations.length; index += 1) {
-    db.exec('BEGIN IMMEDIATE')
-    try {
-      migrations[index]?.()
-      db.prepare('INSERT INTO schema_migrations VALUES (?,?)').run(
-        index + 1,
-        new Date().toISOString(),
-      )
-      db.exec('COMMIT')
-    } catch (error) {
-      db.exec('ROLLBACK')
-      throw error
-    }
-  }
-}
-function migrateLegacyPlanWorkspace(db: DatabaseSync) {
-  const raw: unknown = db
-    .prepare("SELECT value FROM workspace_projections WHERE name='plan'")
-    .get()
-  try {
-    const row = Schema.decodeUnknownSync(StoredRow)(raw)
-    const legacy = Schema.decodeUnknownSync(LegacyPlanWorkspace)(
-      JSON.parse(row.value),
-    )
-    const first = legacy.sequences[0]
-    if (first === undefined) return
-    const plan = evaluatePlan({
-      planId: legacy.planId,
-      revision: legacy.revision,
-      sequences: [
-        {
-          sequenceId: first.sequenceId,
-          target: first.target,
-          capture: first.capture,
-          acquisition: first.acquisition,
-          stopCondition: first.stopCondition,
-          window: legacy.observingWindow,
-          estimatedMinutes: Math.min(legacy.observingWindow.usableMinutes, 72),
-          storageForecastMb: 1800,
-          horizon: 'clear',
-          storage: 'available',
-        },
-        {
-          sequenceId: 'sequence-m27-color',
-          target: first.target,
-          capture: '18 × 180s · RGB',
-          acquisition: 'Continue after luminance with the same solved center.',
-          stopCondition: 'Stop at 18 verified frames or window end.',
-          window: legacy.observingWindow,
-          estimatedMinutes: Math.min(legacy.observingWindow.usableMinutes, 54),
-          storageForecastMb: 1350,
-          horizon: 'clear',
-          storage: 'available',
-        },
-      ],
-    })
-    db.prepare(
-      "UPDATE workspace_projections SET value=? WHERE name='plan'",
-    ).run(JSON.stringify(plan))
-  } catch {}
-}
 function ensureM27FixturePlan(
   db: DatabaseSync,
   includeFixtureDefinition: boolean,
@@ -2233,25 +2006,6 @@ function ensureM27FixturePlan(
       definition.acceptedAt,
     )
   } catch {}
-}
-function migrateOutbox(db: DatabaseSync) {
-  const raw: unknown = db.prepare('PRAGMA table_info(outbox)').all()
-  const columns = new Set(
-    Schema.decodeUnknownSync(Schema.Array(SqliteColumnRow))(raw).map(
-      (column) => column.name,
-    ),
-  )
-  for (const [name, definition] of [
-    ['claim_token', 'TEXT'],
-    ['claimed_by', 'TEXT'],
-    ['claim_until', 'TEXT'],
-    ['attempts', 'INTEGER NOT NULL DEFAULT 0'],
-    ['last_error', 'TEXT'],
-    ['retry_after', 'TEXT'],
-    ['ack_at', 'TEXT'],
-  ] as const)
-    if (!columns.has(name))
-      db.exec(`ALTER TABLE outbox ADD COLUMN ${name} ${definition}`)
 }
 function initializeRuntimeState(db: DatabaseSync) {
   const latestRaw: unknown = db
@@ -2938,12 +2692,6 @@ function readiness(db: DatabaseSync) {
 }
 function operations(db: DatabaseSync) {
   const current = state(db)
-  const schemaRaw: unknown = db
-    .prepare(
-      'SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations',
-    )
-    .get()
-  const schema = Schema.decodeUnknownSync(MigrationRow)(schemaRaw).version
   const workerRaw: unknown = db
     .prepare(
       "SELECT worker_id,state,adapter_state,last_heartbeat FROM worker_status WHERE worker_id='rig-worker'",
@@ -2954,7 +2702,7 @@ function operations(db: DatabaseSync) {
   )
   return {
     release: 'server',
-    schemaVersion: schema,
+    schemaVersion: 'current',
     sqlite: { journalMode: 'wal', checkpoint: 'unknown' as const },
     snapshot: {
       version: current.snapshotVersion,

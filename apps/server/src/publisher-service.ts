@@ -1,4 +1,4 @@
-import { openPublisherDatabase } from './server.ts'
+import { openPublisherDatabase } from './database.ts'
 import type { R2PublisherConfig } from './publisher-config.ts'
 import { createR2Provider } from './r2-provider.ts'
 import { createPublisherWorker } from './publisher-worker.ts'

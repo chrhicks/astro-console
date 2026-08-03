@@ -34,9 +34,9 @@ import {
   createJwksKeyResolver,
   createMembershipBootstrapResolver,
   createProductionAccessAdmission,
-  openMigrationDatabase,
   createLocalWebService,
 } from './server.ts'
+import { DatabasePathNotAppOwned, openAppOwnedDatabase } from './database.ts'
 import { createRigWorkerService, runRigWorker } from './rig-worker.ts'
 import { runSolarTestIntent } from './solar-test.ts'
 import { createSeestarSolarAdapter } from './seestar-solar-adapter.ts'
@@ -1027,7 +1027,6 @@ const CountRow = Schema.Struct({ count: Schema.Int })
 const EventRow = Schema.Struct({ checksum: Schema.String })
 const StatusRow = Schema.Struct({ state: Schema.String })
 const ProjectionRow = Schema.Struct({ value: Schema.String })
-const MigrationRow = Schema.Struct({ version: Schema.Int })
 const RunDefinitionEvidenceRow = Schema.Struct({ definition: Schema.String })
 const AssetAvailabilityRow = Schema.Struct({ availability: Schema.String })
 const AssetDetailRow = Schema.Struct({ detail: Schema.String })
@@ -1445,7 +1444,7 @@ test('manifest processor is disabled by default and only saves bounded configure
   }
   writeFileSync(manifestPath, JSON.stringify(manifest))
   const openTestDatabase = (path: string) =>
-    openMigrationDatabase(path, `${root}/`)
+    openAppOwnedDatabase(path, `${root}/`)
   const missing = createProcessorService(
     { ...config, manifestPath: join(root, 'missing.json') },
     { databaseOpener: openTestDatabase },
@@ -1644,7 +1643,7 @@ test('source ingest records transaction-failure originals as checksum-backed orp
   const originals = join(root, 'originals')
   mkdirSync(sources)
   writeFileSync(join(sources, 'original.fits'), 'original-bytes')
-  const database = openMigrationDatabase(join(root, 'state.sqlite'), `${root}/`)
+  const database = openAppOwnedDatabase(join(root, 'state.sqlite'), `${root}/`)
   database.exec(
     "CREATE TRIGGER reject_source_event BEFORE INSERT ON source_ingest_events BEGIN SELECT RAISE(ABORT, 'forced source ingest failure'); END;",
   )
@@ -2713,65 +2712,27 @@ test('publisher worker preserves a publication persistence failure and recovers 
   service.close()
 })
 
-test('numbered SQLite migrations upgrade a legacy database and reject a newer schema', () => {
+test('fresh SQLite initialization creates the current V2 tables', () => {
   const databasePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-migrations-')),
+    mkdtempSync(join(tmpdir(), 'astro-fresh-schema-')),
     'state.sqlite',
   )
-  const legacy = new DatabaseSync(databasePath)
-  legacy.exec(
-    'CREATE TABLE state (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE events (cursor INTEGER PRIMARY KEY,type TEXT NOT NULL,snapshot TEXT NOT NULL); CREATE TABLE receipts (idempotency_key TEXT PRIMARY KEY,response TEXT NOT NULL); CREATE TABLE outbox (id TEXT PRIMARY KEY,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL); CREATE TABLE control_requests (client_id TEXT PRIMARY KEY,person_id TEXT NOT NULL); CREATE TABLE memberships (external_subject TEXT PRIMARY KEY,person_id TEXT NOT NULL,role TEXT NOT NULL); CREATE TABLE library_assets (asset_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,role TEXT NOT NULL,format TEXT NOT NULL,availability TEXT NOT NULL,comparison_group_id TEXT NOT NULL,captured_at TEXT NOT NULL,updated_at TEXT NOT NULL,sharpness REAL NOT NULL,detail TEXT NOT NULL);',
-  )
-  legacy.close()
-  const service = createFixtureService(databasePath)
-  assert.equal(
-    databaseRow(
-      MigrationRow,
-      service.database
-        .prepare('SELECT max(version) AS version FROM schema_migrations')
-        .get(),
-    ).version,
-    23,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare('SELECT count(*) AS count FROM workspace_projections')
-        .get(),
-    ).count,
-    1,
-  )
+  const service = createLocalWebService(databasePath)
   assert.equal(
     databaseRow(
       CountRow,
       service.database
         .prepare(
-          "SELECT count(*) AS count FROM pragma_table_info('outbox') WHERE name='claim_token'",
+          "SELECT count(*) AS count FROM pragma_table_info('outbox') WHERE name IN ('claim_token','claimed_by','claim_until','attempts','last_error','retry_after','ack_at')",
         )
         .get(),
     ).count,
-    1,
-  )
-  service.close()
-  const freshPath = join(
-    mkdtempSync(join(tmpdir(), 'astro-fresh-migrations-')),
-    'state.sqlite',
-  )
-  const fresh = createLocalWebService(freshPath)
-  assert.equal(
-    databaseRow(
-      MigrationRow,
-      fresh.database
-        .prepare('SELECT max(version) AS version FROM schema_migrations')
-        .get(),
-    ).version,
-    23,
+    7,
   )
   assert.equal(
     databaseRow(
       CountRow,
-      fresh.database
+      service.database
         .prepare(
           "SELECT count(*) AS count FROM pragma_table_info('observing_plans') WHERE name='run_eligible'",
         )
@@ -2779,127 +2740,27 @@ test('numbered SQLite migrations upgrade a legacy database and reject a newer sc
     ).count,
     1,
   )
-  fresh.close()
-  const fixturePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-legacy-plan-')),
-    'state.sqlite',
-  )
-  const seeded = createFixtureService(fixturePath)
-  seeded.database
-    .prepare('DELETE FROM schema_migrations WHERE version>13')
-    .run()
-  seeded.database.exec(
-    'DROP TABLE observing_plans; DROP TABLE observing_plan_receipts',
-  )
-  seeded.database
-    .prepare("UPDATE workspace_projections SET value=? WHERE name='plan'")
-    .run(
-      JSON.stringify({
-        planId: 'plan-m27',
-        revision: 3,
-        target: 'M27 · Dumbbell Nebula',
-        readiness: 'ready',
-        readinessSummary: 'Legacy fixture projection.',
-        observingWindow: {
-          startsAt: '2026-07-25T03:18:00.000Z',
-          endsAt: '2026-07-25T05:02:00.000Z',
-          usableMinutes: 104,
-          peakAltitudeDeg: 62,
-          horizonClearanceDeg: 28,
-        },
-        sequences: [
-          {
-            sequenceId: 'sequence-m27-luminance',
-            target: 'M27 · Dumbbell Nebula',
-            capture: '24 × 180s · L',
-            acquisition: 'Solve, center, focus, then start capture.',
-            stopCondition: 'Stop at 24 verified frames or 01:02 local.',
-            viability: 'viable',
-          },
-        ],
-      }),
-    )
-  seeded.close()
-  const migratedFixture = createFixtureService(fixturePath)
-  const migratedPlan = JSON.parse(
-    databaseRow(
-      ProjectionRow,
-      migratedFixture.database
-        .prepare("SELECT value FROM workspace_projections WHERE name='plan'")
-        .get(),
-    ).value,
-  )
-  assert.equal(migratedPlan.sequences.length, 2)
-  assert.deepEqual(migratedPlan.limitations, [])
-  assert.equal(migratedPlan.sequences[0].window.horizonClearanceDeg, 28)
-  migratedFixture.close()
-  const recorded15Path = join(
-    mkdtempSync(join(tmpdir(), 'astro-recorded-15-plan-')),
-    'state.sqlite',
-  )
-  const recorded15 = createFixtureService(recorded15Path)
-  recorded15.database
-    .prepare('DELETE FROM schema_migrations WHERE version>=16')
-    .run()
-  recorded15.database
-    .prepare("UPDATE workspace_projections SET value=? WHERE name='plan'")
-    .run(
-      JSON.stringify({
-        planId: 'plan-m27',
-        revision: 3,
-        target: 'M27',
-        readiness: 'ready',
-        readinessSummary: 'Recorded schema-15 fixture projection.',
-        observingWindow: {
-          startsAt: '2026-07-25T03:18:00.000Z',
-          endsAt: '2026-07-25T05:02:00.000Z',
-          usableMinutes: 104,
-          peakAltitudeDeg: 62,
-          horizonClearanceDeg: 28,
-        },
-        sequences: [
-          {
-            sequenceId: 'legacy-l',
-            order: 1,
-            target: 'M27',
-            capture: '24 × 180s · L',
-            acquisition: 'Solve and center.',
-            stopCondition: 'Window end.',
-            viability: 'viable',
-          },
-        ],
-      }),
-    )
-  recorded15.close()
-  const repaired = createFixtureService(recorded15Path)
-  const repairedPlan = JSON.parse(
-    databaseRow(
-      ProjectionRow,
-      repaired.database
-        .prepare("SELECT value FROM workspace_projections WHERE name='plan'")
-        .get(),
-    ).value,
-  )
-  assert.equal(repairedPlan.sequences.length, 2)
-  assert.deepEqual(repairedPlan.limitations, [])
   assert.equal(
     databaseRow(
-      MigrationRow,
-      repaired.database
-        .prepare('SELECT max(version) AS version FROM schema_migrations')
+      CountRow,
+      service.database
+        .prepare(
+          "SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name='schema_migrations'",
+        )
         .get(),
-    ).version,
-    23,
+    ).count,
+    0,
   )
-  repaired.close()
-  const newer = new DatabaseSync(databasePath)
-  newer
-    .prepare('INSERT INTO schema_migrations VALUES (?,?)')
-    .run(99, '2026-07-24T00:00:00.000Z')
-  newer.close()
+  service.close()
+})
+
+test('app-owned SQLite opener rejects paths outside its root with a tagged error', () => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-app-owned-root-'))
   assert.throws(
-    () => createFixtureService(databasePath),
-    /newer than this release/,
+    () => openAppOwnedDatabase('/tmp/not-astro.sqlite', `${root}/`),
+    (error: unknown) =>
+      error instanceof DatabasePathNotAppOwned &&
+      error._tag === 'Database.PathNotAppOwned',
   )
 })
 
@@ -3265,7 +3126,7 @@ test('operational endpoints expose bounded admitted health without internal deta
     (response) => response.json(),
   )
   assert.equal(operations.release, 'server')
-  assert.equal(operations.schemaVersion, 23)
+  assert.equal(operations.schemaVersion, 'current')
   assert.equal(operations.sqlite.journalMode, 'wal')
   assert.equal(operations.disk, 'unknown')
   assert.equal(operations.rig, 'unknown')
@@ -3814,83 +3675,6 @@ test('rig outbox dispatch leaves a claimed PublishAsset for its publisher', asyn
     'dispatched',
   )
   rig.close()
-  service.close()
-})
-
-test('startup backfills shared-control state for a legacy local database without changing accepted work', async (t) => {
-  const databasePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-legacy-')),
-    'state.sqlite',
-  )
-  const legacy = new DatabaseSync(databasePath)
-  legacy.exec(
-    'CREATE TABLE state (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE events (cursor INTEGER PRIMARY KEY,type TEXT NOT NULL,snapshot TEXT NOT NULL); CREATE TABLE receipts (idempotency_key TEXT PRIMARY KEY,response TEXT NOT NULL); CREATE TABLE outbox (id TEXT PRIMARY KEY,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL);',
-  )
-  const put = legacy.prepare('INSERT INTO state VALUES (?,?)')
-  for (const [key, value] of Object.entries({
-    snapshotVersion: 7,
-    eventCursor: 11,
-    planRevision: 3,
-    run: {
-      id: 'run-accepted-before-control',
-      revision: 4,
-      phase: 'capture',
-      target: 'M27 · Dumbbell Nebula',
-      progress: 42,
-    },
-  }))
-    put.run(key, JSON.stringify(value))
-  legacy
-    .prepare('INSERT INTO events VALUES (?,?,?)')
-    .run(11, 'RunStarted', '{"accepted":true}')
-  legacy
-    .prepare('INSERT INTO receipts VALUES (?,?)')
-    .run('legacy-receipt', '{"accepted":true}')
-  legacy
-    .prepare('INSERT INTO outbox VALUES (?,?,?,?)')
-    .run('legacy-outbox', 'StartM27Capture', '{}', 'pending')
-  legacy.close()
-
-  const service = createFixtureService(databasePath)
-  const listener = await service.listen()
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  const snapshot = await bootstrapSnapshot(
-    `http://127.0.0.1:${listener.port}/api/snapshot`,
-  )
-  assert.equal(snapshot.snapshotVersion, 7)
-  assert.equal(snapshot.eventCursor, 11)
-  assert.equal(snapshot.activeRun._tag, 'Active')
-  if (snapshot.activeRun._tag === 'Active')
-    assert.equal(snapshot.activeRun.run.runId, 'run-accepted-before-control')
-  assert.equal(snapshot.control.holderClientId, 'desktop-owner')
-  assert.equal(snapshot.control.revision, 1)
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM events').get(),
-    ).count,
-    1,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM receipts').get(),
-    ).count,
-    1,
-  )
-  assert.equal(
-    databaseRow(
-      StatusRow,
-      service.database
-        .prepare("SELECT state FROM outbox WHERE id='legacy-outbox'")
-        .get(),
-    ).state,
-    'cancelled',
-  )
-  await listener.close()
   service.close()
 })
 

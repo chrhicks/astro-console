@@ -1,4 +1,4 @@
-import { readdirSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
@@ -12,6 +12,43 @@ const sourceFiles = (directory) =>
         ? [path]
         : []
     })
+
+const serverImports = new Map([
+  ['src/rig-worker.ts', ['createLocalWebService']],
+  ['src/solar-test.ts', ['createLocalWebService']],
+])
+
+const importedServerNames = (source) =>
+  [
+    ...source.matchAll(
+      /import\s+(?:type\s+)?\{([^}]+)\}\s+from\s+['"]\.\/server\.ts['"]/g,
+    ),
+  ]
+    .flatMap((match) => match[1]?.split(',') ?? [])
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .sort()
+
+const assertCurrentServerImportBoundary = () => {
+  for (const source of sourceFiles('src')) {
+    const names = importedServerNames(readFileSync(source, 'utf8'))
+    const expected = serverImports.get(source)
+    if (expected === undefined && names.length > 0)
+      throw new Error(
+        `${source} must not import server.ts; add an owned boundary instead`,
+      )
+    if (
+      expected !== undefined &&
+      (names.length !== expected.length ||
+        names.some((name, index) => name !== expected[index]))
+    )
+      throw new Error(
+        `${source} server.ts imports changed; move the dependency to its owned boundary`,
+      )
+  }
+}
+
+assertCurrentServerImportBoundary()
 
 for (const source of [...sourceFiles('src'), ...sourceFiles('scripts')]) {
   const result = spawnSync(

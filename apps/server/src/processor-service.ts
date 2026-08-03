@@ -6,7 +6,7 @@ import { runExecutable } from './executable.ts'
 import { saveProcessOutputs, type ProcessSaveResult } from './process-save.ts'
 import { ingestSourceAsset, type SourceIngestResult } from './source-ingest.ts'
 import type { ProcessorConfig } from './processor-config.ts'
-import { openProcessorDatabase } from './server.ts'
+import { openProcessorDatabase } from './database.ts'
 
 const Manifest = Schema.Struct({
   sessionId: Schema.NonEmptyString,
