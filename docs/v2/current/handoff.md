@@ -44,8 +44,7 @@ the five sequential Production Convergence Epics:
 2. `tkt-n9yoieoz` — create the production Nightbook web application.
    **Complete.**
 3. `tkt-uuom4upo` — establish the decoded snapshot, SSE, capability, command,
-   and failure seam. **Implementation and validation complete; pending owner
-   closeout.**
+   and failure seam. **Complete.**
 4. `tkt-qffwfa47` — ship web and server from one version-matched origin.
 5. `tkt-zcsucxyx` — migrate proven workspace slices and retire experimental
    implementation paths.
@@ -85,7 +84,7 @@ at wide, compact, and 390 px phone widths with direct deep-link refresh,
 back/forward, keyboard focus, semantic status, no console errors, and no
 horizontal overflow.
 
-## Production Client Seam Complete Pending Owner Closeout
+## Production Client Seam Complete
 
 Epic 3 emits shared contracts and establishes the bounded bootstrap HTTP/SSE/
 control seam between `apps/web` and `apps/server`. The Effect-owned web client

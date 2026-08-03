@@ -116,9 +116,8 @@ proven behavior only. It does not authorize provider-backed preflight, a device
 command, physical capture, processing workflow, or other deferred Phase 3–6
 behavior.
 
-Epics 1 and 2 are complete. Epic 3 has completed implementation and validation
-pending owner closeout. It supplies emitted shared contracts and a bounded
-bootstrap HTTP/SSE/control
+Epics 1, 2, and 3 are complete. Epic 3 supplies emitted shared contracts and a
+bounded bootstrap HTTP/SSE/control
 seam: the Effect-owned web client loads snapshot-first, reconnects without
 replaying commands, guards stale state, and consumes server-owned phone
 capability and typed command submission. Its validation used real native SSE
