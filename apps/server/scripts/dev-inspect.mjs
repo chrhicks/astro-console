@@ -14,13 +14,20 @@ const requestedPath =
     .find((argument) => argument.startsWith('--path='))
     ?.slice('--path='.length) ?? '/'
 if (!requestedPath.startsWith('/')) throw new Error('--path must start with /')
+const scenario =
+  process.argv
+    .find((argument) => argument.startsWith('--scenario='))
+    ?.slice('--scenario='.length) ?? 'm27'
+if (!['m27', 'plan-draft'].includes(scenario))
+  throw new Error('--scenario must be m27 or plan-draft')
+const scenarioSuffix = scenario === 'plan-draft' ? '-plan-draft' : ''
 const profile = resolve(
   appRoot,
-  `.astro-local-web/inspect-chrome-profile-${requestedClient}`,
+  `.astro-local-web/inspect-chrome-profile-${requestedClient}${scenarioSuffix}`,
 )
 const database = resolve(
   appRoot,
-  `.astro-local-web/inspect-state-${requestedClient}.sqlite`,
+  `.astro-local-web/inspect-state-${requestedClient}${scenarioSuffix}.sqlite`,
 )
 const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 mkdirSync(profile, { recursive: true })
@@ -32,7 +39,7 @@ const server = spawn(
     env: {
       ...process.env,
       ASTRO_LOCAL_WEB_CLIENT: requestedClient,
-      ASTRO_LOCAL_WEB_FIXTURE: 'm27',
+      ASTRO_LOCAL_WEB_FIXTURE: scenario,
       ASTRO_LOCAL_WEB_DB: database,
     },
     stdio: ['inherit', 'pipe', 'pipe'],
@@ -110,7 +117,7 @@ function openBrowser() {
     browser = undefined
   })
   process.stdout.write(
-    `Inspector ready for ${requestedClient}: agent-browser connect 9223\n`,
+    `Inspector ready for ${requestedClient} (${scenario}): agent-browser connect 9223\n`,
   )
 }
 server.stderr.pipe(process.stderr)

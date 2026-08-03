@@ -1,6 +1,12 @@
 import { Effect, Fiber, Stream } from 'effect'
 import { useEffect, useRef, useState } from 'react'
 import { BootstrapClient } from './bootstrap-client'
+import {
+  PlanCommandClient,
+  type PlanAction,
+  type PlanCommandSubmission,
+} from './plan-command-client'
+import { IdempotencyKey } from '@astro-console/v2-contracts'
 import { projectBootstrapState } from './bootstrap-projection'
 import { createBootstrapRuntime } from './bootstrap-runtime'
 import { unavailableProjection } from './future-adapter'
@@ -24,6 +30,13 @@ export function App() {
     unavailableProjection,
   )
   const [route, setRoute] = useState<Route>(currentRoute)
+  const [submitPlan, setSubmitPlan] = useState<
+    | ((
+        action: PlanAction,
+        key: typeof IdempotencyKey.Type,
+      ) => Promise<PlanCommandSubmission>)
+    | undefined
+  >()
   const workspace = routeWorkspace(route)
   const initialRoute = useRef(true)
 
@@ -35,6 +48,15 @@ export function App() {
   useEffect(() => {
     if (import.meta.env.DEV && !import.meta.env.VITE_ASTRO_BOOTSTRAP) return
     const runtime = createBootstrapRuntime()
+    setSubmitPlan(
+      () => (action: PlanAction, key: typeof IdempotencyKey.Type) =>
+        runtime.runPromise(
+          Effect.gen(function* () {
+            const client = yield* PlanCommandClient
+            return yield* client.submit(action, key)
+          }),
+        ),
+    )
     const fiber = runtime.runFork(
       Effect.gen(function* () {
         const client = yield* BootstrapClient
@@ -46,6 +68,7 @@ export function App() {
       }),
     )
     return () => {
+      setSubmitPlan(undefined)
       void runtime
         .runPromise(Fiber.interrupt(fiber))
         .then(() => runtime.dispose())
@@ -111,7 +134,10 @@ export function App() {
         }
       />
     ) : (
-      <PlanView view={projection.plan} />
+      <PlanView
+        view={projection.plan}
+        {...(submitPlan === undefined ? {} : { submit: submitPlan })}
+      />
     )
 
   return (

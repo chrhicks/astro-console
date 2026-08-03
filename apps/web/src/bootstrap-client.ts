@@ -67,6 +67,7 @@ export class EventStream extends Context.Service<
 
 export interface BootstrapClientShape {
   readonly read: () => Effect.Effect<BootstrapClientState>
+  readonly refresh: () => Effect.Effect<void>
   readonly states: Stream.Stream<BootstrapClientState>
 }
 
@@ -124,6 +125,7 @@ export const layer = Layer.effect(
       read: Effect.fn('BootstrapClient.read')(function* () {
         return yield* SubscriptionRef.get(state)
       }),
+      refresh: installSnapshot,
       states: SubscriptionRef.changes(state),
     })
   }),

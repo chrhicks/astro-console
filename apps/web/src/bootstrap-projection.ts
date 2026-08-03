@@ -1,6 +1,7 @@
 import type {
   BootstrapSnapshot,
   BootstrapSubsystemHealth,
+  PlanWorkspaceProjection,
 } from '@astro-console/v2-contracts'
 import {
   BootstrapClientState,
@@ -80,14 +81,7 @@ function projectSnapshot(
   }
   return {
     shell,
-    plan: {
-      detailAvailable: false,
-      title: 'Plan detail unavailable',
-      readiness:
-        'Bootstrap does not include Plan readiness or sequence detail.',
-      detail: 'Plan draft and revision detail are unavailable from bootstrap.',
-      sequences: [],
-    },
+    plan: plan(snapshot, freshness, reason),
     observe: observe(
       snapshot,
       freshness,
@@ -109,6 +103,60 @@ function projectSnapshot(
       diagnostics: 'Processing detail is unavailable from bootstrap.',
     },
   }
+}
+
+function plan(
+  snapshot: BootstrapSnapshot,
+  freshness: 'current' | 'stale' | 'reconnecting',
+  staleReason: string | undefined,
+): Projection['plan'] {
+  if (snapshot.plan === undefined)
+    return {
+      detailAvailable: false,
+      title: 'Plan detail unavailable',
+      readiness: 'Plan readiness is unavailable from the service snapshot.',
+      detail:
+        'Plan draft and revision detail are unavailable from this snapshot.',
+      sequences: [],
+    }
+  const current = freshness === 'current'
+  return {
+    detailAvailable: true,
+    title: 'Observing plan',
+    readiness: current
+      ? readiness(snapshot.plan.readiness)
+      : `Last-confirmed ${readiness(snapshot.plan.readiness)}`,
+    detail: current
+      ? snapshot.plan.readinessSummary
+      : `Current plan truth is unavailable. ${snapshot.plan.readinessSummary}`,
+    sequences: snapshot.plan.sequences.map((sequence) => ({
+      id: sequence.sequenceId,
+      target: sequence.target,
+      window: `${sequence.window.startsAt} – ${sequence.window.endsAt}`,
+      capture: sequence.capture,
+      readiness: sequence.viability,
+    })),
+    source: snapshot.plan,
+    snapshotVersion: snapshot.snapshotVersion,
+    ...(snapshot.activeRun._tag === 'Active'
+      ? { runRevision: snapshot.activeRun.run.revision }
+      : {}),
+    ...(current && snapshot.membership.capability === 'controlCapable'
+      ? {}
+      : {
+          actionReason: current
+            ? 'This client is read-only.'
+            : (staleReason ?? 'Current plan truth is unavailable.'),
+        }),
+  }
+}
+
+function readiness(value: PlanWorkspaceProjection['readiness']) {
+  return value === 'ready'
+    ? 'Ready'
+    : value === 'readyWithLimitations'
+      ? 'Ready with limitations'
+      : 'Blocked'
 }
 
 function unavailableProjection(reason: string): Projection {

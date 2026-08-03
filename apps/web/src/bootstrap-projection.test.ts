@@ -48,6 +48,60 @@ test('projects a fresh authoritative snapshot with distinct health facts', () =>
   assert.equal('action' in projection.observe, false)
 })
 
+test('projects server-owned Plan detail and preserves it as last-confirmed when stale', () => {
+  const plan = Schema.decodeUnknownSync(BootstrapSnapshot)({
+    ...bootstrapFixtures.fresh,
+    plan: {
+      planId: 'plan-m27',
+      revision: 3,
+      readiness: 'readyWithLimitations',
+      readinessSummary:
+        'The plan is usable with the named deterministic limitations.',
+      limitations: ['seq-1: horizon clearance is limited.'],
+      acceptedRunDefinition: {
+        id: 'definition-m27-r2',
+        sourcePlanRevision: 2,
+        acceptedAt: '2026-07-25T20:00:00Z',
+        executor: 'fake',
+      },
+      sequences: [
+        {
+          sequenceId: 'seq-1',
+          target: 'M27',
+          capture: '24 × 180s · L',
+          acquisition: 'Solve and center',
+          stopCondition: '24 frames',
+          window: {
+            startsAt: '2026-07-25T21:00:00Z',
+            endsAt: '2026-07-26T01:00:00Z',
+            usableMinutes: 240,
+            peakAltitudeDeg: 68,
+            horizonClearanceDeg: 28,
+          },
+          estimatedMinutes: 180,
+          storageForecastMb: 1200,
+          horizon: 'limited',
+          storage: 'available',
+          viability: 'limited',
+        },
+      ],
+    },
+  })
+  const current = projectBootstrapState(
+    BootstrapClientState.Current({ snapshot: plan }),
+  )
+  const stale = projectBootstrapState(
+    BootstrapClientState.Stale({ snapshot: plan, reason: 'Disconnected.' }),
+  )
+  assert.equal(current.plan.readiness, 'Ready with limitations')
+  assert.equal(current.plan.sequences[0]?.target, 'M27')
+  assert.equal(
+    current.plan.source?.acceptedRunDefinition?.sourcePlanRevision,
+    2,
+  )
+  assert.equal(stale.plan.readiness, 'Last-confirmed Ready with limitations')
+})
+
 test('projects stale and reconnecting snapshots as last-confirmed and protected', () => {
   const stale = projectBootstrapState(
     BootstrapClientState.Stale({

@@ -11,10 +11,102 @@ import {
   NonNegativeInt,
   NonNegativeNumber,
   PersonId,
+  PlanId,
+  PlanRevision,
+  PreviewId,
   RunId,
   RunRevision,
   SnapshotVersion,
 } from './primitives.js'
+
+export const PlanSequenceDetail = Schema.Struct({
+  sequenceId: Schema.NonEmptyString,
+  target: Schema.NonEmptyString,
+  capture: Schema.NonEmptyString,
+  acquisition: Schema.NonEmptyString,
+  stopCondition: Schema.NonEmptyString,
+  window: Schema.Struct({
+    startsAt: Schema.NonEmptyString,
+    endsAt: Schema.NonEmptyString,
+    usableMinutes: NonNegativeInt,
+    peakAltitudeDeg: Schema.Finite,
+    horizonClearanceDeg: Schema.Finite,
+  }),
+  estimatedMinutes: NonNegativeInt,
+  storageForecastMb: NonNegativeInt,
+  horizon: Schema.Literals(['clear', 'limited', 'blocked', 'missing']),
+  storage: Schema.Literals(['available', 'limited', 'blocked', 'missing']),
+  viability: Schema.Literals(['viable', 'limited', 'blocked']),
+})
+
+export interface PlanSequenceDetail extends Schema.Schema.Type<
+  typeof PlanSequenceDetail
+> {}
+
+export const AcceptedRunDefinitionSummary = Schema.Struct({
+  id: Schema.NonEmptyString,
+  sourcePlanRevision: PlanRevision,
+  acceptedAt: Schema.NonEmptyString,
+  executor: Schema.Literal('fake'),
+})
+
+export const PlanActionEligibility = Schema.TaggedUnion({
+  Eligible: {},
+  Ineligible: {
+    reason: Schema.Literals([
+      'ownerRequired',
+      'readOnlyClient',
+      'controlRequired',
+      'planNotReady',
+      'acceptedDefinitionRequired',
+      'activeRunRequired',
+      'activeRunPresent',
+      'definitionAlreadyAccepted',
+      'terminalRun',
+      'pausedRun',
+      'runAdvanced',
+      'previewRequired',
+    ]),
+  },
+})
+
+export const PlanWorkspaceProjection = Schema.Struct({
+  planId: PlanId,
+  revision: PlanRevision,
+  readiness: Schema.Literals(['ready', 'readyWithLimitations', 'blocked']),
+  readinessSummary: Schema.NonEmptyString,
+  limitations: Schema.Array(Schema.NonEmptyString),
+  sequences: Schema.NonEmptyArray(PlanSequenceDetail),
+  acceptedRunDefinition: Schema.optionalKey(AcceptedRunDefinitionSummary),
+  runMutationPreview: Schema.optionalKey(
+    Schema.Struct({
+      previewId: PreviewId,
+      classification: Schema.Literals([
+        'nonDisruptive',
+        'notice',
+        'disruptive',
+      ]),
+      consequences: Schema.NonEmptyString,
+      expiresAt: ExpiresAt,
+      approvalRequired: Schema.Boolean,
+      approvalToken: Schema.optionalKey(Schema.NonEmptyString),
+    }),
+  ),
+  actions: Schema.optionalKey(
+    Schema.Struct({
+      saveDraft: PlanActionEligibility,
+      acceptRunDefinition: PlanActionEligibility,
+      startAcceptedRun: PlanActionEligibility,
+      previewRunMutation: PlanActionEligibility,
+      applyRunMutation: PlanActionEligibility,
+      approveDisruptiveRunMutation: PlanActionEligibility,
+    }),
+  ),
+})
+
+export interface PlanWorkspaceProjection extends Schema.Schema.Type<
+  typeof PlanWorkspaceProjection
+> {}
 
 export const BootstrapMembership = Schema.Struct({
   personId: PersonId,
@@ -104,6 +196,7 @@ export const BootstrapSnapshot = Schema.Struct({
   generatedAt: GeneratedAt,
   membership: BootstrapMembership,
   control: BootstrapControl,
+  plan: Schema.optionalKey(PlanWorkspaceProjection),
   activeRun: BootstrapActiveRun,
   health: BootstrapHealth,
 })

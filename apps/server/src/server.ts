@@ -10,7 +10,7 @@ import {
 } from 'node:crypto'
 import { mkdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { Context, Effect, Exit, Layer, Schema, Scope } from 'effect'
+import { Context, Effect, Exit, Layer, Option, Schema, Scope } from 'effect'
 import {
   BootstrapHttpFailureEnvelope,
   BootstrapHttpSuccessEnvelope,
@@ -21,6 +21,10 @@ import {
   CommandFailure,
   CommandHttpFailureEnvelope,
   CommandHttpSuccessEnvelope,
+  PlanCommandRequest,
+  PlanCommandResponse,
+  PlanIntent,
+  PlanWorkspaceProjection,
 } from '@astro-console/v2-contracts'
 import { decodeSeestarPushEvent } from 'seestar-sdk'
 import {
@@ -629,6 +633,7 @@ type FailureReason =
   | 'RetryExhausted'
   | 'PolicyUnavailable'
   | 'InvalidInput'
+  | 'DraftUnchanged'
 type CommandResult =
   | {
       readonly outcome: 'accepted'
@@ -650,6 +655,27 @@ class CommandInputInvalid extends Schema.TaggedErrorClass<CommandInputInvalid>()
   'Server.CommandInputInvalid',
   {},
 ) {}
+class PlanCommandInputInvalid extends Schema.TaggedErrorClass<PlanCommandInputInvalid>()(
+  'Server.PlanCommandInputInvalid',
+  {},
+) {}
+class PlanServiceUnavailable extends Schema.TaggedErrorClass<PlanServiceUnavailable>()(
+  'Server.PlanServiceUnavailable',
+  {},
+) {}
+interface PlanCommandServiceShape {
+  readonly execute: (intent: typeof PlanIntent.Type) => Effect.Effect<
+    {
+      readonly status: number
+      readonly body: typeof PlanCommandResponse.Type
+    },
+    Schema.SchemaError | PlanServiceUnavailable
+  >
+}
+class PlanCommandService extends Context.Service<
+  PlanCommandService,
+  PlanCommandServiceShape
+>()('Server.PlanCommandService') {}
 interface ControlCommandServiceShape {
   readonly execute: (
     commandId: string,
@@ -918,34 +944,7 @@ const DownloadAssetRow = Schema.Struct({
   state: Schema.String,
   object_key: Schema.String,
 })
-const PlanWorkspace = Schema.Struct({
-  planId: Schema.String,
-  revision: Schema.Int,
-  readiness: Schema.Literals(['ready', 'readyWithLimitations', 'blocked']),
-  readinessSummary: Schema.String,
-  limitations: Schema.Array(Schema.String),
-  sequences: Schema.Array(
-    Schema.Struct({
-      sequenceId: Schema.String,
-      target: Schema.String,
-      capture: Schema.String,
-      acquisition: Schema.String,
-      stopCondition: Schema.String,
-      window: Schema.Struct({
-        startsAt: Schema.String,
-        endsAt: Schema.String,
-        usableMinutes: Schema.Int,
-        peakAltitudeDeg: Schema.Number,
-        horizonClearanceDeg: Schema.Number,
-      }),
-      estimatedMinutes: Schema.Int,
-      storageForecastMb: Schema.Int,
-      horizon: Schema.Literals(['clear', 'limited', 'blocked', 'missing']),
-      storage: Schema.Literals(['available', 'limited', 'blocked', 'missing']),
-      viability: Schema.Literals(['viable', 'limited', 'blocked']),
-    }),
-  ),
-})
+const PlanWorkspace = PlanWorkspaceProjection
 const StoredRunDefinition = Schema.Struct({
   id: Schema.String,
   sourcePlanId: Schema.String,
@@ -1165,6 +1164,7 @@ const operatorMessages = {
   IdempotencyConflict:
     'This idempotency key was already used for a different command.',
   InvalidInput: 'The service could not read that action.',
+  DraftUnchanged: 'The displayed draft does not contain any changes to save.',
   ControlRequested:
     'Control request recorded. The owner can grant or decline it.',
   ControlGranted: 'Control granted. The other desktop now owns control.',
@@ -1198,14 +1198,18 @@ export function createLocalWebService(
   }),
   processSaveStorage?: ProcessSaveStorage,
   downloadGrants?: DownloadGrantConfig,
-  options: { readonly fixture?: 'm27'; readonly webDistPath?: string } = {},
+  options: {
+    readonly fixture?: 'm27' | 'plan-draft'
+    readonly webDistPath?: string
+  } = {},
 ) {
   if (databasePath !== ':memory:')
     mkdirSync(dirname(databasePath), { recursive: true })
   const database = new DatabaseSync(databasePath)
   database.exec('PRAGMA journal_mode = WAL')
   migrateDatabase(database)
-  if (options.fixture === 'm27') installM27Fixture(database)
+  if (options.fixture !== undefined)
+    installM27Fixture(database, options.fixture === 'm27')
   else initializeRuntimeState(database)
   const webHost = Effect.runSync(
     WebHost.pipe(
@@ -1315,6 +1319,21 @@ export function createLocalWebService(
         database,
         decodedAssetId(url.pathname.slice('/api/library/assets/'.length)),
       )
+    if (request.method === 'POST' && url.pathname === '/api/plan/commands')
+      return Effect.runPromise(
+        planCommandFromRequest(body(request), database, identity, publish).pipe(
+          Effect.catchTags({
+            'Server.PlanCommandInputInvalid': () =>
+              planInvalidResponse(database, identity),
+            'Server.PlanServiceUnavailable': () =>
+              planServiceResponse(
+                'PlanServiceUnavailable',
+                'The Plan service is temporarily unavailable.',
+              ),
+          }),
+          Effect.map(({ status, body }) => json(response, status, body)),
+        ),
+      )
     if (
       request.method === 'POST' &&
       url.pathname === '/api/commands/start-run'
@@ -1410,7 +1429,13 @@ export function createLocalWebService(
       const input = await body(request)
       return input === BodyTooLarge
         ? json(response, 413, reject('InvalidInput').body)
-        : previewRunMutationCommand(response, input, database, identity)
+        : previewRunMutationCommand(
+            response,
+            input,
+            database,
+            identity,
+            publish,
+          )
     }
     if (
       request.method === 'POST' &&
@@ -2044,11 +2069,14 @@ export function createLocalWebService(
   }
 }
 
-export function installM27Fixture(database: DatabaseSync) {
+export function installM27Fixture(
+  database: DatabaseSync,
+  includeFixtureDefinition = true,
+) {
   migrateState(database)
   seedLibrary(database)
   seedWorkspaces(database)
-  ensureM27FixturePlan(database)
+  ensureM27FixturePlan(database, includeFixtureDefinition)
 }
 export function openPublisherDatabase(
   databasePath: string,
@@ -2167,6 +2195,10 @@ function migrateDatabase(db: DatabaseSync) {
       db.exec(
         'CREATE TABLE IF NOT EXISTS run_mutation_previews (preview_id TEXT PRIMARY KEY,run_id TEXT NOT NULL,run_revision INTEGER NOT NULL,owner_person_id TEXT NOT NULL,mutation TEXT NOT NULL,consequences TEXT NOT NULL,classification TEXT NOT NULL,expires_at TEXT NOT NULL,applied_at TEXT); CREATE TABLE IF NOT EXISTS run_mutation_preview_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id))',
       ),
+    () =>
+      db.exec(
+        'CREATE TABLE IF NOT EXISTS run_start_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id))',
+      ),
   ] as const
   if (latest > migrations.length)
     throw new Error(`Database schema ${latest} is newer than this release`)
@@ -2231,7 +2263,10 @@ function migrateLegacyPlanWorkspace(db: DatabaseSync) {
     ).run(JSON.stringify(plan))
   } catch {}
 }
-function ensureM27FixturePlan(db: DatabaseSync) {
+function ensureM27FixturePlan(
+  db: DatabaseSync,
+  includeFixtureDefinition: boolean,
+) {
   const raw: unknown = db
     .prepare("SELECT value FROM workspace_projections WHERE name='plan'")
     .get()
@@ -2245,6 +2280,7 @@ function ensureM27FixturePlan(db: DatabaseSync) {
     db.prepare(
       'UPDATE observing_plans SET run_eligible=1 WHERE plan_id=? AND revision=3',
     ).run(plan.planId)
+    if (!includeFixtureDefinition) return
     const definition: RunDefinition = {
       id: 'run-definition-m27-fixture',
       sourcePlanId: plan.planId,
@@ -2525,15 +2561,15 @@ function seedWorkspaces(db: DatabaseSync) {
   )
 }
 function workspace(response: ServerResponse, db: DatabaseSync, name: 'plan') {
+  return json(response, 200, planWorkspaceProjection(db, name))
+}
+
+function planWorkspaceProjection(db: DatabaseSync, name: 'plan') {
   const raw: unknown = db
     .prepare('SELECT value FROM workspace_projections WHERE name=?')
     .get(name)
   const row = Schema.decodeUnknownSync(StoredRow)(raw)
-  return json(
-    response,
-    200,
-    Schema.decodeUnknownSync(PlanWorkspace)(JSON.parse(row.value)),
-  )
+  return Schema.decodeUnknownSync(PlanWorkspace)(JSON.parse(row.value))
 }
 function evaluatePlan(input: {
   readonly planId: string
@@ -3019,6 +3055,10 @@ function snapshot(db: DatabaseSync, identity: LocalIdentity): Snapshot {
 function bootstrapSnapshot(db: DatabaseSync, identity: LocalIdentity) {
   const current = snapshot(db, identity)
   const observedAt = current.generatedAt
+  const plan =
+    current.plan.readiness === 'unavailable'
+      ? undefined
+      : bootstrapPlanWorkspaceProjection(db, identity, current)
   return Schema.decodeUnknownEffect(BootstrapSnapshot)({
     snapshotVersion: current.snapshotVersion,
     eventCursor: current.eventCursor,
@@ -3039,6 +3079,7 @@ function bootstrapSnapshot(db: DatabaseSync, identity: LocalIdentity) {
         ? {}
         : { reconnectGraceUntil: current.control.reconnectGraceUntil }),
     },
+    ...(plan === undefined ? {} : { plan }),
     activeRun:
       current.run === null
         ? { _tag: 'None' }
@@ -3083,6 +3124,216 @@ function bootstrapSnapshot(db: DatabaseSync, identity: LocalIdentity) {
     },
   })
 }
+function bootstrapPlanWorkspaceProjection(
+  db: DatabaseSync,
+  identity: LocalIdentity,
+  current: Snapshot,
+) {
+  const plan = planWorkspaceProjection(db, 'plan')
+  const currentDefinitionRaw: unknown = db
+    .prepare(
+      'SELECT definition FROM run_definitions WHERE source_plan_id=? AND source_plan_revision=?',
+    )
+    .get(plan.planId, plan.revision)
+  const currentDefinition = Schema.decodeUnknownSync(
+    Schema.optional(Schema.Struct({ definition: Schema.String })),
+  )(currentDefinitionRaw)
+  const acceptedForCurrentRevision =
+    currentDefinition === undefined
+      ? undefined
+      : Schema.decodeUnknownSync(StoredRunDefinition)(
+          JSON.parse(currentDefinition.definition),
+        )
+  const acceptedRaw: unknown = db
+    .prepare(
+      'SELECT definition FROM run_definitions WHERE source_plan_id=? ORDER BY accepted_at DESC LIMIT 1',
+    )
+    .get(plan.planId)
+  const acceptedDefinition = Schema.decodeUnknownSync(
+    Schema.optional(Schema.Struct({ definition: Schema.String })),
+  )(acceptedRaw)
+  const accepted =
+    acceptedDefinition === undefined
+      ? undefined
+      : Schema.decodeUnknownSync(StoredRunDefinition)(
+          JSON.parse(acceptedDefinition.definition),
+        )
+  const owner = isOwner(identity)
+  const controller = current.control.holderClientId === identity.clientId
+  const writable = identity.capability === 'controlCapable'
+  const reason = <Unavailable>(eligible: boolean, unavailable: Unavailable) =>
+    eligible ? { _tag: 'Eligible' as const } : unavailable
+  const ownerWrite = owner && writable
+  const activeFake = current.run !== null && hasFakeExecutor(db)
+  const paused = current.run?.phase === 'paused'
+  const advanced = (current.run?.activeSequenceIndex ?? 0) !== 0
+  const terminal =
+    current.run?.phase === 'completed' ||
+    current.run?.phase === 'stopped' ||
+    current.run?.phase === 'parkRequested'
+  const previewRaw: unknown =
+    current.run === null
+      ? undefined
+      : db
+          .prepare(
+            'SELECT preview_id,run_id,run_revision,owner_person_id,mutation,consequences,classification,expires_at,applied_at FROM run_mutation_previews WHERE run_id=? AND run_revision=? AND applied_at IS NULL AND expires_at>? ORDER BY expires_at DESC LIMIT 1',
+          )
+          .get(current.run.id, current.run.revision, new Date().toISOString())
+  const preview = Schema.decodeUnknownSync(
+    Schema.optional(StoredMutationPreview),
+  )(previewRaw)
+  const previewVisible =
+    preview !== undefined &&
+    owner &&
+    writable &&
+    (controller || preview.owner_person_id === identity.personId)
+  return {
+    ...plan,
+    ...(accepted === undefined
+      ? {}
+      : {
+          acceptedRunDefinition: {
+            id: accepted.id,
+            sourcePlanRevision: accepted.sourcePlanRevision,
+            acceptedAt: accepted.acceptedAt,
+            executor: 'fake' as const,
+          },
+        }),
+    ...(previewVisible
+      ? {
+          runMutationPreview: {
+            previewId: preview.preview_id,
+            classification: preview.classification,
+            consequences: preview.consequences,
+            expiresAt: preview.expires_at,
+            approvalRequired: preview.classification === 'disruptive',
+            ...(preview.classification === 'disruptive' && controller
+              ? {
+                  approvalToken: createHash('sha256')
+                    .update(`${preview.preview_id}:${preview.consequences}`)
+                    .digest('hex'),
+                }
+              : {}),
+          },
+        }
+      : {}),
+    actions: {
+      saveDraft: reason(
+        ownerWrite && current.run === null,
+        !owner
+          ? { _tag: 'Ineligible' as const, reason: 'ownerRequired' }
+          : !writable
+            ? { _tag: 'Ineligible' as const, reason: 'readOnlyClient' }
+            : { _tag: 'Ineligible' as const, reason: 'activeRunPresent' },
+      ),
+      acceptRunDefinition: reason(
+        ownerWrite &&
+          current.run === null &&
+          plan.readiness === 'ready' &&
+          acceptedForCurrentRevision === undefined,
+        !owner
+          ? { _tag: 'Ineligible' as const, reason: 'ownerRequired' }
+          : !writable
+            ? { _tag: 'Ineligible' as const, reason: 'readOnlyClient' }
+            : plan.readiness !== 'ready'
+              ? { _tag: 'Ineligible' as const, reason: 'planNotReady' }
+              : current.run !== null
+                ? { _tag: 'Ineligible' as const, reason: 'activeRunPresent' }
+                : {
+                    _tag: 'Ineligible' as const,
+                    reason: 'definitionAlreadyAccepted',
+                  },
+      ),
+      startAcceptedRun: reason(
+        writable &&
+          controller &&
+          current.run === null &&
+          acceptedForCurrentRevision !== undefined,
+        !writable
+          ? { _tag: 'Ineligible' as const, reason: 'readOnlyClient' }
+          : !controller
+            ? { _tag: 'Ineligible' as const, reason: 'controlRequired' }
+            : current.run !== null
+              ? { _tag: 'Ineligible' as const, reason: 'activeRunPresent' }
+              : {
+                  _tag: 'Ineligible' as const,
+                  reason: 'acceptedDefinitionRequired',
+                },
+      ),
+      previewRunMutation: reason(
+        activeFake && !terminal && !paused && !advanced && ownerWrite,
+        !owner
+          ? { _tag: 'Ineligible' as const, reason: 'ownerRequired' }
+          : !writable
+            ? { _tag: 'Ineligible' as const, reason: 'readOnlyClient' }
+            : terminal
+              ? { _tag: 'Ineligible' as const, reason: 'terminalRun' }
+              : paused
+                ? { _tag: 'Ineligible' as const, reason: 'pausedRun' }
+                : advanced
+                  ? { _tag: 'Ineligible' as const, reason: 'runAdvanced' }
+                  : {
+                      _tag: 'Ineligible' as const,
+                      reason: 'activeRunRequired',
+                    },
+      ),
+      applyRunMutation: reason(
+        activeFake &&
+          !terminal &&
+          !paused &&
+          !advanced &&
+          writable &&
+          owner &&
+          controller &&
+          previewVisible &&
+          preview.classification !== 'disruptive',
+        !writable
+          ? { _tag: 'Ineligible' as const, reason: 'readOnlyClient' }
+          : !controller
+            ? { _tag: 'Ineligible' as const, reason: 'controlRequired' }
+            : terminal
+              ? { _tag: 'Ineligible' as const, reason: 'terminalRun' }
+              : paused
+                ? { _tag: 'Ineligible' as const, reason: 'pausedRun' }
+                : advanced
+                  ? { _tag: 'Ineligible' as const, reason: 'runAdvanced' }
+                  : activeFake
+                    ? { _tag: 'Ineligible' as const, reason: 'previewRequired' }
+                    : {
+                        _tag: 'Ineligible' as const,
+                        reason: 'activeRunRequired',
+                      },
+      ),
+      approveDisruptiveRunMutation: reason(
+        activeFake &&
+          !terminal &&
+          !paused &&
+          !advanced &&
+          writable &&
+          owner &&
+          controller &&
+          previewVisible &&
+          preview.classification === 'disruptive',
+        !writable
+          ? { _tag: 'Ineligible' as const, reason: 'readOnlyClient' }
+          : !controller
+            ? { _tag: 'Ineligible' as const, reason: 'controlRequired' }
+            : terminal
+              ? { _tag: 'Ineligible' as const, reason: 'terminalRun' }
+              : paused
+                ? { _tag: 'Ineligible' as const, reason: 'pausedRun' }
+                : advanced
+                  ? { _tag: 'Ineligible' as const, reason: 'runAdvanced' }
+                  : activeFake
+                    ? { _tag: 'Ineligible' as const, reason: 'previewRequired' }
+                    : {
+                        _tag: 'Ineligible' as const,
+                        reason: 'activeRunRequired',
+                      },
+      ),
+    },
+  }
+}
 function sseProjection(db: DatabaseSync, identity: LocalIdentity) {
   const event = Effect.runSync(
     bootstrapSnapshot(db, identity).pipe(
@@ -3102,10 +3353,56 @@ function acceptRun(
   input: typeof StartRun.Type,
   identity: LocalIdentity,
 ) {
-  const existing = receipt(db, input.idempotencyKey)
-  if (existing !== undefined) return { status: 200, body: existing }
-  const current = state(db)
   if (identity.capability === 'readOnly') return reject('ClientReadOnly')
+  const semanticKey = createHash('sha256')
+    .update(
+      JSON.stringify({
+        version: 1,
+        planId: input.planId,
+        expectedPlanRevision: input.expectedPlanRevision,
+        expectedLeaseRevision: input.expectedLeaseRevision,
+      }),
+    )
+    .digest('hex')
+  const receiptRaw: unknown = db
+    .prepare(
+      'SELECT semantic_key,response FROM run_start_receipts WHERE idempotency_key=? AND owner_person_id=?',
+    )
+    .get(input.idempotencyKey, identity.personId)
+  const existing = Schema.decodeUnknownSync(
+    Schema.optional(
+      Schema.Struct({ semantic_key: Schema.String, response: Schema.String }),
+    ),
+  )(receiptRaw)
+  if (existing !== undefined)
+    return existing.semantic_key === semanticKey
+      ? {
+          status: 200,
+          body: Schema.decodeUnknownSync(CommandResultSchema)(
+            JSON.parse(existing.response),
+          ),
+        }
+      : reject('IdempotencyConflict')
+  const definitionRaw: unknown = db
+    .prepare(
+      'SELECT definition FROM run_definitions WHERE source_plan_id=? AND source_plan_revision=?',
+    )
+    .get(input.planId, input.expectedPlanRevision)
+  const definitionRow = Schema.decodeUnknownSync(
+    Schema.optional(Schema.Struct({ definition: Schema.String })),
+  )(definitionRaw)
+  const definition =
+    definitionRow === undefined
+      ? undefined
+      : Schema.decodeUnknownSync(StoredRunDefinition)(
+          JSON.parse(definitionRow.definition),
+        )
+  const legacy =
+    definition === undefined
+      ? legacyStartReplay(db, input, identity)
+      : legacyStartReplay(db, input, identity, definition)
+  if (legacy !== undefined) return legacy
+  const current = state(db)
   if (current.plan.readiness !== 'ready' || !current.plan.runEligible)
     return reject('PlanUnavailable')
   if (
@@ -3116,19 +3413,8 @@ function acceptRun(
     return reject('FreshnessConflict')
   if (current.control.holderClientId !== identity.clientId)
     return reject('ControlLeaseLost')
+  if (definition === undefined) return reject('PlanUnavailable')
   if (current.run !== null) return reject('ActiveRunConflict')
-  const definitionRaw: unknown = db
-    .prepare(
-      'SELECT definition FROM run_definitions WHERE source_plan_id=? AND source_plan_revision=?',
-    )
-    .get(input.planId, input.expectedPlanRevision)
-  const definitionRow = Schema.decodeUnknownSync(
-    Schema.optional(Schema.Struct({ definition: Schema.String })),
-  )(definitionRaw)
-  if (definitionRow === undefined) return reject('PlanUnavailable')
-  const definition = Schema.decodeUnknownSync(StoredRunDefinition)(
-    JSON.parse(definitionRow.definition),
-  )
   db.exec('BEGIN IMMEDIATE')
   try {
     const fixture = definition.executor === 'fixture'
@@ -3169,7 +3455,17 @@ function acceptRun(
       run: next.run,
       snapshot: snapshot(db, identity),
     }
-    record(db, input.idempotencyKey, result, next.eventCursor, 'RunStarted')
+    db.prepare('INSERT INTO run_start_receipts VALUES (?,?,?,?)').run(
+      input.idempotencyKey,
+      identity.personId,
+      semanticKey,
+      JSON.stringify(result),
+    )
+    db.prepare('INSERT INTO events VALUES (?,?,?)').run(
+      next.eventCursor,
+      'RunStarted',
+      JSON.stringify(result),
+    )
     db.exec('COMMIT')
     return {
       status: 202,
@@ -3180,6 +3476,37 @@ function acceptRun(
     db.exec('ROLLBACK')
     throw error
   }
+}
+function legacyStartReplay(
+  db: DatabaseSync,
+  input: typeof StartRun.Type,
+  identity: LocalIdentity,
+  definition?: typeof StoredRunDefinition.Type,
+) {
+  const raw: unknown = db
+    .prepare('SELECT response FROM receipts WHERE idempotency_key=?')
+    .get(input.idempotencyKey)
+  const receipt = Schema.decodeUnknownSync(Schema.optional(ReceiptRow))(raw)
+  if (receipt === undefined) return undefined
+  const result = Schema.decodeUnknownOption(CommandResultSchema)(
+    JSON.parse(receipt.response),
+  )
+  return Option.match(result, {
+    onNone: () => reject('IdempotencyConflict'),
+    onSome: (stored) =>
+      stored.outcome === 'accepted' &&
+      stored.snapshot.identity.personId === identity.personId &&
+      stored.snapshot.identity.clientId === identity.clientId &&
+      stored.snapshot.plan.id === input.planId &&
+      stored.snapshot.plan.revision === input.expectedPlanRevision &&
+      stored.snapshot.control.revision === input.expectedLeaseRevision &&
+      definition !== undefined &&
+      definition.sourcePlanId === input.planId &&
+      definition.sourcePlanRevision === input.expectedPlanRevision &&
+      stored.run?.sourceDefinitionId === definition.id
+        ? { status: 200, body: stored }
+        : reject('IdempotencyConflict'),
+  })
 }
 function advanceFakeRunState(db: DatabaseSync, identity: LocalIdentity) {
   const current = state(db)
@@ -3332,6 +3659,21 @@ function hasFakeRunDefinition(db: DatabaseSync) {
   )
   return definition.executor === 'fake' || definition.executor === 'fixture'
 }
+function hasFakeExecutor(db: DatabaseSync) {
+  const run = state(db).run
+  if (run?.sourceDefinitionId === undefined) return false
+  const raw: unknown = db
+    .prepare('SELECT definition FROM run_definitions WHERE run_definition_id=?')
+    .get(run.sourceDefinitionId)
+  const row = Schema.decodeUnknownSync(
+    Schema.optional(Schema.Struct({ definition: Schema.String })),
+  )(raw)
+  if (row === undefined) return false
+  return (
+    Schema.decodeUnknownSync(StoredRunDefinition)(JSON.parse(row.definition))
+      .executor === 'fake'
+  )
+}
 
 function acceptRunIntervention(
   db: DatabaseSync,
@@ -3339,6 +3681,7 @@ function acceptRunIntervention(
   intent: 'pause' | 'resume',
   identity: LocalIdentity,
 ) {
+  if (!isOwner(identity)) return reject('OwnerRequired')
   if (identity.capability === 'readOnly') return reject('ClientReadOnly')
   if (!hasFakeRunDefinition(db)) return reject('RunRevisionConflict')
   const semanticKey = createHash('sha256')
@@ -3645,18 +3988,17 @@ function previewRunMutationCommand(
   raw: unknown | undefined,
   db: DatabaseSync,
   identity: LocalIdentity,
+  publish: (type: string, cursor: number) => void,
 ) {
   if (raw === undefined) return json(response, 400, reject('InvalidInput').body)
   try {
-    return json(
-      response,
-      202,
-      previewRunMutation(
-        db,
-        Schema.decodeUnknownSync(PreviewRunMutation)(raw),
-        identity,
-      ),
+    const result = previewRunMutation(
+      db,
+      Schema.decodeUnknownSync(PreviewRunMutation)(raw),
+      identity,
     )
+    if ('event' in result) publish(result.event.type, result.event.cursor)
+    return json(response, 202, result)
   } catch {
     return json(response, 400, reject('InvalidInput').body)
   }
@@ -3667,15 +4009,11 @@ function previewRunMutation(
   input: typeof PreviewRunMutation.Type,
   identity: LocalIdentity,
 ) {
+  if (!isOwner(identity)) return reject('OwnerRequired').body
   if (identity.capability === 'readOnly') return reject('ClientReadOnly').body
-  if (!hasFakeRunDefinition(db)) return reject('RunRevisionConflict').body
+  if (!hasFakeExecutor(db)) return reject('RunRevisionConflict').body
   const current = state(db)
   const run = current.run
-  if (
-    input.expectedLeaseRevision !== current.control.revision ||
-    current.control.holderClientId !== identity.clientId
-  )
-    return reject('ControlLeaseLost').body
   if (run === null || input.expectedRunRevision !== run.revision)
     return reject('RunRevisionConflict').body
   if (
@@ -3754,7 +4092,8 @@ function previewRunMutation(
   const result = {
     outcome: 'accepted' as const,
     preview,
-    ...(classification === 'disruptive'
+    ...(classification === 'disruptive' &&
+    current.control.holderClientId === identity.clientId
       ? {
           approvalToken: createHash('sha256')
             .update(`${preview.previewId}:${consequences}`)
@@ -3762,25 +4101,47 @@ function previewRunMutation(
         }
       : {}),
   }
-  db.prepare(
-    'INSERT INTO run_mutation_previews VALUES (?,?,?,?,?,?,?,?,NULL)',
-  ).run(
-    preview.previewId,
-    run.id,
-    run.revision,
-    identity.personId,
-    preview.mutation,
-    consequences,
-    classification,
-    preview.expiresAt,
-  )
-  db.prepare('INSERT INTO run_mutation_preview_receipts VALUES (?,?,?,?)').run(
-    input.idempotencyKey,
-    identity.personId,
-    semanticKey,
-    JSON.stringify(result),
-  )
-  return result
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const cursor = current.eventCursor + 1
+    commit(db, {
+      snapshotVersion: current.snapshotVersion + 1,
+      eventCursor: cursor,
+    })
+    db.prepare(
+      'INSERT INTO run_mutation_previews VALUES (?,?,?,?,?,?,?,?,NULL)',
+    ).run(
+      preview.previewId,
+      run.id,
+      run.revision,
+      identity.personId,
+      preview.mutation,
+      consequences,
+      classification,
+      preview.expiresAt,
+    )
+    db.prepare(
+      'INSERT INTO run_mutation_preview_receipts VALUES (?,?,?,?)',
+    ).run(
+      input.idempotencyKey,
+      identity.personId,
+      semanticKey,
+      JSON.stringify(result),
+    )
+    db.prepare('INSERT INTO events VALUES (?,?,?)').run(
+      cursor,
+      'RunMutationPreviewed',
+      JSON.stringify(result),
+    )
+    db.exec('COMMIT')
+    return {
+      ...result,
+      event: { type: 'RunMutationPreviewed', cursor },
+    }
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
 }
 
 function applyRunMutationCommand(
@@ -3815,8 +4176,9 @@ function applyRunMutation(
   approved: boolean,
   identity: LocalIdentity,
 ) {
+  if (!isOwner(identity)) return reject('OwnerRequired')
   if (identity.capability === 'readOnly') return reject('ClientReadOnly')
-  if (!hasFakeRunDefinition(db)) return reject('RunRevisionConflict')
+  if (!hasFakeExecutor(db)) return reject('RunRevisionConflict')
   const current = state(db)
   const run = current.run
   if (
@@ -3856,6 +4218,12 @@ function applyRunMutation(
       : reject('IdempotencyConflict')
   if (run === null || input.expectedRunRevision !== run.revision)
     return reject('RunRevisionConflict')
+  if (
+    run.phase === 'completed' ||
+    run.phase === 'stopped' ||
+    run.phase === 'parkRequested'
+  )
+    return reject('PolicyUnavailable')
   const rowRaw: unknown = db
     .prepare(
       'SELECT preview_id,run_id,run_revision,owner_person_id,mutation,consequences,classification,expires_at,applied_at FROM run_mutation_previews WHERE preview_id=?',
@@ -3864,11 +4232,7 @@ function applyRunMutation(
   const preview = Schema.decodeUnknownSync(
     Schema.optional(StoredMutationPreview),
   )(rowRaw)
-  if (
-    preview === undefined ||
-    preview.owner_person_id !== identity.personId ||
-    preview.run_id !== run.id
-  )
+  if (preview === undefined || preview.run_id !== run.id)
     return reject('PreviewUnavailable')
   if (preview.applied_at !== null) return reject('PreviewUnavailable')
   if (Date.parse(preview.expires_at) <= Date.now())
@@ -4170,7 +4534,8 @@ function reject(reason: FailureReason) {
             reason === 'PreviewUnavailable' ||
             reason === 'PreviewExpired' ||
             reason === 'RetryExhausted' ||
-            reason === 'PolicyUnavailable'
+            reason === 'PolicyUnavailable' ||
+            reason === 'DraftUnchanged'
           ? 409
           : reason === 'InvalidInput'
             ? 400
@@ -4257,7 +4622,7 @@ function acceptPlanDraft(
     )(JSON.parse(existing.response))
     return stored.semanticKey === semanticKey
       ? { status: 200, body: stored.result }
-      : reject('InvalidInput')
+      : reject('IdempotencyConflict')
   }
   const current = state(db)
   if (current.plan.readiness === 'unavailable') return reject('PlanUnavailable')
@@ -4267,6 +4632,12 @@ function acceptPlanDraft(
     current.run !== null
   )
     return reject('FreshnessConflict')
+  const currentPlan = planWorkspaceProjection(db, 'plan')
+  const currentSequences = currentPlan.sequences.map(
+    ({ viability, ...sequence }) => sequence,
+  )
+  if (JSON.stringify(input.sequences) === JSON.stringify(currentSequences))
+    return reject('DraftUnchanged')
   const plan = evaluatePlan({
     planId: input.planId,
     revision: current.plan.revision + 1,
@@ -4370,7 +4741,7 @@ function acceptRunDefinition(
     )(JSON.parse(existing.response))
     return stored.semanticKey === semanticKey
       ? { status: 200, body: stored.result }
-      : reject('InvalidInput')
+      : reject('IdempotencyConflict')
   }
   const current = state(db)
   if (current.plan.readiness === 'unavailable') return reject('PlanUnavailable')
@@ -4534,7 +4905,7 @@ const controlCommandLayer = (
               failure: commandFailure(commandId, result.body),
             }),
           )
-        if (result.event !== undefined)
+        if ('event' in result && result.event !== undefined)
           publish(result.event.type, result.event.cursor)
         const data = yield* bootstrapSnapshot(db, identity)
         const body = yield* Schema.decodeUnknownEffect(
@@ -4574,6 +4945,179 @@ const controlCommandFromEnvelope = Effect.fn(
   (effect, _request, db, identity, publish) =>
     effect.pipe(Effect.provide(controlCommandLayer(db, identity, publish))),
 )
+const planCommandLayer = (
+  db: DatabaseSync,
+  identity: LocalIdentity,
+  publish: (type: string, cursor: number) => void,
+) =>
+  Layer.succeed(
+    PlanCommandService,
+    PlanCommandService.of({
+      execute: Effect.fn('Server.PlanCommandService.execute')(function* (
+        intent: typeof PlanIntent.Type,
+      ) {
+        const response = yield* Effect.try({
+          try: () => planIntentResponse(db, intent, identity),
+          catch: () => new PlanServiceUnavailable(),
+        })
+        const event = yield* Effect.try({
+          try: () =>
+            Schema.decodeUnknownSync(
+              Schema.optional(
+                Schema.Struct({ type: Schema.String, cursor: Schema.Int }),
+              ),
+            )('event' in response ? response.event : undefined),
+          catch: () => new PlanServiceUnavailable(),
+        })
+        if (event !== undefined) publish(event.type, event.cursor)
+        const body = yield* planCommandResponse(
+          intent,
+          response.body,
+          db,
+          identity,
+        ).pipe(Effect.mapError(() => new PlanServiceUnavailable()))
+        return { status: response.status, body }
+      }),
+    }),
+  )
+function planIntentResponse(
+  db: DatabaseSync,
+  intent: typeof PlanIntent.Type,
+  identity: LocalIdentity,
+) {
+  if (PlanIntent.guards.SaveDraft(intent))
+    return acceptPlanDraft(db, intent, identity)
+  if (PlanIntent.guards.AcceptRunDefinition(intent))
+    return acceptRunDefinition(db, intent, identity)
+  if (PlanIntent.guards.StartAcceptedRun(intent))
+    return acceptRun(db, { ...intent, _tag: 'StartRunFromPlan' }, identity)
+  if (PlanIntent.guards.PreviewRunMutation(intent)) {
+    const body = previewRunMutation(db, intent, identity)
+    return {
+      status: body.outcome === 'rejected' ? reject(body.reason).status : 202,
+      body,
+    }
+  }
+  if (PlanIntent.guards.ApplyRunMutation(intent))
+    return applyRunMutation(db, intent, false, identity)
+  return applyRunMutation(db, intent, true, identity)
+}
+const planCommandFromRequest = Effect.fn('Server.planCommandFromRequest')(
+  function* (
+    request: Promise<unknown | undefined | typeof BodyTooLarge>,
+    db: DatabaseSync,
+    identity: LocalIdentity,
+    publish: (type: string, cursor: number) => void,
+  ) {
+    void db
+    void identity
+    void publish
+    const raw = yield* Effect.promise(() => request)
+    if (raw === undefined || raw === BodyTooLarge)
+      return yield* Effect.fail(new PlanCommandInputInvalid())
+    const requestBody = yield* Schema.decodeUnknownEffect(PlanCommandRequest)(
+      raw,
+    ).pipe(Effect.mapError(() => new PlanCommandInputInvalid()))
+    const service = yield* PlanCommandService
+    return yield* service.execute(requestBody.intent)
+  },
+  (effect, _request, db, identity, publish) =>
+    effect.pipe(Effect.provide(planCommandLayer(db, identity, publish))),
+)
+const planServiceResponse = Effect.fn('Server.planServiceResponse')(function* (
+  failure: 'PlanServiceUnavailable',
+  summary: string,
+) {
+  const body = yield* Schema.decodeUnknownEffect(PlanCommandResponse)({
+    _tag: 'Unavailable',
+    failure: { _tag: 'PlanServiceUnavailable', summary },
+  })
+  return { status: 503, body }
+})
+const planInvalidResponse = Effect.fn('Server.planInvalidResponse')(function* (
+  db: DatabaseSync,
+  identity: LocalIdentity,
+) {
+  const snapshot = yield* bootstrapSnapshot(db, identity)
+  const body = yield* Schema.decodeUnknownEffect(PlanCommandResponse)({
+    _tag: 'Rejected',
+    failure: {
+      _tag: 'InvalidInput',
+      summary: 'The Plan command is invalid.',
+    },
+    snapshot,
+  })
+  return { status: 400, body }
+})
+const planCommandResponse = Effect.fn('Server.planCommandResponse')(function* (
+  intent: typeof PlanIntent.Type,
+  raw: unknown,
+  db: DatabaseSync,
+  identity: LocalIdentity,
+) {
+  const rejected = Schema.decodeUnknownOption(
+    Schema.Struct({
+      outcome: Schema.Literal('rejected'),
+      reason: Schema.NonEmptyString,
+      message: Schema.NonEmptyString,
+    }),
+  )(raw)
+  const snapshot = yield* bootstrapSnapshot(db, identity)
+  return yield* Option.match(rejected, {
+    onNone: () =>
+      Schema.decodeUnknownEffect(PlanCommandResponse)({
+        _tag: 'Accepted',
+        result: planCommandResult(intent, raw),
+        snapshot,
+      }),
+    onSome: (failure) =>
+      Schema.decodeUnknownEffect(PlanCommandResponse)({
+        _tag: 'Rejected',
+        failure: {
+          _tag: 'Rejected',
+          reason: failure.reason,
+          summary: failure.message,
+        },
+        snapshot,
+      }),
+  })
+})
+function planCommandResult(intent: typeof PlanIntent.Type, raw: unknown) {
+  if (PlanIntent.guards.SaveDraft(intent))
+    return { _tag: 'DraftSaved' as const }
+  if (PlanIntent.guards.AcceptRunDefinition(intent))
+    return { _tag: 'RunDefinitionAccepted' as const }
+  if (PlanIntent.guards.StartAcceptedRun(intent))
+    return { _tag: 'RunStarted' as const }
+  if (PlanIntent.guards.ApplyRunMutation(intent))
+    return { _tag: 'RunMutationApplied' as const }
+  if (PlanIntent.guards.ApproveDisruptiveRunMutation(intent))
+    return { _tag: 'RunMutationApplied' as const }
+  const preview = Schema.decodeUnknownSync(
+    Schema.Struct({
+      outcome: Schema.Literal('accepted'),
+      preview: Schema.Struct({
+        previewId: Schema.NonEmptyString,
+        classification: Schema.Literals([
+          'nonDisruptive',
+          'notice',
+          'disruptive',
+        ]),
+        consequences: Schema.NonEmptyString,
+        expiresAt: Schema.NonEmptyString,
+        approvalRequired: Schema.Boolean,
+      }),
+      approvalToken: Schema.optionalKey(Schema.NonEmptyString),
+    }),
+  )(raw)
+  return {
+    _tag: 'RunMutationPreviewed' as const,
+    ...preview.preview,
+    ...(preview.approvalToken === undefined
+      ? {}
+      : { approvalToken: preview.approvalToken }),
+  }
+}
 function commandFailure(
   commandId: string,
   rejected: Extract<CommandResult, { readonly outcome: 'rejected' }>,
@@ -4761,7 +5305,7 @@ if (process.argv[1]?.endsWith('server.ts')) {
       undefined,
       issuer === undefined ? undefined : { issuer },
       {
-        ...(config.fixture === 'm27' ? { fixture: config.fixture } : {}),
+        ...(config.fixture === undefined ? {} : { fixture: config.fixture }),
         webDistPath: config.runtime.webDistPath,
       },
     )

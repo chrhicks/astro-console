@@ -1,6 +1,7 @@
 .app-shell {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
+  height: 100vh;
   min-height: 100vh;
   background: var(--color-canvas);
 }
@@ -115,14 +116,25 @@
 .status-anchor__health {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   padding: var(--space-4) 0;
 }
 .status-anchor__health .semantic-status {
   font-size: 0.75rem;
 }
 .status-anchor__health-summary {
-  display: none;
+  display: inline;
+}
+.status-anchor__health-detail {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 .status-anchor span,
 .status-anchor b {
@@ -184,12 +196,13 @@
     grid-column: 1 / -1;
   }
   .status-anchor__health {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 @media (max-width: 600px) {
   .app-shell {
     display: block;
+    height: auto;
   }
   .app-shell__header {
     grid-template-columns: 1fr;
@@ -247,12 +260,6 @@
     display: grid;
     grid-column: 1 / -1;
     grid-template-columns: minmax(0, 1fr);
-  }
-  .status-anchor__health-detail {
-    display: none;
-  }
-  .status-anchor__health-summary {
-    display: inline;
   }
   .status-anchor__progress progress {
     width: 4rem;

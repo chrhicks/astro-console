@@ -119,11 +119,11 @@ export function Shell({
         <div className="status-anchor__health" aria-label="Service health">
           {view.health.map((fact) => (
             <Status key={fact.label} tone={fact.tone}>
-              <span className="status-anchor__health-detail">
-                {fact.detail}
-              </span>
               <span className="status-anchor__health-summary">
                 {fact.summary}
+              </span>
+              <span className="status-anchor__health-detail">
+                {fact.detail}
               </span>
             </Status>
           ))}

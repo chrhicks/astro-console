@@ -36,7 +36,7 @@ export type OriginServerConfig = {
         readonly clientContext: 'desktop' | 'phone'
         readonly cacheTtlMs: number
       }
-  readonly fixture: string | undefined
+  readonly fixture: 'm27' | 'plan-draft' | undefined
   readonly downloadGrant:
     { readonly url: string; readonly secretPath: string } | undefined
 }
@@ -73,8 +73,14 @@ export const originServerConfig = Config.all({
         return configFailure(
           'Production admission requires Access issuer, audience, HTTPS JWKS URL, bootstrap path, client context, and integer JWKS cache TTL',
         )
-      if (Option.isSome(input.fixture) && input.fixture.value !== 'm27')
-        return configFailure('ASTRO_LOCAL_WEB_FIXTURE must be m27 when set')
+      if (
+        Option.isSome(input.fixture) &&
+        input.fixture.value !== 'm27' &&
+        input.fixture.value !== 'plan-draft'
+      )
+        return configFailure(
+          'ASTRO_LOCAL_WEB_FIXTURE must be m27 or plan-draft when set',
+        )
       if (
         Option.isNone(input.downloadGrantUrl) &&
         Option.isNone(input.downloadGrantSecretPath)
@@ -117,6 +123,11 @@ function originServer(input: {
   readonly downloadGrantSecretPath: Option.Option<string>
 }) {
   return Effect.gen(function* () {
+    const fixture =
+      Option.isSome(input.fixture) &&
+      (input.fixture.value === 'm27' || input.fixture.value === 'plan-draft')
+        ? input.fixture.value
+        : undefined
     const databasePath = yield* validText(
       input.databasePath,
       'Runtime configuration contains an invalid non-secret value',
@@ -143,7 +154,7 @@ function originServer(input: {
           webDistPath,
         },
         admission: { mode: 'development' as const, client: input.client },
-        fixture: Option.getOrUndefined(input.fixture),
+        fixture,
         downloadGrant:
           Option.isSome(input.downloadGrantUrl) &&
           Option.isSome(input.downloadGrantSecretPath)
@@ -169,6 +180,10 @@ function originServer(input: {
     )
       return yield* configFailure(
         'Production admission requires Access issuer, audience, HTTPS JWKS URL, bootstrap path, client context, and integer JWKS cache TTL',
+      )
+    if (Option.isSome(input.fixture))
+      return yield* configFailure(
+        'Local fixtures require development admission and loopback binding',
       )
     const clientContext = input.clientContext.value
     if (clientContext !== 'desktop' && clientContext !== 'phone')
@@ -201,7 +216,7 @@ function originServer(input: {
         clientContext,
         cacheTtlMs: Number(input.cacheTtl),
       },
-      fixture: Option.getOrUndefined(input.fixture),
+      fixture: undefined,
       downloadGrant:
         Option.isSome(input.downloadGrantUrl) &&
         Option.isSome(input.downloadGrantSecretPath)

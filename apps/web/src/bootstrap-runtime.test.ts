@@ -8,6 +8,7 @@ import {
   SnapshotTransport,
 } from './bootstrap-client'
 import { CommandClient, CommandTransport } from './command-client'
+import { PlanCommandClient, PlanCommandTransport } from './plan-command-client'
 import { makeBootstrapRuntime } from './bootstrap-runtime'
 
 test('composes clients per mount and disposes each EventSource scope', async () => {
@@ -54,13 +55,21 @@ test('composes clients per mount and disposes each EventSource scope', async () 
     snapshotTransportLayer,
     eventStreamLayer,
     commandTransportLayer,
+    Layer.succeed(
+      PlanCommandTransport,
+      PlanCommandTransport.of({
+        submit: () => Effect.die('plan command submission is not expected'),
+      }),
+    ),
   )
   await runtime.runPromise(
     Effect.gen(function* () {
       const bootstrap = yield* BootstrapClient
       const command = yield* CommandClient
+      const planCommand = yield* PlanCommandClient
       yield* bootstrap.read()
       assert.equal(command.submit === undefined, false)
+      assert.equal(planCommand.submit === undefined, false)
     }),
   )
   await runtime.runPromise(Queue.take(opened))
@@ -70,11 +79,18 @@ test('composes clients per mount and disposes each EventSource scope', async () 
     snapshotTransportLayer,
     eventStreamLayer,
     commandTransportLayer,
+    Layer.succeed(
+      PlanCommandTransport,
+      PlanCommandTransport.of({
+        submit: () => Effect.die('plan command submission is not expected'),
+      }),
+    ),
   )
   await remounted.runPromise(
     Effect.gen(function* () {
       yield* BootstrapClient
       yield* CommandClient
+      yield* PlanCommandClient
     }),
   )
   await remounted.runPromise(Queue.take(opened))

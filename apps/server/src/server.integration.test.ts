@@ -24,6 +24,7 @@ import {
   BootstrapSseEventEnvelope,
   CommandHttpFailureEnvelope,
   CommandHttpSuccessEnvelope,
+  PlanCommandResponse,
   RunSnapshot,
 } from '@astro-console/v2-contracts'
 import {
@@ -144,6 +145,599 @@ test('bootstrap and bounded control transport decode shared contracts before mut
   await reader.cancel()
 })
 
+test('Plan command transport decodes one closed request boundary and projects persisted eligibility', async (t) => {
+  const service = createFixtureService()
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const malformed = await fetch(`${base}/api/plan/commands`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
+  assert.equal(malformed.status, 400)
+  assert.equal(
+    Schema.decodeUnknownSync(PlanCommandResponse)(await malformed.json())._tag,
+    'Rejected',
+  )
+  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (snapshot.plan === undefined)
+    throw new Error('Fixture Plan is unavailable')
+  assert.equal(snapshot.plan?.actions?.saveDraft._tag, 'Eligible')
+  assert.equal(snapshot.plan?.actions?.startAcceptedRun._tag, 'Eligible')
+  const started = await fetch(`${base}/api/plan/commands`, {
+    method: 'POST',
+    body: JSON.stringify({
+      intent: {
+        _tag: 'StartAcceptedRun',
+        planId: snapshot.plan.planId,
+        expectedPlanRevision: snapshot.plan.revision,
+        expectedLeaseRevision: snapshot.control.revision,
+        idempotencyKey: 'plan-command-start-001',
+      },
+    }),
+  })
+  assert.equal(started.status, 202)
+  assert.equal(
+    Schema.decodeUnknownSync(PlanCommandResponse)(await started.json())._tag,
+    'Accepted',
+  )
+})
+
+test('Plan command preview responses preserve persisted notice and disruptive domain results', async (t) => {
+  const service = createLocalWebService(
+    ':memory:',
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'plan-draft' },
+  )
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (initial.plan === undefined) throw new Error('Fixture Plan is unavailable')
+  const saved = await fetch(`${base}/api/plan/commands`, {
+    method: 'POST',
+    body: JSON.stringify({
+      intent: {
+        _tag: 'SaveDraft',
+        planId: initial.plan.planId,
+        expectedPlanRevision: initial.plan.revision,
+        idempotencyKey: 'plan-preview-save',
+        sequences: initial.plan.sequences.map(({ viability, ...sequence }) => ({
+          ...sequence,
+          capture: `${sequence.capture} · revised`,
+        })),
+      },
+    }),
+  })
+  assert.equal(saved.status, 202)
+  const savedSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (savedSnapshot.plan === undefined)
+    throw new Error('Saved fixture Plan is unavailable')
+  const accepted = await fetch(`${base}/api/plan/commands`, {
+    method: 'POST',
+    body: JSON.stringify({
+      intent: {
+        _tag: 'AcceptRunDefinition',
+        planId: savedSnapshot.plan.planId,
+        expectedPlanRevision: savedSnapshot.plan.revision,
+        expectedLeaseRevision: savedSnapshot.control.revision,
+        idempotencyKey: 'plan-preview-accept',
+      },
+    }),
+  })
+  assert.equal(accepted.status, 202)
+  const acceptedSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (acceptedSnapshot.plan === undefined)
+    throw new Error('Accepted fixture Plan is unavailable')
+  const started = await fetch(`${base}/api/plan/commands`, {
+    method: 'POST',
+    body: JSON.stringify({
+      intent: {
+        _tag: 'StartAcceptedRun',
+        planId: acceptedSnapshot.plan.planId,
+        expectedPlanRevision: acceptedSnapshot.plan.revision,
+        expectedLeaseRevision: acceptedSnapshot.control.revision,
+        idempotencyKey: 'plan-preview-start',
+      },
+    }),
+  })
+  assert.equal(started.status, 202)
+  const active = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (active.activeRun._tag !== 'Active')
+    throw new Error('Expected an active fake run')
+  for (const expected of [
+    {
+      mutation: 'shortenSecond' as const,
+      classification: 'notice' as const,
+      approvalRequired: false,
+    },
+    {
+      mutation: 'discardCurrent' as const,
+      classification: 'disruptive' as const,
+      approvalRequired: true,
+    },
+  ]) {
+    const response: Response = await fetch(`${base}/api/plan/commands`, {
+      method: 'POST',
+      body: JSON.stringify({
+        intent: {
+          _tag: 'PreviewRunMutation',
+          mutation: expected.mutation,
+          expectedLeaseRevision: active.control.revision,
+          expectedRunRevision: active.activeRun.run.revision,
+          idempotencyKey: `plan-preview-${expected.classification}`,
+        },
+      }),
+    })
+    assert.equal(response.status, 202)
+    const body = Schema.decodeUnknownSync(PlanCommandResponse)(
+      await response.json(),
+    )
+    assert.equal(body._tag, 'Accepted')
+    if (body._tag !== 'Accepted' || body.result._tag !== 'RunMutationPreviewed')
+      throw new Error('Expected a mapped mutation preview result')
+    assert.equal(body.result.classification, expected.classification)
+    assert.equal(body.result.approvalRequired, expected.approvalRequired)
+    assert.notEqual(body.result.previewId, '')
+    assert.notEqual(body.result.consequences, '')
+    assert.notEqual(body.result.expiresAt, '')
+    assert.equal(
+      expected.approvalRequired,
+      body.result.approvalToken !== undefined,
+    )
+    const persisted = databaseRow(
+      Schema.Struct({
+        preview_id: Schema.String,
+        classification: Schema.String,
+        consequences: Schema.String,
+        expires_at: Schema.String,
+      }),
+      service.database
+        .prepare(
+          'SELECT preview_id,classification,consequences,expires_at FROM run_mutation_previews WHERE preview_id=?',
+        )
+        .get(body.result.previewId),
+    )
+    assert.equal(persisted.preview_id, body.result.previewId)
+    assert.equal(persisted.classification, body.result.classification)
+    assert.equal(persisted.consequences, body.result.consequences)
+    assert.equal(persisted.expires_at, body.result.expiresAt)
+    assert.equal(
+      body.snapshot.plan?.runMutationPreview?.previewId,
+      body.result.previewId,
+    )
+  }
+})
+
+test('legacy generic start receipts replay only when their persisted run facts match', async (t) => {
+  const service = createFixtureService()
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (initial.plan === undefined) throw new Error('Fixture Plan is unavailable')
+  const command = {
+    _tag: 'StartRunFromPlan',
+    planId: initial.plan.planId,
+    expectedPlanRevision: initial.plan.revision,
+    expectedLeaseRevision: initial.control.revision,
+    idempotencyKey: 'legacy-start-replay',
+  }
+  const started = await fetch(`${base}/api/commands/start-run`, {
+    method: 'POST',
+    body: JSON.stringify(command),
+  }).then((response) => response.json())
+  service.database.prepare('DELETE FROM run_start_receipts').run()
+  service.database
+    .prepare('INSERT INTO receipts VALUES (?,?)')
+    .run(command.idempotencyKey, JSON.stringify(started))
+  const replay = await fetch(`${base}/api/plan/commands`, {
+    method: 'POST',
+    body: JSON.stringify({ intent: { ...command, _tag: 'StartAcceptedRun' } }),
+  })
+  assert.equal(replay.status, 200)
+  assert.equal(
+    Schema.decodeUnknownSync(PlanCommandResponse)(await replay.json())._tag,
+    'Accepted',
+  )
+  const mismatched = JSON.parse(JSON.stringify(started))
+  mismatched.snapshot.identity.personId = 'other-owner'
+  service.database.prepare('DELETE FROM receipts').run()
+  service.database
+    .prepare('INSERT INTO receipts VALUES (?,?)')
+    .run('legacy-start-mismatch', JSON.stringify(mismatched))
+  const conflict = await fetch(`${base}/api/plan/commands`, {
+    method: 'POST',
+    body: JSON.stringify({
+      intent: {
+        ...command,
+        _tag: 'StartAcceptedRun',
+        idempotencyKey: 'legacy-start-mismatch',
+      },
+    }),
+  })
+  assert.equal(conflict.status, 409)
+  const rejected = Schema.decodeUnknownSync(PlanCommandResponse)(
+    await conflict.json(),
+  )
+  assert.equal(rejected._tag, 'Rejected')
+  if (rejected._tag === 'Rejected' && rejected.failure._tag === 'Rejected')
+    assert.equal(rejected.failure.reason, 'IdempotencyConflict')
+})
+
+test('legacy generic start replay survives later control and plan changes', async (t) => {
+  const service = createFixtureService()
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (initial.plan === undefined) throw new Error('Fixture Plan is unavailable')
+  const command = {
+    _tag: 'StartRunFromPlan',
+    planId: initial.plan.planId,
+    expectedPlanRevision: initial.plan.revision,
+    expectedLeaseRevision: initial.control.revision,
+    idempotencyKey: 'legacy-start-delayed-replay',
+  }
+  const started = await fetch(`${base}/api/commands/start-run`, {
+    method: 'POST',
+    body: JSON.stringify(command),
+  }).then((response) => response.json())
+  service.database.prepare('DELETE FROM run_start_receipts').run()
+  service.database
+    .prepare('INSERT INTO receipts VALUES (?,?)')
+    .run(command.idempotencyKey, JSON.stringify(started))
+  service.database
+    .prepare('UPDATE state SET value=? WHERE key=?')
+    .run('4', 'planRevision')
+  service.database
+    .prepare('UPDATE state SET value=? WHERE key=?')
+    .run('2', 'leaseRevision')
+  service.database
+    .prepare('UPDATE state SET value=? WHERE key=?')
+    .run(JSON.stringify('another-desktop'), 'leaseHolder')
+  const replay = await fetch(`${base}/api/plan/commands`, {
+    method: 'POST',
+    body: JSON.stringify({ intent: { ...command, _tag: 'StartAcceptedRun' } }),
+  })
+  assert.equal(replay.status, 200)
+  assert.equal(
+    Schema.decodeUnknownSync(PlanCommandResponse)(await replay.json())._tag,
+    'Accepted',
+  )
+})
+
+test('later drafts retain the latest accepted definition summary without making it current', async (t) => {
+  const service = createFixtureService()
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (initial.plan === undefined) throw new Error('Fixture Plan is unavailable')
+  const saved = await fetch(`${base}/api/plan/commands`, {
+    method: 'POST',
+    body: JSON.stringify({
+      intent: {
+        _tag: 'SaveDraft',
+        planId: initial.plan.planId,
+        expectedPlanRevision: initial.plan.revision,
+        idempotencyKey: 'later-draft',
+        sequences: initial.plan.sequences.map((sequence) => ({
+          ...sequence,
+          capture: `${sequence.capture} · revised`,
+        })),
+      },
+    }),
+  })
+  assert.equal(saved.status, 202)
+  const later = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(later.plan?.revision, initial.plan.revision + 1)
+  assert.equal(
+    later.plan?.acceptedRunDefinition?.id,
+    'run-definition-m27-fixture',
+  )
+  assert.equal(
+    later.plan?.acceptedRunDefinition?.sourcePlanRevision,
+    initial.plan.revision,
+  )
+  assert.deepEqual(later.plan?.actions?.startAcceptedRun, {
+    _tag: 'Ineligible',
+    reason: 'acceptedDefinitionRequired',
+  })
+})
+
+test('a current controller can apply another owner’s exact preview', async (t) => {
+  const admission = (request?: Pick<IncomingMessage, 'headers'>) =>
+    request?.headers.authorization === 'Bearer owner'
+      ? {
+          personId: 'owner',
+          clientId: 'owner-desktop',
+          role: 'owner' as const,
+          capability: 'controlCapable' as const,
+        }
+      : request?.headers.authorization === 'Bearer controller'
+        ? {
+            personId: 'controller',
+            clientId: 'controller-desktop',
+            role: 'owner' as const,
+            capability: 'controlCapable' as const,
+          }
+        : request?.headers.authorization === 'Bearer viewer'
+          ? {
+              personId: 'viewer',
+              clientId: 'viewer-desktop',
+              role: 'viewer' as const,
+              capability: 'readOnly' as const,
+            }
+          : request?.headers.authorization === 'Bearer phone'
+            ? {
+                personId: 'phone-owner',
+                clientId: 'phone-owner',
+                role: 'owner' as const,
+                capability: 'readOnly' as const,
+              }
+            : undefined
+  const service = createFixtureService(':memory:', admission)
+  service.database
+    .prepare('UPDATE state SET value=? WHERE key=?')
+    .run(JSON.stringify('owner-desktop'), 'leaseHolder')
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  const owner = { authorization: 'Bearer owner' }
+  const controller = { authorization: 'Bearer controller' }
+  const viewer = { authorization: 'Bearer viewer' }
+  const phone = { authorization: 'Bearer phone' }
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const initial = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: owner,
+  })
+  if (initial.plan === undefined) throw new Error('Fixture Plan is unavailable')
+  const draft = await fetch(`${base}/api/commands/save-plan-draft`, {
+    method: 'POST',
+    headers: { ...owner, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      planId: initial.plan.planId,
+      expectedPlanRevision: initial.plan.revision,
+      idempotencyKey: 'two-person-draft',
+      sequences: initial.plan.sequences.map(({ viability, ...sequence }) => ({
+        ...sequence,
+        capture: `${sequence.capture} · revised`,
+      })),
+    }),
+  }).then((response) => response.json())
+  await fetch(`${base}/api/commands/accept-run-definition`, {
+    method: 'POST',
+    headers: { ...owner, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      _tag: 'AcceptRunDefinition',
+      planId: draft.plan.planId,
+      expectedPlanRevision: draft.plan.revision,
+      expectedLeaseRevision: draft.snapshot.control.revision,
+      idempotencyKey: 'two-person-definition',
+    }),
+  })
+  await fetch(`${base}/api/commands/start-run`, {
+    method: 'POST',
+    headers: { ...owner, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      _tag: 'StartRunFromPlan',
+      planId: draft.plan.planId,
+      expectedPlanRevision: draft.plan.revision,
+      expectedLeaseRevision: draft.snapshot.control.revision,
+      idempotencyKey: 'two-person-start',
+    }),
+  })
+  const active = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: owner,
+  })
+  if (active.activeRun._tag !== 'Active')
+    throw new Error('Expected a fake active run')
+  const viewerSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: viewer,
+  })
+  const phoneSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: phone,
+  })
+  assert.deepEqual(viewerSnapshot.plan?.actions?.previewRunMutation, {
+    _tag: 'Ineligible',
+    reason: 'ownerRequired',
+  })
+  assert.deepEqual(phoneSnapshot.plan?.actions?.previewRunMutation, {
+    _tag: 'Ineligible',
+    reason: 'readOnlyClient',
+  })
+  const preview = await fetch(`${base}/api/commands/preview-run-mutation`, {
+    method: 'POST',
+    headers: { ...owner, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      _tag: 'PreviewRunMutation',
+      mutation: 'shortenSecond',
+      expectedLeaseRevision: active.control.revision,
+      expectedRunRevision: active.activeRun.run.revision,
+      idempotencyKey: 'two-person-preview',
+    }),
+  }).then((response) => response.json())
+  service.database
+    .prepare('UPDATE state SET value=? WHERE key=?')
+    .run('2', 'leaseRevision')
+  service.database
+    .prepare('UPDATE state SET value=? WHERE key=?')
+    .run(JSON.stringify('controller-desktop'), 'leaseHolder')
+  const controllerSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: controller,
+  })
+  assert.equal(
+    controllerSnapshot.plan?.runMutationPreview?.previewId,
+    preview.preview.previewId,
+  )
+  assert.equal(
+    controllerSnapshot.plan?.runMutationPreview?.approvalToken,
+    undefined,
+  )
+  assert.deepEqual(controllerSnapshot.plan?.actions?.applyRunMutation, {
+    _tag: 'Eligible',
+  })
+  const ownerSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: owner,
+  })
+  assert.equal(
+    ownerSnapshot.plan?.runMutationPreview?.previewId,
+    preview.preview.previewId,
+  )
+  assert.equal(ownerSnapshot.plan?.runMutationPreview?.approvalToken, undefined)
+  assert.deepEqual(ownerSnapshot.plan?.actions?.applyRunMutation, {
+    _tag: 'Ineligible',
+    reason: 'controlRequired',
+  })
+  const viewerPreview = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: viewer,
+  })
+  const phonePreview = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: phone,
+  })
+  assert.equal(viewerPreview.plan?.runMutationPreview, undefined)
+  assert.equal(phonePreview.plan?.runMutationPreview, undefined)
+  service.database
+    .prepare('UPDATE run_mutation_previews SET expires_at=? WHERE preview_id=?')
+    .run('2000-01-01T00:00:00.000Z', preview.preview.previewId)
+  const expired = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: controller,
+  })
+  assert.equal(expired.plan?.runMutationPreview, undefined)
+  assert.deepEqual(expired.plan?.actions?.applyRunMutation, {
+    _tag: 'Ineligible',
+    reason: 'previewRequired',
+  })
+  const currentPreview = await fetch(
+    `${base}/api/commands/preview-run-mutation`,
+    {
+      method: 'POST',
+      headers: { ...owner, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        _tag: 'PreviewRunMutation',
+        mutation: 'shortenSecond',
+        expectedLeaseRevision: expired.control.revision,
+        expectedRunRevision: active.activeRun.run.revision,
+        idempotencyKey: 'two-person-current-preview',
+      }),
+    },
+  ).then((response) => response.json())
+  const current = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: controller,
+  })
+  assert.equal(
+    current.plan?.runMutationPreview?.previewId,
+    currentPreview.preview.previewId,
+  )
+  const applied = await fetch(`${base}/api/commands/apply-run-mutation`, {
+    method: 'POST',
+    headers: { ...controller, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      _tag: 'ApplyRunMutation',
+      previewId: currentPreview.preview.previewId,
+      expectedLeaseRevision: current.control.revision,
+      expectedRunRevision: active.activeRun.run.revision,
+      idempotencyKey: 'two-person-apply',
+    }),
+  })
+  assert.equal(applied.status, 202)
+  const appliedSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: controller,
+  })
+  assert.equal(appliedSnapshot.plan?.runMutationPreview, undefined)
+  if (appliedSnapshot.activeRun._tag !== 'Active')
+    throw new Error('Expected the fake run after applying the notice preview')
+  const disruptive = await fetch(`${base}/api/commands/preview-run-mutation`, {
+    method: 'POST',
+    headers: { ...owner, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      _tag: 'PreviewRunMutation',
+      mutation: 'discardCurrent',
+      expectedLeaseRevision: appliedSnapshot.control.revision,
+      expectedRunRevision: appliedSnapshot.activeRun.run.revision,
+      idempotencyKey: 'two-person-disruptive-preview',
+    }),
+  }).then((response) => response.json())
+  assert.equal(disruptive.approvalToken, undefined)
+  const disruptiveSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: controller,
+  })
+  const disruptivePreview = disruptiveSnapshot.plan?.runMutationPreview
+  assert.equal(disruptivePreview?.previewId, disruptive.preview.previewId)
+  assert.equal(disruptivePreview?.approvalRequired, true)
+  assert.notEqual(disruptivePreview?.approvalToken, undefined)
+  if (disruptivePreview?.approvalToken === undefined)
+    throw new Error('Expected the current controller approval token')
+  const approved = await fetch(
+    `${base}/api/commands/approve-disruptive-run-mutation`,
+    {
+      method: 'POST',
+      headers: { ...controller, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        _tag: 'ApproveDisruptiveRunMutation',
+        previewId: disruptivePreview.previewId,
+        approvalToken: disruptivePreview.approvalToken,
+        expectedLeaseRevision: disruptiveSnapshot.control.revision,
+        expectedRunRevision: appliedSnapshot.activeRun.run.revision,
+        idempotencyKey: 'two-person-disruptive-approval',
+      }),
+    },
+  )
+  assert.equal(approved.status, 202)
+})
+
+test('malformed persisted Plan execution data returns a bounded unavailable response', async (t) => {
+  const service = createFixtureService()
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (snapshot.plan === undefined)
+    throw new Error('Fixture Plan is unavailable')
+  service.database.prepare('UPDATE run_definitions SET definition=?').run('{')
+  const response = await fetch(`${base}/api/plan/commands`, {
+    method: 'POST',
+    body: JSON.stringify({
+      intent: {
+        _tag: 'StartAcceptedRun',
+        planId: snapshot.plan.planId,
+        expectedPlanRevision: snapshot.plan.revision,
+        expectedLeaseRevision: snapshot.control.revision,
+        idempotencyKey: 'malformed-definition',
+      },
+    }),
+  })
+  assert.equal(response.status, 503)
+  const unavailable = Schema.decodeUnknownSync(PlanCommandResponse)(
+    await response.json(),
+  )
+  assert.equal(unavailable._tag, 'Unavailable')
+  assert.equal((await fetch(`${base}/health/live`)).status, 200)
+})
+
 function first<Value>(values: ReadonlyArray<Value>) {
   const value = values[0]
   assert.ok(value !== undefined)
@@ -248,6 +842,11 @@ test('focused executable configurations decode defaults and conditional branches
     mode: 'development',
     client: 'owner',
   })
+  assert.equal(
+    (await read(originServerConfig, { ASTRO_LOCAL_WEB_FIXTURE: 'plan-draft' }))
+      .fixture,
+    'plan-draft',
+  )
   const production = await read(originServerConfig, {
     ASTRO_ADMISSION_MODE: 'production',
     ASTRO_LOCAL_WEB_BIND: '0.0.0.0',
@@ -383,6 +982,17 @@ test('focused executable configurations decode defaults and conditional branches
   )
   await assert.rejects(
     read(originServerConfig, { ASTRO_ADMISSION_MODE: 'production' }),
+  )
+  await assert.rejects(
+    read(originServerConfig, {
+      ASTRO_ADMISSION_MODE: 'production',
+      ASTRO_LOCAL_WEB_FIXTURE: 'plan-draft',
+      CF_ACCESS_ISSUER: 'https://access.example',
+      CF_ACCESS_AUDIENCE: 'audience',
+      CF_ACCESS_JWKS_URL: 'https://access.example/certs',
+      ASTRO_MEMBERSHIP_BOOTSTRAP_PATH: '/run/config/members.json',
+      ASTRO_CLIENT_CONTEXT: 'desktop',
+    }),
   )
   await assert.rejects(
     read(originServerConfig, {
@@ -1835,7 +2445,9 @@ test('SQLite acceptance atomically persists fixture run, event, and receipt with
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM receipts').get(),
+      service.database
+        .prepare('SELECT count(*) AS count FROM run_start_receipts')
+        .get(),
     ).count,
     1,
   )
@@ -1873,7 +2485,7 @@ test('numbered SQLite migrations upgrade a legacy database and reject a newer sc
         .prepare('SELECT max(version) AS version FROM schema_migrations')
         .get(),
     ).version,
-    20,
+    21,
   )
   assert.equal(
     databaseRow(
@@ -1908,7 +2520,7 @@ test('numbered SQLite migrations upgrade a legacy database and reject a newer sc
         .prepare('SELECT max(version) AS version FROM schema_migrations')
         .get(),
     ).version,
-    20,
+    21,
   )
   assert.equal(
     databaseRow(
@@ -2031,7 +2643,7 @@ test('numbered SQLite migrations upgrade a legacy database and reject a newer sc
         .prepare('SELECT max(version) AS version FROM schema_migrations')
         .get(),
     ).version,
-    20,
+    21,
   )
   repaired.close()
   const newer = new DatabaseSync(databasePath)
@@ -2495,7 +3107,7 @@ test('operational endpoints expose bounded admitted health without internal deta
     (response) => response.json(),
   )
   assert.equal(operations.release, 'local-web-fixture')
-  assert.equal(operations.schemaVersion, 20)
+  assert.equal(operations.schemaVersion, 21)
   assert.equal(operations.sqlite.journalMode, 'wal')
   assert.equal(operations.disk, 'unknown')
   assert.equal(operations.rig, 'unknown')
@@ -4115,7 +4727,9 @@ test('fixture run acceptance does not depend on unserviceable hardware outbox wo
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM receipts').get(),
+      service.database
+        .prepare('SELECT count(*) AS count FROM run_start_receipts')
+        .get(),
     ).count,
     1,
   )
@@ -4288,7 +4902,12 @@ test('SQLite-backed plan drafts persist deterministic verdicts, revision guards,
     planId: initial.planId,
     expectedPlanRevision: initial.revision,
     idempotencyKey: 'plan-ready-001',
-    sequences,
+    sequences: sequences.map(
+      (sequence: { readonly capture: string }, index: number) =>
+        index === 1
+          ? { ...sequence, capture: `${sequence.capture} · shortened` }
+          : sequence,
+    ),
   }
   const duplicate = await fetch(`${base}/api/commands/save-plan-draft`, {
     method: 'POST',
@@ -4437,7 +5056,12 @@ test('SQLite accepts one immutable RunDefinition from a ready persisted plan and
       planId: initial.planId,
       expectedPlanRevision: initial.revision,
       idempotencyKey: 'run-definition-draft-001',
-      sequences,
+      sequences: sequences.map(
+        (sequence: { readonly capture: string }, index: number) =>
+          index === 1
+            ? { ...sequence, capture: `${sequence.capture} · shortened` }
+            : sequence,
+      ),
     }),
   })
   assert.equal(saved.status, 202)
@@ -4568,7 +5192,12 @@ test('SQLite accepts one immutable RunDefinition from a ready persisted plan and
         planId: activeInitial.planId,
         expectedPlanRevision: activeInitial.revision,
         idempotencyKey: 'run-definition-active-draft',
-        sequences: activeSequences,
+        sequences: activeSequences.map(
+          (sequence: { readonly capture: string }, index: number) =>
+            index === 1
+              ? { ...sequence, capture: `${sequence.capture} · shortened` }
+              : sequence,
+        ),
       }),
     },
   ).then((response) => response.json())
@@ -4644,8 +5273,8 @@ test('SQLite accepts one immutable RunDefinition from a ready persisted plan and
       }),
     },
   )
-  assert.equal(changedReplay.status, 400)
-  assert.equal((await changedReplay.json()).reason, 'InvalidInput')
+  assert.equal(changedReplay.status, 409)
+  assert.equal((await changedReplay.json()).reason, 'IdempotencyConflict')
   const second = await fetch(`${base}/api/commands/accept-run-definition`, {
     method: 'POST',
     body: JSON.stringify({ ...command, idempotencyKey: 'run-definition-002' }),
@@ -4774,7 +5403,12 @@ test('an accepted fake RunDefinition advances two immutable sequences through du
       planId: initial.planId,
       expectedPlanRevision: initial.revision,
       idempotencyKey: 'fake-run-draft',
-      sequences,
+      sequences: sequences.map(
+        (sequence: { readonly capture: string }, index: number) =>
+          index === 1
+            ? { ...sequence, capture: `${sequence.capture} · shortened` }
+            : sequence,
+      ),
     }),
   }).then((response) => response.json())
   const accepted = await fetch(`${base}/api/commands/accept-run-definition`, {
@@ -5055,7 +5689,12 @@ test('fixture installation restores only a missing M27 plan record and keeps a s
           planId: initial.planId,
           expectedPlanRevision: initial.revision,
           idempotencyKey: 'saved-restart-001',
-          sequences,
+          sequences: sequences.map(
+            (sequence: { readonly capture: string }, index: number) =>
+              index === 1
+                ? { ...sequence, capture: `${sequence.capture} · shortened` }
+                : sequence,
+          ),
         }),
       })
     ).status,
@@ -5072,6 +5711,133 @@ test('fixture installation restores only a missing M27 plan record and keeps a s
   })
   const snapshot = await bootstrapSnapshot(`${recoveredBase}/api/snapshot`)
   assert.equal(snapshot.activeRun._tag, 'None')
+})
+
+test('plan-draft fixture preserves UI-created fake definitions without run or hardware work', async (t) => {
+  const standard = createFixtureService()
+  assert.equal(
+    databaseRow(
+      CountRow,
+      standard.database
+        .prepare(
+          "SELECT count(*) AS count FROM run_definitions WHERE run_definition_id='run-definition-m27-fixture'",
+        )
+        .get(),
+    ).count,
+    1,
+  )
+  standard.close()
+
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-plan-draft-fixture-')),
+    'state.sqlite',
+  )
+  const service = createLocalWebService(
+    databasePath,
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'plan-draft' },
+  )
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(initial.plan?.readiness, 'ready')
+  assert.equal(initial.plan?.acceptedRunDefinition, undefined)
+  assert.equal(initial.activeRun._tag, 'None')
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database
+        .prepare('SELECT count(*) AS count FROM run_definitions')
+        .get(),
+    ).count,
+    0,
+  )
+  if (initial.plan === undefined)
+    throw new Error('Plan-draft fixture is unavailable')
+  const saved = await fetch(`${base}/api/plan/commands`, {
+    method: 'POST',
+    body: JSON.stringify({
+      intent: {
+        _tag: 'SaveDraft',
+        planId: initial.plan.planId,
+        expectedPlanRevision: initial.plan.revision,
+        idempotencyKey: 'plan-draft-save',
+        sequences: initial.plan.sequences.map(({ viability, ...sequence }) => ({
+          ...sequence,
+          capture: `${sequence.capture} · saved`,
+        })),
+      },
+    }),
+  })
+  assert.equal(saved.status, 202)
+  const afterSave = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (afterSave.plan === undefined) throw new Error('Saved Plan is unavailable')
+  const accepted = await fetch(`${base}/api/plan/commands`, {
+    method: 'POST',
+    body: JSON.stringify({
+      intent: {
+        _tag: 'AcceptRunDefinition',
+        planId: afterSave.plan.planId,
+        expectedPlanRevision: afterSave.plan.revision,
+        expectedLeaseRevision: afterSave.control.revision,
+        idempotencyKey: 'plan-draft-accept',
+      },
+    }),
+  })
+  assert.equal(accepted.status, 202)
+  await listener.close()
+  service.close()
+
+  const recovered = createLocalWebService(
+    databasePath,
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'plan-draft' },
+  )
+  t.after(() => recovered.close())
+  const definition = JSON.parse(
+    databaseRow(
+      RunDefinitionEvidenceRow,
+      recovered.database
+        .prepare('SELECT definition FROM run_definitions')
+        .get(),
+    ).definition,
+  )
+  assert.equal(definition.executor, 'fake')
+  assert.equal(
+    databaseRow(
+      CountRow,
+      recovered.database
+        .prepare('SELECT count(*) AS count FROM run_definitions')
+        .get(),
+    ).count,
+    1,
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      recovered.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+    ).count,
+    0,
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      recovered.database
+        .prepare('SELECT count(*) AS count FROM solar_test_intents')
+        .get(),
+    ).count,
+    0,
+  )
+  const recoveredListener = await recovered.listen()
+  const snapshot = await bootstrapSnapshot(
+    `http://127.0.0.1:${recoveredListener.port}/api/snapshot`,
+  )
+  assert.equal(snapshot.activeRun._tag, 'None')
+  await recoveredListener.close()
 })
 
 test('workspace projections remain behind existing admission', async (t) => {
@@ -5632,7 +6398,12 @@ test('fake run resolution and consequence-aware edits persist only durable fake 
         planId: plan.planId,
         expectedPlanRevision: plan.revision,
         idempotencyKey: `${key}-draft`,
-        sequences,
+        sequences: sequences.map(
+          (sequence: { readonly capture: string }, index: number) =>
+            index === 1
+              ? { ...sequence, capture: `${sequence.capture} · shortened` }
+              : sequence,
+        ),
       }),
     }).then((response) => response.json())
     await fetch(`${base}/api/commands/accept-run-definition`, {

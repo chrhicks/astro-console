@@ -217,6 +217,7 @@ async function submit(
         BootstrapClient,
         BootstrapClient.of({
           read: () => Effect.succeed(state),
+          refresh: () => Effect.void,
           states: Stream.empty,
         }),
       ),
