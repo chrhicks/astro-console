@@ -167,9 +167,7 @@ test('fixture projections distinguish disconnected, rejected, process, and deliv
   assert.match(disconnected.shell.freshness, /current authoritative truth/i)
   assert.doesNotMatch(disconnected.shell.service, /stale|reconnecting/i)
   assert.match(disconnected.observe.status, /current run truth is unavailable/i)
-  assert.equal(disconnected.shell.progressValue, 0)
-  assert.equal(disconnected.shell.progressMax, 1)
-  assert.match(disconnected.shell.sequenceProgress, /unavailable/i)
+  assert.equal(disconnected.shell.currentRun, undefined)
 
   const rejected = projectFixture('rejected')
   assert.match(rejected.observe.status, /simulated action rejection/i)
@@ -223,6 +221,34 @@ test('status and shell environment preserve semantic and projected facts', () =>
   assert.match(shell, /Commands cannot be sent or replayed/)
   assert.match(shell, /Service availability unknown without a snapshot/)
   assert.match(shell, /Static result output remains visible/)
+})
+
+test('shell exposes a persisted current run outside Observe without commands', () => {
+  const projection = projectFixture('fresh')
+  const link = (route: ReturnType<typeof parseRoute>) => {
+    if (route.kind === 'not-found') assert.fail('Expected a workspace route')
+    return { href: routePath(route), onClick: () => undefined }
+  }
+  const library = renderToStaticMarkup(
+    createElement(Shell, {
+      workspace: 'library',
+      view: projection.shell,
+      link,
+      result: undefined,
+    }),
+  )
+  const observe = renderToStaticMarkup(
+    createElement(Shell, {
+      workspace: 'observe',
+      view: projection.shell,
+      link,
+      result: undefined,
+    }),
+  )
+  assert.match(library, /Return to Observe/)
+  assert.match(library, /Fixture estimate: 2h 18m remaining/)
+  assert.doesNotMatch(library, /<button/)
+  assert.doesNotMatch(observe, /Return to Observe/)
 })
 
 test('process has a focusable screen heading', () => {

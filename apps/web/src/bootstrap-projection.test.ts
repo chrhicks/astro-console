@@ -61,7 +61,7 @@ test('projects stale and reconnecting snapshots as last-confirmed and protected'
       reason: 'A fresh snapshot is required.',
     }),
   )
-  assert.match(stale.shell.phase, /^Last-confirmed Capture$/)
+  assert.match(stale.shell.currentRun?.phase ?? '', /^Last-confirmed Capture$/)
   assert.match(stale.shell.protection, /cannot be sent or replayed/)
   assert.doesNotMatch(stale.shell.freshness, /live/i)
   assert.match(reconnecting.shell.freshness, /^Reconnecting snapshot/)
@@ -72,7 +72,7 @@ test('projects unavailable state without invented service or workspace truth', (
   const projection = projectBootstrapState(
     BootstrapClientState.Unavailable({ reason: 'Snapshot request failed.' }),
   )
-  assert.equal(projection.shell.activeRun, 'Active run unknown')
+  assert.equal(projection.shell.currentRun, undefined)
   assert.equal(projection.shell.health[0]?.state, 'unavailable')
   assert.equal(projection.observe.phase, 'Unavailable')
   assert.equal(projection.observe.detailAvailable, false)
@@ -129,11 +129,16 @@ test('projects active and idle run summaries without inventing workspace detail'
   const idle = projectBootstrapState(
     BootstrapClientState.Current({ snapshot: snapshot('noRun') }),
   )
-  assert.equal(active.shell.activeRun, 'M27 / Capture')
-  assert.equal(active.shell.progress, '1% complete')
-  assert.equal(active.shell.sequenceProgress, '1 completed sequences')
-  assert.equal(idle.shell.activeRun, 'No active run')
-  assert.equal(idle.shell.phase, 'Idle')
+  assert.deepEqual(active.shell.currentRun, {
+    target: 'M27',
+    phase: 'Capture',
+    progress: '50% complete',
+    progressValue: 50,
+    progressMax: 100,
+    sequenceProgress: '1 completed sequences',
+    estimatedCompletion: 'Estimated completion unavailable from bootstrap.',
+  })
+  assert.equal(idle.shell.currentRun, undefined)
   assert.match(idle.observe.status, /active-run summary only/)
 })
 

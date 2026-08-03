@@ -52,7 +52,7 @@ export const ActiveRunSummary = Schema.Struct({
     'parkRequested',
   ]),
   target: Schema.NonEmptyString,
-  progress: NonNegativeNumber,
+  progress: NonNegativeNumber.check(Schema.isLessThanOrEqualTo(100)),
   completedSequenceCount: NonNegativeInt,
 })
 

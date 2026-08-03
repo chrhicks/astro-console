@@ -31,24 +31,19 @@ function projectSnapshot(
 ): Projection {
   const health = healthFacts(snapshot)
   const activeRun = snapshot.activeRun
-  const run =
+  const currentRun =
     activeRun._tag === 'Active'
       ? {
-          activeRun: `${activeRun.run.target} / ${phaseLabel(activeRun.run.phase)}`,
+          target: activeRun.run.target,
           phase: phaseLabel(activeRun.run.phase),
           progress: `${Math.round(activeRun.run.progress)}% complete`,
           progressValue: activeRun.run.progress,
+          progressMax: 100,
           sequenceProgress: `${activeRun.run.completedSequenceCount} completed sequences`,
-          target: activeRun.run.target,
+          estimatedCompletion:
+            'Estimated completion unavailable from bootstrap.',
         }
-      : {
-          activeRun: 'No active run',
-          phase: 'Idle',
-          progress: 'No active run progress',
-          progressValue: 0,
-          sequenceProgress: 'No completed sequence information',
-          target: 'No active run',
-        }
+      : undefined
   const fresh = freshness === 'current'
   const connection = fresh
     ? `Current bootstrap snapshot confirmed at ${snapshot.generatedAt}`
@@ -61,14 +56,19 @@ function projectSnapshot(
     environment: 'Authoritative projection',
     attention: fresh ? attention(health) : 'attention',
     readOnly: true,
-    activeRun: run.activeRun,
-    phase: fresh ? run.phase : `Last-confirmed ${run.phase}`,
-    progress: fresh ? run.progress : `Last-confirmed ${run.progress}`,
-    progressValue: run.progressValue,
-    progressMax: 100,
-    sequenceProgress: fresh
-      ? run.sequenceProgress
-      : `Last-confirmed ${run.sequenceProgress}`,
+    currentRun: currentRun && {
+      ...currentRun,
+      phase: fresh ? currentRun.phase : `Last-confirmed ${currentRun.phase}`,
+      progress: fresh
+        ? currentRun.progress
+        : `Last-confirmed ${currentRun.progress}`,
+      sequenceProgress: fresh
+        ? currentRun.sequenceProgress
+        : `Last-confirmed ${currentRun.sequenceProgress}`,
+      estimatedCompletion: fresh
+        ? currentRun.estimatedCompletion
+        : `Last-confirmed ${currentRun.estimatedCompletion}`,
+    },
     freshness: connection,
     controller: controller(snapshot),
     membership: membership(snapshot),
@@ -88,7 +88,12 @@ function projectSnapshot(
       detail: 'Plan draft and revision detail are unavailable from bootstrap.',
       sequences: [],
     },
-    observe: observe(snapshot, freshness, reason, run.target),
+    observe: observe(
+      snapshot,
+      freshness,
+      reason,
+      currentRun?.target ?? 'No active run',
+    ),
     library: { assets: [] },
     process: {
       detailAvailable: false,
@@ -113,12 +118,7 @@ function unavailableProjection(reason: string): Projection {
       environment: 'Authoritative projection',
       attention: 'danger',
       readOnly: true,
-      activeRun: 'Active run unknown',
-      phase: 'Unavailable',
-      progress: 'No authoritative progress evidence',
-      progressValue: 0,
-      progressMax: 100,
-      sequenceProgress: 'Sequence progress unavailable',
+      currentRun: undefined,
       freshness: 'No authoritative snapshot',
       controller: 'Controller unknown',
       membership: 'Membership unknown',

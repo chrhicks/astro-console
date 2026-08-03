@@ -137,6 +137,10 @@
   width: 7rem;
   height: 0.35rem;
 }
+.return-to-observe {
+  color: var(--color-secondary);
+  font-weight: 700;
+}
 .semantic-status {
   color: var(--color-neutral);
   font-size: 0.75rem;
@@ -222,6 +226,9 @@
   .status-anchor__progress {
     grid-column: 1 / -1;
     flex-wrap: wrap;
+  }
+  .return-to-observe {
+    grid-column: 1 / -1;
   }
   .status-anchor__authority {
     display: grid;

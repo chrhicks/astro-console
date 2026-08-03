@@ -4831,6 +4831,7 @@ test('an accepted fake RunDefinition advances two immutable sequences through du
   assert.equal(started.status, 202)
   const startedRun = (await started.json()).run
   assert.equal(startedRun.phase, 'preflight')
+  assert.equal(startedRun.progress, 0)
   assert.equal(startedRun.sourceDefinitionId, accepted.runDefinition.id)
   assert.equal(
     startedRun.target,
@@ -4863,6 +4864,8 @@ test('an accepted fake RunDefinition advances two immutable sequences through du
   assert.equal(beforePause.activeRun._tag, 'Active')
   if (beforePause.activeRun._tag !== 'Active')
     throw new Error('Fake run is missing before pause')
+  assert.equal(beforePause.activeRun.run.target, startedRun.target)
+  assert.equal(beforePause.activeRun.run.progress, 25)
   const pause = {
     _tag: 'PauseRun',
     expectedLeaseRevision: beforePause.control.revision,
@@ -4917,7 +4920,29 @@ test('an accepted fake RunDefinition advances two immutable sequences through du
   if (afterRestart.activeRun._tag !== 'Active')
     throw new Error('Paused fake run is missing after restart')
   assert.equal(afterRestart.activeRun.run.phase, 'paused')
+  assert.equal(afterRestart.activeRun.run.target, startedRun.target)
+  assert.equal(afterRestart.activeRun.run.progress, 25)
   assert.equal(afterRestart.activeRun.run.completedSequenceCount, 0)
+  const phone = createFixtureService(databasePath, () => ({
+    personId: 'owner-chicks',
+    clientId: 'phone-monitor',
+    role: 'owner',
+    capability: 'readOnly',
+  }))
+  const phoneListener = await phone.listen()
+  const phoneSnapshot = await bootstrapSnapshot(
+    `http://127.0.0.1:${phoneListener.port}/api/snapshot`,
+  )
+  assert.equal(phoneSnapshot.membership.capability, 'readOnly')
+  assert.equal(phoneSnapshot.activeRun._tag, 'Active')
+  if (phoneSnapshot.activeRun._tag === 'Active') {
+    assert.equal(phoneSnapshot.activeRun.run.target, startedRun.target)
+    assert.equal(phoneSnapshot.activeRun.run.phase, 'paused')
+    assert.equal(phoneSnapshot.activeRun.run.progress, 25)
+    assert.equal(phoneSnapshot.activeRun.run.completedSequenceCount, 0)
+  }
+  await phoneListener.close()
+  phone.close()
   assert.equal(recovered.advanceFakeRun(), undefined)
   const notPaused = await fetch(`${recoveredBase}/api/commands/resume-run`, {
     method: 'POST',

@@ -130,7 +130,7 @@ export const bootstrapFixtures = {
         revision: 3,
         phase: 'capture',
         target: 'M27',
-        progress: 0.5,
+        progress: 50,
         completedSequenceCount: 1,
       },
     },

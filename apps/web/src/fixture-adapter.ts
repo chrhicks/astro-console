@@ -27,14 +27,16 @@ type FixtureState = {
     ShellView,
     | 'readOnly'
     | 'capability'
-    | 'progressValue'
-    | 'progressMax'
-    | 'sequenceProgress'
+    | 'currentRun'
     | 'membership'
     | 'presence'
     | 'attentionOwner'
     | 'health'
-  >
+  > & {
+    activeRun: string
+    phase: string
+    progress: string
+  }
   observe: Omit<
     ObserveView,
     | 'detailAvailable'
@@ -406,6 +408,21 @@ export function projectFixture(scenario: FixtureScenario): Projection {
     shell: {
       ...state.shell,
       readOnly: true,
+      currentRun:
+        scenario === 'disconnected'
+          ? undefined
+          : {
+              target: state.shell.activeRun,
+              phase: state.shell.phase,
+              progress: state.shell.progress,
+              progressValue: 24,
+              progressMax: 108,
+              sequenceProgress: 'Sequence 1 / 3',
+              estimatedCompletion:
+                scenario === 'fresh'
+                  ? 'Fixture estimate: 2h 18m remaining.'
+                  : 'Estimated completion unavailable in fixture.',
+            },
       capability: 'Read-only fixture capability',
       membership: 'Fixture member',
       presence: 'Fixture presence',
@@ -419,10 +436,6 @@ export function projectFixture(scenario: FixtureScenario): Projection {
           tone: 'neutral',
         },
       ],
-      progressValue: scenario === 'disconnected' ? 0 : 24,
-      progressMax: scenario === 'disconnected' ? 1 : 108,
-      sequenceProgress:
-        scenario === 'disconnected' ? 'Sequence unavailable' : 'Sequence 1 / 3',
     },
     plan: {
       detailAvailable: true,

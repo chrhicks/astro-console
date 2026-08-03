@@ -60,12 +60,17 @@ export type ShellView = {
   environment: string
   attention: StatusTone
   readOnly: boolean
-  activeRun: string
-  phase: string
-  progress: string
-  progressValue: number
-  progressMax: number
-  sequenceProgress: string
+  currentRun:
+    | {
+        target: string
+        phase: string
+        progress: string
+        progressValue: number
+        progressMax: number
+        sequenceProgress: string
+        estimatedCompletion: string
+      }
+    | undefined
   freshness: string
   controller: string
   membership: string

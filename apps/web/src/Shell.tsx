@@ -77,16 +77,34 @@ export function Shell({
           >
             {view.freshness}
           </Status>
-          <b>{view.activeRun}</b>
-          <span>{view.phase}</span>
+          {view.currentRun && (
+            <>
+              <b>{view.currentRun.target}</b>
+              <span>{view.currentRun.phase}</span>
+              {workspace !== 'observe' && (
+                <a
+                  className="return-to-observe"
+                  {...link({ kind: 'workspace', workspace: 'observe' })}
+                >
+                  Return to Observe
+                </a>
+              )}
+            </>
+          )}
         </div>
-        <div className="status-anchor__progress">
-          <progress value={view.progressValue} max={view.progressMax}>
-            {view.progress}
-          </progress>
-          <span>{view.progress}</span>
-          <span>{view.sequenceProgress}</span>
-        </div>
+        {view.currentRun && (
+          <div className="status-anchor__progress">
+            <progress
+              value={view.currentRun.progressValue}
+              max={view.currentRun.progressMax}
+            >
+              {view.currentRun.progress}
+            </progress>
+            <span>{view.currentRun.progress}</span>
+            <span>{view.currentRun.sequenceProgress}</span>
+            <span>{view.currentRun.estimatedCompletion}</span>
+          </div>
+        )}
         <div className="status-anchor__authority">
           <span className="status-anchor__controller">{view.controller}</span>
           <span className="status-anchor__membership">{view.membership}</span>

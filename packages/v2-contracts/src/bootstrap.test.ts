@@ -78,9 +78,17 @@ describe('production bootstrap wire contract', () => {
       event: 'ProjectionChanged',
       data: bootstrapFixtures.activeRun,
     })
+    const malformedProgress = Schema.decodeUnknownResult(BootstrapSnapshot)({
+      ...bootstrapFixtures.activeRun,
+      activeRun: {
+        _tag: 'Active',
+        run: { ...bootstrapFixtures.activeRun.activeRun.run, progress: 101 },
+      },
+    })
 
     assert.equal(Result.isFailure(malformedSnapshot), true)
     assert.equal(Result.isFailure(malformedFailure), true)
     assert.equal(Result.isFailure(malformedEvent), true)
+    assert.equal(Result.isFailure(malformedProgress), true)
   })
 })
