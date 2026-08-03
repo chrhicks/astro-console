@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **Phases 0, 0.5, 1, and 2 complete; Production Convergence Epics 1–4 are complete; Phase 3 follows Epic 5**
+Status: **Phases 0, 0.5, 1, and 2 and all five Production Convergence Epics complete; Phase 3 read-only preflight is next, pending owner acceptance**
 
 This directory is organized to keep normal working context small. Do not read
 the entire V2 tree by default.
@@ -23,24 +23,24 @@ requires its specific detail.
 
 ## Load On Demand
 
-| Need | Read |
-| --- | --- |
-| Workspace behavior or product entities | [Current product specification](current/product-spec.md) |
-| Why a completed convergence decision was made | [Phase 1 foundation archive](archive/phase-1-foundation/README.md) |
-| Accepted Gate 5 scenarios and ownership | [Gate 5 baseline](current/gate-05-scenarios.md) |
-| Accepted Gate 5 consequential actions | [Gate 5 action map](current/gate-05-action-map.md) |
-| Accepted canonical Gate 5 contract language | [Gate 5 contract vocabulary](current/gate-05-contract-vocabulary.md) |
-| Executable Effect Schema candidates and fixtures | [V2 contracts package](../../packages/v2-contracts/README.md) |
-| End-to-end V2.0 scope, phases, and exit criteria | [V2 delivery plan](current/delivery-plan.md) |
-| Phase 2 slice selection and execution method | [Phase 2 implementation planning](current/phase-2-planning.md) |
-| Phase 3 slice selection and execution method | [Phase 3 implementation planning](current/phase-3-planning.md) |
-| Ideas outside V2.0 | [Post-V2.0 notes](current/v2-post-v2.0-notes.md) |
-| Production UI visual implementation | Owner-corrected [visual style guide](current/visual-style-guide.md), [UI component library](current/ui-component-library.md), [UI build contract](current/ui-build-contract.md), and [`docs/v2-ui-final`](../../docs/v2-ui-final/) visual evidence |
-| Why Phase 0.5 made a specific visual decision | [Phase 0.5 design-system archive](archive/phase-0.5/README.md) — historical only; do not use for active implementation authority |
-| Accepted interaction evidence or candidate contracts | The relevant document under [accepted gates](gates/README.md) |
-| Deployment, Cloudflare, storage, security, or operations | [Infrastructure plan](infra/README.md), then only its relevant section |
-| Visual interaction evidence | [Accepted prototype references](../../prototype/v2-ui/index.html) |
-| Why an older option was rejected | [Documentation archive](archive/README.md) or [prototype archive](../../prototype/v2-ui/archive/index.html) |
+| Need                                                     | Read                                                                                                                                                                                                                                             |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Workspace behavior or product entities                   | [Current product specification](current/product-spec.md)                                                                                                                                                                                         |
+| Why a completed convergence decision was made            | [Phase 1 foundation archive](archive/phase-1-foundation/README.md)                                                                                                                                                                               |
+| Accepted Gate 5 scenarios and ownership                  | [Gate 5 baseline](current/gate-05-scenarios.md)                                                                                                                                                                                                  |
+| Accepted Gate 5 consequential actions                    | [Gate 5 action map](current/gate-05-action-map.md)                                                                                                                                                                                               |
+| Accepted canonical Gate 5 contract language              | [Gate 5 contract vocabulary](current/gate-05-contract-vocabulary.md)                                                                                                                                                                             |
+| Executable Effect Schema candidates and fixtures         | [V2 contracts package](../../packages/v2-contracts/README.md)                                                                                                                                                                                    |
+| End-to-end V2.0 scope, phases, and exit criteria         | [V2 delivery plan](current/delivery-plan.md)                                                                                                                                                                                                     |
+| Phase 2 slice selection and execution method             | [Phase 2 implementation planning](current/phase-2-planning.md)                                                                                                                                                                                   |
+| Phase 3 slice selection and execution method             | [Phase 3 implementation planning](current/phase-3-planning.md)                                                                                                                                                                                   |
+| Ideas outside V2.0                                       | [Post-V2.0 notes](current/v2-post-v2.0-notes.md)                                                                                                                                                                                                 |
+| Production UI visual implementation                      | `apps/web` source and CSS, the owner-corrected [visual style guide](current/visual-style-guide.md), [UI component library](current/ui-component-library.md), [UI build contract](current/ui-build-contract.md), and accepted screenshot evidence |
+| Why Phase 0.5 made a specific visual decision            | [Phase 0.5 design-system archive](archive/phase-0.5/README.md) — historical only; do not use for active implementation authority                                                                                                                 |
+| Accepted interaction evidence or candidate contracts     | The relevant document under [accepted gates](gates/README.md)                                                                                                                                                                                    |
+| Deployment, Cloudflare, storage, security, or operations | [Infrastructure plan](infra/README.md), then only its relevant section                                                                                                                                                                           |
+| Historical visual interaction evidence                   | [Accepted prototype references](../../prototype/v2-ui/index.html)                                                                                                                                                                                |
+| Why an older option was rejected                         | [Documentation archive](archive/README.md) or [prototype archive](../../prototype/v2-ui/archive/index.html)                                                                                                                                      |
 
 ## Current Position
 
@@ -64,20 +64,20 @@ the selected V2 reference.
 Phase 1 is closed: the local-web and host-verification evidence are recorded,
 and the branch-wide quality regression has landed its bounded fixes. Phase 2
 (Plan and Managed Runs) is also closed with fake-only managed-run evidence.
-Production Convergence now promotes that infrastructure and the accepted
-Nightbook UI into `apps/server` and `apps/web`. Its first four sequential
-Continuum Epics, `tkt-ezxr1fsb`, `tkt-n9yoieoz`, `tkt-uuom4upo`, and
-`tkt-qffwfa47`, are complete. Epic 4 ships the Effect WebHost and scoped
-OriginListener with the version-matched web bundle from one rig-local origin.
-Epic 5, `tkt-zcsucxyx`, remains next for the detailed Plan, Observe, Library,
-and Process migration and experimental-path retirement.
-Phase 3 (Observe, Acquire, and Capture) follows convergence and still proceeds
-only in separately accepted bounded vertical slices.
+Production Convergence has promoted that infrastructure and the accepted
+Nightbook UI into `apps/server` and `apps/web`. All five sequential Continuum
+Epics, `tkt-ezxr1fsb`, `tkt-n9yoieoz`, `tkt-uuom4upo`, `tkt-qffwfa47`, and
+`tkt-zcsucxyx`, are complete. The final production architecture serves the
+version-matched web bundle from the rig-local server origin and has migrated
+the Plan, fake managed-run Observe, Library delivery, and current Process
+handoff boundaries while retiring experimental runtime paths.
+Phase 3 (Observe, Acquire, and Capture) follows convergence. Its read-only
+decision-grade preflight packet is prepared but still requires owner acceptance
+before implementation; later slices remain separately accepted bounded work.
 
-Owner clarification: `docs/v2-ui-final` represents intended `apps/web`
-production visuals. Phase 0.5 visual material is historical/semantic only;
-proof wording must distinguish final-study visual conformance from runtime
-fixture behavior.
+`apps/web` source, CSS, and accepted screenshot evidence are the production
+visual authority. `docs/v2-ui-final` and `prototype/v2-ui` are historical Gate
+and design evidence, not runtime implementation authority.
 
 ## Context Rules
 

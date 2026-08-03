@@ -28,6 +28,11 @@ const intent = (tag: ControlIntent['_tag']): ControlIntent =>
     _tag: tag,
     commandId: `${tag}-command`,
     idempotencyKey: `${tag}-key`,
+    ...(tag === 'GrantControl'
+      ? { requestId: 'request-1', targetClientId: 'desktop-member' }
+      : tag === 'DeclineControl'
+        ? { requestId: 'request-1' }
+        : {}),
   })
 
 type CurrentState = Extract<ClientState, { readonly _tag: 'Current' }>
@@ -109,6 +114,47 @@ test('submits eligible request and take control once with the current lease revi
         ? submitted.command.idempotencyKey
         : undefined,
       command.idempotencyKey,
+    )
+  }
+})
+
+test('encodes every shared control operation with the current lease revision', async () => {
+  const state = current({
+    ...bootstrapFixtures.fresh,
+    control: { revision: 9, state: 'held', holderClientId: 'desktop-owner' },
+  })
+  for (const tag of [
+    'GrantControl',
+    'DeclineControl',
+    'ReleaseControl',
+    'TakeControl',
+  ] as const) {
+    let submitted: CommandEnvelope | undefined
+    await submit(
+      tag === 'TakeControl'
+        ? current({
+            ...bootstrapFixtures.fresh,
+            control: {
+              revision: 9,
+              state: 'held',
+              holderClientId: 'desktop-member',
+            },
+          })
+        : state,
+      intent(tag),
+      (body) => {
+        submitted = Schema.decodeUnknownSync(CommandEnvelope)(body)
+        return Effect.succeed({
+          ok: true,
+          data: snapshot(bootstrapFixtures.fresh),
+        })
+      },
+    )
+    assert.equal(
+      submitted !== undefined && 'expectedLeaseRevision' in submitted.command
+        ? submitted.command.expectedLeaseRevision
+        : undefined,
+      9,
     )
   }
 })

@@ -4,12 +4,13 @@ Status: **accepted baseline through Gate 4**
 
 Updated: July 21, 2026
 
-This is the semantic UX authority for V2 product and prototype
-work. The longer [current product specification](current/product-spec.md)
-supplies domain detail;
+This is the semantic UX authority for V2 product work. The longer
+[current product specification](current/product-spec.md) supplies domain detail;
 accepted gate records supply scenario evidence. New work should follow these
 rules unless a later gate records why a rule must change. Concrete visual
-composition defers to [`docs/v2-ui-final`](../v2-ui-final/).
+composition is implemented in `apps/web` source and CSS, with accepted
+screenshots as evidence. `docs/v2-ui-final` and `prototype/v2-ui` remain
+historical Gate and design evidence, not runtime implementation authority.
 
 ## Product Philosophy
 
@@ -34,11 +35,11 @@ composition defers to [`docs/v2-ui-final`](../v2-ui-final/).
 
 ## Workspace Boundaries
 
-| Workspace | Owns the operator's task | Does not own | Primary handoff |
-| --- | --- | --- | --- |
-| **Plan** | Future observing intent, sequence design, readiness, and validation | Accepted run execution | `Run plan` creates a stable `RunDefinition` for Observe |
-| **Observe** | Current run evidence, intervention, acquisition, capture, verification, and recovery | Browser-local execution or historical asset management | Captured evidence becomes Library assets |
-| **Library** | Durable sources, saved results, review, related-artifact comparison, and downloads | Unsaved processing scratch | `Open in Process` supplies raws, a linear stack, or a saved result |
+| Workspace   | Owns the operator's task                                                                         | Does not own                                                                | Primary handoff                                                        |
+| ----------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **Plan**    | Future observing intent, sequence design, readiness, and validation                              | Accepted run execution                                                      | `Run plan` creates a stable `RunDefinition` for Observe                |
+| **Observe** | Current run evidence, intervention, acquisition, capture, verification, and recovery             | Browser-local execution or historical asset management                      | Captured evidence becomes Library assets                               |
+| **Library** | Durable sources, saved results, review, related-artifact comparison, and downloads               | Unsaved processing scratch                                                  | `Open in Process` supplies raws, a linear stack, or a saved result     |
 | **Process** | One current Build/Develop editing session, preview, undo/redo, tool choice, and selected outputs | General history browsing, arbitrary saved-result comparison, or rig control | `Save to Library` creates durable artifacts; Discard preserves sources |
 
 The global shell owns workspace navigation, identity, compact active-run

@@ -95,7 +95,7 @@ export function App() {
     return () => removeEventListener('popstate', onPopState)
   }, [])
   useEffect(() => {
-    if (!import.meta.env.VITE_ASTRO_BOOTSTRAP || workspace !== 'library') return
+    if (workspace !== 'library') return
     const runtime = createLibraryRuntime()
     const generation = ++libraryPageGeneration.current
     setLibraryPage({
@@ -127,7 +127,7 @@ export function App() {
     }
   }, [libraryQuery, workspace])
   useEffect(() => {
-    if (!import.meta.env.VITE_ASTRO_BOOTSTRAP || route.kind !== 'asset') {
+    if (route.kind !== 'asset') {
       setLibraryDetail({ value: undefined, state: undefined })
       return
     }
@@ -165,10 +165,7 @@ export function App() {
     }
   }, [route])
   useEffect(() => {
-    if (
-      !import.meta.env.VITE_ASTRO_BOOTSTRAP ||
-      route.kind !== 'process-source'
-    ) {
+    if (route.kind !== 'process-source') {
       setProcessSource({ value: undefined, state: undefined })
       return
     }
@@ -206,7 +203,6 @@ export function App() {
     }
   }, [route])
   useEffect(() => {
-    if (import.meta.env.DEV && !import.meta.env.VITE_ASTRO_BOOTSTRAP) return
     const runtime = createBootstrapRuntime()
     setSubmitPlan(
       () => (action: PlanAction, key: typeof IdempotencyKey.Type) =>
@@ -251,15 +247,8 @@ export function App() {
     }
     requestAnimationFrame(() => document.querySelector('h1')?.focus())
   }, [route])
-  useEffect(() => {
-    if (import.meta.env.DEV && !import.meta.env.VITE_ASTRO_BOOTSTRAP)
-      void import('./fixture-adapter').then((module) =>
-        setProjection(module.fixtureProjection),
-      )
-  }, [])
-
   const navigate = (next: Exclude<Route, { kind: 'not-found' }>) => {
-    const path = routeWithProjection(next, location.search)
+    const path = routeWithProjection(next)
     history.pushState(null, '', path)
     setRoute(next)
   }
@@ -279,7 +268,7 @@ export function App() {
     navigate(next)
   }
   const link = (next: Exclude<Route, { kind: 'not-found' }>) => ({
-    href: routeWithProjection(next, location.search),
+    href: routeWithProjection(next),
     onClick: (event: React.MouseEvent<HTMLAnchorElement>) =>
       intercept(event, next),
   })
@@ -309,27 +298,23 @@ export function App() {
         view={projection.library}
         assetId={route.kind === 'asset' ? route.assetId : undefined}
         link={link}
-        {...(import.meta.env.VITE_ASTRO_BOOTSTRAP
-          ? {
-              page: {
-                query: libraryQuery,
-                ...(libraryPage.value === undefined
-                  ? {}
-                  : { value: libraryPage.value }),
-                ...(libraryPage.message === undefined
-                  ? {}
-                  : { message: libraryPage.message }),
-              },
-              ...(libraryDetail.value === undefined
-                ? {}
-                : { detail: libraryDetail.value }),
-              ...(libraryDetail.state === undefined
-                ? {}
-                : { detailState: libraryDetail.state }),
-              onQuery: changeLibraryQuery,
-              readOnly: projection.shell.readOnly,
-            }
-          : {})}
+        page={{
+          query: libraryQuery,
+          ...(libraryPage.value === undefined
+            ? {}
+            : { value: libraryPage.value }),
+          ...(libraryPage.message === undefined
+            ? {}
+            : { message: libraryPage.message }),
+        }}
+        {...(libraryDetail.value === undefined
+          ? {}
+          : { detail: libraryDetail.value })}
+        {...(libraryDetail.state === undefined
+          ? {}
+          : { detailState: libraryDetail.state })}
+        onQuery={changeLibraryQuery}
+        readOnly={projection.shell.readOnly}
       />
     ) : workspace === 'process' ? (
       <ProcessView

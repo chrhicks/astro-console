@@ -26,6 +26,9 @@ const forbidden = [
   'process-rail',
   'process-canvas',
   'process-image',
+  'fixture-adapter',
+  '?fixture=',
+  'theme-study',
 ]
 
 for (const text of forbidden)

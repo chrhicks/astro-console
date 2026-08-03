@@ -61,15 +61,7 @@ export function routePath(route: Exclude<Route, { kind: 'not-found' }>) {
   return `/process?sourceAssetId=${encodeURIComponent(route.sourceAssetId)}`
 }
 
-export function routeWithProjection(
-  route: Exclude<Route, { kind: 'not-found' }>,
-  search: string,
-) {
-  const path = routePath(route)
-  const fixture = new URLSearchParams(search).get('fixture')
-  if (!fixture) return path
-  return `${path}${path.includes('?') ? '&' : '?'}fixture=${encodeURIComponent(fixture)}`
-}
+export const routeWithProjection = routePath
 
 export function routeWorkspace(route: Route): Workspace | undefined {
   if (route.kind === 'workspace') return route.workspace

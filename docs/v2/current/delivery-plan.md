@@ -1,6 +1,6 @@
 # Astro Console V2 Delivery Plan
 
-Status: **durable V2 completion roadmap — Phases 0, 0.5, 1, and 2 complete; Production Convergence Epics 1–4 complete; Phase 3 follows Epic 5**
+Status: **durable V2 completion roadmap — Phases 0, 0.5, 1, and 2 and Production Convergence complete; Phase 3 preflight is prepared, not accepted or implemented**
 
 ## Keep This Plan
 
@@ -36,8 +36,8 @@ reference. The authoritative design rules remain in
 
 Phase 0.5 records remain historical semantic evidence. The active implementation
 visual language and responsive/accessibility bar are the current visual guide,
-component library, build contract, and [`docs/v2-ui-final`](../../v2-ui-final/)
-source and screenshots.
+component library, build contract, `apps/web` source and CSS, and accepted
+screenshot evidence.
 
 ## Phase 1: Local Web Foundation — Complete
 
@@ -70,7 +70,7 @@ Phase 2 is complete with deterministic fake-run evidence only. It does not
 prove provider-backed preflight, acquisition, capture, recovery, stopping, or
 parking; those remain Phase 3 work.
 
-## Production Convergence — Epic 5 Remaining
+## Production Convergence — Complete
 
 Production Convergence turns the completed V2 infrastructure, contract, and UI
 learning into the real implementation target before new Phase 3 behavior is
@@ -81,7 +81,7 @@ version-matched web bundle from one logical origin.
 
 ### Outcomes
 
-- Promote the local-web implementation to `apps/server` without changing its
+- Promote the proven server implementation to `apps/server` without changing its
   proven domain behavior, persistence, worker, deployment, or proof boundaries.
 - Create `apps/web` from the accepted Nightbook presentation while excluding
   prototype fixture ownership and browser-local durable substitutes.
@@ -105,9 +105,8 @@ version-matched web bundle from one logical origin.
 - Plan and fake managed-run behavior, Library delivery, and current Process
   truth are available through `apps/web` and `apps/server` with wide, compact,
   and read-only phone validation.
-- The local-web experimental path and UI prototype are no longer active
-  implementation targets. Phase 3 work proceeds only in the production
-  applications.
+- Experimental paths and UI prototypes are no longer active implementation
+  targets. Phase 3 work proceeds only in the production applications.
 
 Execution is tracked by five sequential Continuum Epics:
 `tkt-ezxr1fsb`, `tkt-n9yoieoz`, `tkt-uuom4upo`, `tkt-qffwfa47`, and
@@ -116,28 +115,28 @@ proven behavior only. It does not authorize provider-backed preflight, a device
 command, physical capture, processing workflow, or other deferred Phase 3–6
 behavior.
 
-Epics 1, 2, 3, and 4 are complete. Epic 3 supplies emitted shared contracts and a
-bounded bootstrap HTTP/SSE/control
-seam: the Effect-owned web client loads snapshot-first, reconnects without
-replaying commands, guards stale state, and consumes server-owned phone
-capability and typed command submission. Its validation used real native SSE
-and a temporary validation-only same-origin development proxy; it does not
-prove a shipped one-origin deployment. Epic 4 completes that release
-integration: Effect WebHost and a scoped OriginListener serve the
-version-matched bundle from one pinned image embedding `apps/web` `dist`; the
-integrated Vite real-bootstrap/SSE workflow replaced the inline shell and
-removed its inline CSP allowances.
-Final evidence passes **182** contract, **69** server, and **38** web tests,
-with strict review, ui-validator, and Designer PASS at wide, compact, and 390 px
-for owner, friend, and phone projections. Image
-`sha256:920d6caf56afab3afe7f5cdb0625ff6b295525358b63ec32c3ffdc8798ad6334`
-and Compose renders were verified, with no physical, provider, Solar, or device
-action.
+All five Epics are complete. `apps/web` is the canonical Nightbook client and
+`apps/server` is the canonical rig-local authority. The final architecture
+serves the version-matched web bundle from one pinned image through the Effect
+WebHost and scoped OriginListener. Its canonical boundary is bootstrap, SSE,
+typed control, Plan, fake managed-run Observe, Library/download, and Process
+handoff; direct legacy routes are retired. The production bundle contains no
+fixture adapter, theme-study runtime, or prototype runtime.
 
-Epic 5, `tkt-zcsucxyx`, remains next and owns the detailed Plan, Observe,
-Library, and Process migration and experimental-path retirement. It is not
-claimed by Epic 4. Phase 3 remains separately authorized only by its accepted
-bounded slices.
+The completed exit criteria are evidenced by **184/184** contract,
+**62/62** server, and **57/57** web tests; Compose base/download, rig, and
+publisher renders; and Designer PASS at wide, compact, and 390 px for owner,
+friend, and phone projections. Final image:
+`sha256:10c3f8ccbcf9530b24a595e90242ad497720d177b8ffdaae95104cf62b18835e`.
+`ASTRO_SERVER` is the canonical environment configuration, with bounded
+deployed legacy aliases only. No provider, device, Solar, physical, or capture
+work was performed or authorized.
+
+The typed control request/grant/decline/release/take seam remains preserved,
+but user-facing presence and control UI is deferred to Phase 6; reconnect and
+presence lifecycle are not claimed. Interactive Process is deferred to Phase 5.
+Phase 3 remains separately authorized only by accepted bounded slices; its
+prepared read-only preflight packet is not accepted or implemented.
 
 ## Phase 3: Observe, Acquire, and Capture — After Production Convergence
 

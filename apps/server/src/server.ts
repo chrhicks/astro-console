@@ -21,6 +21,7 @@ import {
   CommandFailure,
   CommandHttpFailureEnvelope,
   CommandHttpSuccessEnvelope,
+  DomainEvent,
   ObserveCommandRequest,
   ObserveCommandResult,
   ObserveCommandResponse,
@@ -50,91 +51,45 @@ import {
 import { runExecutable } from './executable.ts'
 import { OriginListener, originListenerLayer } from './origin-listener.ts'
 import { WebHost, webHostLayer } from './web-host.ts'
-const StartRun = Schema.TaggedStruct('StartRunFromPlan', {
-  planId: Schema.NonEmptyString,
-  expectedPlanRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  expectedLeaseRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  idempotencyKey: Schema.NonEmptyString,
-})
-const AcceptRunDefinition = Schema.TaggedStruct('AcceptRunDefinition', {
-  planId: Schema.NonEmptyString,
-  expectedPlanRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  expectedLeaseRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  idempotencyKey: Schema.NonEmptyString,
-})
-const PauseRun = Schema.TaggedStruct('PauseRun', {
-  expectedLeaseRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  expectedRunRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  idempotencyKey: Schema.NonEmptyString,
-})
-const ResumeRun = Schema.TaggedStruct('ResumeRun', {
-  expectedLeaseRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  expectedRunRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  idempotencyKey: Schema.NonEmptyString,
-})
-const FakePolicy = Schema.Struct({
-  expectedLeaseRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  expectedRunRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  idempotencyKey: Schema.NonEmptyString,
-})
-const PreviewRunMutation = Schema.TaggedStruct('PreviewRunMutation', {
-  mutation: Schema.Literals([
-    'reprioritizeSecond',
-    'shortenSecond',
-    'discardCurrent',
-  ]),
-  expectedLeaseRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  expectedRunRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  idempotencyKey: Schema.NonEmptyString,
-})
-const ApplyRunMutation = Schema.TaggedStruct('ApplyRunMutation', {
-  previewId: Schema.NonEmptyString,
-  expectedLeaseRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  expectedRunRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  idempotencyKey: Schema.NonEmptyString,
-})
-const ApproveDisruptiveRunMutation = Schema.TaggedStruct(
-  'ApproveDisruptiveRunMutation',
-  {
-    previewId: Schema.NonEmptyString,
-    approvalToken: Schema.NonEmptyString,
-    expectedLeaseRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-    expectedRunRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-    idempotencyKey: Schema.NonEmptyString,
-  },
-)
-const SavePlanDraft = Schema.Struct({
-  planId: Schema.NonEmptyString,
-  expectedPlanRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  idempotencyKey: Schema.NonEmptyString,
-  sequences: Schema.Array(
-    Schema.Struct({
-      sequenceId: Schema.NonEmptyString,
-      target: Schema.NonEmptyString,
-      capture: Schema.NonEmptyString,
-      acquisition: Schema.NonEmptyString,
-      stopCondition: Schema.NonEmptyString,
-      window: Schema.Struct({
-        startsAt: Schema.NonEmptyString,
-        endsAt: Schema.NonEmptyString,
-        usableMinutes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-        peakAltitudeDeg: Schema.Finite,
-        horizonClearanceDeg: Schema.Finite,
-      }),
-      estimatedMinutes: Schema.Int.check(Schema.isGreaterThan(0)),
-      storageForecastMb: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-      horizon: Schema.Literals(['clear', 'limited', 'blocked', 'missing']),
-      storage: Schema.Literals(['available', 'limited', 'blocked', 'missing']),
-    }),
-  ),
-})
-const ControlCommand = Schema.Struct({
-  expectedLeaseRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  expectedRunRevision: Schema.optionalKey(
-    Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  ),
-  idempotencyKey: Schema.NonEmptyString,
-})
+type StartRun = Extract<
+  typeof PlanIntent.Type,
+  { readonly _tag: 'StartAcceptedRun' }
+>
+type AcceptRunDefinition = Extract<
+  typeof PlanIntent.Type,
+  { readonly _tag: 'AcceptRunDefinition' }
+>
+type PauseRun = Extract<
+  typeof ObserveIntent.Type,
+  { readonly _tag: 'PauseRun' }
+>
+type ResumeRun = Extract<
+  typeof ObserveIntent.Type,
+  { readonly _tag: 'ResumeRun' }
+>
+type FakePolicy = Extract<
+  typeof ObserveIntent.Type,
+  | { readonly _tag: 'StopRun' }
+  | { readonly _tag: 'SkipSequence' }
+  | { readonly _tag: 'RetryPhase' }
+  | { readonly _tag: 'RequestPark' }
+>
+type PreviewRunMutation = Extract<
+  typeof PlanIntent.Type,
+  { readonly _tag: 'PreviewRunMutation' }
+>
+type ApplyRunMutation = Extract<
+  typeof PlanIntent.Type,
+  { readonly _tag: 'ApplyRunMutation' }
+>
+type ApproveDisruptiveRunMutation = Extract<
+  typeof PlanIntent.Type,
+  { readonly _tag: 'ApproveDisruptiveRunMutation' }
+>
+type SavePlanDraft = Extract<
+  typeof PlanIntent.Type,
+  { readonly _tag: 'SaveDraft' }
+>
 const SolarTestIntentInput = Schema.Struct({
   name: Schema.NonEmptyString.check(
     Schema.isMinLength(3),
@@ -593,8 +548,10 @@ type Snapshot = {
     readonly state: 'held' | 'reconnecting' | 'unheld'
     readonly reconnectGraceUntil?: string
     readonly pendingRequests: ReadonlyArray<{
+      readonly requestId: string
       readonly clientId: string
       readonly personId: string
+      readonly expiresAt: string
     }>
   }
   readonly run: Run | null
@@ -607,10 +564,10 @@ type Snapshot = {
 type ControlEvent =
   | 'ControlRequested'
   | 'ControlGranted'
+  | 'ControlDeclined'
+  | 'ControlReleased'
   | 'OwnerTookControl'
-  | 'ControlReconnectGraceStarted'
-  | 'ControlReconnected'
-  | 'ControlGraceExpired'
+  | 'ControlLeaseExpired'
   | 'RunPaused'
   | 'RunResumed'
   | 'RunStopped'
@@ -626,6 +583,8 @@ type FailureReason =
   | 'RunDefinitionAlreadyAccepted'
   | 'ClientReadOnly'
   | 'ControlLeaseLost'
+  | 'AlreadyController'
+  | 'ControlRequestAlreadyPending'
   | 'OwnerRequired'
   | 'ControlRequestUnavailable'
   | 'ActiveRunConflict'
@@ -772,7 +731,7 @@ class ControlCommandService extends Context.Service<
   ControlCommandServiceShape
 >()('Server.ControlCommandService') {}
 type PlanReadiness = 'ready' | 'readyWithLimitations' | 'blocked'
-type DraftSequence = (typeof SavePlanDraft.Type)['sequences'][number]
+type DraftSequence = SavePlanDraft['sequences'][number]
 type PlanProjection = {
   readonly planId: string
   readonly revision: number
@@ -904,10 +863,18 @@ const StoredState = Schema.Struct({
   evidence: StoredEvidence,
 })
 const StoredRequest = Schema.Struct({
+  request_id: Schema.String,
   client_id: Schema.String,
   person_id: Schema.String,
+  created_at: Schema.String,
+  expires_at: Schema.String,
+  target_control_capable: Schema.Int,
 })
-const ControlRequestRow = Schema.Struct({ client_id: Schema.String })
+const ControlRequestRow = Schema.Struct({
+  request_id: Schema.String,
+  client_id: Schema.String,
+  target_control_capable: Schema.Int,
+})
 const StoredRow = Schema.Struct({ value: Schema.String })
 const LatestCursorRow = Schema.Struct({ cursor: Schema.Int })
 const MigrationRow = Schema.Struct({ version: Schema.Int })
@@ -1122,7 +1089,11 @@ const StoredSnapshot = Schema.Struct({
     state: Schema.Literals(['held', 'reconnecting', 'unheld']),
     reconnectGraceUntil: Schema.optionalKey(Schema.String),
     pendingRequests: Schema.Array(
-      Schema.Struct({ clientId: Schema.String, personId: Schema.String }),
+      Schema.Struct({
+        requestId: Schema.String,
+        clientId: Schema.String,
+        personId: Schema.String,
+      }),
     ),
   }),
   run: Schema.NullOr(StoredRun),
@@ -1144,10 +1115,10 @@ const CommandResultSchema = Schema.Union([
       Schema.Literals([
         'ControlRequested',
         'ControlGranted',
+        'ControlDeclined',
+        'ControlReleased',
         'OwnerTookControl',
-        'ControlReconnectGraceStarted',
-        'ControlReconnected',
-        'ControlGraceExpired',
+        'ControlLeaseExpired',
         'RunPaused',
         'RunResumed',
         'RunStopped',
@@ -1171,6 +1142,8 @@ const CommandResultSchema = Schema.Union([
       'RunDefinitionAlreadyAccepted',
       'ClientReadOnly',
       'ControlLeaseLost',
+      'AlreadyController',
+      'ControlRequestAlreadyPending',
       'OwnerRequired',
       'ControlRequestUnavailable',
       'ActiveRunConflict',
@@ -1196,6 +1169,9 @@ const operatorMessages = {
   ClientReadOnly: 'Monitoring is read-only on this client.',
   ControlLeaseLost:
     'Control changed hands. Your command was not sent to the observatory; the accepted run continues.',
+  AlreadyController: 'This desktop already controls the observatory.',
+  ControlRequestAlreadyPending:
+    'This desktop already has a pending control request.',
   OwnerRequired: 'Only the owner can accept a RunDefinition.',
   ControlRequestUnavailable: 'There is no current control request to grant.',
   ActiveRunConflict: 'A run is already active. Return to Observe.',
@@ -1212,12 +1188,12 @@ const operatorMessages = {
   ControlRequested:
     'Control request recorded. The owner can grant or decline it.',
   ControlGranted: 'Control granted. The other desktop now owns control.',
+  ControlDeclined:
+    'Control request declined. The current desktop keeps control.',
+  ControlReleased: 'Control released. No desktop now owns control.',
   OwnerTookControl: 'Control returned to the owner desktop.',
-  ControlReconnectGraceStarted:
-    'Reconnect grace is active; accepted work continues.',
-  ControlReconnected: 'Controller reconnected; control remains current.',
-  ControlGraceExpired:
-    'Reconnect grace expired. Control is unheld; accepted work continues.',
+  ControlLeaseExpired:
+    'Control lease expired. Control is unheld; accepted work continues.',
   RunPaused: 'Pause was accepted by the service.',
   RunResumed: 'Resume was accepted by the service.',
   RunStopped: 'Stop was accepted by the service. This run cannot be resumed.',
@@ -1400,154 +1376,6 @@ export function createLocalWebService(
           Effect.map(({ status, body }) => json(response, status, body)),
         ),
       )
-    if (
-      request.method === 'POST' &&
-      url.pathname === '/api/commands/start-run'
-    ) {
-      const input = await body(request)
-      return input === BodyTooLarge
-        ? json(response, 413, reject('InvalidInput').body)
-        : runCommand(response, input, database, identity, publish)
-    }
-    if (
-      request.method === 'POST' &&
-      url.pathname === '/api/commands/pause-run'
-    ) {
-      const input = await body(request)
-      return input === BodyTooLarge
-        ? json(response, 413, reject('InvalidInput').body)
-        : runInterventionCommand(
-            response,
-            input,
-            Schema.decodeUnknownSync(PauseRun),
-            'pause',
-            database,
-            identity,
-            publish,
-          )
-    }
-    if (
-      request.method === 'POST' &&
-      url.pathname === '/api/commands/resume-run'
-    ) {
-      const input = await body(request)
-      return input === BodyTooLarge
-        ? json(response, 413, reject('InvalidInput').body)
-        : runInterventionCommand(
-            response,
-            input,
-            Schema.decodeUnknownSync(ResumeRun),
-            'resume',
-            database,
-            identity,
-            publish,
-          )
-    }
-    if (
-      request.method === 'POST' &&
-      url.pathname === '/api/commands/save-plan-draft'
-    ) {
-      const input = await body(request)
-      return input === BodyTooLarge
-        ? json(response, 413, reject('InvalidInput').body)
-        : savePlanDraftCommand(response, input, database, identity, publish)
-    }
-    if (
-      request.method === 'POST' &&
-      url.pathname === '/api/commands/accept-run-definition'
-    ) {
-      const input = await body(request)
-      return input === BodyTooLarge
-        ? json(response, 413, reject('InvalidInput').body)
-        : acceptRunDefinitionCommand(
-            response,
-            input,
-            database,
-            identity,
-            publish,
-          )
-    }
-    if (
-      request.method === 'POST' &&
-      [
-        '/api/commands/stop-run',
-        '/api/commands/skip-fake-sequence',
-        '/api/commands/retry-fake-phase',
-        '/api/commands/request-fake-park',
-      ].includes(url.pathname)
-    ) {
-      const input = await body(request)
-      return input === BodyTooLarge
-        ? json(response, 413, reject('InvalidInput').body)
-        : fakePolicyCommand(
-            response,
-            input,
-            url.pathname,
-            database,
-            identity,
-            publish,
-          )
-    }
-    if (
-      request.method === 'POST' &&
-      url.pathname === '/api/commands/preview-run-mutation'
-    ) {
-      const input = await body(request)
-      return input === BodyTooLarge
-        ? json(response, 413, reject('InvalidInput').body)
-        : previewRunMutationCommand(
-            response,
-            input,
-            database,
-            identity,
-            publish,
-          )
-    }
-    if (
-      request.method === 'POST' &&
-      url.pathname === '/api/commands/apply-run-mutation'
-    ) {
-      const input = await body(request)
-      return input === BodyTooLarge
-        ? json(response, 413, reject('InvalidInput').body)
-        : applyRunMutationCommand(
-            response,
-            input,
-            false,
-            database,
-            identity,
-            publish,
-          )
-    }
-    if (
-      request.method === 'POST' &&
-      url.pathname === '/api/commands/approve-disruptive-run-mutation'
-    ) {
-      const input = await body(request)
-      return input === BodyTooLarge
-        ? json(response, 413, reject('InvalidInput').body)
-        : applyRunMutationCommand(
-            response,
-            input,
-            true,
-            database,
-            identity,
-            publish,
-          )
-    }
-    if (request.method === 'POST' && controlPaths.has(url.pathname)) {
-      const input = await body(request)
-      return input === BodyTooLarge
-        ? json(response, 413, reject('InvalidInput').body)
-        : controlCommand(
-            response,
-            input,
-            database,
-            url.pathname,
-            identity,
-            publish,
-          )
-    }
     if (
       request.method === 'GET' &&
       Effect.runSync(webHost.asset(response, url.pathname, responseHeaders))
@@ -2213,13 +2041,6 @@ export function openMigrationDatabase(
   return database
 }
 
-const controlPaths = new Set([
-  '/api/commands/request-control',
-  '/api/commands/grant-control',
-  '/api/commands/take-control',
-  '/api/commands/controller-disconnected',
-  '/api/commands/controller-reconnected',
-])
 const isOwner = (identity: LocalIdentity) => identity.role === 'owner'
 
 function migrateDatabase(db: DatabaseSync) {
@@ -2304,6 +2125,16 @@ function migrateDatabase(db: DatabaseSync) {
       db.exec(
         'CREATE TABLE IF NOT EXISTS run_start_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id))',
       ),
+    () => {
+      db.exec(
+        "ALTER TABLE control_requests RENAME TO legacy_control_requests; CREATE TABLE control_requests (request_id TEXT PRIMARY KEY,client_id TEXT NOT NULL UNIQUE,person_id TEXT NOT NULL); INSERT INTO control_requests SELECT 'legacy-' || client_id,client_id,person_id FROM legacy_control_requests; DROP TABLE legacy_control_requests; CREATE TABLE IF NOT EXISTS control_command_receipts (idempotency_key TEXT NOT NULL,actor_person_id TEXT NOT NULL,actor_client_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,actor_person_id,actor_client_id))",
+      )
+    },
+    () => {
+      db.exec(
+        "ALTER TABLE control_requests RENAME TO legacy_control_requests; CREATE TABLE control_requests (request_id TEXT PRIMARY KEY,client_id TEXT NOT NULL UNIQUE,person_id TEXT NOT NULL,created_at TEXT NOT NULL,expires_at TEXT NOT NULL,target_control_capable INTEGER NOT NULL); INSERT INTO control_requests SELECT request_id,client_id,person_id,'1970-01-01T00:00:00.000Z','1970-01-01T00:00:00.000Z',0 FROM legacy_control_requests; DROP TABLE legacy_control_requests",
+      )
+    },
   ] as const
   if (latest > migrations.length)
     throw new Error(`Database schema ${latest} is newer than this release`)
@@ -3122,7 +2953,7 @@ function operations(db: DatabaseSync) {
     workerRaw,
   )
   return {
-    release: 'local-web-fixture',
+    release: 'server',
     schemaVersion: schema,
     sqlite: { journalMode: 'wal', checkpoint: 'unknown' as const },
     snapshot: {
@@ -3157,9 +2988,15 @@ function storedValue(db: DatabaseSync, key: string): unknown {
   const parsed: unknown = JSON.parse(row.value)
   return parsed
 }
+function expireControlRequests(db: DatabaseSync) {
+  db.prepare('DELETE FROM control_requests WHERE expires_at<=?').run(
+    new Date().toISOString(),
+  )
+}
 function state(
   db: DatabaseSync,
 ): Omit<Snapshot, 'generatedAt' | 'identity' | 'connection'> {
+  expireControlRequests(db)
   const stored = Schema.decodeUnknownSync(StoredState)({
     snapshotVersion: storedValue(db, 'snapshotVersion'),
     eventCursor: storedValue(db, 'eventCursor'),
@@ -3173,7 +3010,7 @@ function state(
   })
   const requestRows: unknown = db
     .prepare(
-      'SELECT client_id,person_id FROM control_requests ORDER BY client_id',
+      'SELECT request_id,client_id,person_id,created_at,expires_at,target_control_capable FROM control_requests ORDER BY client_id',
     )
     .all()
   const requests = Schema.decodeUnknownSync(Schema.Array(StoredRequest))(
@@ -3221,8 +3058,10 @@ function state(
         ? {}
         : { reconnectGraceUntil: stored.reconnectGraceUntil }),
       pendingRequests: requests.map((item) => ({
+        requestId: item.request_id,
         clientId: item.client_id,
         personId: item.person_id,
+        expiresAt: item.expires_at,
       })),
     },
     run: stored.run,
@@ -3252,12 +3091,17 @@ function expireReconnectGrace(db: DatabaseSync) {
   try {
     const currentGrace = storedValue(db, 'reconnectGraceUntil')
     const currentState = storedValue(db, 'leaseState')
+    const previousHolder = storedValue(db, 'leaseHolder')
     if (
       typeof currentGrace !== 'string' ||
       currentState !== 'reconnecting' ||
       Date.parse(currentGrace) > Date.now()
     ) {
       db.exec('COMMIT')
+      return
+    }
+    if (typeof previousHolder !== 'string') {
+      db.exec('ROLLBACK')
       return
     }
     const cursor = Number(storedValue(db, 'eventCursor')) + 1
@@ -3271,8 +3115,13 @@ function expireReconnectGrace(db: DatabaseSync) {
     })
     db.prepare('INSERT INTO events VALUES (?,?,?)').run(
       cursor,
-      'ControlGraceExpired',
-      JSON.stringify({ message: operatorMessages.ControlGraceExpired }),
+      'ControlLeaseExpired',
+      JSON.stringify(
+        domainEvent({
+          _tag: 'ControlLeaseExpired',
+          previousHolderClientId: previousHolder,
+        }),
+      ),
     )
     db.exec('COMMIT')
   } catch (error) {
@@ -3318,6 +3167,7 @@ function bootstrapSnapshot(db: DatabaseSync, identity: LocalIdentity) {
       ...(current.control.reconnectGraceUntil === undefined
         ? {}
         : { reconnectGraceUntil: current.control.reconnectGraceUntil }),
+      pendingRequests: current.control.pendingRequests,
     },
     ...(plan === undefined ? {} : { plan }),
     ...(observe === undefined ? {} : { observe }),
@@ -3710,11 +3560,7 @@ function sseProjection(db: DatabaseSync, identity: LocalIdentity) {
   )
   return `id: ${event.id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`
 }
-function acceptRun(
-  db: DatabaseSync,
-  input: typeof StartRun.Type,
-  identity: LocalIdentity,
-) {
+function acceptRun(db: DatabaseSync, input: StartRun, identity: LocalIdentity) {
   if (identity.capability === 'readOnly') return reject('ClientReadOnly')
   const semanticKey = createHash('sha256')
     .update(
@@ -3841,7 +3687,7 @@ function acceptRun(
 }
 function legacyStartReplay(
   db: DatabaseSync,
-  input: typeof StartRun.Type,
+  input: StartRun,
   identity: LocalIdentity,
   definition?: typeof StoredRunDefinition.Type,
 ) {
@@ -3984,28 +3830,6 @@ function nextFakeRunTransition(
   }
 }
 
-function runInterventionCommand<
-  Input extends typeof PauseRun.Type | typeof ResumeRun.Type,
->(
-  response: ServerResponse,
-  raw: unknown | undefined,
-  decode: (raw: unknown) => Input,
-  intent: 'pause' | 'resume',
-  db: DatabaseSync,
-  identity: LocalIdentity,
-  publish: (type: string, cursor: number) => void,
-) {
-  if (raw === undefined) return json(response, 400, reject('InvalidInput').body)
-  try {
-    const result = acceptRunIntervention(db, decode(raw), intent, identity)
-    if ('event' in result && result.event !== undefined)
-      publish(result.event.type, result.event.cursor)
-    return json(response, result.status, result.body)
-  } catch {
-    return json(response, 400, reject('InvalidInput').body)
-  }
-}
-
 function hasFakeRunDefinition(db: DatabaseSync) {
   const run = state(db).run
   if (run?.sourceDefinitionId === undefined) return false
@@ -4039,7 +3863,7 @@ function hasFakeExecutor(db: DatabaseSync) {
 
 function acceptRunIntervention(
   db: DatabaseSync,
-  input: typeof PauseRun.Type | typeof ResumeRun.Type,
+  input: PauseRun | ResumeRun,
   intent: 'pause' | 'resume',
   identity: LocalIdentity,
 ) {
@@ -4156,32 +3980,9 @@ function acceptRunIntervention(
   }
 }
 
-function fakePolicyCommand(
-  response: ServerResponse,
-  raw: unknown | undefined,
-  path: string,
-  db: DatabaseSync,
-  identity: LocalIdentity,
-  publish: (type: string, cursor: number) => void,
-) {
-  if (raw === undefined) return json(response, 400, reject('InvalidInput').body)
-  try {
-    const result = acceptFakePolicy(
-      db,
-      Schema.decodeUnknownSync(FakePolicy)(raw),
-      path,
-      identity,
-    )
-    if ('event' in result && result.event !== undefined)
-      publish(result.event.type, result.event.cursor)
-    return json(response, result.status, result.body)
-  } catch {
-    return json(response, 400, reject('InvalidInput').body)
-  }
-}
 function acceptFakePolicy(
   db: DatabaseSync,
-  input: typeof FakePolicy.Type,
+  input: FakePolicy,
   path: string,
   identity: LocalIdentity,
 ) {
@@ -4246,26 +4047,22 @@ function acceptFakePolicy(
     run.phase === 'parkRequested'
   )
     return reject('AlreadyTerminal')
-  if (
-    run.phase === 'paused' &&
-    path !== '/api/commands/stop-run' &&
-    path !== '/api/commands/request-fake-park'
-  )
+  if (run.phase === 'paused' && path !== 'stop' && path !== 'park')
     return reject('PolicyUnavailable')
   const policyPhase = resumableRunPhase(run.phase)
-  if (path === '/api/commands/retry-fake-phase' && policyPhase === undefined)
+  if (path === 'retry' && policyPhase === undefined)
     return reject('PolicyUnavailable')
   const activeSequenceIndex = run.activeSequenceIndex
   const completedSequenceCount = run.completedSequenceCount
   if (activeSequenceIndex === undefined || completedSequenceCount === undefined)
     return reject('PolicyUnavailable')
   const nextSequence = sequences[activeSequenceIndex + 1]
-  if (path === '/api/commands/retry-fake-phase' && run.retryPhase !== undefined)
+  if (path === 'retry' && run.retryPhase !== undefined)
     return reject('RetryExhausted')
   let nextRun: Run
-  if (path === '/api/commands/stop-run')
+  if (path === 'stop')
     nextRun = { ...run, revision: run.revision + 1, phase: 'stopped' }
-  else if (path === '/api/commands/skip-fake-sequence')
+  else if (path === 'skip')
     nextRun =
       nextSequence === undefined
         ? {
@@ -4286,17 +4083,17 @@ function acceptFakePolicy(
             activeSequenceIndex: activeSequenceIndex + 1,
             completedSequenceCount: completedSequenceCount + 1,
           }
-  else if (path === '/api/commands/retry-fake-phase') {
+  else if (path === 'retry') {
     if (policyPhase === undefined) return reject('PolicyUnavailable')
     nextRun = { ...run, revision: run.revision + 1, retryPhase: policyPhase }
   } else
     nextRun = { ...run, revision: run.revision + 1, phase: 'parkRequested' }
   const eventType: ControlEvent =
-    path === '/api/commands/stop-run'
+    path === 'stop'
       ? 'RunStopped'
-      : path === '/api/commands/skip-fake-sequence'
+      : path === 'skip'
         ? 'FakeSequenceSkipped'
-        : path === '/api/commands/retry-fake-phase'
+        : path === 'retry'
           ? 'FakePhaseRetried'
           : 'FakeParkRequested'
   db.exec('BEGIN IMMEDIATE')
@@ -4319,7 +4116,7 @@ function acceptFakePolicy(
       semanticKey,
       JSON.stringify(body),
     )
-    if (path === '/api/commands/stop-run')
+    if (path === 'stop')
       db.prepare('INSERT INTO receipts VALUES (?,?)').run(
         input.idempotencyKey,
         JSON.stringify(body),
@@ -4353,30 +4150,9 @@ const StoredMutationPreview = Schema.Struct({
   applied_at: Schema.NullOr(Schema.String),
 })
 
-function previewRunMutationCommand(
-  response: ServerResponse,
-  raw: unknown | undefined,
-  db: DatabaseSync,
-  identity: LocalIdentity,
-  publish: (type: string, cursor: number) => void,
-) {
-  if (raw === undefined) return json(response, 400, reject('InvalidInput').body)
-  try {
-    const result = previewRunMutation(
-      db,
-      Schema.decodeUnknownSync(PreviewRunMutation)(raw),
-      identity,
-    )
-    if ('event' in result) publish(result.event.type, result.event.cursor)
-    return json(response, 202, result)
-  } catch {
-    return json(response, 400, reject('InvalidInput').body)
-  }
-}
-
 function previewRunMutation(
   db: DatabaseSync,
-  input: typeof PreviewRunMutation.Type,
+  input: PreviewRunMutation,
   identity: LocalIdentity,
 ) {
   if (!isOwner(identity)) return reject('OwnerRequired').body
@@ -4514,35 +4290,9 @@ function previewRunMutation(
   }
 }
 
-function applyRunMutationCommand(
-  response: ServerResponse,
-  raw: unknown | undefined,
-  approved: boolean,
-  db: DatabaseSync,
-  identity: LocalIdentity,
-  publish: (type: string, cursor: number) => void,
-) {
-  if (raw === undefined) return json(response, 400, reject('InvalidInput').body)
-  try {
-    const schema = approved ? ApproveDisruptiveRunMutation : ApplyRunMutation
-    const result = applyRunMutation(
-      db,
-      Schema.decodeUnknownSync(schema)(raw),
-      approved,
-      identity,
-    )
-    if ('event' in result && result.event !== undefined)
-      publish(result.event.type, result.event.cursor)
-    return json(response, result.status, result.body)
-  } catch {
-    return json(response, 400, reject('InvalidInput').body)
-  }
-}
-
 function applyRunMutation(
   db: DatabaseSync,
-  input:
-    typeof ApplyRunMutation.Type | typeof ApproveDisruptiveRunMutation.Type,
+  input: ApplyRunMutation | ApproveDisruptiveRunMutation,
   approved: boolean,
   identity: LocalIdentity,
 ) {
@@ -4705,62 +4455,113 @@ function mutationNextTarget(db: DatabaseSync, run: Run) {
 
 function acceptControl(
   db: DatabaseSync,
-  path: string,
-  input: typeof ControlCommand.Type,
+  command: typeof controlEnvelopeCommand.Type,
   identity: LocalIdentity,
 ) {
   expireReconnectGrace(db)
-  const existing = receipt(db, input.idempotencyKey)
-  if (existing !== undefined) return { status: 200, body: existing }
+  const semanticKey = createHash('sha256')
+    .update(JSON.stringify({ version: 1, command }))
+    .digest('hex')
+  const existingRaw: unknown = db
+    .prepare(
+      'SELECT semantic_key,response FROM control_command_receipts WHERE idempotency_key=? AND actor_person_id=? AND actor_client_id=?',
+    )
+    .get(command.idempotencyKey, identity.personId, identity.clientId)
+  const existing = Schema.decodeUnknownSync(
+    Schema.optional(
+      Schema.Struct({ semantic_key: Schema.String, response: Schema.String }),
+    ),
+  )(existingRaw)
+  if (existing !== undefined)
+    return existing.semantic_key === semanticKey
+      ? {
+          status: 200,
+          body: Schema.decodeUnknownSync(CommandHttpSuccessEnvelope)(
+            JSON.parse(existing.response),
+          ),
+        }
+      : reject('IdempotencyConflict')
   const current = state(db)
-  if (identity.capability === 'readOnly') return reject('ClientReadOnly')
-  if (input.expectedLeaseRevision !== current.control.revision)
+  const desktop = identity.clientId.startsWith('desktop-')
+  if (identity.capability === 'readOnly' || !desktop)
+    return reject('ClientReadOnly')
+  if (command.expectedLeaseRevision !== current.control.revision)
     return reject('FreshnessConflict')
   if (
-    path === '/api/commands/stop-run' &&
-    current.control.holderClientId !== identity.clientId
+    (Command.guards.GrantControl(command) ||
+      Command.guards.DeclineControl(command) ||
+      Command.guards.TakeControl(command)) &&
+    !isOwner(identity)
   )
-    return reject('ControlLeaseLost')
-  if (
-    [
-      '/api/commands/controller-disconnected',
-      '/api/commands/controller-reconnected',
-    ].includes(path) &&
-    current.control.holderClientId !== identity.clientId
-  )
-    return reject('ControlLeaseLost')
-  if (
-    path === '/api/commands/controller-reconnected' &&
-    current.control.state !== 'reconnecting'
-  )
-    return reject('FreshnessConflict')
-  if (
-    path === '/api/commands/stop-run' &&
-    (current.run === null ||
-      current.run.phase === 'stopped' ||
-      input.expectedRunRevision !== current.run.revision)
-  )
-    return reject('FreshnessConflict')
-  if (path === '/api/commands/grant-control' && !isOwner(identity))
     return reject('OwnerRequired')
+  if (
+    Command.guards.ReleaseControl(command) &&
+    current.control.holderClientId !== identity.clientId
+  )
+    return reject('ControlLeaseLost')
+  if (Command.guards.RequestControl(command)) {
+    if (current.control.holderClientId === identity.clientId)
+      return reject('AlreadyController')
+    const pendingRequest: unknown = db
+      .prepare('SELECT client_id FROM control_requests WHERE client_id=?')
+      .get(identity.clientId)
+    if (
+      Schema.decodeUnknownSync(
+        Schema.optional(Schema.Struct({ client_id: Schema.String })),
+      )(pendingRequest) !== undefined
+    )
+      return reject('ControlRequestAlreadyPending')
+  }
   db.exec('BEGIN IMMEDIATE')
   try {
     let holder = current.control.holderClientId
-    let leaseState = current.control.state
-    let grace = current.control.reconnectGraceUntil ?? null
     let revision = current.control.revision
-    let eventType: ControlEvent = 'ControlRequested'
-    if (path === '/api/commands/request-control')
-      db.prepare('INSERT OR IGNORE INTO control_requests VALUES (?,?)').run(
+    let event: typeof DomainEvent.Type
+    if (Command.guards.RequestControl(command)) {
+      const createdAt = new Date().toISOString()
+      const expiresAt = new Date(Date.now() + 60_000).toISOString()
+      const requestId = randomUUID()
+      db.prepare('INSERT INTO control_requests VALUES (?,?,?,?,?,?)').run(
+        requestId,
         identity.clientId,
         identity.personId,
+        createdAt,
+        expiresAt,
+        1,
       )
-    if (path === '/api/commands/grant-control') {
+      event = domainEvent({
+        _tag: 'ControlRequested',
+        requestId,
+        requesterClientId: identity.clientId,
+      })
+    } else if (Command.guards.GrantControl(command)) {
+      expireControlRequests(db)
       const requestRaw: unknown = db
         .prepare(
-          'SELECT client_id FROM control_requests ORDER BY client_id LIMIT 1',
+          'SELECT request_id,client_id,target_control_capable FROM control_requests WHERE request_id=? AND client_id=?',
         )
-        .get()
+        .get(command.requestId, command.targetClientId)
+      const request = Schema.decodeUnknownSync(
+        Schema.optional(ControlRequestRow),
+      )(requestRaw)
+      if (request === undefined || request.target_control_capable !== 1) {
+        db.exec('ROLLBACK')
+        return reject('ControlRequestUnavailable')
+      }
+      holder = request.client_id
+      revision += 1
+      event = domainEvent({
+        _tag: 'ControlGranted',
+        requestId: request.request_id,
+        holderClientId: request.client_id,
+      })
+      db.exec('DELETE FROM control_requests')
+    } else if (Command.guards.DeclineControl(command)) {
+      const requestRaw: unknown = db
+        .prepare(
+          'SELECT request_id,client_id,target_control_capable FROM control_requests WHERE request_id=?',
+        )
+        .get(command.requestId)
       const request = Schema.decodeUnknownSync(
         Schema.optional(ControlRequestRow),
       )(requestRaw)
@@ -4768,61 +4569,58 @@ function acceptControl(
         db.exec('ROLLBACK')
         return reject('ControlRequestUnavailable')
       }
-      holder = request.client_id
-      leaseState = 'held'
-      grace = null
+      db.prepare('DELETE FROM control_requests WHERE request_id=?').run(
+        request.request_id,
+      )
+      event = domainEvent({
+        _tag: 'ControlDeclined',
+        requestId: request.request_id,
+      })
+    } else if (Command.guards.ReleaseControl(command)) {
+      holder = null
       revision += 1
-      eventType = 'ControlGranted'
-      db.prepare('DELETE FROM control_requests WHERE client_id=?').run(holder)
-    }
-    if (path === '/api/commands/take-control') {
+      event = domainEvent({
+        _tag: 'ControlReleased',
+        previousHolderClientId: identity.clientId,
+      })
+      db.exec('DELETE FROM control_requests')
+    } else {
       holder = identity.clientId
-      leaseState = 'held'
-      grace = null
       revision += 1
-      eventType = 'OwnerTookControl'
+      event = domainEvent({
+        _tag: 'OwnerTookControl',
+        holderClientId: identity.clientId,
+      })
       db.exec('DELETE FROM control_requests')
     }
-    if (path === '/api/commands/controller-disconnected') {
-      leaseState = 'reconnecting'
-      grace = new Date(Date.now() + 30_000).toISOString()
-      revision += 1
-      eventType = 'ControlReconnectGraceStarted'
-    }
-    if (path === '/api/commands/controller-reconnected') {
-      leaseState = 'held'
-      grace = null
-      revision += 1
-      eventType = 'ControlReconnected'
-    }
-    if (path === '/api/commands/stop-run') eventType = 'RunStopped'
-    const nextRun =
-      path === '/api/commands/stop-run' && current.run !== null
-        ? {
-            ...current.run,
-            revision: current.run.revision + 1,
-            phase: 'stopped' as const,
-          }
-        : current.run
     const cursor = current.eventCursor + 1
     commit(db, {
       snapshotVersion: current.snapshotVersion + 1,
       eventCursor: cursor,
       leaseRevision: revision,
       leaseHolder: holder,
-      leaseState,
-      reconnectGraceUntil: grace,
-      ...(nextRun === current.run ? {} : { run: nextRun }),
+      leaseState: holder === null ? 'unheld' : 'held',
+      reconnectGraceUntil: null,
     })
-    const result: CommandResult = {
-      outcome: 'accepted',
-      eventType,
-      message: operatorMessages[eventType],
-      snapshot: snapshot(db, identity),
-    }
-    record(db, input.idempotencyKey, result, cursor, eventType)
+    const data = Effect.runSync(bootstrapSnapshot(db, identity))
+    const body = Schema.decodeUnknownSync(CommandHttpSuccessEnvelope)({
+      ok: true,
+      data,
+    })
+    db.prepare('INSERT INTO control_command_receipts VALUES (?,?,?,?,?)').run(
+      command.idempotencyKey,
+      identity.personId,
+      identity.clientId,
+      semanticKey,
+      JSON.stringify(body),
+    )
+    db.prepare('INSERT INTO events VALUES (?,?,?)').run(
+      cursor,
+      event._tag,
+      JSON.stringify(event),
+    )
     db.exec('COMMIT')
-    return { status: 202, body: result, event: { type: eventType, cursor } }
+    return { status: 202, body, event: { type: event._tag, cursor } }
   } catch (error) {
     db.exec('ROLLBACK')
     throw error
@@ -4833,6 +4631,9 @@ function commit(db: DatabaseSync, values: Record<string, unknown>) {
   const put = db.prepare('UPDATE state SET value=? WHERE key=?')
   for (const [key, value] of Object.entries(values))
     put.run(JSON.stringify(value), key)
+}
+function domainEvent(event: unknown) {
+  return Schema.decodeUnknownSync(DomainEvent)(event)
 }
 function persistEvidence(
   db: DatabaseSync,
@@ -4858,32 +4659,6 @@ function persistEvidence(
     db.exec('ROLLBACK')
     throw error
   }
-}
-function record(
-  db: DatabaseSync,
-  key: string,
-  result: CommandResult,
-  cursor: number,
-  type: string,
-) {
-  db.prepare('INSERT INTO receipts VALUES (?,?)').run(
-    key,
-    JSON.stringify(result),
-  )
-  db.prepare('INSERT INTO events VALUES (?,?,?)').run(
-    cursor,
-    type,
-    JSON.stringify(result),
-  )
-}
-function receipt(db: DatabaseSync, key: string): CommandResult | undefined {
-  const raw: unknown = db
-    .prepare('SELECT response FROM receipts WHERE idempotency_key=?')
-    .get(key)
-  const row = Schema.decodeUnknownSync(Schema.optional(ReceiptRow))(raw)
-  if (row === undefined) return undefined
-  const parsed: unknown = JSON.parse(row.response)
-  return Schema.decodeUnknownSync(CommandResultSchema)(parsed)
 }
 function reject(reason: FailureReason) {
   return {
@@ -4919,45 +4694,9 @@ function reject(reason: FailureReason) {
     },
   }
 }
-function runCommand(
-  response: ServerResponse,
-  raw: unknown | undefined,
-  db: DatabaseSync,
-  identity: LocalIdentity,
-  publish: (type: string, cursor: number) => void,
-) {
-  return decodedCommand(
-    response,
-    raw,
-    Schema.decodeUnknownSync(StartRun),
-    (input) => acceptRun(db, input, identity),
-    publish,
-  )
-}
-function savePlanDraftCommand(
-  response: ServerResponse,
-  raw: unknown | undefined,
-  db: DatabaseSync,
-  identity: LocalIdentity,
-  publish: (type: string, cursor: number) => void,
-) {
-  if (raw === undefined) return json(response, 400, reject('InvalidInput').body)
-  try {
-    const result = acceptPlanDraft(
-      db,
-      Schema.decodeUnknownSync(SavePlanDraft)(raw),
-      identity,
-    )
-    if (result.event !== undefined)
-      publish(result.event.type, result.event.cursor)
-    return json(response, result.status, result.body)
-  } catch {
-    return json(response, 400, reject('InvalidInput').body)
-  }
-}
 function acceptPlanDraft(
   db: DatabaseSync,
-  input: typeof SavePlanDraft.Type,
+  input: SavePlanDraft,
   identity: LocalIdentity,
 ) {
   if (!isOwner(identity)) return reject('OwnerRequired')
@@ -5059,30 +4798,9 @@ function acceptPlanDraft(
     throw error
   }
 }
-function acceptRunDefinitionCommand(
-  response: ServerResponse,
-  raw: unknown | undefined,
-  db: DatabaseSync,
-  identity: LocalIdentity,
-  publish: (type: string, cursor: number) => void,
-) {
-  if (raw === undefined) return json(response, 400, reject('InvalidInput').body)
-  try {
-    const result = acceptRunDefinition(
-      db,
-      Schema.decodeUnknownSync(AcceptRunDefinition)(raw),
-      identity,
-    )
-    if (result.event !== undefined)
-      publish(result.event.type, result.event.cursor)
-    return json(response, result.status, result.body)
-  } catch {
-    return json(response, 400, reject('InvalidInput').body)
-  }
-}
 function acceptRunDefinition(
   db: DatabaseSync,
-  input: typeof AcceptRunDefinition.Type,
+  input: AcceptRunDefinition,
   identity: LocalIdentity,
 ) {
   if (!isOwner(identity)) return reject('OwnerRequired')
@@ -5201,45 +4919,11 @@ function acceptRunDefinition(
     throw error
   }
 }
-function controlCommand(
-  response: ServerResponse,
-  raw: unknown | undefined,
-  db: DatabaseSync,
-  path: string,
-  identity: LocalIdentity,
-  publish: (type: string, cursor: number) => void,
-) {
-  return decodedCommand(
-    response,
-    raw,
-    Schema.decodeUnknownSync(ControlCommand),
-    (input) => acceptControl(db, path, input, identity),
-    publish,
-  )
-}
-function decodedCommand<Input>(
-  response: ServerResponse,
-  raw: unknown | undefined,
-  decode: (raw: unknown) => Input,
-  run: (input: Input) => {
-    readonly status: number
-    readonly body: CommandResult
-    readonly event?: { readonly type: string; readonly cursor: number }
-  },
-  publish: (type: string, cursor: number) => void,
-) {
-  if (raw === undefined) return json(response, 400, reject('InvalidInput').body)
-  try {
-    const result = run(decode(raw))
-    if (result.event !== undefined)
-      publish(result.event.type, result.event.cursor)
-    return json(response, result.status, result.body)
-  } catch {
-    return json(response, 400, reject('InvalidInput').body)
-  }
-}
 const controlEnvelopeCommand = Schema.Union([
   Command.cases.RequestControl,
+  Command.cases.GrantControl,
+  Command.cases.DeclineControl,
+  Command.cases.ReleaseControl,
   Command.cases.TakeControl,
 ])
 const commandFailureStatuses = {
@@ -5265,11 +4949,8 @@ const controlCommandLayer = (
         commandId: string,
         command: typeof controlEnvelopeCommand.Type,
       ) {
-        const path = Command.guards.RequestControl(command)
-          ? '/api/commands/request-control'
-          : '/api/commands/take-control'
-        const result = acceptControl(db, path, command, identity)
-        if (result.body.outcome === 'rejected')
+        const result = acceptControl(db, command, identity)
+        if (!('ok' in result.body))
           return yield* Effect.fail(
             new CommandRejected({
               failure: commandFailure(commandId, result.body),
@@ -5277,14 +4958,7 @@ const controlCommandLayer = (
           )
         if ('event' in result && result.event !== undefined)
           publish(result.event.type, result.event.cursor)
-        const data = yield* bootstrapSnapshot(db, identity)
-        const body = yield* Schema.decodeUnknownEffect(
-          CommandHttpSuccessEnvelope,
-        )({
-          ok: true,
-          data,
-        })
-        return { status: result.status, body }
+        return { status: result.status, body: result.body }
       }),
     }),
   )
@@ -5360,7 +5034,7 @@ function planIntentResponse(
   if (PlanIntent.guards.AcceptRunDefinition(intent))
     return acceptRunDefinition(db, intent, identity)
   if (PlanIntent.guards.StartAcceptedRun(intent))
-    return acceptRun(db, { ...intent, _tag: 'StartRunFromPlan' }, identity)
+    return acceptRun(db, intent, identity)
   if (PlanIntent.guards.PreviewRunMutation(intent)) {
     const body = previewRunMutation(db, intent, identity)
     return {
@@ -5446,12 +5120,12 @@ function observeIntentResponse(
   if (ObserveIntent.guards.ResumeRun(intent))
     return acceptRunIntervention(db, intent, 'resume', identity)
   const path = ObserveIntent.guards.StopRun(intent)
-    ? '/api/commands/stop-run'
+    ? 'stop'
     : ObserveIntent.guards.SkipSequence(intent)
-      ? '/api/commands/skip-fake-sequence'
+      ? 'skip'
       : ObserveIntent.guards.RetryPhase(intent)
-        ? '/api/commands/retry-fake-phase'
-        : '/api/commands/request-fake-park'
+        ? 'retry'
+        : 'park'
   return acceptFakePolicy(db, intent, path, identity)
 }
 function observeCommandResult(
@@ -5622,6 +5296,8 @@ function commandFailure(
   const failure =
     rejected.reason === 'ClientReadOnly' ||
     rejected.reason === 'ControlLeaseLost' ||
+    rejected.reason === 'AlreadyController' ||
+    rejected.reason === 'ControlRequestAlreadyPending' ||
     rejected.reason === 'OwnerRequired'
       ? {
           _tag: 'AuthorizationFailure',
@@ -5631,7 +5307,11 @@ function commandFailure(
               ? 'ClientReadOnly'
               : rejected.reason === 'ControlLeaseLost'
                 ? 'ControlLeaseLost'
-                : 'OwnerRequired',
+                : rejected.reason === 'AlreadyController'
+                  ? 'AlreadyController'
+                  : rejected.reason === 'ControlRequestAlreadyPending'
+                    ? 'ControlRequestAlreadyPending'
+                    : 'OwnerRequired',
         }
       : rejected.reason === 'IdempotencyConflict'
         ? { _tag: 'IdempotencyConflict', ...common }

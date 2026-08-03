@@ -1,6 +1,41 @@
-# Production Convergence Handoff
+# Production Convergence Complete Handoff
 
-Status: **Phases 1 and 2 closed — Production Convergence Epics 1–4 complete; complete Epic 5 before accepting a Phase 3 implementation slice**
+Status: **Phases 1 and 2 closed — all five Production Convergence Epics complete; Phase 3 read-only preflight remains prepared, not accepted or implemented**
+
+## Production Convergence Complete
+
+All five sequential Continuum Epics are complete:
+
+1. `tkt-ezxr1fsb` — promote the proven server.
+2. `tkt-n9yoieoz` — create the production Nightbook web application.
+3. `tkt-uuom4upo` — establish the decoded snapshot, SSE, capability, command,
+   and failure seam.
+4. `tkt-qffwfa47` — ship web and server from one version-matched origin.
+5. `tkt-zcsucxyx` — migrate the proven workspace slices and retire experimental
+   implementation paths.
+
+`apps/web` is the canonical Nightbook browser client and `apps/server` is the
+canonical rig-local authority. The final server image serves the version-matched
+web bundle through the Effect WebHost and scoped OriginListener. Canonical
+endpoints cover bootstrap, SSE, typed control, Plan, fake managed-run Observe,
+Library/download, and Process handoff; direct legacy routes are retired.
+`ASTRO_SERVER` is canonical configuration, with bounded deployed legacy aliases
+only. Fixture adapter, theme-study, and prototype runtimes are absent from the
+production bundle.
+
+Plan, fake managed-run Observe, Library delivery, and current Process handoff
+are migrated. Interactive Process remains Phase 5 work. The typed control
+request/grant/decline/release/take seam is preserved, but user-facing presence
+and control UI remain Phase 6 work; reconnect and presence lifecycle are not
+claimed.
+
+Final evidence: contracts **184/184**, server **62/62**, and web **57/57**;
+Compose base/download, rig, and publisher renders; and Designer PASS at wide,
+compact, and 390 px for owner, friend, and phone projections. Final image:
+`sha256:10c3f8ccbcf9530b24a595e90242ad497720d177b8ffdaae95104cf62b18835e`.
+No provider, device, Solar, physical, or capture work was performed or
+authorized. The Phase 3 read-only decision-grade preflight packet is prepared
+but requires separate owner acceptance before implementation.
 
 ## Completed Host-Verification Bundle
 
@@ -25,7 +60,7 @@ passed at wide, compact, and 390 px phone widths.
 `4308796` is now on `main`; `v2` has no unique desktop or SDK paths. Phase 1
 does not authorize further cleanup by default.
 
-## Current Work: Continue Production Convergence
+## Completed Production Convergence
 
 Phase 2 is closed. Its five completed slices are [Multi-Sequence Draft and
 Deterministic Validation](phase-2-planning.md#first-slice-multi-sequence-draft-and-deterministic-validation),
@@ -37,8 +72,8 @@ They prove deterministic Plan persistence/projection, a revisioned immutable
 RunDefinition snapshot, a two-sequence fake executor through completion, and
 durable fake-run pause/resume, resolution policies, and consequence-aware
 edits. The prepared next packet is [Read-Only Decision-Grade Preflight](phase-3-planning.md#first-slice-read-only-decision-grade-preflight).
-It remains prepared but is not the next implementation target. First complete
-the five sequential Production Convergence Epics:
+It remains prepared and requires owner acceptance before implementation. The
+five sequential Production Convergence Epics are complete:
 
 1. `tkt-ezxr1fsb` — promote the proven server. **Complete.**
 2. `tkt-n9yoieoz` — create the production Nightbook web application.
@@ -48,13 +83,13 @@ the five sequential Production Convergence Epics:
 4. `tkt-qffwfa47` — ship web and server from one version-matched origin.
    **Complete.**
 5. `tkt-zcsucxyx` — migrate proven workspace slices and retire experimental
-   implementation paths.
+   implementation paths. **Complete.**
 
-Each Epic is blocked by its predecessor and contains its own ordered child
+Each Epic was blocked by its predecessor and contained its own ordered child
 implementation tasks. Convergence preserves existing proof boundaries and does
-not authorize a provider read, device command, physical capture, processing
-workflow, off-host recovery, or storage-health operation. After convergence,
-the preflight packet must still be accepted before implementation; it authorizes
+not authorize a provider read, device command, physical capture, interactive
+processing workflow, off-host recovery, or storage-health operation. The
+preflight packet must still be accepted before implementation; it authorizes
 only a current provider read and truthful checklist projection.
 
 ## Production Web Application Complete
@@ -85,7 +120,7 @@ at wide, compact, and 390 px phone widths with direct deep-link refresh,
 back/forward, keyboard focus, semantic status, no console errors, and no
 horizontal overflow.
 
-## Production Client Seam Complete
+## Historical Epic 3 Evidence
 
 Epic 3 emits shared contracts and establishes the bounded bootstrap HTTP/SSE/
 control seam between `apps/web` and `apps/server`. The Effect-owned web client
@@ -101,7 +136,7 @@ one-origin shipping and integrated local workflow. This work preserves the
 existing proof boundary: it authorizes no provider read, device command,
 capture, or Phase 3 behavior.
 
-## Production Origin Complete
+## Historical Epic 4 Evidence
 
 Epic 4 ships the one-origin architecture: the Effect WebHost and scoped
 OriginListener serve the version-matched client, with one pinned image embedding
@@ -115,10 +150,10 @@ for owner, friend, and phone projections. The image
 and Compose renders were verified. No physical, provider, Solar, or device
 action was issued.
 
-Epic 5, `tkt-zcsucxyx`, is next. It still owns the detailed Plan, Observe,
-Library, and Process migration and experimental-path retirement; Epic 4 does
-not claim those details shipped. Phase 3 remains separately authorized only by
-its accepted bounded slices.
+Epic 5 subsequently completed the detailed Plan, Observe, Library, and Process
+migration and experimental-path retirement. The final convergence evidence is
+recorded above. Phase 3 remains separately authorized only by its accepted
+bounded slices.
 
 The user accepts NVMe live/recent data plus the SSD backup as current
 same-host resilience. Off-host recovery is not current Phase 1 scope.
@@ -126,7 +161,7 @@ same-host resilience. Off-host recovery is not current Phase 1 scope.
 ## Verified Baseline
 
 - `apps/server` type checks and its SQLite/HTTP/SSE/worker/filesystem
-  integration suite pass **71/71**. The suite covers the retained local-web
+  integration suite pass **62/62**. The suite covers the retained local-web
   foundation, Process Save/publisher boundary, and the deliberately installed
   deterministic M27 fixture without creating generic hardware work. Normal
   origin, rig-worker, Solar CLI, publisher, and processor database opening
@@ -192,17 +227,17 @@ this handoff is the active authority.
 
 ## Remaining Backend and Infrastructure Boundaries
 
-| Boundary | Current state | Required proof |
-| --- | --- | --- |
-| Process Save and permanent local output | One-shot manifest processor ingested an existing M13 LIGHT original and distinct Siril linear master into SSD originals/finals with lineage and checksum proof | Keep processor one-shot/least-privilege; later processing workflow needs a separately authorized product slice. |
-| Publication worker and private R2 | M13 linear master real PUT plus provider HEAD checksum/byte verification observed; durable projection is `published` | Controlled recovery drill under normal load. |
-| Downloads | Streamlined origin and publisher from `eceab25` are deployed. The M13 object has verified attachment metadata and its fresh private-R2 URL downloaded successfully in the browser. | No further Phase 1 proof. Future outputs receive attachment metadata at publication. |
-| Storage health and cleanup | Process Save containment and recorded-orphan cleanup are locally proven; operations disk is `unknown` | Authorize a separate storage-health workflow before adding thresholds, capture admission, or scratch cleanup. |
-| Rig-worker liveness | Schema-compatible worker is running and durably `alive` / `ready`; no Solar work was pending. | No further Phase 1 proof. This remains liveness only, never capture proof. |
-| Same-host resilience | Enabled SSD backup timer has a successful 2026-07-29 run with checksum and disposable restore-drill evidence. | No further Phase 1 proof. This is the accepted current resilience scope. |
-| Off-host recovery | Not current scope | Revisit only if the user changes the current NVMe-plus-SSD resilience decision. |
-| Device/session presence | Person-to-client fixture | Stable production client/session authority before treating a person's browsers as distinct presence clients. |
-| Processing deployment | Compose placeholder absent by design | Separate least-privilege processor/publisher lifecycles, bounded resources, and no rig/tunnel credentials. |
+| Boundary                                | Current state                                                                                                                                                                      | Required proof                                                                                                  |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Process Save and permanent local output | One-shot manifest processor ingested an existing M13 LIGHT original and distinct Siril linear master into SSD originals/finals with lineage and checksum proof                     | Keep processor one-shot/least-privilege; later processing workflow needs a separately authorized product slice. |
+| Publication worker and private R2       | M13 linear master real PUT plus provider HEAD checksum/byte verification observed; durable projection is `published`                                                               | Controlled recovery drill under normal load.                                                                    |
+| Downloads                               | Streamlined origin and publisher from `eceab25` are deployed. The M13 object has verified attachment metadata and its fresh private-R2 URL downloaded successfully in the browser. | No further Phase 1 proof. Future outputs receive attachment metadata at publication.                            |
+| Storage health and cleanup              | Process Save containment and recorded-orphan cleanup are locally proven; operations disk is `unknown`                                                                              | Authorize a separate storage-health workflow before adding thresholds, capture admission, or scratch cleanup.   |
+| Rig-worker liveness                     | Schema-compatible worker is running and durably `alive` / `ready`; no Solar work was pending.                                                                                      | No further Phase 1 proof. This remains liveness only, never capture proof.                                      |
+| Same-host resilience                    | Enabled SSD backup timer has a successful 2026-07-29 run with checksum and disposable restore-drill evidence.                                                                      | No further Phase 1 proof. This is the accepted current resilience scope.                                        |
+| Off-host recovery                       | Not current scope                                                                                                                                                                  | Revisit only if the user changes the current NVMe-plus-SSD resilience decision.                                 |
+| Device/session presence                 | Person-to-client fixture                                                                                                                                                           | Stable production client/session authority before treating a person's browsers as distinct presence clients.    |
+| Processing deployment                   | Compose placeholder absent by design                                                                                                                                               | Separate least-privilege processor/publisher lifecycles, bounded resources, and no rig/tunnel credentials.      |
 
 ## Scope and Authority
 
@@ -216,6 +251,14 @@ this handoff is the active authority.
   sole copy of original evidence.
 - This handoff authorizes no off-host recovery work, new browser controls, or
   processing-workflow implementation.
+- Stable production presence/session authority and automatic reconnect lifecycle
+  remain Phase 6 work. Browser-reported disconnect/reconnect is not a control
+  command; persisted legacy reconnecting state still expires safely if found.
+- The canonical server/web control seam remains preserved, but user-facing
+  request, grant, release, and presence lifecycle is explicitly Phase 6 scope;
+  it is not an unreachable accidental behavior. A current pending request means
+  only an unexpired authoritative request, not proof that its desktop remains
+  connected.
 
 ## Read First
 

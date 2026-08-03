@@ -1,5 +1,5 @@
 # Copy outside the repository as publisher.env. Only the publisher service reads it.
-ASTRO_LOCAL_WEB_DB=/var/lib/astro-console/state.sqlite
+ASTRO_SERVER_DB=/var/lib/astro-console/state.sqlite
 ASTRO_PUBLISHER_OUTPUTS_ROOT=/var/lib/astro-console/outputs
 R2_ACCOUNT_ID=503286fc7e5e8545c172105f991efef1
 R2_BUCKET=astro-console-artifacts

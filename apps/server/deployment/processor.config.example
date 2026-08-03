@@ -1,7 +1,7 @@
 # Copy outside the repository only for one owner-supervised evidence run.
 # This is not an origin env file and does not start a processor service.
 ASTRO_PROCESSOR_MODE=manifest
-ASTRO_LOCAL_WEB_DB=/var/lib/astro-console/state.sqlite
+ASTRO_SERVER_DB=/var/lib/astro-console/state.sqlite
 ASTRO_PROCESSOR_SOURCES_ROOT=/var/lib/astro-console/processor-sources
 ASTRO_PROCESSOR_ORIGINALS_ROOT=/var/lib/astro-console/originals
 ASTRO_PROCESSOR_OUTPUTS_ROOT=/var/lib/astro-console/outputs

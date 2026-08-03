@@ -19,11 +19,11 @@ import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { ConfigProvider, Effect, Schema } from 'effect'
 import {
   AcquireSnapshot,
-  BootstrapHttpFailureEnvelope,
   BootstrapHttpSuccessEnvelope,
   BootstrapSseEventEnvelope,
   CommandHttpFailureEnvelope,
   CommandHttpSuccessEnvelope,
+  DomainEvent,
   ObserveCommandResponse,
   PlanCommandResponse,
   ProcessSourceHandoff,
@@ -35,8 +35,6 @@ import {
   createMembershipBootstrapResolver,
   createProductionAccessAdmission,
   openMigrationDatabase,
-  openProcessorDatabase,
-  openPublisherDatabase,
   createLocalWebService,
 } from './server.ts'
 import { createRigWorkerService, runRigWorker } from './rig-worker.ts'
@@ -86,7 +84,12 @@ async function bootstrapSnapshot(url: string, init?: RequestInit) {
 }
 
 test('bootstrap and bounded control transport decode shared contracts before mutation', async (t) => {
-  const service = createFixtureService()
+  const service = createFixtureService(undefined, () => ({
+    personId: 'member',
+    clientId: 'desktop-member',
+    role: 'viewer' as const,
+    capability: 'controlCapable' as const,
+  }))
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
@@ -185,6 +188,627 @@ test('Plan command transport decodes one closed request boundary and projects pe
   assert.equal(
     Schema.decodeUnknownSync(PlanCommandResponse)(await started.json())._tag,
     'Accepted',
+  )
+})
+
+test('every retired direct Plan, Observe, and control route returns a JSON 404', async (t) => {
+  const service = createFixtureService()
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  for (const path of [
+    '/api/commands/start-run',
+    '/api/commands/save-plan-draft',
+    '/api/commands/accept-run-definition',
+    '/api/commands/pause-run',
+    '/api/commands/resume-run',
+    '/api/commands/stop-run',
+    '/api/commands/skip-fake-sequence',
+    '/api/commands/retry-fake-phase',
+    '/api/commands/request-fake-park',
+    '/api/commands/preview-run-mutation',
+    '/api/commands/apply-run-mutation',
+    '/api/commands/approve-disruptive-run-mutation',
+    '/api/commands/request-control',
+    '/api/commands/grant-control',
+    '/api/commands/take-control',
+    '/api/commands/controller-disconnected',
+    '/api/commands/controller-reconnected',
+  ]) {
+    const response = await fetch(`${base}${path}`, { method: 'POST' })
+    assert.equal(response.status, 404)
+    assert.match(
+      response.headers.get('content-type') ?? '',
+      /^application\/json/,
+    )
+    assert.equal(
+      Schema.decodeUnknownSync(
+        Schema.Struct({
+          outcome: Schema.Literal('rejected'),
+          reason: Schema.Literal('InvalidInput'),
+        }),
+      )(await response.json()).reason,
+      'InvalidInput',
+    )
+  }
+})
+
+test('canonical control commands persist exact requests, actor-scoped receipts, and SSE truth', async (t) => {
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-canonical-control-')),
+    'state.sqlite',
+  )
+  const service = createFixtureService(databasePath, (request) => {
+    const token = request?.headers.authorization
+    if (token === 'Bearer owner')
+      return {
+        personId: 'owner',
+        clientId: 'desktop-owner',
+        role: 'owner' as const,
+        capability: 'controlCapable' as const,
+      }
+    if (token === 'Bearer member')
+      return {
+        personId: 'member',
+        clientId: 'desktop-member',
+        role: 'viewer' as const,
+        capability: 'controlCapable' as const,
+      }
+    if (token === 'Bearer friend')
+      return {
+        personId: 'friend',
+        clientId: 'desktop-friend',
+        role: 'viewer' as const,
+        capability: 'controlCapable' as const,
+      }
+    if (token === 'Bearer phone')
+      return {
+        personId: 'owner',
+        clientId: 'phone-owner',
+        role: 'owner' as const,
+        capability: 'readOnly' as const,
+      }
+    return undefined
+  })
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  const owner = { authorization: 'Bearer owner' }
+  const member = { authorization: 'Bearer member' }
+  const friend = { authorization: 'Bearer friend' }
+  const submit = async (command: unknown, headers: HeadersInit) => {
+    const response = await fetch(`${base}/api/commands/control`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ commandId: crypto.randomUUID(), command }),
+    })
+    return { response, body: await response.json() }
+  }
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const stream = await fetch(`${base}/api/events`, { headers: owner })
+  const reader = stream.body?.getReader()
+  await nextEvent(reader)
+  const beforeRejectedRequest = await bootstrapSnapshot(
+    `${base}/api/snapshot`,
+    {
+      headers: owner,
+    },
+  )
+  const currentHolder = await submit(
+    {
+      _tag: 'RequestControl',
+      expectedLeaseRevision: 1,
+      idempotencyKey: 'owner-request',
+    },
+    owner,
+  )
+  assert.equal(currentHolder.response.status, 403)
+  const currentHolderFailure = Schema.decodeUnknownSync(
+    CommandHttpFailureEnvelope,
+  )(currentHolder.body)
+  if (currentHolderFailure.failure._tag !== 'CommandRejected')
+    throw new Error('Current holder request did not reject')
+  if (currentHolderFailure.failure.failure._tag !== 'AuthorizationFailure')
+    throw new Error('Current holder request used the wrong failure')
+  assert.equal(currentHolderFailure.failure.failure.reason, 'AlreadyController')
+  const afterRejectedRequest = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: owner,
+  })
+  assert.equal(
+    afterRejectedRequest.snapshotVersion,
+    beforeRejectedRequest.snapshotVersion,
+  )
+  assert.equal(
+    afterRejectedRequest.eventCursor,
+    beforeRejectedRequest.eventCursor,
+  )
+  const requested = await submit(
+    {
+      _tag: 'RequestControl',
+      expectedLeaseRevision: 1,
+      idempotencyKey: 'member-request',
+    },
+    member,
+  )
+  assert.equal(requested.response.status, 202)
+  const requestSnapshot = Schema.decodeUnknownSync(CommandHttpSuccessEnvelope)(
+    requested.body,
+  ).data
+  const pending = requestSnapshot.control.pendingRequests?.[0]
+  if (pending === undefined) throw new Error('Control request is unavailable')
+  assert.equal(pending.clientId, 'desktop-member')
+  assert.equal(Date.parse(pending.expiresAt) > Date.now(), true)
+  assert.equal(
+    databaseRow(
+      Schema.Struct({ target_control_capable: Schema.Int }),
+      service.database
+        .prepare(
+          'SELECT target_control_capable FROM control_requests WHERE request_id=?',
+        )
+        .get(pending.requestId),
+    ).target_control_capable,
+    1,
+  )
+  assert.match(await nextEvent(reader), /ProjectionChanged/)
+  const duplicate = await submit(
+    {
+      _tag: 'RequestControl',
+      expectedLeaseRevision: 1,
+      idempotencyKey: 'member-request-duplicate',
+    },
+    member,
+  )
+  assert.equal(duplicate.response.status, 403)
+  const duplicateFailure = Schema.decodeUnknownSync(CommandHttpFailureEnvelope)(
+    duplicate.body,
+  )
+  if (duplicateFailure.failure._tag !== 'CommandRejected')
+    throw new Error('Duplicate control request did not reject')
+  if (duplicateFailure.failure.failure._tag !== 'AuthorizationFailure')
+    throw new Error('Duplicate control request used the wrong failure')
+  assert.equal(
+    duplicateFailure.failure.failure.reason,
+    'ControlRequestAlreadyPending',
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database
+        .prepare('SELECT count(*) AS count FROM control_command_receipts')
+        .get(),
+    ).count,
+    1,
+  )
+  const friendRequested = await submit(
+    {
+      _tag: 'RequestControl',
+      expectedLeaseRevision: 1,
+      idempotencyKey: 'friend-request-for-grant',
+    },
+    friend,
+  )
+  const friendPending = Schema.decodeUnknownSync(CommandHttpSuccessEnvelope)(
+    friendRequested.body,
+  ).data.control.pendingRequests?.find(
+    (request) => request.clientId === 'desktop-friend',
+  )
+  if (friendPending === undefined)
+    throw new Error('Friend control request is unavailable')
+  assert.match(await nextEvent(reader), /desktop-friend/)
+  const conflict = await submit(
+    {
+      _tag: 'TakeControl',
+      expectedLeaseRevision: 1,
+      idempotencyKey: 'member-request',
+    },
+    member,
+  )
+  assert.equal(conflict.response.status, 409)
+  const mismatch = await submit(
+    {
+      _tag: 'GrantControl',
+      expectedLeaseRevision: 1,
+      requestId: pending.requestId,
+      targetClientId: 'desktop-other',
+      idempotencyKey: 'grant-mismatch',
+    },
+    owner,
+  )
+  assert.equal(mismatch.response.status, 409)
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM events').get(),
+    ).count,
+    2,
+  )
+  const granted = await submit(
+    {
+      _tag: 'GrantControl',
+      expectedLeaseRevision: 1,
+      requestId: pending.requestId,
+      targetClientId: pending.clientId,
+      idempotencyKey: 'grant-member',
+    },
+    owner,
+  )
+  assert.equal(granted.response.status, 202)
+  assert.equal(
+    Schema.decodeUnknownSync(CommandHttpSuccessEnvelope)(granted.body).data
+      .control.holderClientId,
+    'desktop-member',
+  )
+  assert.deepEqual(
+    Schema.decodeUnknownSync(CommandHttpSuccessEnvelope)(granted.body).data
+      .control.pendingRequests,
+    [],
+  )
+  assert.doesNotMatch(await nextEvent(reader), /desktop-friend/)
+  const staleGrant = await submit(
+    {
+      _tag: 'GrantControl',
+      expectedLeaseRevision: 2,
+      requestId: friendPending.requestId,
+      targetClientId: friendPending.clientId,
+      idempotencyKey: 'grant-stale-friend',
+    },
+    owner,
+  )
+  assert.equal(staleGrant.response.status, 409)
+  const friendRequestedForRelease = await submit(
+    {
+      _tag: 'RequestControl',
+      expectedLeaseRevision: 2,
+      idempotencyKey: 'friend-request-for-release',
+    },
+    friend,
+  )
+  assert.equal(friendRequestedForRelease.response.status, 202)
+  const oldController = await submit(
+    {
+      _tag: 'ReleaseControl',
+      expectedLeaseRevision: 2,
+      idempotencyKey: 'old-release',
+    },
+    owner,
+  )
+  assert.equal(oldController.response.status, 403)
+  const released = await submit(
+    {
+      _tag: 'ReleaseControl',
+      expectedLeaseRevision: 2,
+      idempotencyKey: 'member-release',
+    },
+    member,
+  )
+  assert.equal(released.response.status, 202)
+  assert.deepEqual(
+    databaseRow(
+      Schema.Struct({ type: Schema.String, snapshot: Schema.String }),
+      service.database
+        .prepare(
+          'SELECT type,snapshot FROM events ORDER BY cursor DESC LIMIT 1',
+        )
+        .get(),
+    ),
+    {
+      type: 'ControlReleased',
+      snapshot: JSON.stringify({
+        _tag: 'ControlReleased',
+        previousHolderClientId: 'desktop-member',
+      }),
+    },
+  )
+  assert.deepEqual(
+    Schema.decodeUnknownSync(CommandHttpSuccessEnvelope)(released.body).data
+      .control.pendingRequests,
+    [],
+  )
+  const friendRequestedForTake = await submit(
+    {
+      _tag: 'RequestControl',
+      expectedLeaseRevision: 3,
+      idempotencyKey: 'friend-request-for-take',
+    },
+    friend,
+  )
+  assert.equal(friendRequestedForTake.response.status, 202)
+  const ownerTake = await submit(
+    {
+      _tag: 'TakeControl',
+      expectedLeaseRevision: 3,
+      idempotencyKey: 'member-release',
+    },
+    owner,
+  )
+  assert.equal(ownerTake.response.status, 202)
+  assert.deepEqual(
+    Schema.decodeUnknownSync(CommandHttpSuccessEnvelope)(ownerTake.body).data
+      .control.pendingRequests,
+    [],
+  )
+  const requestedForDecline = await submit(
+    {
+      _tag: 'RequestControl',
+      expectedLeaseRevision: 4,
+      idempotencyKey: 'member-decline-request',
+    },
+    member,
+  )
+  const declinedPending = Schema.decodeUnknownSync(CommandHttpSuccessEnvelope)(
+    requestedForDecline.body,
+  ).data.control.pendingRequests?.[0]
+  if (declinedPending === undefined)
+    throw new Error('Decline request is unavailable')
+  const retainedRequest = await submit(
+    {
+      _tag: 'RequestControl',
+      expectedLeaseRevision: 4,
+      idempotencyKey: 'friend-request-for-decline',
+    },
+    friend,
+  )
+  assert.equal(retainedRequest.response.status, 202)
+  const declined = await submit(
+    {
+      _tag: 'DeclineControl',
+      expectedLeaseRevision: 4,
+      requestId: declinedPending.requestId,
+      idempotencyKey: 'owner-decline',
+    },
+    owner,
+  )
+  assert.equal(declined.response.status, 202)
+  assert.deepEqual(
+    databaseRow(
+      Schema.Struct({ type: Schema.String, snapshot: Schema.String }),
+      service.database
+        .prepare(
+          'SELECT type,snapshot FROM events ORDER BY cursor DESC LIMIT 1',
+        )
+        .get(),
+    ),
+    {
+      type: 'ControlDeclined',
+      snapshot: JSON.stringify({
+        _tag: 'ControlDeclined',
+        requestId: declinedPending.requestId,
+      }),
+    },
+  )
+  assert.deepEqual(
+    Schema.decodeUnknownSync(CommandHttpSuccessEnvelope)(
+      declined.body,
+    ).data.control.pendingRequests?.map((request) => request.clientId),
+    ['desktop-friend'],
+  )
+  const stale = await submit(
+    {
+      _tag: 'ReleaseControl',
+      expectedLeaseRevision: 3,
+      idempotencyKey: 'stale-release',
+    },
+    owner,
+  )
+  assert.equal(stale.response.status, 409)
+  const phone = await submit(
+    {
+      _tag: 'TakeControl',
+      expectedLeaseRevision: 4,
+      idempotencyKey: 'phone-take',
+    },
+    { authorization: 'Bearer phone' },
+  )
+  assert.equal(phone.response.status, 403)
+  const replay = await submit(
+    {
+      _tag: 'TakeControl',
+      expectedLeaseRevision: 3,
+      idempotencyKey: 'member-release',
+    },
+    owner,
+  )
+  assert.equal(replay.response.status, 200)
+  const controlEvents = Schema.decodeUnknownSync(
+    Schema.Array(
+      Schema.Struct({ type: Schema.String, snapshot: Schema.String }),
+    ),
+  )(
+    service.database
+      .prepare(
+        "SELECT type,snapshot FROM events WHERE type IN ('ControlRequested','ControlGranted','ControlDeclined','ControlReleased','OwnerTookControl') ORDER BY cursor",
+      )
+      .all(),
+  )
+  assert.deepEqual(
+    controlEvents.map(
+      (row) =>
+        Schema.decodeUnknownSync(DomainEvent)(JSON.parse(row.snapshot))._tag,
+    ),
+    controlEvents.map((row) => row.type),
+  )
+  await reader?.cancel()
+  await listener.close()
+  service.close()
+  const recovered = createFixtureService(databasePath, () => ({
+    personId: 'owner',
+    clientId: 'desktop-owner',
+    role: 'owner' as const,
+    capability: 'controlCapable' as const,
+  }))
+  const recoveredListener = await recovered.listen()
+  t.after(async () => {
+    await recoveredListener.close()
+    recovered.close()
+  })
+  const recoveredSnapshot = await bootstrapSnapshot(
+    `http://127.0.0.1:${recoveredListener.port}/api/snapshot`,
+  )
+  assert.equal(recoveredSnapshot.control.holderClientId, 'desktop-owner')
+  assert.deepEqual(
+    recoveredSnapshot.control.pendingRequests?.map(
+      (request) => request.clientId,
+    ),
+    ['desktop-friend'],
+  )
+})
+
+test('reconnect lease expiry records the canonical control event once', async (t) => {
+  const service = createFixtureService()
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const before = databaseRow(
+    CountRow,
+    service.database.prepare('SELECT count(*) AS count FROM events').get(),
+  ).count
+  const beforeSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+  const update = service.database.prepare(
+    'UPDATE state SET value=? WHERE key=?',
+  )
+  update.run(JSON.stringify('desktop-member'), 'leaseHolder')
+  update.run(JSON.stringify('reconnecting'), 'leaseState')
+  update.run(JSON.stringify(new Date(0).toISOString()), 'reconnectGraceUntil')
+  const afterSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+  const event = databaseRow(
+    Schema.Struct({ type: Schema.String, snapshot: Schema.String }),
+    service.database
+      .prepare('SELECT type,snapshot FROM events ORDER BY cursor DESC LIMIT 1')
+      .get(),
+  )
+  assert.equal(event.type, 'ControlLeaseExpired')
+  assert.deepEqual(
+    Schema.decodeUnknownSync(DomainEvent)(JSON.parse(event.snapshot)),
+    {
+      _tag: 'ControlLeaseExpired',
+      previousHolderClientId: 'desktop-member',
+    },
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM events').get(),
+    ).count,
+    before + 1,
+  )
+  assert.equal(afterSnapshot.eventCursor, beforeSnapshot.eventCursor + 1)
+})
+
+test('expired control requests are removed before projection and grant', async (t) => {
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-control-request-expiry-')),
+    'state.sqlite',
+  )
+  const admission = (request?: Pick<IncomingMessage, 'headers'>) =>
+    request?.headers.authorization === 'Bearer member'
+      ? {
+          personId: 'member',
+          clientId: 'desktop-member',
+          role: 'viewer' as const,
+          capability: 'controlCapable' as const,
+        }
+      : {
+          personId: 'owner',
+          clientId: 'desktop-owner',
+          role: 'owner' as const,
+          capability: 'controlCapable' as const,
+        }
+  const service = createFixtureService(databasePath, admission)
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const requested = Schema.decodeUnknownSync(CommandHttpSuccessEnvelope)(
+    await fetch(`${base}/api/commands/control`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer member' },
+      body: JSON.stringify({
+        commandId: 'expired-request',
+        command: {
+          _tag: 'RequestControl',
+          expectedLeaseRevision: 1,
+          idempotencyKey: 'expired-request',
+        },
+      }),
+    }).then((response) => response.json()),
+  )
+  const pending = requested.data.control.pendingRequests?.[0]
+  if (pending === undefined) throw new Error('Control request is unavailable')
+  service.database
+    .prepare(
+      'UPDATE control_requests SET target_control_capable=0 WHERE request_id=?',
+    )
+    .run(pending.requestId)
+  const beforeUnavailableGrant = requested.data.eventCursor
+  const unavailableGrant = await fetch(`${base}/api/commands/control`, {
+    method: 'POST',
+    body: JSON.stringify({
+      commandId: 'unavailable-target-grant',
+      command: {
+        _tag: 'GrantControl',
+        expectedLeaseRevision: requested.data.control.revision,
+        requestId: pending.requestId,
+        targetClientId: pending.clientId,
+        idempotencyKey: 'unavailable-target-grant',
+      },
+    }),
+  })
+  assert.equal(unavailableGrant.status, 409)
+  assert.equal(
+    (await bootstrapSnapshot(`${base}/api/snapshot`)).eventCursor,
+    beforeUnavailableGrant,
+  )
+  service.database
+    .prepare(
+      'UPDATE control_requests SET target_control_capable=1,expires_at=? WHERE request_id=?',
+    )
+    .run('2000-01-01T00:00:00.000Z', pending.requestId)
+  const projected = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.deepEqual(projected.control.pendingRequests, [])
+  const beforeGrant = projected.eventCursor
+  const rejected = await fetch(`${base}/api/commands/control`, {
+    method: 'POST',
+    body: JSON.stringify({
+      commandId: 'expired-grant',
+      command: {
+        _tag: 'GrantControl',
+        expectedLeaseRevision: projected.control.revision,
+        requestId: pending.requestId,
+        targetClientId: pending.clientId,
+        idempotencyKey: 'expired-grant',
+      },
+    }),
+  })
+  assert.equal(rejected.status, 409)
+  assert.equal(
+    (await bootstrapSnapshot(`${base}/api/snapshot`)).eventCursor,
+    beforeGrant,
+  )
+  await listener.close()
+  service.close()
+  const recovered = createFixtureService(databasePath, admission)
+  const recoveredListener = await recovered.listen()
+  t.after(async () => {
+    await recoveredListener.close()
+    recovered.close()
+  })
+  assert.deepEqual(
+    (
+      await bootstrapSnapshot(
+        `http://127.0.0.1:${recoveredListener.port}/api/snapshot`,
+      )
+    ).control.pendingRequests,
+    [],
   )
 })
 
@@ -319,110 +943,6 @@ test('Plan command preview responses preserve persisted notice and disruptive do
   }
 })
 
-test('legacy generic start receipts replay only when their persisted run facts match', async (t) => {
-  const service = createFixtureService()
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
-  if (initial.plan === undefined) throw new Error('Fixture Plan is unavailable')
-  const command = {
-    _tag: 'StartRunFromPlan',
-    planId: initial.plan.planId,
-    expectedPlanRevision: initial.plan.revision,
-    expectedLeaseRevision: initial.control.revision,
-    idempotencyKey: 'legacy-start-replay',
-  }
-  const started = await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    body: JSON.stringify(command),
-  }).then((response) => response.json())
-  service.database.prepare('DELETE FROM run_start_receipts').run()
-  service.database
-    .prepare('INSERT INTO receipts VALUES (?,?)')
-    .run(command.idempotencyKey, JSON.stringify(started))
-  const replay = await fetch(`${base}/api/plan/commands`, {
-    method: 'POST',
-    body: JSON.stringify({ intent: { ...command, _tag: 'StartAcceptedRun' } }),
-  })
-  assert.equal(replay.status, 200)
-  assert.equal(
-    Schema.decodeUnknownSync(PlanCommandResponse)(await replay.json())._tag,
-    'Accepted',
-  )
-  const mismatched = JSON.parse(JSON.stringify(started))
-  mismatched.snapshot.identity.personId = 'other-owner'
-  service.database.prepare('DELETE FROM receipts').run()
-  service.database
-    .prepare('INSERT INTO receipts VALUES (?,?)')
-    .run('legacy-start-mismatch', JSON.stringify(mismatched))
-  const conflict = await fetch(`${base}/api/plan/commands`, {
-    method: 'POST',
-    body: JSON.stringify({
-      intent: {
-        ...command,
-        _tag: 'StartAcceptedRun',
-        idempotencyKey: 'legacy-start-mismatch',
-      },
-    }),
-  })
-  assert.equal(conflict.status, 409)
-  const rejected = Schema.decodeUnknownSync(PlanCommandResponse)(
-    await conflict.json(),
-  )
-  assert.equal(rejected._tag, 'Rejected')
-  if (rejected._tag === 'Rejected' && rejected.failure._tag === 'Rejected')
-    assert.equal(rejected.failure.reason, 'IdempotencyConflict')
-})
-
-test('legacy generic start replay survives later control and plan changes', async (t) => {
-  const service = createFixtureService()
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
-  if (initial.plan === undefined) throw new Error('Fixture Plan is unavailable')
-  const command = {
-    _tag: 'StartRunFromPlan',
-    planId: initial.plan.planId,
-    expectedPlanRevision: initial.plan.revision,
-    expectedLeaseRevision: initial.control.revision,
-    idempotencyKey: 'legacy-start-delayed-replay',
-  }
-  const started = await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    body: JSON.stringify(command),
-  }).then((response) => response.json())
-  service.database.prepare('DELETE FROM run_start_receipts').run()
-  service.database
-    .prepare('INSERT INTO receipts VALUES (?,?)')
-    .run(command.idempotencyKey, JSON.stringify(started))
-  service.database
-    .prepare('UPDATE state SET value=? WHERE key=?')
-    .run('4', 'planRevision')
-  service.database
-    .prepare('UPDATE state SET value=? WHERE key=?')
-    .run('2', 'leaseRevision')
-  service.database
-    .prepare('UPDATE state SET value=? WHERE key=?')
-    .run(JSON.stringify('another-desktop'), 'leaseHolder')
-  const replay = await fetch(`${base}/api/plan/commands`, {
-    method: 'POST',
-    body: JSON.stringify({ intent: { ...command, _tag: 'StartAcceptedRun' } }),
-  })
-  assert.equal(replay.status, 200)
-  assert.equal(
-    Schema.decodeUnknownSync(PlanCommandResponse)(await replay.json())._tag,
-    'Accepted',
-  )
-})
-
 test('later drafts retain the latest accepted definition summary without making it current', async (t) => {
   const service = createFixtureService()
   const listener = await service.listen()
@@ -463,249 +983,6 @@ test('later drafts retain the latest accepted definition summary without making 
     _tag: 'Ineligible',
     reason: 'acceptedDefinitionRequired',
   })
-})
-
-test('a current controller can apply another owner’s exact preview', async (t) => {
-  const admission = (request?: Pick<IncomingMessage, 'headers'>) =>
-    request?.headers.authorization === 'Bearer owner'
-      ? {
-          personId: 'owner',
-          clientId: 'owner-desktop',
-          role: 'owner' as const,
-          capability: 'controlCapable' as const,
-        }
-      : request?.headers.authorization === 'Bearer controller'
-        ? {
-            personId: 'controller',
-            clientId: 'controller-desktop',
-            role: 'owner' as const,
-            capability: 'controlCapable' as const,
-          }
-        : request?.headers.authorization === 'Bearer viewer'
-          ? {
-              personId: 'viewer',
-              clientId: 'viewer-desktop',
-              role: 'viewer' as const,
-              capability: 'readOnly' as const,
-            }
-          : request?.headers.authorization === 'Bearer phone'
-            ? {
-                personId: 'phone-owner',
-                clientId: 'phone-owner',
-                role: 'owner' as const,
-                capability: 'readOnly' as const,
-              }
-            : undefined
-  const service = createFixtureService(':memory:', admission)
-  service.database
-    .prepare('UPDATE state SET value=? WHERE key=?')
-    .run(JSON.stringify('owner-desktop'), 'leaseHolder')
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  const owner = { authorization: 'Bearer owner' }
-  const controller = { authorization: 'Bearer controller' }
-  const viewer = { authorization: 'Bearer viewer' }
-  const phone = { authorization: 'Bearer phone' }
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  const initial = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: owner,
-  })
-  if (initial.plan === undefined) throw new Error('Fixture Plan is unavailable')
-  const draft = await fetch(`${base}/api/commands/save-plan-draft`, {
-    method: 'POST',
-    headers: { ...owner, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      planId: initial.plan.planId,
-      expectedPlanRevision: initial.plan.revision,
-      idempotencyKey: 'two-person-draft',
-      sequences: initial.plan.sequences.map(({ viability, ...sequence }) => ({
-        ...sequence,
-        capture: `${sequence.capture} · revised`,
-      })),
-    }),
-  }).then((response) => response.json())
-  await fetch(`${base}/api/commands/accept-run-definition`, {
-    method: 'POST',
-    headers: { ...owner, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      _tag: 'AcceptRunDefinition',
-      planId: draft.plan.planId,
-      expectedPlanRevision: draft.plan.revision,
-      expectedLeaseRevision: draft.snapshot.control.revision,
-      idempotencyKey: 'two-person-definition',
-    }),
-  })
-  await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    headers: { ...owner, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      _tag: 'StartRunFromPlan',
-      planId: draft.plan.planId,
-      expectedPlanRevision: draft.plan.revision,
-      expectedLeaseRevision: draft.snapshot.control.revision,
-      idempotencyKey: 'two-person-start',
-    }),
-  })
-  const active = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: owner,
-  })
-  if (active.activeRun._tag !== 'Active')
-    throw new Error('Expected a fake active run')
-  const viewerSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: viewer,
-  })
-  const phoneSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: phone,
-  })
-  assert.deepEqual(viewerSnapshot.plan?.actions?.previewRunMutation, {
-    _tag: 'Ineligible',
-    reason: 'ownerRequired',
-  })
-  assert.deepEqual(phoneSnapshot.plan?.actions?.previewRunMutation, {
-    _tag: 'Ineligible',
-    reason: 'readOnlyClient',
-  })
-  const preview = await fetch(`${base}/api/commands/preview-run-mutation`, {
-    method: 'POST',
-    headers: { ...owner, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      _tag: 'PreviewRunMutation',
-      mutation: 'shortenSecond',
-      expectedLeaseRevision: active.control.revision,
-      expectedRunRevision: active.activeRun.run.revision,
-      idempotencyKey: 'two-person-preview',
-    }),
-  }).then((response) => response.json())
-  service.database
-    .prepare('UPDATE state SET value=? WHERE key=?')
-    .run('2', 'leaseRevision')
-  service.database
-    .prepare('UPDATE state SET value=? WHERE key=?')
-    .run(JSON.stringify('controller-desktop'), 'leaseHolder')
-  const controllerSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: controller,
-  })
-  assert.equal(
-    controllerSnapshot.plan?.runMutationPreview?.previewId,
-    preview.preview.previewId,
-  )
-  assert.equal(
-    controllerSnapshot.plan?.runMutationPreview?.approvalToken,
-    undefined,
-  )
-  assert.deepEqual(controllerSnapshot.plan?.actions?.applyRunMutation, {
-    _tag: 'Eligible',
-  })
-  const ownerSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: owner,
-  })
-  assert.equal(
-    ownerSnapshot.plan?.runMutationPreview?.previewId,
-    preview.preview.previewId,
-  )
-  assert.equal(ownerSnapshot.plan?.runMutationPreview?.approvalToken, undefined)
-  assert.deepEqual(ownerSnapshot.plan?.actions?.applyRunMutation, {
-    _tag: 'Ineligible',
-    reason: 'controlRequired',
-  })
-  const viewerPreview = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: viewer,
-  })
-  const phonePreview = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: phone,
-  })
-  assert.equal(viewerPreview.plan?.runMutationPreview, undefined)
-  assert.equal(phonePreview.plan?.runMutationPreview, undefined)
-  service.database
-    .prepare('UPDATE run_mutation_previews SET expires_at=? WHERE preview_id=?')
-    .run('2000-01-01T00:00:00.000Z', preview.preview.previewId)
-  const expired = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: controller,
-  })
-  assert.equal(expired.plan?.runMutationPreview, undefined)
-  assert.deepEqual(expired.plan?.actions?.applyRunMutation, {
-    _tag: 'Ineligible',
-    reason: 'previewRequired',
-  })
-  const currentPreview = await fetch(
-    `${base}/api/commands/preview-run-mutation`,
-    {
-      method: 'POST',
-      headers: { ...owner, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        _tag: 'PreviewRunMutation',
-        mutation: 'shortenSecond',
-        expectedLeaseRevision: expired.control.revision,
-        expectedRunRevision: active.activeRun.run.revision,
-        idempotencyKey: 'two-person-current-preview',
-      }),
-    },
-  ).then((response) => response.json())
-  const current = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: controller,
-  })
-  assert.equal(
-    current.plan?.runMutationPreview?.previewId,
-    currentPreview.preview.previewId,
-  )
-  const applied = await fetch(`${base}/api/commands/apply-run-mutation`, {
-    method: 'POST',
-    headers: { ...controller, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      _tag: 'ApplyRunMutation',
-      previewId: currentPreview.preview.previewId,
-      expectedLeaseRevision: current.control.revision,
-      expectedRunRevision: active.activeRun.run.revision,
-      idempotencyKey: 'two-person-apply',
-    }),
-  })
-  assert.equal(applied.status, 202)
-  const appliedSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: controller,
-  })
-  assert.equal(appliedSnapshot.plan?.runMutationPreview, undefined)
-  if (appliedSnapshot.activeRun._tag !== 'Active')
-    throw new Error('Expected the fake run after applying the notice preview')
-  const disruptive = await fetch(`${base}/api/commands/preview-run-mutation`, {
-    method: 'POST',
-    headers: { ...owner, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      _tag: 'PreviewRunMutation',
-      mutation: 'discardCurrent',
-      expectedLeaseRevision: appliedSnapshot.control.revision,
-      expectedRunRevision: appliedSnapshot.activeRun.run.revision,
-      idempotencyKey: 'two-person-disruptive-preview',
-    }),
-  }).then((response) => response.json())
-  assert.equal(disruptive.approvalToken, undefined)
-  const disruptiveSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: controller,
-  })
-  const disruptivePreview = disruptiveSnapshot.plan?.runMutationPreview
-  assert.equal(disruptivePreview?.previewId, disruptive.preview.previewId)
-  assert.equal(disruptivePreview?.approvalRequired, true)
-  assert.notEqual(disruptivePreview?.approvalToken, undefined)
-  if (disruptivePreview?.approvalToken === undefined)
-    throw new Error('Expected the current controller approval token')
-  const approved = await fetch(
-    `${base}/api/commands/approve-disruptive-run-mutation`,
-    {
-      method: 'POST',
-      headers: { ...controller, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        _tag: 'ApproveDisruptiveRunMutation',
-        previewId: disruptivePreview.previewId,
-        approvalToken: disruptivePreview.approvalToken,
-        expectedLeaseRevision: disruptiveSnapshot.control.revision,
-        expectedRunRevision: appliedSnapshot.activeRun.run.revision,
-        idempotencyKey: 'two-person-disruptive-approval',
-      }),
-    },
-  )
-  assert.equal(approved.status, 202)
 })
 
 test('malformed persisted Plan execution data returns a bounded unavailable response', async (t) => {
@@ -751,7 +1028,6 @@ const EventRow = Schema.Struct({ checksum: Schema.String })
 const StatusRow = Schema.Struct({ state: Schema.String })
 const ProjectionRow = Schema.Struct({ value: Schema.String })
 const MigrationRow = Schema.Struct({ version: Schema.Int })
-const EventTypeRow = Schema.Struct({ type: Schema.String })
 const RunDefinitionEvidenceRow = Schema.Struct({ definition: Schema.String })
 const AssetAvailabilityRow = Schema.Struct({ availability: Schema.String })
 const AssetDetailRow = Schema.Struct({ detail: Schema.String })
@@ -794,10 +1070,6 @@ const DispatchedOutboxRow = Schema.Struct({
   ack_at: Schema.NullOr(Schema.String),
   attempts: Schema.Int,
 })
-const RunDefinitionRow = Schema.Struct({
-  source_plan_revision: Schema.Int,
-  definition: Schema.String,
-})
 
 function databaseRow<Row>(
   schema: Schema.Schema<Row> & Schema.ConstraintDecoder<unknown>,
@@ -834,8 +1106,8 @@ test('focused executable configurations decode defaults and conditional branches
   }
   const development = await read(originServerConfig, {})
   assert.deepEqual(development.runtime, {
-    databasePath: './.astro-local-web/state.sqlite',
-    release: 'local-web-fixture',
+    databasePath: './.astro-server/state.sqlite',
+    release: 'server',
     port: 0,
     host: '127.0.0.1',
     webDistPath: '../web/dist',
@@ -850,17 +1122,73 @@ test('focused executable configurations decode defaults and conditional branches
     'plan-draft',
   )
   assert.equal(
+    (await read(originServerConfig, { ASTRO_SERVER_FIXTURE: 'plan-draft' }))
+      .fixture,
+    'plan-draft',
+  )
+  const legacyOrigin = await read(originServerConfig, {
+    ASTRO_LOCAL_WEB_BIND: '127.0.0.1',
+    ASTRO_LOCAL_WEB_CLIENT: 'phone',
+    ASTRO_LOCAL_WEB_DB: '/legacy.sqlite',
+    ASTRO_LOCAL_WEB_FIXTURE: 'plan-draft',
+    ASTRO_LOCAL_WEB_PORT: '4711',
+  })
+  assert.deepEqual(legacyOrigin.runtime, {
+    databasePath: '/legacy.sqlite',
+    release: 'server',
+    port: 4711,
+    host: '127.0.0.1',
+    webDistPath: '../web/dist',
+  })
+  assert.equal(legacyOrigin.admission.mode, 'development')
+  if (legacyOrigin.admission.mode === 'development')
+    assert.equal(legacyOrigin.admission.client, 'phone')
+  assert.equal(legacyOrigin.fixture, 'plan-draft')
+  const canonicalOrigin = await read(originServerConfig, {
+    ASTRO_LOCAL_WEB_BIND: '0.0.0.0',
+    ASTRO_LOCAL_WEB_CLIENT: 'phone',
+    ASTRO_LOCAL_WEB_DB: '/legacy.sqlite',
+    ASTRO_LOCAL_WEB_FIXTURE: 'plan-draft',
+    ASTRO_LOCAL_WEB_PORT: '4711',
+    ASTRO_SERVER_BIND: '127.0.0.1',
+    ASTRO_SERVER_CLIENT: 'owner',
+    ASTRO_SERVER_DB: '/canonical.sqlite',
+    ASTRO_SERVER_FIXTURE: 'm27',
+    ASTRO_SERVER_PORT: '4722',
+  })
+  assert.equal(canonicalOrigin.runtime.host, '127.0.0.1')
+  assert.equal(canonicalOrigin.runtime.databasePath, '/canonical.sqlite')
+  assert.equal(canonicalOrigin.runtime.port, 4722)
+  assert.equal(canonicalOrigin.admission.mode, 'development')
+  if (canonicalOrigin.admission.mode === 'development')
+    assert.equal(canonicalOrigin.admission.client, 'owner')
+  assert.equal(canonicalOrigin.fixture, 'm27')
+  assert.equal(
     (
       await read(originServerConfig, {
-        ASTRO_LOCAL_WEB_FIXTURE: 'library-published',
+        ASTRO_ADMISSION_MODE: 'production',
+        ASTRO_LOCAL_WEB_BIND: '0.0.0.0',
+        CF_ACCESS_ISSUER: 'https://access.example',
+        CF_ACCESS_AUDIENCE: 'audience',
+        CF_ACCESS_JWKS_URL: 'https://access.example/certs',
+        ASTRO_MEMBERSHIP_BOOTSTRAP_PATH: '/run/config/members.json',
+        ASTRO_CLIENT_CONTEXT: 'desktop',
+      })
+    ).runtime.host,
+    '0.0.0.0',
+  )
+  assert.equal(
+    (
+      await read(originServerConfig, {
+        ASTRO_SERVER_FIXTURE: 'library-published',
       })
     ).fixture,
     'library-published',
   )
   const production = await read(originServerConfig, {
     ASTRO_ADMISSION_MODE: 'production',
-    ASTRO_LOCAL_WEB_BIND: '0.0.0.0',
-    ASTRO_LOCAL_WEB_DB: '/var/lib/astro-console/state.sqlite',
+    ASTRO_SERVER_BIND: '0.0.0.0',
+    ASTRO_SERVER_DB: '/var/lib/astro-console/state.sqlite',
     CF_ACCESS_ISSUER: 'https://access.example',
     CF_ACCESS_AUDIENCE: 'audience',
     CF_ACCESS_JWKS_URL: 'https://access.example/certs',
@@ -884,13 +1212,13 @@ test('focused executable configurations decode defaults and conditional branches
   )
   assert.deepEqual(
     await read(rigWorkerEnvironmentConfig, {
-      ASTRO_LOCAL_WEB_DB: '/state.sqlite',
+      ASTRO_SERVER_DB: '/state.sqlite',
     }),
     { mode: 'disabled', databasePath: '/state.sqlite' },
   )
   assert.deepEqual(
     await read(rigWorkerEnvironmentConfig, {
-      ASTRO_LOCAL_WEB_DB: '/state.sqlite',
+      ASTRO_SERVER_DB: '/state.sqlite',
       ASTRO_RIG_WORKER_MODE: 'seestar',
       ASTRO_SEESTAR_HOST: '192.168.4.63',
       ASTRO_SEESTAR_PEM_PATH: '/run/secrets/seestar.pem',
@@ -908,7 +1236,7 @@ test('focused executable configurations decode defaults and conditional branches
     (
       await read(processorEnvironmentConfig, {
         ASTRO_PROCESSOR_MODE: 'manifest',
-        ASTRO_LOCAL_WEB_DB: '/var/lib/astro-console/state.sqlite',
+        ASTRO_SERVER_DB: '/var/lib/astro-console/state.sqlite',
         ASTRO_PROCESSOR_SOURCES_ROOT: '/var/lib/astro-console/sources',
         ASTRO_PROCESSOR_ORIGINALS_ROOT: '/var/lib/astro-console/originals',
         ASTRO_PROCESSOR_OUTPUTS_ROOT: '/var/lib/astro-console/outputs',
@@ -955,30 +1283,28 @@ test('focused executable configurations decode defaults and conditional branches
       await read(publisherEnvironmentConfig, {
         ...r2,
         R2_CREDENTIALS_PATH: '/run/secrets/r2-write',
-        ASTRO_LOCAL_WEB_DB: '/var/lib/astro-console/state.sqlite',
+        ASTRO_SERVER_DB: '/var/lib/astro-console/state.sqlite',
         ASTRO_PUBLISHER_OUTPUTS_ROOT: '/var/lib/astro-console/outputs',
       })
     ).bucket,
     r2.R2_BUCKET,
   )
-  await assert.rejects(
-    read(originServerConfig, { ASTRO_LOCAL_WEB_PORT: 'wrong' }),
-  )
+  await assert.rejects(read(originServerConfig, { ASTRO_SERVER_PORT: 'wrong' }))
   await assert.rejects(
     read(originServerConfig, {
       ASTRO_ADMISSION_MODE: 'development',
-      ASTRO_LOCAL_WEB_BIND: '0.0.0.0',
+      ASTRO_SERVER_BIND: '0.0.0.0',
     }),
   )
   await assert.rejects(
     read(rigWorkerEnvironmentConfig, {
-      ASTRO_LOCAL_WEB_DB: '/state.sqlite',
+      ASTRO_SERVER_DB: '/state.sqlite',
       ASTRO_RIG_WORKER_MODE: 'wrong',
     }),
   )
   await assert.rejects(
     read(rigWorkerEnvironmentConfig, {
-      ASTRO_LOCAL_WEB_DB: '/state.sqlite',
+      ASTRO_SERVER_DB: '/state.sqlite',
       ASTRO_RIG_WORKER_MODE: 'seestar',
     }),
   )
@@ -996,7 +1322,7 @@ test('focused executable configurations decode defaults and conditional branches
   await assert.rejects(
     read(originServerConfig, {
       ASTRO_ADMISSION_MODE: 'production',
-      ASTRO_LOCAL_WEB_FIXTURE: 'plan-draft',
+      ASTRO_SERVER_FIXTURE: 'plan-draft',
       CF_ACCESS_ISSUER: 'https://access.example',
       CF_ACCESS_AUDIENCE: 'audience',
       CF_ACCESS_JWKS_URL: 'https://access.example/certs',
@@ -1014,7 +1340,7 @@ test('focused executable configurations decode defaults and conditional branches
     read(publisherEnvironmentConfig, {
       ...r2,
       R2_CREDENTIALS_PATH: '/tmp/r2',
-      ASTRO_LOCAL_WEB_DB: '/var/lib/astro-console/state.sqlite',
+      ASTRO_SERVER_DB: '/var/lib/astro-console/state.sqlite',
       ASTRO_PUBLISHER_OUTPUTS_ROOT: '/var/lib/astro-console/outputs',
     }),
   )
@@ -1047,40 +1373,6 @@ test('focused executable configurations decode defaults and conditional branches
     }),
   )
 })
-
-function assertNoM27Fixture(database: DatabaseSync) {
-  assert.equal(
-    databaseRow(
-      CountRow,
-      database
-        .prepare("SELECT count(*) AS count FROM state WHERE value LIKE '%m27%'")
-        .get(),
-    ).count,
-    0,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      database
-        .prepare(
-          "SELECT count(*) AS count FROM library_assets WHERE asset_id LIKE '%m27%'",
-        )
-        .get(),
-    ).count,
-    0,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      database
-        .prepare(
-          "SELECT count(*) AS count FROM workspace_projections WHERE value LIKE '%m27%'",
-        )
-        .get(),
-    ).count,
-    0,
-  )
-}
 
 function publisherFixture(idempotencyKey: string) {
   const root = mkdtempSync(join(tmpdir(), 'astro-publisher-'))
@@ -2421,62 +2713,6 @@ test('publisher worker preserves a publication persistence failure and recovers 
   service.close()
 })
 
-test('SQLite acceptance atomically persists fixture run, event, and receipt without hardware work', async (t) => {
-  const service = createFixtureService(
-    join(mkdtempSync(join(tmpdir(), 'astro-local-')), 'state.sqlite'),
-  )
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
-  const command = {
-    _tag: 'StartRunFromPlan',
-    planId: 'plan-m27',
-    expectedPlanRevision: 3,
-    expectedLeaseRevision: snapshot.control.revision,
-    idempotencyKey: 'm27-accept-1',
-  }
-  const accepted = await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    body: JSON.stringify(command),
-  })
-  assert.equal(accepted.status, 202)
-  assert.equal((await accepted.json()).outcome, 'accepted')
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM events').get(),
-    ).count,
-    1,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare('SELECT count(*) AS count FROM run_start_receipts')
-        .get(),
-    ).count,
-    1,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
-    ).count,
-    0,
-  )
-  const replay = await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    body: JSON.stringify(command),
-  })
-  assert.equal(replay.status, 200)
-  await listener.close()
-  service.close()
-})
-
 test('numbered SQLite migrations upgrade a legacy database and reject a newer schema', () => {
   const databasePath = join(
     mkdtempSync(join(tmpdir(), 'astro-migrations-')),
@@ -2495,7 +2731,7 @@ test('numbered SQLite migrations upgrade a legacy database and reject a newer sc
         .prepare('SELECT max(version) AS version FROM schema_migrations')
         .get(),
     ).version,
-    21,
+    23,
   )
   assert.equal(
     databaseRow(
@@ -2530,7 +2766,7 @@ test('numbered SQLite migrations upgrade a legacy database and reject a newer sc
         .prepare('SELECT max(version) AS version FROM schema_migrations')
         .get(),
     ).version,
-    21,
+    23,
   )
   assert.equal(
     databaseRow(
@@ -2653,7 +2889,7 @@ test('numbered SQLite migrations upgrade a legacy database and reject a newer sc
         .prepare('SELECT max(version) AS version FROM schema_migrations')
         .get(),
     ).version,
-    21,
+    23,
   )
   repaired.close()
   const newer = new DatabaseSync(databasePath)
@@ -2672,7 +2908,7 @@ test('origin admission factory consumes decoded configuration', async (t) => {
     originServerConfig.pipe(
       Effect.provide(
         ConfigProvider.layer(
-          ConfigProvider.fromUnknown({ ASTRO_LOCAL_WEB_CLIENT: 'phone' }),
+          ConfigProvider.fromUnknown({ ASTRO_SERVER_CLIENT: 'phone' }),
         ),
       ),
     ),
@@ -2712,94 +2948,6 @@ test('disabled rig worker exits without creating or mutating its database', asyn
     health: { mode: 'disabled', status: 'disabled', databasePath },
   })
   assert.equal(existsSync(databasePath), false)
-})
-
-test('non-fixture origin, workers, and service databases migrate without M27 Plan, Library, or Process seeds', async (t) => {
-  const root = mkdtempSync(join(tmpdir(), 'astro-no-fixture-'))
-  const allowedRoot = `${root}/`
-  const origin = createLocalWebService(join(root, 'origin.sqlite'))
-  assertNoM27Fixture(origin.database)
-  const listener = await origin.listen()
-  t.after(async () => {
-    await listener.close()
-    origin.close()
-  })
-  const base = `http://127.0.0.1:${listener.port}`
-  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
-  const ready = await fetch(`${base}/api/health/ready`).then((response) =>
-    response.json(),
-  )
-  assert.equal(snapshot.activeRun._tag, 'None')
-  assert.equal(ready.status, 'unavailable')
-  const start = await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'StartRunFromPlan',
-      planId: 'uninitialized',
-      expectedPlanRevision: 0,
-      expectedLeaseRevision: 0,
-      idempotencyKey: 'uninitialized-start',
-    }),
-  })
-  assert.equal(start.status, 409)
-  assert.equal((await start.json()).reason, 'PlanUnavailable')
-  assert.equal(
-    databaseRow(
-      CountRow,
-      origin.database.prepare('SELECT count(*) AS count FROM events').get(),
-    ).count,
-    0,
-  )
-  assert.equal((await fetch(`${base}/api/snapshot`)).status, 200)
-  const publisher = openPublisherDatabase(
-    join(root, 'publisher.sqlite'),
-    allowedRoot,
-  )
-  assertNoM27Fixture(publisher)
-  publisher.close()
-  const processor = openProcessorDatabase(
-    join(root, 'processor.sqlite'),
-    allowedRoot,
-  )
-  assertNoM27Fixture(processor)
-  processor.close()
-
-  const workerPath = join(root, 'worker.sqlite')
-  const worker = createRigWorkerService(
-    {
-      mode: 'seestar',
-      databasePath: workerPath,
-      rigId: 'seestar-s30',
-      host: '192.168.4.63',
-      pemPath: '/run/secrets/seestar.pem',
-    },
-    undefined,
-  )
-  worker.close()
-  const workerDatabase = openMigrationDatabase(workerPath, allowedRoot)
-  assertNoM27Fixture(workerDatabase)
-  workerDatabase.close()
-
-  const solarPath = join(root, 'solar.sqlite')
-  const solar = createLocalWebService(solarPath)
-  solar.database
-    .prepare('INSERT INTO memberships VALUES (?,?,?)')
-    .run('solar-owner', 'owner', 'owner')
-  assertNoM27Fixture(solar.database)
-  solar.close()
-  const solarResult = runSolarTestIntent({
-    databasePath: solarPath,
-    subject: 'solar-owner',
-    command: {
-      action: 'submit',
-      name: 'Solar fixture boundary',
-      idempotencyKey: 'solar-no-fixture',
-    },
-  })
-  assert.equal(solarResult.outcome, 'accepted')
-  const solarDatabase = openMigrationDatabase(solarPath, allowedRoot)
-  assertNoM27Fixture(solarDatabase)
-  solarDatabase.close()
 })
 
 test('owner-only Solar test intent persists separate pending work and Stack-evidence boundary', () => {
@@ -3116,8 +3264,8 @@ test('operational endpoints expose bounded admitted health without internal deta
   const operations = await fetch(`${base}/api/health/operations`).then(
     (response) => response.json(),
   )
-  assert.equal(operations.release, 'local-web-fixture')
-  assert.equal(operations.schemaVersion, 21)
+  assert.equal(operations.release, 'server')
+  assert.equal(operations.schemaVersion, 23)
   assert.equal(operations.sqlite.journalMode, 'wal')
   assert.equal(operations.disk, 'unknown')
   assert.equal(operations.rig, 'unknown')
@@ -3143,180 +3291,6 @@ test('operational endpoints expose bounded admitted health without internal deta
   )
   await deniedListener.close()
   denied.close()
-})
-
-test('request-context admission rejects before snapshot, stream, query, or mutation routing', async (t) => {
-  const service = createFixtureService(':memory:', (request) =>
-    request?.headers.authorization === 'Bearer verified-owner'
-      ? {
-          personId: 'owner-chicks',
-          clientId: 'desktop-owner',
-          capability: 'controlCapable',
-          role: 'owner',
-        }
-      : undefined,
-  )
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  for (const path of ['/api/events', '/api/library'])
-    assert.equal((await fetch(`${base}${path}`)).status, 401)
-  const snapshotFailure = Schema.decodeUnknownSync(
-    BootstrapHttpFailureEnvelope,
-  )(await fetch(`${base}/api/snapshot`).then((response) => response.json()))
-  assert.equal(snapshotFailure.failure._tag, 'AuthenticationFailure')
-  assert.equal(
-    (
-      await fetch(`${base}/api/commands/start-run`, {
-        method: 'POST',
-        body: JSON.stringify({
-          personId: 'owner-chicks',
-          capability: 'controlCapable',
-        }),
-      })
-    ).status,
-    401,
-  )
-  const commandFailure = Schema.decodeUnknownSync(CommandHttpFailureEnvelope)(
-    await fetch(`${base}/api/commands/control`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    }).then((response) => response.json()),
-  )
-  assert.equal(commandFailure.failure._tag, 'AuthenticationFailure')
-  const admitted = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: {
-      authorization: 'Bearer verified-owner',
-      'x-client-capability': 'readOnly',
-    },
-  })
-  assert.equal(admitted.membership.capability, 'controlCapable')
-})
-
-test('verified Access assertions map durable memberships without trusting request authority', async (t) => {
-  const databasePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-access-')),
-    'state.sqlite',
-  )
-  const seeded = createFixtureService(databasePath)
-  seeded.database
-    .prepare('INSERT INTO memberships VALUES (?,?,?)')
-    .run('access-owner', 'owner-chicks', 'owner')
-  seeded.database
-    .prepare('INSERT INTO memberships VALUES (?,?,?)')
-    .run('access-viewer', 'maya', 'viewer')
-  seeded.close()
-  const keys = generateKeyPairSync('rsa', { modulusLength: 2048 })
-  const issuer = 'https://chicks.cloudflareaccess.com'
-  const audience = 'access-audience'
-  const claim = (subject: string, overrides: Record<string, unknown> = {}) => {
-    const header = Buffer.from(
-      JSON.stringify({ alg: 'RS256', kid: 'fixture-key', typ: 'JWT' }),
-    ).toString('base64url')
-    const email =
-      subject === 'access-owner'
-        ? 'owner@example.com'
-        : subject === 'access-viewer'
-          ? 'viewer@example.com'
-          : 'unknown@example.com'
-    const payload = Buffer.from(
-      JSON.stringify({
-        sub: subject,
-        email,
-        iss: issuer,
-        aud: audience,
-        exp: Math.floor(Date.now() / 1_000) + 60,
-        ...overrides,
-      }),
-    ).toString('base64url')
-    return `${header}.${payload}.${sign('RSA-SHA256', Buffer.from(`${header}.${payload}`), keys.privateKey).toString('base64url')}`
-  }
-  const keyResolver = createJwksKeyResolver({
-    url: 'https://chicks.cloudflareaccess.com/cdn-cgi/access/certs',
-    fetcher: async () => ({
-      ok: true,
-      status: 200,
-      text: async () =>
-        JSON.stringify({
-          keys: [
-            {
-              ...keys.publicKey.export({ format: 'jwk' }),
-              kid: 'fixture-key',
-              use: 'sig',
-            },
-          ],
-        }),
-    }),
-  })
-  const admission = createProductionAccessAdmission({
-    issuer,
-    audience,
-    keyResolver,
-    databasePath,
-    clientContext: 'desktop',
-    bootstrap: [
-      { email: 'owner@example.com', personId: 'owner-chicks', role: 'owner' },
-      { email: 'viewer@example.com', personId: 'maya', role: 'viewer' },
-    ],
-  })
-  const service = createFixtureService(databasePath, admission)
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  const authorized = (token: string) => ({
-    'cf-access-jwt-assertion': token,
-    'x-client-capability': 'controlCapable',
-  })
-  const owner = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: authorized(claim('access-owner')),
-  })
-  assert.equal(owner.membership.personId, 'owner-chicks')
-  assert.equal(owner.membership.capability, 'controlCapable')
-  const viewer = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: authorized(claim('access-viewer')),
-  })
-  assert.equal(viewer.membership.capability, 'readOnly')
-  assert.equal(
-    (
-      await fetch(`${base}/api/commands/start-run`, {
-        method: 'POST',
-        headers: authorized(claim('access-viewer')),
-        body: JSON.stringify({
-          _tag: 'StartRunFromPlan',
-          planId: 'plan-m27',
-          expectedPlanRevision: 3,
-          expectedLeaseRevision: 1,
-          idempotencyKey: 'viewer-start',
-        }),
-      })
-    ).status,
-    403,
-  )
-  assert.equal(
-    (
-      await fetch(`${base}/api/snapshot`, {
-        headers: authorized(claim('unknown-subject')),
-      })
-    ).status,
-    401,
-  )
-  for (const token of [
-    claim('access-owner', { exp: Math.floor(Date.now() / 1_000) - 1 }),
-    claim('access-owner', { iss: 'https://forged.example' }),
-    claim('access-owner', { aud: 'wrong-audience' }),
-    `${claim('access-owner')}.forged`,
-  ])
-    assert.equal(
-      (await fetch(`${base}/api/snapshot`, { headers: authorized(token) }))
-        .status,
-      401,
-    )
 })
 
 test('production admission rechecks normalized bootstrap policy and revokes removed viewer subjects', async () => {
@@ -3476,158 +3450,6 @@ test('production admission reloads a removed membership bootstrap file before th
   unlinkSync(bootstrapPath)
   now += 1_000
   assert.equal(await admission(request), undefined)
-})
-
-test('a configured non-fixture owner has role-based operations and grant authority while viewers and phones remain read-only', async (t) => {
-  const databasePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-role-owner-')),
-    'state.sqlite',
-  )
-  const seeded = createFixtureService(databasePath)
-  seeded.close()
-  const keys = generateKeyPairSync('rsa', { modulusLength: 2048 })
-  const issuer = 'https://access.example'
-  const audience = 'role-audience'
-  const claim = (subject: string, email: string) => {
-    const header = Buffer.from(
-      JSON.stringify({ alg: 'RS256', kid: 'owner-key' }),
-    ).toString('base64url')
-    const payload = Buffer.from(
-      JSON.stringify({
-        sub: subject,
-        email,
-        iss: issuer,
-        aud: audience,
-        exp: Math.floor(Date.now() / 1_000) + 60,
-      }),
-    ).toString('base64url')
-    return `${header}.${payload}.${sign('RSA-SHA256', Buffer.from(`${header}.${payload}`), keys.privateKey).toString('base64url')}`
-  }
-  const keyResolver = createJwksKeyResolver({
-    url: 'https://access.example/certs',
-    fetcher: async () => ({
-      ok: true,
-      status: 200,
-      text: async () =>
-        JSON.stringify({
-          keys: [
-            {
-              ...keys.publicKey.export({ format: 'jwk' }),
-              kid: 'owner-key',
-              use: 'sig',
-            },
-          ],
-        }),
-    }),
-  })
-  const config = {
-    issuer,
-    audience,
-    keyResolver,
-    databasePath,
-    clientContext: 'desktop' as const,
-    bootstrap: [
-      {
-        email: 'owner@example.com',
-        personId: 'observatory-primary',
-        role: 'owner' as const,
-      },
-      {
-        email: 'viewer@example.com',
-        personId: 'guest-observer',
-        role: 'viewer' as const,
-      },
-    ],
-  }
-  const service = createFixtureService(
-    databasePath,
-    createProductionAccessAdmission(config),
-  )
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  const ownerHeaders = {
-    'cf-access-jwt-assertion': claim('owner-subject', 'owner@example.com'),
-  }
-  const viewerHeaders = {
-    'cf-access-jwt-assertion': claim('viewer-subject', 'viewer@example.com'),
-  }
-  const ownerSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: ownerHeaders,
-  })
-  assert.equal(ownerSnapshot.membership.personId, 'observatory-primary')
-  assert.equal(ownerSnapshot.membership.role, 'owner')
-  assert.equal(ownerSnapshot.membership.capability, 'controlCapable')
-  assert.equal(
-    (await fetch(`${base}/api/health/operations`, { headers: ownerHeaders }))
-      .status,
-    200,
-  )
-  assert.equal(
-    (await fetch(`${base}/api/health/operations`, { headers: viewerHeaders }))
-      .status,
-    403,
-  )
-  assert.equal(
-    (
-      await fetch(`${base}/api/commands/grant-control`, {
-        method: 'POST',
-        headers: viewerHeaders,
-        body: JSON.stringify({
-          expectedLeaseRevision: 1,
-          idempotencyKey: 'viewer-may-not-grant',
-        }),
-      })
-    ).status,
-    403,
-  )
-  assert.equal(
-    (
-      await fetch(`${base}/api/commands/request-control`, {
-        method: 'POST',
-        headers: ownerHeaders,
-        body: JSON.stringify({
-          expectedLeaseRevision: 1,
-          idempotencyKey: 'owner-request',
-        }),
-      })
-    ).status,
-    202,
-  )
-  assert.equal(
-    (
-      await fetch(`${base}/api/commands/grant-control`, {
-        method: 'POST',
-        headers: ownerHeaders,
-        body: JSON.stringify({
-          expectedLeaseRevision: 1,
-          idempotencyKey: 'owner-grant',
-        }),
-      })
-    ).status,
-    202,
-  )
-  const phoneAdmission = createProductionAccessAdmission({
-    ...config,
-    clientContext: 'phone',
-  })
-  const phoneIdentity = await phoneAdmission({
-    headers: {
-      'cf-access-jwt-assertion': claim(
-        'owner-phone-subject',
-        'owner@example.com',
-      ),
-    },
-  })
-  assert.deepEqual(phoneIdentity, {
-    personId: 'observatory-primary',
-    clientId: 'access:owner-phone-subject',
-    role: 'owner',
-    capability: 'readOnly',
-  })
 })
 
 test('production Access JWKS admission refreshes by kid, bounds cache use, and fails closed', async () => {
@@ -3993,306 +3815,6 @@ test('rig outbox dispatch leaves a claimed PublishAsset for its publisher', asyn
   )
   rig.close()
   service.close()
-})
-
-test('enabled worker without an adapter reports liveness without claiming fixture hardware work', async (t) => {
-  const databasePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-rig-unconfigured-')),
-    'state.sqlite',
-  )
-  const service = createFixtureService(databasePath)
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'StartRunFromPlan',
-      planId: 'plan-m27',
-      expectedPlanRevision: 3,
-      expectedLeaseRevision: 1,
-      idempotencyKey: 'rig-unconfigured-start',
-    }),
-  })
-  const config = {
-    mode: 'seestar' as const,
-    databasePath,
-    rigId: 'seestar-s30' as const,
-    host: '192.168.4.63',
-    pemPath: '/run/secrets/seestar.pem',
-  }
-  const worker = createRigWorkerService(config, undefined, {
-    now: () => new Date('2026-07-25T12:00:00.000Z'),
-  })
-  assert.equal(await worker.runOnce(), 'unavailable')
-  assert.deepEqual(worker.health(), {
-    mode: 'seestar',
-    status: 'alive',
-    adapter: 'unconfigured',
-    lastHeartbeat: '2026-07-25T12:00:00.000Z',
-  })
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare(
-          "SELECT count(*) AS count FROM outbox WHERE kind='StartM27Capture'",
-        )
-        .get(),
-    ).count,
-    0,
-  )
-  const operations = await fetch(`${base}/api/health/operations`).then(
-    (response) => response.json(),
-  )
-  assert.deepEqual(operations.worker, {
-    status: 'alive',
-    adapter: 'unconfigured',
-    lastHeartbeat: '2026-07-25T12:00:00.000Z',
-  })
-  assert.deepEqual(await worker.run({ maxPasses: 1 }), {
-    passes: 1,
-    health: {
-      mode: 'seestar',
-      status: 'stopped',
-      adapter: 'unconfigured',
-      lastHeartbeat: '2026-07-25T12:00:00.000Z',
-    },
-  })
-})
-
-test('current controller resumes only the paused revision and replays idempotently', async (t) => {
-  const service = createFixtureService()
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'StartRunFromPlan',
-      planId: 'plan-m27',
-      expectedPlanRevision: 3,
-      expectedLeaseRevision: 1,
-      idempotencyKey: 'resume-start',
-    }),
-  })
-  const paused = await fetch(`${base}/api/commands/pause-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'PauseRun',
-      expectedLeaseRevision: 1,
-      expectedRunRevision: 1,
-      idempotencyKey: 'resume-pause',
-    }),
-  }).then((response) => response.json())
-  assert.equal(paused.snapshot.run.phase, 'paused')
-  const command = {
-    _tag: 'ResumeRun',
-    expectedLeaseRevision: 1,
-    expectedRunRevision: 2,
-    idempotencyKey: 'resume-once',
-  }
-  const resumed = await fetch(`${base}/api/commands/resume-run`, {
-    method: 'POST',
-    body: JSON.stringify(command),
-  })
-  assert.equal(resumed.status, 202)
-  assert.equal((await resumed.json()).snapshot.run.phase, 'capture')
-  assert.equal(
-    (
-      await fetch(`${base}/api/commands/resume-run`, {
-        method: 'POST',
-        body: JSON.stringify(command),
-      })
-    ).status,
-    200,
-  )
-  assert.equal(
-    (
-      await fetch(`${base}/api/commands/resume-run`, {
-        method: 'POST',
-        body: JSON.stringify({
-          ...command,
-          expectedRunRevision: 2,
-          idempotencyKey: 'resume-stale',
-        }),
-      })
-    ).status,
-    409,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare(
-          "SELECT count(*) AS count FROM outbox WHERE kind IN ('StartM27Capture','StopStack','ResumeStack','StopRun')",
-        )
-        .get(),
-    ).count,
-    0,
-  )
-})
-
-test('resume preserves accepted fixture capture without hardware dispatch', async (t) => {
-  const service = createFixtureService()
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  const resume = async (key: string) => {
-    await fetch(`${base}/api/commands/start-run`, {
-      method: 'POST',
-      body: JSON.stringify({
-        _tag: 'StartRunFromPlan',
-        planId: 'plan-m27',
-        expectedPlanRevision: 3,
-        expectedLeaseRevision: 1,
-        idempotencyKey: `${key}-start`,
-      }),
-    })
-    await fetch(`${base}/api/commands/pause-run`, {
-      method: 'POST',
-      body: JSON.stringify({
-        _tag: 'PauseRun',
-        expectedLeaseRevision: 1,
-        expectedRunRevision: 1,
-        idempotencyKey: `${key}-pause`,
-      }),
-    })
-    return fetch(`${base}/api/commands/resume-run`, {
-      method: 'POST',
-      body: JSON.stringify({
-        _tag: 'ResumeRun',
-        expectedLeaseRevision: 1,
-        expectedRunRevision: 2,
-        idempotencyKey: `${key}-resume`,
-      }),
-    })
-  }
-  await resume('fixture-resume')
-  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
-  assert.equal(snapshot.activeRun._tag, 'Active')
-  if (snapshot.activeRun._tag === 'Active')
-    assert.equal(snapshot.activeRun.run.phase, 'capture')
-})
-
-test('a non-RunDefinition active run cannot use the bounded pause path', async (t) => {
-  const service = createFixtureService()
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  service.database.prepare("UPDATE state SET value=? WHERE key='run'").run(
-    JSON.stringify({
-      id: 'legacy-run',
-      revision: 4,
-      phase: 'capture',
-      target: 'Legacy capture',
-      progress: 50,
-    }),
-  )
-  const paused = await fetch(`${base}/api/commands/pause-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'PauseRun',
-      expectedLeaseRevision: 1,
-      expectedRunRevision: 4,
-      idempotencyKey: 'source-less-pause',
-    }),
-  })
-  assert.equal(paused.status, 409)
-  assert.equal((await paused.json()).reason, 'RunRevisionConflict')
-  const current = await bootstrapSnapshot(`${base}/api/snapshot`)
-  assert.equal(current.activeRun._tag, 'Active')
-  if (current.activeRun._tag === 'Active')
-    assert.equal(current.activeRun.run.phase, 'capture')
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare('SELECT count(*) AS count FROM run_intervention_receipts')
-        .get(),
-    ).count,
-    0,
-  )
-})
-
-test('current controller terminally stops an active fixture run without hardware dispatch', async (t) => {
-  const service = createFixtureService()
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'StartRunFromPlan',
-      planId: 'plan-m27',
-      expectedPlanRevision: 3,
-      expectedLeaseRevision: 1,
-      idempotencyKey: 'stop-start',
-    }),
-  })
-  const command = {
-    expectedLeaseRevision: 1,
-    expectedRunRevision: 1,
-    idempotencyKey: 'stop-once',
-  }
-  const stopped = await fetch(`${base}/api/commands/stop-run`, {
-    method: 'POST',
-    body: JSON.stringify(command),
-  })
-  assert.equal(stopped.status, 202)
-  assert.equal((await stopped.json()).eventType, 'RunStopped')
-  assert.equal(
-    (
-      await fetch(`${base}/api/commands/stop-run`, {
-        method: 'POST',
-        body: JSON.stringify(command),
-      })
-    ).status,
-    200,
-  )
-  assert.equal(
-    (
-      await fetch(`${base}/api/commands/stop-run`, {
-        method: 'POST',
-        body: JSON.stringify({
-          ...command,
-          idempotencyKey: 'stop-terminal',
-          expectedRunRevision: 2,
-        }),
-      })
-    ).status,
-    409,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare(
-          "SELECT count(*) AS count FROM outbox WHERE kind IN ('StartM27Capture','StopStack','ResumeStack','StopRun')",
-        )
-        .get(),
-    ).count,
-    0,
-  )
-  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
-  assert.equal(snapshot.activeRun._tag, 'Active')
-  if (snapshot.activeRun._tag === 'Active')
-    assert.equal(snapshot.activeRun.run.phase, 'stopped')
 })
 
 test('startup backfills shared-control state for a legacy local database without changing accepted work', async (t) => {
@@ -4724,114 +4246,6 @@ test('Library detail uses stable identities and snapshot delivery remains catalo
   service.close()
 })
 
-test('fixture run acceptance does not depend on unserviceable hardware outbox work', async (t) => {
-  const service = createFixtureService()
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  service.database.exec(
-    "CREATE TRIGGER reject_outbox BEFORE INSERT ON outbox BEGIN SELECT RAISE(ABORT, 'forced outbox failure'); END;",
-  )
-  const accepted = await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'StartRunFromPlan',
-      planId: 'plan-m27',
-      expectedPlanRevision: 3,
-      expectedLeaseRevision: 1,
-      idempotencyKey: 'fixture-run',
-    }),
-  })
-  assert.equal(accepted.status, 202)
-  const after = await bootstrapSnapshot(`${base}/api/snapshot`)
-  assert.equal(after.activeRun._tag, 'Active')
-  if (after.activeRun._tag === 'Active')
-    assert.equal(after.activeRun.run.phase, 'capture')
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM events').get(),
-    ).count,
-    1,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare('SELECT count(*) AS count FROM run_start_receipts')
-        .get(),
-    ).count,
-    1,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
-    ).count,
-    0,
-  )
-  await listener.close()
-  service.close()
-})
-
-test('HTTP boundary rejects stale and server-configured phone intents without state change', async (t) => {
-  const service = createFixtureService()
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  const stale = await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'StartRunFromPlan',
-      planId: 'plan-m27',
-      expectedPlanRevision: 0,
-      expectedLeaseRevision: 1,
-      idempotencyKey: 'stale',
-    }),
-  })
-  assert.equal(stale.status, 409)
-  const phoneService = createFixtureService(':memory:', () => ({
-    personId: 'owner-chicks',
-    clientId: 'phone-monitor',
-    capability: 'readOnly',
-  }))
-  const phoneListener = await phoneService.listen()
-  t.after(async () => {
-    await listener.close()
-    service.close()
-    await phoneListener.close()
-    phoneService.close()
-  })
-  const phone = await fetch(
-    `http://127.0.0.1:${phoneListener.port}/api/commands/start-run`,
-    {
-      method: 'POST',
-      headers: { 'x-client-capability': 'controlCapable' },
-      body: JSON.stringify({
-        _tag: 'StartRunFromPlan',
-        planId: 'plan-m27',
-        expectedPlanRevision: 3,
-        expectedLeaseRevision: 1,
-        idempotencyKey: 'phone',
-      }),
-    },
-  )
-  assert.equal(phone.status, 403)
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM events').get(),
-    ).count,
-    0,
-  )
-  await listener.close()
-  service.close()
-  await phoneListener.close()
-  phoneService.close()
-})
-
 test('authenticated workspace projections preserve future intent, bounded Library evidence, and a stable Process handoff', async (t) => {
   const databasePath = join(
     mkdtempSync(join(tmpdir(), 'astro-process-source-handoff-')),
@@ -4981,842 +4395,6 @@ test('authenticated workspace projections preserve future intent, bounded Librar
     503,
   )
   assert.equal((await fetch(`${base}/api/workspaces/process`)).status, 400)
-})
-
-test('SQLite-backed plan drafts persist deterministic verdicts, revision guards, idempotency, and SSE projection', async (t) => {
-  const databasePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-plan-draft-')),
-    'state.sqlite',
-  )
-  const service = createFixtureService(databasePath)
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  const stream = await fetch(`${base}/api/events`)
-  const reader = stream.body?.getReader()
-  await reader?.read()
-  const initial = await fetch(`${base}/api/workspaces/plan`).then((response) =>
-    response.json(),
-  )
-  const sequences = initial.sequences.map(
-    ({ viability, ...sequence }: { readonly viability: string }) => sequence,
-  )
-  const command = {
-    planId: initial.planId,
-    expectedPlanRevision: initial.revision,
-    idempotencyKey: 'plan-ready-001',
-    sequences: sequences.map(
-      (sequence: { readonly capture: string }, index: number) =>
-        index === 1
-          ? { ...sequence, capture: `${sequence.capture} · shortened` }
-          : sequence,
-    ),
-  }
-  const duplicate = await fetch(`${base}/api/commands/save-plan-draft`, {
-    method: 'POST',
-    body: JSON.stringify({
-      ...command,
-      idempotencyKey: 'plan-duplicate-001',
-      sequences: [sequences[0], sequences[0]],
-    }),
-  })
-  assert.equal(duplicate.status, 400)
-  const ready = await fetch(`${base}/api/commands/save-plan-draft`, {
-    method: 'POST',
-    body: JSON.stringify(command),
-  })
-  assert.equal(ready.status, 202)
-  assert.equal((await ready.json()).plan.readiness, 'ready')
-  const savedSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
-  const startSavedDraft = await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'StartRunFromPlan',
-      planId: initial.planId,
-      expectedPlanRevision: initial.revision + 1,
-      expectedLeaseRevision: savedSnapshot.control.revision,
-      idempotencyKey: 'saved-draft-start',
-    }),
-  })
-  assert.equal(startSavedDraft.status, 409)
-  assert.equal((await startSavedDraft.json()).reason, 'PlanUnavailable')
-  const event = await nextEvent(reader)
-  assert.match(event, /event: ProjectionChanged/)
-  assert.match(event, /data: \{"snapshotVersion"/)
-  const replay = await fetch(`${base}/api/commands/save-plan-draft`, {
-    method: 'POST',
-    body: JSON.stringify(command),
-  })
-  assert.equal(replay.status, 200)
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare(
-          "SELECT count(*) AS count FROM events WHERE type='PlanDraftSaved'",
-        )
-        .get(),
-    ).count,
-    1,
-  )
-  const limited = await fetch(`${base}/api/commands/save-plan-draft`, {
-    method: 'POST',
-    body: JSON.stringify({
-      ...command,
-      expectedPlanRevision: initial.revision + 1,
-      idempotencyKey: 'plan-limited-001',
-      sequences: sequences.map(
-        (sequence: { readonly horizon: string }, index: number) =>
-          index === 0 ? { ...sequence, horizon: 'limited' } : sequence,
-      ),
-    }),
-  })
-  assert.equal(limited.status, 202)
-  assert.equal((await limited.json()).plan.readiness, 'readyWithLimitations')
-  const blocked = await fetch(`${base}/api/commands/save-plan-draft`, {
-    method: 'POST',
-    body: JSON.stringify({
-      ...command,
-      expectedPlanRevision: initial.revision + 2,
-      idempotencyKey: 'plan-blocked-001',
-      sequences: sequences.map(
-        (sequence: { readonly storage: string }, index: number) =>
-          index === 1 ? { ...sequence, storage: 'missing' } : sequence,
-      ),
-    }),
-  })
-  assert.equal(blocked.status, 202)
-  assert.equal((await blocked.json()).plan.readiness, 'blocked')
-  const stale = await fetch(`${base}/api/commands/save-plan-draft`, {
-    method: 'POST',
-    body: JSON.stringify({
-      ...command,
-      expectedPlanRevision: initial.revision + 2,
-      idempotencyKey: 'plan-stale-001',
-    }),
-  })
-  assert.equal(stale.status, 409)
-  await reader?.cancel()
-  await listener.close()
-  service.close()
-  const recovered = createFixtureService(databasePath)
-  const recoveredListener = await recovered.listen()
-  const recoveredPlan = await fetch(
-    `http://127.0.0.1:${recoveredListener.port}/api/workspaces/plan`,
-  ).then((response) => response.json())
-  assert.equal(recoveredPlan.readiness, 'blocked')
-  assert.equal(recoveredPlan.revision, initial.revision + 3)
-  const phone = createFixtureService(databasePath, () => ({
-    personId: 'owner-chicks',
-    clientId: 'phone-monitor',
-    capability: 'readOnly',
-    role: 'owner',
-  }))
-  const phoneListener = await phone.listen()
-  assert.equal(
-    (
-      await fetch(
-        `http://127.0.0.1:${phoneListener.port}/api/commands/save-plan-draft`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            ...command,
-            expectedPlanRevision: recoveredPlan.revision,
-            idempotencyKey: 'plan-phone-001',
-          }),
-        },
-      )
-    ).status,
-    403,
-  )
-  await recoveredListener.close()
-  recovered.close()
-  await phoneListener.close()
-  phone.close()
-})
-
-test('SQLite accepts one immutable RunDefinition from a ready persisted plan and emits no device work', async (t) => {
-  const databasePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-run-definition-')),
-    'state.sqlite',
-  )
-  const service = createFixtureService(databasePath)
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  const initial = await fetch(`${base}/api/workspaces/plan`).then((response) =>
-    response.json(),
-  )
-  const sequences = initial.sequences.map(
-    ({ viability, ...sequence }: { readonly viability: string }) => sequence,
-  )
-  const saved = await fetch(`${base}/api/commands/save-plan-draft`, {
-    method: 'POST',
-    body: JSON.stringify({
-      planId: initial.planId,
-      expectedPlanRevision: initial.revision,
-      idempotencyKey: 'run-definition-draft-001',
-      sequences: sequences.map(
-        (sequence: { readonly capture: string }, index: number) =>
-          index === 1
-            ? { ...sequence, capture: `${sequence.capture} · shortened` }
-            : sequence,
-      ),
-    }),
-  })
-  assert.equal(saved.status, 202)
-  const draft = await saved.json()
-  const stream = await fetch(`${base}/api/events`)
-  const reader = stream.body?.getReader()
-  await reader?.read()
-  const command = {
-    _tag: 'AcceptRunDefinition',
-    planId: draft.plan.planId,
-    expectedPlanRevision: draft.plan.revision,
-    expectedLeaseRevision: draft.snapshot.control.revision,
-    idempotencyKey: 'run-definition-001',
-  }
-  const malformed = await fetch(`${base}/api/commands/accept-run-definition`, {
-    method: 'POST',
-    body: JSON.stringify({ _tag: 'AcceptRunDefinition' }),
-  })
-  assert.equal(malformed.status, 400)
-  assert.equal((await malformed.json()).reason, 'InvalidInput')
-  const staleLease = await fetch(`${base}/api/commands/accept-run-definition`, {
-    method: 'POST',
-    body: JSON.stringify({
-      ...command,
-      expectedLeaseRevision: command.expectedLeaseRevision + 1,
-      idempotencyKey: 'run-definition-stale-lease',
-    }),
-  })
-  assert.equal(staleLease.status, 409)
-  assert.equal((await staleLease.json()).reason, 'FreshnessConflict')
-  const phone = createFixtureService(databasePath, () => ({
-    personId: 'owner-chicks',
-    clientId: 'phone-monitor',
-    capability: 'readOnly',
-    role: 'owner',
-  }))
-  const phoneListener = await phone.listen()
-  const phoneResult = await fetch(
-    `http://127.0.0.1:${phoneListener.port}/api/commands/accept-run-definition`,
-    { method: 'POST', body: JSON.stringify(command) },
-  )
-  assert.equal(phoneResult.status, 403)
-  assert.equal((await phoneResult.json()).reason, 'ClientReadOnly')
-  await phoneListener.close()
-  phone.close()
-  const unavailable = createLocalWebService(':memory:')
-  const unavailableListener = await unavailable.listen()
-  const unavailableResult = await fetch(
-    `http://127.0.0.1:${unavailableListener.port}/api/commands/accept-run-definition`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        _tag: 'AcceptRunDefinition',
-        planId: 'uninitialized',
-        expectedPlanRevision: 0,
-        expectedLeaseRevision: 0,
-        idempotencyKey: 'run-definition-unavailable',
-      }),
-    },
-  )
-  assert.equal(unavailableResult.status, 409)
-  assert.equal((await unavailableResult.json()).reason, 'PlanUnavailable')
-  await unavailableListener.close()
-  unavailable.close()
-  const limitedPath = join(
-    mkdtempSync(join(tmpdir(), 'astro-run-definition-limited-')),
-    'state.sqlite',
-  )
-  const limitedService = createFixtureService(limitedPath)
-  const limitedListener = await limitedService.listen()
-  const limitedBase = `http://127.0.0.1:${limitedListener.port}`
-  const limitedInitial = await fetch(`${limitedBase}/api/workspaces/plan`).then(
-    (response) => response.json(),
-  )
-  const limitedSequences = limitedInitial.sequences.map(
-    (
-      { viability, ...sequence }: { readonly viability: string },
-      index: number,
-    ) => (index === 0 ? { ...sequence, horizon: 'limited' } : sequence),
-  )
-  const limitedDraft = await fetch(
-    `${limitedBase}/api/commands/save-plan-draft`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        planId: limitedInitial.planId,
-        expectedPlanRevision: limitedInitial.revision,
-        idempotencyKey: 'run-definition-limited-draft',
-        sequences: limitedSequences,
-      }),
-    },
-  ).then((response) => response.json())
-  const limitedResult = await fetch(
-    `${limitedBase}/api/commands/accept-run-definition`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        _tag: 'AcceptRunDefinition',
-        planId: limitedDraft.plan.planId,
-        expectedPlanRevision: limitedDraft.plan.revision,
-        expectedLeaseRevision: limitedDraft.snapshot.control.revision,
-        idempotencyKey: 'run-definition-limited',
-      }),
-    },
-  )
-  assert.equal(limitedResult.status, 409)
-  assert.equal((await limitedResult.json()).reason, 'PlanNotReady')
-  await limitedListener.close()
-  limitedService.close()
-  const activePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-run-definition-active-')),
-    'state.sqlite',
-  )
-  const activeService = createFixtureService(activePath)
-  const activeListener = await activeService.listen()
-  const activeBase = `http://127.0.0.1:${activeListener.port}`
-  const activeInitial = await fetch(`${activeBase}/api/workspaces/plan`).then(
-    (response) => response.json(),
-  )
-  const activeSequences = activeInitial.sequences.map(
-    ({ viability, ...sequence }: { readonly viability: string }) => sequence,
-  )
-  const activeDraft = await fetch(
-    `${activeBase}/api/commands/save-plan-draft`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        planId: activeInitial.planId,
-        expectedPlanRevision: activeInitial.revision,
-        idempotencyKey: 'run-definition-active-draft',
-        sequences: activeSequences.map(
-          (sequence: { readonly capture: string }, index: number) =>
-            index === 1
-              ? { ...sequence, capture: `${sequence.capture} · shortened` }
-              : sequence,
-        ),
-      }),
-    },
-  ).then((response) => response.json())
-  const activeCommand = {
-    _tag: 'AcceptRunDefinition',
-    planId: activeDraft.plan.planId,
-    expectedPlanRevision: activeDraft.plan.revision,
-    expectedLeaseRevision: activeDraft.snapshot.control.revision,
-    idempotencyKey: 'run-definition-active-accept',
-  }
-  assert.equal(
-    (
-      await fetch(`${activeBase}/api/commands/accept-run-definition`, {
-        method: 'POST',
-        body: JSON.stringify(activeCommand),
-      })
-    ).status,
-    202,
-  )
-  assert.equal(
-    (
-      await fetch(`${activeBase}/api/commands/start-run`, {
-        method: 'POST',
-        body: JSON.stringify({
-          _tag: 'StartRunFromPlan',
-          planId: activeCommand.planId,
-          expectedPlanRevision: activeCommand.expectedPlanRevision,
-          expectedLeaseRevision: activeCommand.expectedLeaseRevision,
-          idempotencyKey: 'run-definition-active-run',
-        }),
-      })
-    ).status,
-    202,
-  )
-  const activeResult = await fetch(
-    `${activeBase}/api/commands/accept-run-definition`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        ...activeCommand,
-        idempotencyKey: 'run-definition-active',
-      }),
-    },
-  )
-  assert.equal(activeResult.status, 409)
-  assert.equal((await activeResult.json()).reason, 'ActiveRunConflict')
-  await activeListener.close()
-  activeService.close()
-  const accepted = await fetch(`${base}/api/commands/accept-run-definition`, {
-    method: 'POST',
-    body: JSON.stringify(command),
-  })
-  assert.equal(accepted.status, 202)
-  const result = await accepted.json()
-  assert.equal(result.runDefinition.executor, 'fake')
-  assert.equal(result.runDefinition.sourcePlanRevision, draft.plan.revision)
-  assert.equal(result.snapshot.plan.runEligible, true)
-  const event = await nextEvent(reader)
-  assert.match(event, /event: ProjectionChanged/)
-  const replay = await fetch(`${base}/api/commands/accept-run-definition`, {
-    method: 'POST',
-    body: JSON.stringify(command),
-  })
-  assert.equal(replay.status, 200)
-  assert.equal((await replay.json()).runDefinition.id, result.runDefinition.id)
-  const changedReplay = await fetch(
-    `${base}/api/commands/accept-run-definition`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        ...command,
-        expectedLeaseRevision: command.expectedLeaseRevision + 1,
-      }),
-    },
-  )
-  assert.equal(changedReplay.status, 409)
-  assert.equal((await changedReplay.json()).reason, 'IdempotencyConflict')
-  const second = await fetch(`${base}/api/commands/accept-run-definition`, {
-    method: 'POST',
-    body: JSON.stringify({ ...command, idempotencyKey: 'run-definition-002' }),
-  })
-  assert.equal(second.status, 409)
-  assert.equal((await second.json()).reason, 'RunDefinitionAlreadyAccepted')
-  const stale = await fetch(`${base}/api/commands/accept-run-definition`, {
-    method: 'POST',
-    body: JSON.stringify({
-      ...command,
-      expectedPlanRevision: draft.plan.revision - 1,
-      idempotencyKey: 'run-definition-stale',
-    }),
-  })
-  assert.equal(stale.status, 409)
-  assert.equal((await stale.json()).reason, 'FreshnessConflict')
-  const next = await fetch(`${base}/api/commands/save-plan-draft`, {
-    method: 'POST',
-    body: JSON.stringify({
-      planId: draft.plan.planId,
-      expectedPlanRevision: draft.plan.revision,
-      idempotencyKey: 'run-definition-next-draft',
-      sequences: sequences.map(
-        (sequence: { readonly capture: string }, index: number) =>
-          index === 0 ? { ...sequence, capture: '48 × 180s · L' } : sequence,
-      ),
-    }),
-  })
-  assert.equal(next.status, 202)
-  const nextPlan = (await next.json()).plan
-  const blocked = await fetch(`${base}/api/commands/save-plan-draft`, {
-    method: 'POST',
-    body: JSON.stringify({
-      planId: nextPlan.planId,
-      expectedPlanRevision: nextPlan.revision,
-      idempotencyKey: 'run-definition-blocked-draft',
-      sequences: sequences.map(
-        (sequence: { readonly storage: string }, index: number) =>
-          index === 0 ? { ...sequence, storage: 'missing' } : sequence,
-      ),
-    }),
-  })
-  const blockedPlan = (await blocked.json()).plan
-  const notReady = await fetch(`${base}/api/commands/accept-run-definition`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'AcceptRunDefinition',
-      planId: blockedPlan.planId,
-      expectedPlanRevision: blockedPlan.revision,
-      expectedLeaseRevision: draft.snapshot.control.revision,
-      idempotencyKey: 'run-definition-blocked',
-    }),
-  })
-  assert.equal(notReady.status, 409)
-  assert.equal((await notReady.json()).reason, 'PlanNotReady')
-  const definition = JSON.parse(
-    databaseRow(
-      RunDefinitionEvidenceRow,
-      service.database
-        .prepare(
-          'SELECT definition FROM run_definitions WHERE run_definition_id=?',
-        )
-        .get(result.runDefinition.id),
-    ).definition,
-  )
-  assert.equal(definition.plan.sequences[0].capture, sequences[0].capture)
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare(
-          "SELECT count(*) AS count FROM events WHERE type='RunDefinitionAccepted'",
-        )
-        .get(),
-    ).count,
-    1,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
-    ).count,
-    0,
-  )
-  assert.equal(
-    (await bootstrapSnapshot(`${base}/api/snapshot`)).activeRun._tag,
-    'None',
-  )
-  await reader?.cancel()
-  await listener.close()
-  service.close()
-  const recovered = createFixtureService(databasePath)
-  const recoveredDefinition = databaseRow(
-    RunDefinitionRow,
-    recovered.database
-      .prepare(
-        'SELECT source_plan_revision,definition FROM run_definitions WHERE run_definition_id=?',
-      )
-      .get(result.runDefinition.id),
-  )
-  assert.equal(recoveredDefinition.source_plan_revision, draft.plan.revision)
-  assert.equal(
-    JSON.parse(recoveredDefinition.definition).id,
-    result.runDefinition.id,
-  )
-  recovered.close()
-})
-
-test('an accepted fake RunDefinition advances two immutable sequences through durable service-owned phases', async () => {
-  const databasePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-fake-run-')),
-    'state.sqlite',
-  )
-  const service = createFixtureService(databasePath)
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  const initial = await fetch(`${base}/api/workspaces/plan`).then((response) =>
-    response.json(),
-  )
-  const sequences = initial.sequences.map(
-    ({ viability, ...sequence }: { readonly viability: string }) => sequence,
-  )
-  const draft = await fetch(`${base}/api/commands/save-plan-draft`, {
-    method: 'POST',
-    body: JSON.stringify({
-      planId: initial.planId,
-      expectedPlanRevision: initial.revision,
-      idempotencyKey: 'fake-run-draft',
-      sequences: sequences.map(
-        (sequence: { readonly capture: string }, index: number) =>
-          index === 1
-            ? { ...sequence, capture: `${sequence.capture} · shortened` }
-            : sequence,
-      ),
-    }),
-  }).then((response) => response.json())
-  const accepted = await fetch(`${base}/api/commands/accept-run-definition`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'AcceptRunDefinition',
-      planId: draft.plan.planId,
-      expectedPlanRevision: draft.plan.revision,
-      expectedLeaseRevision: draft.snapshot.control.revision,
-      idempotencyKey: 'fake-run-definition',
-    }),
-  }).then((response) => response.json())
-  const stream = await fetch(`${base}/api/events`)
-  const reader = stream.body?.getReader()
-  await reader?.read()
-  const start = {
-    _tag: 'StartRunFromPlan',
-    planId: draft.plan.planId,
-    expectedPlanRevision: draft.plan.revision,
-    expectedLeaseRevision: draft.snapshot.control.revision,
-    idempotencyKey: 'fake-run-start',
-  }
-  const nonHolder = createFixtureService(databasePath, () => ({
-    personId: 'friend-ada',
-    clientId: 'desktop-ada',
-    role: 'viewer',
-    capability: 'controlCapable',
-  }))
-  const nonHolderListener = await nonHolder.listen()
-  const nonHolderStart = await fetch(
-    `http://127.0.0.1:${nonHolderListener.port}/api/commands/start-run`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ ...start, idempotencyKey: 'fake-run-non-holder' }),
-    },
-  )
-  assert.equal(nonHolderStart.status, 403)
-  assert.equal((await nonHolderStart.json()).reason, 'ControlLeaseLost')
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare("SELECT count(*) AS count FROM events WHERE type='RunStarted'")
-        .get(),
-    ).count,
-    0,
-  )
-  await nonHolderListener.close()
-  nonHolder.close()
-  const started = await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    body: JSON.stringify(start),
-  })
-  assert.equal(started.status, 202)
-  const startedRun = (await started.json()).run
-  assert.equal(startedRun.phase, 'preflight')
-  assert.equal(startedRun.progress, 0)
-  assert.equal(startedRun.sourceDefinitionId, accepted.runDefinition.id)
-  assert.equal(
-    startedRun.target,
-    accepted.runDefinition.plan.sequences[0].target,
-  )
-  assert.match(await nextEvent(reader), /event: ProjectionChanged/)
-  assert.equal(
-    (
-      await fetch(`${base}/api/commands/start-run`, {
-        method: 'POST',
-        body: JSON.stringify(start),
-      })
-    ).status,
-    200,
-  )
-  assert.equal(
-    (
-      await fetch(`${base}/api/commands/start-run`, {
-        method: 'POST',
-        body: JSON.stringify({ ...start, idempotencyKey: 'fake-run-conflict' }),
-      })
-    ).status,
-    409,
-  )
-  assert.equal(service.advanceFakeRun()?.run.phase, 'acquire')
-  assert.match(await nextEvent(reader), /event: ProjectionChanged/)
-  assert.equal(service.advanceFakeRun()?.run.phase, 'capture')
-  assert.match(await nextEvent(reader), /event: ProjectionChanged/)
-  const beforePause = await bootstrapSnapshot(`${base}/api/snapshot`)
-  assert.equal(beforePause.activeRun._tag, 'Active')
-  if (beforePause.activeRun._tag !== 'Active')
-    throw new Error('Fake run is missing before pause')
-  assert.equal(beforePause.activeRun.run.target, startedRun.target)
-  assert.equal(beforePause.activeRun.run.progress, 25)
-  const pause = {
-    _tag: 'PauseRun',
-    expectedLeaseRevision: beforePause.control.revision,
-    expectedRunRevision: beforePause.activeRun.run.revision,
-    idempotencyKey: 'fake-run-pause',
-  }
-  const paused = await fetch(`${base}/api/commands/pause-run`, {
-    method: 'POST',
-    body: JSON.stringify(pause),
-  })
-  assert.equal(paused.status, 202)
-  const pausedBody = await paused.json()
-  assert.equal(pausedBody.snapshot.run.phase, 'paused')
-  assert.equal(pausedBody.snapshot.run.resumablePhase, 'capture')
-  assert.match(await nextEvent(reader), /event: ProjectionChanged/)
-  assert.equal(
-    (
-      await fetch(`${base}/api/commands/pause-run`, {
-        method: 'POST',
-        body: JSON.stringify(pause),
-      })
-    ).status,
-    200,
-  )
-  const idempotencyConflict = await fetch(`${base}/api/commands/resume-run`, {
-    method: 'POST',
-    body: JSON.stringify({ ...pause, _tag: 'ResumeRun' }),
-  })
-  assert.equal(idempotencyConflict.status, 409)
-  assert.equal((await idempotencyConflict.json()).reason, 'IdempotencyConflict')
-  assert.equal(service.advanceFakeRun(), undefined)
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare("SELECT count(*) AS count FROM events WHERE type='RunPaused'")
-        .get(),
-    ).count,
-    1,
-  )
-  await reader?.cancel()
-  await listener.close()
-  service.close()
-  const recovered = createFixtureService(databasePath)
-  const recoveredListener = await recovered.listen()
-  const recoveredBase = `http://127.0.0.1:${recoveredListener.port}`
-  const recoveredStream = await fetch(`${recoveredBase}/api/events`)
-  const recoveredReader = recoveredStream.body?.getReader()
-  await recoveredReader?.read()
-  const afterRestart = await bootstrapSnapshot(`${recoveredBase}/api/snapshot`)
-  assert.equal(afterRestart.activeRun._tag, 'Active')
-  if (afterRestart.activeRun._tag !== 'Active')
-    throw new Error('Paused fake run is missing after restart')
-  assert.equal(afterRestart.activeRun.run.phase, 'paused')
-  assert.equal(afterRestart.activeRun.run.target, startedRun.target)
-  assert.equal(afterRestart.activeRun.run.progress, 25)
-  assert.equal(afterRestart.activeRun.run.completedSequenceCount, 0)
-  const phone = createFixtureService(databasePath, () => ({
-    personId: 'owner-chicks',
-    clientId: 'phone-monitor',
-    role: 'owner',
-    capability: 'readOnly',
-  }))
-  const phoneListener = await phone.listen()
-  const phoneSnapshot = await bootstrapSnapshot(
-    `http://127.0.0.1:${phoneListener.port}/api/snapshot`,
-  )
-  assert.equal(phoneSnapshot.membership.capability, 'readOnly')
-  assert.equal(phoneSnapshot.activeRun._tag, 'Active')
-  if (phoneSnapshot.activeRun._tag === 'Active') {
-    assert.equal(phoneSnapshot.activeRun.run.target, startedRun.target)
-    assert.equal(phoneSnapshot.activeRun.run.phase, 'paused')
-    assert.equal(phoneSnapshot.activeRun.run.progress, 25)
-    assert.equal(phoneSnapshot.activeRun.run.completedSequenceCount, 0)
-  }
-  await phoneListener.close()
-  phone.close()
-  assert.equal(recovered.advanceFakeRun(), undefined)
-  const notPaused = await fetch(`${recoveredBase}/api/commands/resume-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'ResumeRun',
-      expectedLeaseRevision: afterRestart.control.revision,
-      expectedRunRevision: afterRestart.activeRun.run.revision - 1,
-      idempotencyKey: 'fake-run-stale-resume',
-    }),
-  })
-  assert.equal(notPaused.status, 409)
-  assert.equal((await notPaused.json()).reason, 'RunRevisionConflict')
-  const resumed = await fetch(`${recoveredBase}/api/commands/resume-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'ResumeRun',
-      expectedLeaseRevision: afterRestart.control.revision,
-      expectedRunRevision: afterRestart.activeRun.run.revision,
-      idempotencyKey: 'fake-run-resume',
-    }),
-  })
-  assert.equal(resumed.status, 202)
-  assert.equal((await resumed.json()).snapshot.run.phase, 'capture')
-  assert.equal(recovered.advanceFakeRun()?.run.phase, 'verify')
-  assert.equal(recovered.advanceFakeRun()?.run.phase, 'preflight')
-  const secondSequence = await bootstrapSnapshot(
-    `${recoveredBase}/api/snapshot`,
-  )
-  assert.equal(secondSequence.activeRun._tag, 'Active')
-  if (secondSequence.activeRun._tag === 'Active')
-    assert.equal(secondSequence.activeRun.run.completedSequenceCount, 1)
-  assert.equal(recovered.advanceFakeRun()?.run.phase, 'acquire')
-  assert.equal(recovered.advanceFakeRun()?.run.phase, 'capture')
-  assert.equal(recovered.advanceFakeRun()?.run.phase, 'verify')
-  assert.equal(recovered.advanceFakeRun()?.run.phase, 'completed')
-  assert.match(await nextEvent(recoveredReader), /event: ProjectionChanged/)
-  const completed = await bootstrapSnapshot(`${recoveredBase}/api/snapshot`)
-  assert.equal(completed.activeRun._tag, 'Active')
-  if (completed.activeRun._tag === 'Active') {
-    assert.equal(completed.activeRun.run.phase, 'completed')
-    assert.equal(completed.activeRun.run.completedSequenceCount, 2)
-    assert.equal(completed.activeRun.run.revision, 11)
-  }
-  assert.equal(recovered.advanceFakeRun(), undefined)
-  assert.equal(
-    databaseRow(
-      CountRow,
-      recovered.database.prepare('SELECT count(*) AS count FROM outbox').get(),
-    ).count,
-    0,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      recovered.database
-        .prepare(
-          "SELECT count(*) AS count FROM events WHERE type='RunCompleted'",
-        )
-        .get(),
-    ).count,
-    1,
-  )
-  await recoveredReader?.cancel()
-  await recoveredListener.close()
-  recovered.close()
-})
-
-test('fixture installation restores only a missing M27 plan record and keeps a saved draft visible after restart', async (t) => {
-  const missingPath = join(
-    mkdtempSync(join(tmpdir(), 'astro-missing-fixture-plan-')),
-    'state.sqlite',
-  )
-  const fixture = createFixtureService(missingPath)
-  fixture.database
-    .prepare("DELETE FROM observing_plans WHERE plan_id='plan-m27'")
-    .run()
-  fixture.close()
-  const restored = createFixtureService(missingPath)
-  const restoredListener = await restored.listen()
-  const restoredBase = `http://127.0.0.1:${restoredListener.port}`
-  assert.equal(
-    (
-      await fetch(`${restoredBase}/api/workspaces/plan`).then((response) =>
-        response.json(),
-      )
-    ).planId,
-    'plan-m27',
-  )
-  await restoredListener.close()
-  restored.close()
-
-  const savedPath = join(
-    mkdtempSync(join(tmpdir(), 'astro-saved-draft-restart-')),
-    'state.sqlite',
-  )
-  const saved = createFixtureService(savedPath)
-  const savedListener = await saved.listen()
-  const savedBase = `http://127.0.0.1:${savedListener.port}`
-  const initial = await fetch(`${savedBase}/api/workspaces/plan`).then(
-    (response) => response.json(),
-  )
-  const sequences = initial.sequences.map(
-    ({ viability, ...sequence }: { readonly viability: string }) => sequence,
-  )
-  assert.equal(
-    (
-      await fetch(`${savedBase}/api/commands/save-plan-draft`, {
-        method: 'POST',
-        body: JSON.stringify({
-          planId: initial.planId,
-          expectedPlanRevision: initial.revision,
-          idempotencyKey: 'saved-restart-001',
-          sequences: sequences.map(
-            (sequence: { readonly capture: string }, index: number) =>
-              index === 1
-                ? { ...sequence, capture: `${sequence.capture} · shortened` }
-                : sequence,
-          ),
-        }),
-      })
-    ).status,
-    202,
-  )
-  await savedListener.close()
-  saved.close()
-  const recovered = createFixtureService(savedPath)
-  const recoveredListener = await recovered.listen()
-  const recoveredBase = `http://127.0.0.1:${recoveredListener.port}`
-  t.after(async () => {
-    await recoveredListener.close()
-    recovered.close()
-  })
-  const snapshot = await bootstrapSnapshot(`${recoveredBase}/api/snapshot`)
-  assert.equal(snapshot.activeRun._tag, 'None')
 })
 
 test('library-published fixture projects one durable Download Eligible M27 asset without work', async (t) => {
@@ -6075,37 +4653,6 @@ test('a request query cannot select phone or controller capability', async (t) =
   phoneService.close()
 })
 
-test('malformed and oversized bodies become bounded InvalidInput rejections', async (t) => {
-  const service = createFixtureService()
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  const malformed = await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    body: '{',
-  })
-  assert.deepEqual(await malformed.json(), {
-    outcome: 'rejected',
-    reason: 'InvalidInput',
-    message: 'The service could not read that action.',
-  })
-  const oversized = await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    body: 'x'.repeat(16_385),
-  })
-  assert.equal(oversized.status, 413)
-  assert.deepEqual(await oversized.json(), {
-    outcome: 'rejected',
-    reason: 'InvalidInput',
-    message: 'The service could not read that action.',
-  })
-  await listener.close()
-  service.close()
-})
-
 test('protected responses install browser security headers without caching service truth', async (t) => {
   const service = createFixtureService()
   const listener = await service.listen()
@@ -6127,333 +4674,6 @@ test('protected responses install browser security headers without caching servi
     response.headers.get('content-security-policy') ?? '',
     /unsafe-inline/,
   )
-})
-
-test('SSE sends a snapshot before durable cursor catch-up and never replays a command', async (t) => {
-  const service = createFixtureService()
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  const stream = await fetch(`${base}/api/events`)
-  const reader = stream.body?.getReader()
-  assert.notEqual(reader, undefined)
-  const first = await nextEvent(reader)
-  assert.match(first, /event: ProjectionChanged/)
-  const started = await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'StartRunFromPlan',
-      planId: 'plan-m27',
-      expectedPlanRevision: 3,
-      expectedLeaseRevision: 1,
-      idempotencyKey: 'sse-run',
-    }),
-  })
-  assert.equal(started.status, 202)
-  const next = await nextEvent(reader)
-  assert.match(next, /event: ProjectionChanged/)
-  await reader?.cancel()
-  await listener.close()
-  service.close()
-})
-
-test('browser reconnect installs a current snapshot and its stale shell offers no mutation replay', async (t) => {
-  const service = createFixtureService()
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  const firstStream = await fetch(`${base}/api/events`)
-  const firstReader = firstStream.body?.getReader()
-  await firstReader?.read()
-  await firstReader?.cancel()
-  const started = await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'StartRunFromPlan',
-      planId: 'plan-m27',
-      expectedPlanRevision: 3,
-      expectedLeaseRevision: 1,
-      idempotencyKey: 'reconnect-start',
-    }),
-  })
-  assert.equal(started.status, 202)
-  const reconnectStream = await fetch(`${base}/api/events`)
-  const reconnectReader = reconnectStream.body?.getReader()
-  const reconnect = await nextEvent(reconnectReader)
-  assert.match(reconnect, /event: ProjectionChanged/)
-  assert.match(reconnect, /"phase":"capture"/)
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare(
-          "SELECT count(*) AS count FROM outbox WHERE kind='StartM27Capture'",
-        )
-        .get(),
-    ).count,
-    0,
-  )
-  await reconnectReader?.cancel()
-  await listener.close()
-  service.close()
-})
-
-test('expired reconnect grace survives restart, releases control to nobody, and preserves accepted work', async (t) => {
-  const databasePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-lease-recovery-')),
-    'state.sqlite',
-  )
-  const owner = createFixtureService(databasePath, () => ({
-    personId: 'owner-chicks',
-    clientId: 'desktop-owner',
-    capability: 'controlCapable',
-    role: 'owner',
-  }))
-  const friend = createFixtureService(databasePath, () => ({
-    personId: 'friend-ada',
-    clientId: 'desktop-ada',
-    capability: 'controlCapable',
-  }))
-  const ownerListener = await owner.listen()
-  const friendListener = await friend.listen()
-  const ownerBase = `http://127.0.0.1:${ownerListener.port}`
-  const friendBase = `http://127.0.0.1:${friendListener.port}`
-  await fetch(`${ownerBase}/api/commands/start-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'StartRunFromPlan',
-      planId: 'plan-m27',
-      expectedPlanRevision: 3,
-      expectedLeaseRevision: 1,
-      idempotencyKey: 'lease-recovery-run',
-    }),
-  })
-  const impostor = await fetch(
-    `${friendBase}/api/commands/controller-disconnected`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        expectedLeaseRevision: 1,
-        idempotencyKey: 'impostor-disconnect',
-      }),
-    },
-  ).then((response) => response.json())
-  assert.equal(impostor.reason, 'ControlLeaseLost')
-  await fetch(`${friendBase}/api/commands/request-control`, {
-    method: 'POST',
-    body: JSON.stringify({
-      expectedLeaseRevision: 1,
-      idempotencyKey: 'lease-recovery-request',
-    }),
-  })
-  await fetch(`${ownerBase}/api/commands/grant-control`, {
-    method: 'POST',
-    body: JSON.stringify({
-      expectedLeaseRevision: 1,
-      idempotencyKey: 'lease-recovery-grant',
-    }),
-  })
-  const disconnected = await fetch(
-    `${friendBase}/api/commands/controller-disconnected`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        expectedLeaseRevision: 2,
-        idempotencyKey: 'lease-recovery-disconnect',
-      }),
-    },
-  ).then((response) => response.json())
-  assert.equal(disconnected.eventType, 'ControlReconnectGraceStarted')
-  await ownerListener.close()
-  await friendListener.close()
-  owner.close()
-  friend.close()
-  const persisted = new DatabaseSync(databasePath)
-  persisted
-    .prepare("UPDATE state SET value=? WHERE key='reconnectGraceUntil'")
-    .run(JSON.stringify('2000-01-01T00:00:00.000Z'))
-  persisted.close()
-  const recovered = createFixtureService(databasePath, () => ({
-    personId: 'owner-chicks',
-    clientId: 'desktop-owner',
-    capability: 'controlCapable',
-    role: 'owner',
-  }))
-  const recoveredListener = await recovered.listen()
-  t.after(async () => {
-    await recoveredListener.close()
-    recovered.close()
-  })
-  const snapshot = await bootstrapSnapshot(
-    `http://127.0.0.1:${recoveredListener.port}/api/snapshot`,
-  )
-  assert.equal(snapshot.control.holderClientId, undefined)
-  assert.equal(snapshot.control.state, 'unheld')
-  assert.equal(snapshot.control.revision, 4)
-  assert.equal(snapshot.activeRun._tag, 'Active')
-  if (snapshot.activeRun._tag === 'Active')
-    assert.equal(snapshot.activeRun.run.phase, 'capture')
-  assert.equal(
-    databaseRow(
-      EventTypeRow,
-      recovered.database
-        .prepare('SELECT type FROM events ORDER BY cursor DESC LIMIT 1')
-        .get(),
-    ).type,
-    'ControlGraceExpired',
-  )
-  await recoveredListener.close()
-  recovered.close()
-})
-
-test('two server-configured desktops transfer control without stopping the accepted run', async (t) => {
-  const databasePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-control-')),
-    'state.sqlite',
-  )
-  const owner = createFixtureService(databasePath, () => ({
-    personId: 'owner-chicks',
-    clientId: 'desktop-owner',
-    capability: 'controlCapable',
-    role: 'owner',
-  }))
-  const friend = createFixtureService(databasePath, () => ({
-    personId: 'friend-ada',
-    clientId: 'desktop-ada',
-    capability: 'controlCapable',
-  }))
-  const ownerListener = await owner.listen()
-  const friendListener = await friend.listen()
-  t.after(async () => {
-    await ownerListener.close()
-    await friendListener.close()
-    owner.close()
-    friend.close()
-  })
-  const ownerBase = `http://127.0.0.1:${ownerListener.port}`
-  const friendBase = `http://127.0.0.1:${friendListener.port}`
-  const initial = await bootstrapSnapshot(`${ownerBase}/api/snapshot`)
-  await fetch(`${ownerBase}/api/commands/start-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'StartRunFromPlan',
-      planId: 'plan-m27',
-      expectedPlanRevision: 3,
-      expectedLeaseRevision: initial.control.revision,
-      idempotencyKey: 'run-before-takeover',
-    }),
-  })
-  await fetch(`${friendBase}/api/commands/request-control`, {
-    method: 'POST',
-    body: JSON.stringify({
-      expectedLeaseRevision: 1,
-      idempotencyKey: 'ada-request',
-    }),
-  })
-  const granted = await fetch(`${ownerBase}/api/commands/grant-control`, {
-    method: 'POST',
-    body: JSON.stringify({
-      expectedLeaseRevision: 1,
-      idempotencyKey: 'owner-grant',
-    }),
-  })
-  assert.equal(granted.status, 202)
-  const oldController = await fetch(`${ownerBase}/api/commands/pause-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'PauseRun',
-      expectedLeaseRevision: 2,
-      expectedRunRevision: 1,
-      idempotencyKey: 'old-pause',
-    }),
-  })
-  const oldResult = await oldController.json()
-  assert.equal(oldResult.reason, 'ControlLeaseLost')
-  assert.equal(
-    oldResult.message,
-    'Control changed hands. Your command was not sent to the observatory; the accepted run continues.',
-  )
-  const after = await bootstrapSnapshot(`${friendBase}/api/snapshot`)
-  assert.equal(after.control.holderClientId, 'desktop-ada')
-  assert.equal(after.activeRun._tag, 'Active')
-  if (after.activeRun._tag === 'Active')
-    assert.equal(after.activeRun.run.phase, 'capture')
-  assert.equal(
-    databaseRow(
-      CountRow,
-      owner.database.prepare('SELECT count(*) AS count FROM outbox').get(),
-    ).count,
-    0,
-  )
-  await ownerListener.close()
-  await friendListener.close()
-  owner.close()
-  friend.close()
-})
-
-test('an owner SSE projection advances when a friend writes the shared SQLite database', async (t) => {
-  const databasePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-projection-')),
-    'state.sqlite',
-  )
-  const owner = createFixtureService(databasePath, () => ({
-    personId: 'owner-chicks',
-    clientId: 'desktop-owner',
-    capability: 'controlCapable',
-    role: 'owner',
-  }))
-  const friend = createFixtureService(databasePath, () => ({
-    personId: 'friend-ada',
-    clientId: 'desktop-ada',
-    capability: 'controlCapable',
-  }))
-  const ownerListener = await owner.listen()
-  const friendListener = await friend.listen()
-  t.after(async () => {
-    await ownerListener.close()
-    await friendListener.close()
-    owner.close()
-    friend.close()
-  })
-  const ownerBase = `http://127.0.0.1:${ownerListener.port}`
-  const friendBase = `http://127.0.0.1:${friendListener.port}`
-  const stream = await fetch(`${ownerBase}/api/events`)
-  const reader = stream.body?.getReader()
-  await reader?.read()
-  await fetch(`${friendBase}/api/commands/request-control`, {
-    method: 'POST',
-    body: JSON.stringify({
-      expectedLeaseRevision: 1,
-      idempotencyKey: 'projection-request',
-    }),
-  })
-  const changed = await Promise.race([
-    reader?.read(),
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () =>
-          reject(new Error('owner did not receive cross-process projection')),
-        2_000,
-      ),
-    ),
-  ])
-  const text = new TextDecoder().decode(changed?.value)
-  assert.match(text, /event: ProjectionChanged/)
-  assert.match(
-    text,
-    /id: 1\nevent: ProjectionChanged\ndata: \{"snapshotVersion":2,"eventCursor":1/,
-  )
-  await reader?.cancel()
-  await ownerListener.close()
-  await friendListener.close()
-  owner.close()
-  friend.close()
 })
 
 test('listener shutdown closes a consumed keep-alive request', async (t) => {
@@ -6569,362 +4789,416 @@ test('reports a missing web bundle without substituting an inline shell', async 
   assert.equal((await fetch(`${base}/api/snapshot`)).status, 200)
 })
 
-test('fake run resolution and consequence-aware edits persist only durable fake state', async (t) => {
+async function submitPlan(
+  base: string,
+  intent: unknown,
+  headers?: HeadersInit,
+) {
+  const response = await fetch(`${base}/api/plan/commands`, {
+    method: 'POST',
+    ...(headers === undefined ? {} : { headers }),
+    body: JSON.stringify({ intent }),
+  })
+  return {
+    response,
+    body: Schema.decodeUnknownSync(PlanCommandResponse)(await response.json()),
+  }
+}
+
+async function submitObserve(
+  base: string,
+  intent: unknown,
+  headers?: HeadersInit,
+) {
+  const response = await fetch(`${base}/api/observe/commands`, {
+    method: 'POST',
+    ...(headers === undefined ? {} : { headers }),
+    body: JSON.stringify({ intent }),
+  })
+  return {
+    response,
+    body: Schema.decodeUnknownSync(ObserveCommandResponse)(
+      await response.json(),
+    ),
+  }
+}
+
+async function startFixtureRun(base: string, idempotencyKey: string) {
+  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (snapshot.plan === undefined)
+    throw new Error('Fixture Plan is unavailable')
+  const started = await submitPlan(base, {
+    _tag: 'StartAcceptedRun',
+    planId: snapshot.plan.planId,
+    expectedPlanRevision: snapshot.plan.revision,
+    expectedLeaseRevision: snapshot.control.revision,
+    idempotencyKey,
+  })
+  assert.equal(started.response.status, 202)
+  assert.equal(started.body._tag, 'Accepted')
+  return bootstrapSnapshot(`${base}/api/snapshot`)
+}
+
+test('canonical Plan commands persist draft readiness, immutable acceptance, idempotency, restart, and SSE truth', async (t) => {
   const databasePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-final-phase-two-')),
+    mkdtempSync(join(tmpdir(), 'astro-canonical-plan-')),
     'state.sqlite',
   )
-  const start = async (key: string, path = databasePath) => {
-    const service = createFixtureService(path)
-    const listener = await service.listen()
-    const base = `http://127.0.0.1:${listener.port}`
-    const plan = await fetch(`${base}/api/workspaces/plan`).then((response) =>
-      response.json(),
-    )
-    const sequences = plan.sequences.map(
-      ({ viability, ...sequence }: { readonly viability: string }) => sequence,
-    )
-    const draft = await fetch(`${base}/api/commands/save-plan-draft`, {
-      method: 'POST',
-      body: JSON.stringify({
-        planId: plan.planId,
-        expectedPlanRevision: plan.revision,
-        idempotencyKey: `${key}-draft`,
-        sequences: sequences.map(
-          (sequence: { readonly capture: string }, index: number) =>
-            index === 1
-              ? { ...sequence, capture: `${sequence.capture} · shortened` }
-              : sequence,
-        ),
-      }),
-    }).then((response) => response.json())
-    await fetch(`${base}/api/commands/accept-run-definition`, {
-      method: 'POST',
-      body: JSON.stringify({
-        _tag: 'AcceptRunDefinition',
-        planId: draft.plan.planId,
-        expectedPlanRevision: draft.plan.revision,
-        expectedLeaseRevision: draft.snapshot.control.revision,
-        idempotencyKey: `${key}-definition`,
-      }),
-    })
-    await fetch(`${base}/api/commands/start-run`, {
-      method: 'POST',
-      body: JSON.stringify({
-        _tag: 'StartRunFromPlan',
-        planId: draft.plan.planId,
-        expectedPlanRevision: draft.plan.revision,
-        expectedLeaseRevision: draft.snapshot.control.revision,
-        idempotencyKey: `${key}-start`,
-      }),
-    })
-    return { service, listener, base }
-  }
-  const first = await start('final-edit')
-  t.after(async () => {
-    await first.listener.close()
-    first.service.close()
+  const service = createLocalWebService(
+    databasePath,
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'plan-draft' },
+  )
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  const stream = await fetch(`${base}/api/events`)
+  const reader = stream.body?.getReader()
+  await reader?.read()
+  const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (initial.plan === undefined) throw new Error('Fixture Plan is unavailable')
+  const sequences = initial.plan.sequences.map(
+    ({ viability, ...sequence }) => sequence,
+  )
+  const saved = await submitPlan(base, {
+    _tag: 'SaveDraft',
+    planId: initial.plan.planId,
+    expectedPlanRevision: initial.plan.revision,
+    idempotencyKey: 'canonical-plan-save',
+    sequences: sequences.map((sequence, index) =>
+      index === 1
+        ? { ...sequence, capture: `${sequence.capture} · shortened` }
+        : sequence,
+    ),
   })
-  const snapshot = await bootstrapSnapshot(`${first.base}/api/snapshot`)
-  assert.equal(snapshot.activeRun._tag, 'Active')
-  if (snapshot.activeRun._tag !== 'Active')
-    throw new Error('Run mutation requires an active run')
-  const previewResponse = await fetch(
-    `${first.base}/api/commands/preview-run-mutation`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        _tag: 'PreviewRunMutation',
-        mutation: 'reprioritizeSecond',
-        expectedLeaseRevision: snapshot.control.revision,
-        expectedRunRevision: snapshot.activeRun.run.revision,
-        idempotencyKey: 'final-preview',
-      }),
-    },
-  )
-  assert.equal(previewResponse.status, 202)
-  const preview = await previewResponse.json()
-  assert.equal(preview.preview.classification, 'nonDisruptive')
-  const expired = await fetch(
-    `${first.base}/api/commands/preview-run-mutation`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        _tag: 'PreviewRunMutation',
-        mutation: 'shortenSecond',
-        expectedLeaseRevision: snapshot.control.revision,
-        expectedRunRevision: snapshot.activeRun.run.revision,
-        idempotencyKey: 'final-expired-preview',
-      }),
-    },
-  ).then((response) => response.json())
-  first.service.database
-    .prepare('UPDATE run_mutation_previews SET expires_at=? WHERE preview_id=?')
-    .run('2000-01-01T00:00:00.000Z', expired.preview.previewId)
-  const expiredApply = await fetch(
-    `${first.base}/api/commands/apply-run-mutation`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        _tag: 'ApplyRunMutation',
-        previewId: expired.preview.previewId,
-        expectedLeaseRevision: snapshot.control.revision,
-        expectedRunRevision: snapshot.activeRun.run.revision,
-        idempotencyKey: 'final-expired-apply',
-      }),
-    },
-  )
-  assert.equal(expiredApply.status, 409)
-  assert.equal((await expiredApply.json()).reason, 'PreviewExpired')
-  const applied = await fetch(`${first.base}/api/commands/apply-run-mutation`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'ApplyRunMutation',
-      previewId: preview.preview.previewId,
-      expectedLeaseRevision: snapshot.control.revision,
-      expectedRunRevision: snapshot.activeRun.run.revision,
-      idempotencyKey: 'final-apply',
-    }),
+  assert.equal(saved.response.status, 202)
+  assert.equal(saved.body._tag, 'Accepted')
+  if (saved.body._tag !== 'Accepted') throw new Error('Draft was not accepted')
+  assert.equal(saved.body.result._tag, 'DraftSaved')
+  assert.match(await nextEvent(reader), /ProjectionChanged/)
+  const duplicate = await submitPlan(base, {
+    _tag: 'SaveDraft',
+    planId: initial.plan.planId,
+    expectedPlanRevision: initial.plan.revision,
+    idempotencyKey: 'canonical-plan-duplicate',
+    sequences: [sequences[0], sequences[0]],
   })
-  assert.equal(applied.status, 202)
-  const afterApplied = await applied.json()
-  assert.equal(afterApplied.snapshot.run.activeSequenceIndex, 0)
-  assert.equal(afterApplied.snapshot.run.appliedMutations.length, 1)
-  const replayed = await fetch(
-    `${first.base}/api/commands/apply-run-mutation`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        _tag: 'ApplyRunMutation',
-        previewId: preview.preview.previewId,
-        expectedLeaseRevision: snapshot.control.revision,
-        expectedRunRevision: snapshot.activeRun.run.revision,
-        idempotencyKey: 'final-apply',
-      }),
-    },
-  )
-  assert.equal(replayed.status, 200)
-  assert.deepEqual(await replayed.json(), afterApplied)
+  assert.equal(duplicate.response.status, 400)
+  const draft = saved.body.snapshot.plan
+  if (draft === undefined) throw new Error('Saved Plan is unavailable')
+  const accepted = await submitPlan(base, {
+    _tag: 'AcceptRunDefinition',
+    planId: draft.planId,
+    expectedPlanRevision: draft.revision,
+    expectedLeaseRevision: saved.body.snapshot.control.revision,
+    idempotencyKey: 'canonical-definition-accept',
+  })
+  assert.equal(accepted.response.status, 202)
+  const replay = await submitPlan(base, {
+    _tag: 'AcceptRunDefinition',
+    planId: draft.planId,
+    expectedPlanRevision: draft.revision,
+    expectedLeaseRevision: saved.body.snapshot.control.revision,
+    idempotencyKey: 'canonical-definition-accept',
+  })
+  assert.equal(replay.response.status, 200)
   assert.equal(
     databaseRow(
       CountRow,
-      first.service.database
-        .prepare(
-          "SELECT count(*) AS count FROM events WHERE type='RunMutationApplied'",
-        )
-        .get(),
-    ).count,
-    1,
-  )
-  const disruptive = await fetch(
-    `${first.base}/api/commands/preview-run-mutation`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        _tag: 'PreviewRunMutation',
-        mutation: 'discardCurrent',
-        expectedLeaseRevision: afterApplied.snapshot.control.revision,
-        expectedRunRevision: afterApplied.snapshot.run.revision,
-        idempotencyKey: 'final-disruptive-preview',
-      }),
-    },
-  ).then((response) => response.json())
-  const denied = await fetch(`${first.base}/api/commands/apply-run-mutation`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'ApplyRunMutation',
-      previewId: disruptive.preview.previewId,
-      expectedLeaseRevision: afterApplied.snapshot.control.revision,
-      expectedRunRevision: afterApplied.snapshot.run.revision,
-      idempotencyKey: 'final-disruptive-denied',
-    }),
-  })
-  assert.equal(denied.status, 403)
-  const mismatchedApproval = await fetch(
-    `${first.base}/api/commands/approve-disruptive-run-mutation`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        _tag: 'ApproveDisruptiveRunMutation',
-        previewId: disruptive.preview.previewId,
-        approvalToken: 'wrong-token',
-        expectedLeaseRevision: afterApplied.snapshot.control.revision,
-        expectedRunRevision: afterApplied.snapshot.run.revision,
-        idempotencyKey: 'final-disruptive-mismatch',
-      }),
-    },
-  )
-  assert.equal(mismatchedApproval.status, 403)
-  assert.equal((await mismatchedApproval.json()).reason, 'ApprovalMismatch')
-  const approved = await fetch(
-    `${first.base}/api/commands/approve-disruptive-run-mutation`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        _tag: 'ApproveDisruptiveRunMutation',
-        previewId: disruptive.preview.previewId,
-        approvalToken: disruptive.approvalToken,
-        expectedLeaseRevision: afterApplied.snapshot.control.revision,
-        expectedRunRevision: afterApplied.snapshot.run.revision,
-        idempotencyKey: 'final-disruptive-approved',
-      }),
-    },
-  ).then((response) => response.json())
-  assert.equal(approved.snapshot.run.activeSequenceIndex, 1)
-  assert.equal(approved.snapshot.run.phase, 'preflight')
-  assert.equal(
-    databaseRow(
-      CountRow,
-      first.service.database
-        .prepare('SELECT count(*) AS count FROM outbox')
-        .get(),
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
     ).count,
     0,
   )
-  const retry = await fetch(`${first.base}/api/commands/retry-fake-phase`, {
-    method: 'POST',
-    body: JSON.stringify({
-      expectedLeaseRevision: approved.snapshot.control.revision,
-      expectedRunRevision: approved.snapshot.run.revision,
-      idempotencyKey: 'final-retry',
-    }),
-  }).then((response) => response.json())
-  assert.equal(retry.snapshot.run.retryPhase, 'preflight')
-  const retryAgain = await fetch(
-    `${first.base}/api/commands/retry-fake-phase`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        expectedLeaseRevision: retry.snapshot.control.revision,
-        expectedRunRevision: retry.snapshot.run.revision,
-        idempotencyKey: 'final-retry-again',
-      }),
-    },
+  const later = await submitPlan(base, {
+    _tag: 'SaveDraft',
+    planId: draft.planId,
+    expectedPlanRevision: draft.revision,
+    idempotencyKey: 'canonical-later-draft',
+    sequences: sequences.map((sequence) => ({
+      ...sequence,
+      capture: '48 × 180s · L',
+    })),
+  })
+  assert.equal(later.response.status, 202)
+  const definition = databaseRow(
+    RunDefinitionEvidenceRow,
+    service.database.prepare('SELECT definition FROM run_definitions').get(),
   )
-  assert.equal(retryAgain.status, 409)
-  const parked = await fetch(`${first.base}/api/commands/request-fake-park`, {
-    method: 'POST',
-    body: JSON.stringify({
-      expectedLeaseRevision: retry.snapshot.control.revision,
-      expectedRunRevision: retry.snapshot.run.revision,
-      idempotencyKey: 'final-park',
-    }),
-  }).then((response) => response.json())
-  assert.equal(parked.snapshot.run.phase, 'parkRequested')
-  await first.listener.close()
-  first.service.close()
+  assert.notEqual(
+    JSON.parse(definition.definition).plan.sequences[0].capture,
+    '48 × 180s · L',
+  )
+  await reader?.cancel()
+  await listener.close()
+  service.close()
   const recovered = createFixtureService(databasePath)
-  const recoveredSnapshot = databaseRow(
-    ProjectionRow,
-    recovered.database.prepare("SELECT value FROM state WHERE key='run'").get(),
-  )
-  assert.equal(JSON.parse(recoveredSnapshot.value).phase, 'parkRequested')
-  recovered.close()
-  const skip = await start(
-    'final-skip',
-    join(mkdtempSync(join(tmpdir(), 'astro-final-skip-')), 'state.sqlite'),
-  )
+  const recoveredListener = await recovered.listen()
   t.after(async () => {
-    await skip.listener.close()
-    skip.service.close()
+    await recoveredListener.close()
+    recovered.close()
   })
-  const skipSnapshot = await bootstrapSnapshot(`${skip.base}/api/snapshot`)
-  assert.equal(skipSnapshot.activeRun._tag, 'Active')
-  if (skipSnapshot.activeRun._tag !== 'Active')
-    throw new Error('Skip requires an active run')
-  const skipped = await fetch(`${skip.base}/api/commands/skip-fake-sequence`, {
-    method: 'POST',
-    body: JSON.stringify({
-      expectedLeaseRevision: skipSnapshot.control.revision,
-      expectedRunRevision: skipSnapshot.activeRun.run.revision,
-      idempotencyKey: 'final-skip-once',
-    }),
-  }).then((response) => response.json())
-  assert.equal(skipped.snapshot.run.activeSequenceIndex, 1)
   assert.equal(
-    skipped.snapshot.run.revision,
-    skipSnapshot.activeRun.run.revision + 1,
+    (
+      await bootstrapSnapshot(
+        `http://127.0.0.1:${recoveredListener.port}/api/snapshot`,
+      )
+    ).plan?.revision,
+    draft.revision + 1,
   )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      skip.service.database
-        .prepare(
-          "SELECT count(*) AS count FROM events WHERE type='FakeSequenceSkipped'",
-        )
-        .get(),
-    ).count,
-    1,
-  )
-  const stopped = await start(
-    'final-stop',
-    join(mkdtempSync(join(tmpdir(), 'astro-final-stop-')), 'state.sqlite'),
-  )
-  t.after(async () => {
-    await stopped.listener.close()
-    stopped.service.close()
-  })
-  const stopSnapshot = await bootstrapSnapshot(`${stopped.base}/api/snapshot`)
-  assert.equal(stopSnapshot.activeRun._tag, 'Active')
-  if (stopSnapshot.activeRun._tag !== 'Active')
-    throw new Error('Stop requires an active run')
-  const stop = await fetch(`${stopped.base}/api/commands/stop-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      expectedLeaseRevision: stopSnapshot.control.revision,
-      expectedRunRevision: stopSnapshot.activeRun.run.revision,
-      idempotencyKey: 'final-stop-once',
-    }),
-  }).then((response) => response.json())
-  assert.equal(stop.snapshot.run.phase, 'stopped')
-  assert.equal(
-    stop.snapshot.run.revision,
-    stopSnapshot.activeRun.run.revision + 1,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      stopped.service.database
-        .prepare("SELECT count(*) AS count FROM events WHERE type='RunStopped'")
-        .get(),
-    ).count,
-    1,
-  )
-  const blockedPolicy = await fetch(
-    `${stopped.base}/api/commands/request-fake-park`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        expectedLeaseRevision: stop.snapshot.control.revision,
-        expectedRunRevision: stop.snapshot.run.revision,
-        idempotencyKey: 'final-stop-policy',
-      }),
-    },
-  )
-  assert.equal(blockedPolicy.status, 409)
 })
 
-test('a viewer-role current controller retains fake Observe authority while viewers and phones remain ineligible', async (t) => {
+test('canonical Observe commands drive fake lifecycle, recovery, terminal, and consequence paths', async (t) => {
+  const service = createFixtureService()
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const started = await startFixtureRun(base, 'canonical-observe-start')
+  if (started.observe === undefined)
+    throw new Error('Observe run is unavailable')
+  const pause = await submitObserve(base, {
+    _tag: 'PauseRun',
+    expectedLeaseRevision: started.control.revision,
+    expectedRunRevision: started.observe.revision,
+    idempotencyKey: 'canonical-observe-pause',
+  })
+  assert.equal(pause.response.status, 202)
+  assert.equal(pause.body._tag, 'Accepted')
+  const paused = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(paused.observe?.phase, 'paused')
+  assert.equal(service.advanceFakeRun(), undefined)
+  if (paused.observe === undefined)
+    throw new Error('Paused Observe run is unavailable')
+  const resumed = await submitObserve(base, {
+    _tag: 'ResumeRun',
+    expectedLeaseRevision: paused.control.revision,
+    expectedRunRevision: paused.observe.revision,
+    idempotencyKey: 'canonical-observe-resume',
+  })
+  assert.equal(resumed.response.status, 202)
+  const active = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (active.observe === undefined)
+    throw new Error('Observe run is unavailable')
+  for (const _tag of ['RetryPhase', 'SkipSequence'] as const) {
+    const response = await submitObserve(base, {
+      _tag,
+      expectedLeaseRevision: active.control.revision,
+      expectedRunRevision: (await bootstrapSnapshot(`${base}/api/snapshot`))
+        .observe?.revision,
+      idempotencyKey: `canonical-observe-${_tag}`,
+    })
+    assert.equal(response.response.status, 202)
+    assert.equal(response.body._tag, 'Accepted')
+  }
+  const afterSkip = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (afterSkip.observe === undefined)
+    throw new Error('Observe run is unavailable')
+  const parked = await submitObserve(base, {
+    _tag: 'RequestPark',
+    expectedLeaseRevision: afterSkip.control.revision,
+    expectedRunRevision: afterSkip.observe.revision,
+    idempotencyKey: 'canonical-observe-park',
+  })
+  assert.equal(parked.response.status, 202)
+  assert.equal(
+    (await bootstrapSnapshot(`${base}/api/snapshot`)).observe?.phase,
+    'parkRequested',
+  )
+  const terminal = await submitObserve(base, {
+    _tag: 'StopRun',
+    expectedLeaseRevision: afterSkip.control.revision,
+    expectedRunRevision: afterSkip.observe.revision,
+    idempotencyKey: 'canonical-observe-terminal',
+  })
+  assert.equal(terminal.response.status, 409)
+  assert.equal(terminal.body._tag, 'Rejected')
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+    ).count,
+    0,
+  )
+  const stoppedService = createFixtureService()
+  const stoppedListener = await stoppedService.listen()
+  const stoppedBase = `http://127.0.0.1:${stoppedListener.port}`
+  t.after(async () => {
+    await stoppedListener.close()
+    stoppedService.close()
+  })
+  const stoppedSnapshot = await startFixtureRun(
+    stoppedBase,
+    'canonical-observe-stop-start',
+  )
+  if (stoppedSnapshot.observe === undefined)
+    throw new Error('Observe run is unavailable')
+  const stopped = await submitObserve(stoppedBase, {
+    _tag: 'StopRun',
+    expectedLeaseRevision: stoppedSnapshot.control.revision,
+    expectedRunRevision: stoppedSnapshot.observe.revision,
+    idempotencyKey: 'canonical-observe-stop',
+  })
+  assert.equal(stopped.response.status, 202)
+  assert.equal(
+    (await bootstrapSnapshot(`${stoppedBase}/api/snapshot`)).observe?.phase,
+    'stopped',
+  )
+})
+
+test('canonical snapshot-first reconnect and shared SQLite projection keep commands unreplayed', async (t) => {
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-canonical-projection-')),
+    'state.sqlite',
+  )
+  const owner = createFixtureService(databasePath)
+  const friend = createFixtureService(databasePath, () => ({
+    personId: 'friend-ada',
+    clientId: 'desktop-ada',
+    role: 'viewer' as const,
+    capability: 'controlCapable' as const,
+  }))
+  const ownerListener = await owner.listen()
+  const friendListener = await friend.listen()
+  const ownerBase = `http://127.0.0.1:${ownerListener.port}`
+  const friendBase = `http://127.0.0.1:${friendListener.port}`
+  t.after(async () => {
+    await ownerListener.close()
+    await friendListener.close()
+    owner.close()
+    friend.close()
+  })
+  const stream = await fetch(`${ownerBase}/api/events`)
+  const reader = stream.body?.getReader()
+  assert.match(await nextEvent(reader), /ProjectionChanged/)
+  await startFixtureRun(ownerBase, 'canonical-reconnect-start')
+  await reader?.cancel()
+  const reconnect = await fetch(`${ownerBase}/api/events`)
+  const reconnectReader = reconnect.body?.getReader()
+  assert.match(await nextEvent(reconnectReader), /"phase":"capture"/)
+  const before = databaseRow(
+    CountRow,
+    owner.database
+      .prepare("SELECT count(*) AS count FROM events WHERE type='RunStarted'")
+      .get(),
+  ).count
+  const requested = Schema.decodeUnknownSync(CommandHttpSuccessEnvelope)(
+    await fetch(`${friendBase}/api/commands/control`, {
+      method: 'POST',
+      body: JSON.stringify({
+        commandId: 'canonical-cross-process-request',
+        command: {
+          _tag: 'RequestControl',
+          expectedLeaseRevision: 1,
+          idempotencyKey: 'canonical-cross-process-request',
+        },
+      }),
+    }).then((response) => response.json()),
+  )
+  assert.equal(requested.ok, true)
+  assert.match(await nextEvent(reconnectReader), /"eventCursor":2/)
+  assert.equal(
+    databaseRow(
+      CountRow,
+      owner.database
+        .prepare("SELECT count(*) AS count FROM events WHERE type='RunStarted'")
+        .get(),
+    ).count,
+    before,
+  )
+  await reconnectReader?.cancel()
+})
+
+test('canonical Observe pause survives restart and resumes the persisted fake run', async (t) => {
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-canonical-observe-restart-')),
+    'state.sqlite',
+  )
+  const service = createFixtureService(databasePath)
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  const started = await startFixtureRun(base, 'canonical-restart-start')
+  if (started.observe === undefined)
+    throw new Error('Observe run is unavailable')
+  const paused = await submitObserve(base, {
+    _tag: 'PauseRun',
+    expectedLeaseRevision: started.control.revision,
+    expectedRunRevision: started.observe.revision,
+    idempotencyKey: 'canonical-restart-pause',
+  })
+  assert.equal(paused.response.status, 202)
+  await listener.close()
+  service.close()
+  const recovered = createFixtureService(databasePath)
+  const recoveredListener = await recovered.listen()
+  t.after(async () => {
+    await recoveredListener.close()
+    recovered.close()
+  })
+  const recoveredBase = `http://127.0.0.1:${recoveredListener.port}`
+  const persisted = await bootstrapSnapshot(`${recoveredBase}/api/snapshot`)
+  assert.equal(persisted.observe?.phase, 'paused')
+  if (persisted.observe === undefined)
+    throw new Error('Paused Observe run is unavailable')
+  const resumed = await submitObserve(recoveredBase, {
+    _tag: 'ResumeRun',
+    expectedLeaseRevision: persisted.control.revision,
+    expectedRunRevision: persisted.observe.revision,
+    idempotencyKey: 'canonical-restart-resume',
+  })
+  assert.equal(resumed.response.status, 202)
+  assert.notEqual(
+    (await bootstrapSnapshot(`${recoveredBase}/api/snapshot`)).observe?.phase,
+    'paused',
+  )
+})
+
+test('non-fixture startup projects unavailable Plan truth through canonical commands', async (t) => {
+  const service = createLocalWebService(':memory:')
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(snapshot.plan, undefined)
+  const rejected = await submitPlan(base, {
+    _tag: 'StartAcceptedRun',
+    planId: 'uninitialized',
+    expectedPlanRevision: 0,
+    expectedLeaseRevision: snapshot.control.revision,
+    idempotencyKey: 'canonical-unavailable-plan',
+  })
+  assert.equal(rejected.response.status, 409)
+  assert.equal(rejected.body._tag, 'Rejected')
+  if (rejected.body._tag === 'Rejected')
+    assert.equal(rejected.body.failure._tag, 'Rejected')
+})
+
+test('canonical Plan and Observe routes enforce admitted owner, viewer, and phone authority', async (t) => {
   const service = createFixtureService(':memory:', (request) =>
-    request?.headers.authorization === 'Bearer controller'
+    request?.headers.authorization === 'Bearer owner'
       ? {
-          personId: 'viewer-controller',
+          personId: 'owner',
           clientId: 'desktop-owner',
-          role: 'viewer' as const,
+          role: 'owner' as const,
           capability: 'controlCapable' as const,
         }
       : request?.headers.authorization === 'Bearer viewer'
         ? {
             personId: 'viewer',
-            clientId: 'viewer-desktop',
+            clientId: 'desktop-viewer',
             role: 'viewer' as const,
             capability: 'controlCapable' as const,
           }
         : request?.headers.authorization === 'Bearer phone'
           ? {
-              personId: 'viewer-phone',
-              clientId: 'desktop-owner',
-              role: 'viewer' as const,
+              personId: 'owner',
+              clientId: 'phone-owner',
+              role: 'owner' as const,
               capability: 'readOnly' as const,
             }
           : undefined,
@@ -6935,215 +5209,56 @@ test('a viewer-role current controller retains fake Observe authority while view
     await listener.close()
     service.close()
   })
-  const controller = { authorization: 'Bearer controller' }
-  const viewer = { authorization: 'Bearer viewer' }
-  const phone = { authorization: 'Bearer phone' }
-  await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    headers: controller,
-    body: JSON.stringify({
-      _tag: 'StartRunFromPlan',
-      planId: 'plan-m27',
-      expectedPlanRevision: 3,
-      expectedLeaseRevision: 1,
-      idempotencyKey: 'observe-current-run',
-    }),
-  })
+  const owner = { authorization: 'Bearer owner' }
   const initial = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: controller,
+    headers: owner,
   })
-  assert.equal(initial.observe?.actions.pause._tag, 'Eligible')
-  assert.deepEqual(
-    (await bootstrapSnapshot(`${base}/api/snapshot`, { headers: viewer }))
-      .observe?.actions.pause,
-    { _tag: 'Ineligible', reason: 'controlRequired' },
+  if (initial.plan === undefined) throw new Error('Fixture Plan is unavailable')
+  const viewerDraft = await submitPlan(
+    base,
+    {
+      _tag: 'SaveDraft',
+      planId: initial.plan.planId,
+      expectedPlanRevision: initial.plan.revision,
+      idempotencyKey: 'viewer-plan-edit',
+      sequences: initial.plan.sequences.map(
+        ({ viability, ...sequence }) => sequence,
+      ),
+    },
+    { authorization: 'Bearer viewer' },
   )
-  assert.deepEqual(
-    (await bootstrapSnapshot(`${base}/api/snapshot`, { headers: phone }))
-      .observe?.actions.pause,
-    { _tag: 'Ineligible', reason: 'readOnlyClient' },
+  assert.equal(viewerDraft.response.status, 403)
+  const started = await submitPlan(
+    base,
+    {
+      _tag: 'StartAcceptedRun',
+      planId: initial.plan.planId,
+      expectedPlanRevision: initial.plan.revision,
+      expectedLeaseRevision: initial.control.revision,
+      idempotencyKey: 'owner-plan-start',
+    },
+    owner,
   )
-  if (initial.observe === undefined) throw new Error('Observe run is required')
-  service.database
-    .prepare('INSERT INTO events VALUES (?,?,?)')
-    .run(999, 'FakeParkRequested', JSON.stringify({ run: { id: 'prior-run' } }))
-  const current = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: controller,
+  assert.equal(started.response.status, 202)
+  const active = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: owner,
   })
-  assert.equal(
-    current.observe?.lifecycleFacts.includes(
-      'Fake/fixture lifecycle fact: FakeParkRequested.',
-    ),
-    false,
-  )
-  const pause = await fetch(`${base}/api/observe/commands`, {
-    method: 'POST',
-    headers: controller,
-    body: JSON.stringify({
-      intent: {
-        _tag: 'PauseRun',
-        expectedLeaseRevision: initial.control.revision,
-        expectedRunRevision: initial.observe.revision,
-        idempotencyKey: 'observe-pause',
-      },
-    }),
-  })
-  assert.equal(pause.status, 202)
-  const paused = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: controller,
-  })
-  assert.equal(paused.observe?.phase, 'paused')
-  assert.equal(paused.observe?.actions.stop._tag, 'Eligible')
-  assert.equal(paused.observe?.actions.park._tag, 'Eligible')
-  assert.equal(paused.observe?.actions.skip._tag, 'Ineligible')
-  assert.equal(paused.observe?.actions.retry._tag, 'Ineligible')
-  if (paused.observe?.actions.skip._tag === 'Ineligible')
-    assert.equal(paused.observe.actions.skip.reason, 'policyUnavailable')
-  if (paused.observe === undefined)
-    throw new Error('Paused Observe run is required')
-  const phonePause = await fetch(`${base}/api/observe/commands`, {
-    method: 'POST',
-    headers: phone,
-    body: JSON.stringify({
-      intent: {
-        _tag: 'PauseRun',
-        expectedLeaseRevision: paused.control.revision,
-        expectedRunRevision: paused.observe.revision,
-        idempotencyKey: 'observe-phone-pause',
-      },
-    }),
-  })
-  assert.equal(phonePause.status, 403)
-  const parked = await fetch(`${base}/api/observe/commands`, {
-    method: 'POST',
-    headers: controller,
-    body: JSON.stringify({
-      intent: {
-        _tag: 'RequestPark',
-        expectedLeaseRevision: paused.control.revision,
-        expectedRunRevision: paused.observe.revision,
-        idempotencyKey: 'observe-park',
-      },
-    }),
-  })
-  assert.equal(parked.status, 202)
-  const terminal = await bootstrapSnapshot(`${base}/api/snapshot`, {
-    headers: controller,
-  })
-  assert.equal(terminal.observe?.phase, 'parkRequested')
-  assert.equal(
-    terminal.observe?.attemptFacts.includes(
-      'Park is policy only; no mount moved.',
-    ),
-    true,
-  )
-  assert.deepEqual(terminal.observe?.actions.stop, {
-    _tag: 'Ineligible',
-    reason: 'terminalRun',
-  })
-})
-
-test('Observe command transport rejects invalid and terminal actions and maps fake lifecycle actions', async (t) => {
-  const service = createFixtureService(':memory:', () => ({
-    personId: 'viewer-controller',
-    clientId: 'desktop-owner',
-    role: 'viewer' as const,
-    capability: 'controlCapable' as const,
-  }))
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  const malformed = await fetch(`${base}/api/observe/commands`, {
-    method: 'POST',
-    body: JSON.stringify({}),
-  })
-  assert.equal(malformed.status, 400)
-  assert.equal(
-    Schema.decodeUnknownSync(ObserveCommandResponse)(await malformed.json())
-      ._tag,
-    'Rejected',
-  )
-  const plan = await bootstrapSnapshot(`${base}/api/snapshot`)
-  if (plan.plan === undefined) throw new Error('Fixture Plan is required')
-  await fetch(`${base}/api/commands/start-run`, {
-    method: 'POST',
-    body: JSON.stringify({
-      _tag: 'StartRunFromPlan',
-      planId: plan.plan.planId,
-      expectedPlanRevision: plan.plan.revision,
-      expectedLeaseRevision: plan.control.revision,
-      idempotencyKey: 'observe-transport-start',
-    }),
-  })
-  const submit = async (
-    action:
-      'PauseRun' | 'ResumeRun' | 'RetryPhase' | 'SkipSequence' | 'StopRun',
-    key: string,
-  ) => {
-    const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
-    if (snapshot.observe === undefined)
-      throw new Error('Observe run is required')
-    return fetch(`${base}/api/observe/commands`, {
-      method: 'POST',
-      body: JSON.stringify({
-        intent: {
-          _tag: action,
-          expectedLeaseRevision: snapshot.control.revision,
-          expectedRunRevision: snapshot.observe.revision,
-          idempotencyKey: key,
-        },
-      }),
-    })
-  }
-  for (const [action, key] of [
-    ['PauseRun', 'observe-transport-pause'],
-    ['ResumeRun', 'observe-transport-resume'],
-    ['RetryPhase', 'observe-transport-retry'],
-    ['SkipSequence', 'observe-transport-skip'],
+  if (active.observe === undefined)
+    throw new Error('Observe run is unavailable')
+  for (const [headers, idempotencyKey] of [
+    [{ authorization: 'Bearer viewer' }, 'viewer-pause'],
+    [{ authorization: 'Bearer phone' }, 'phone-pause'],
   ] as const) {
-    const response = await submit(action, key)
-    assert.equal(response.status, 202)
-    assert.equal(
-      Schema.decodeUnknownSync(ObserveCommandResponse)(await response.json())
-        ._tag,
-      'Accepted',
-    )
-    if (action === 'RetryPhase') {
-      const retried = await bootstrapSnapshot(`${base}/api/snapshot`)
-      assert.deepEqual(retried.observe?.actions.retry, {
-        _tag: 'Ineligible',
-        reason: 'retryUsed',
-      })
-    }
-  }
-  const stopped = await submit('StopRun', 'observe-transport-stop')
-  assert.equal(stopped.status, 202)
-  const terminal = await bootstrapSnapshot(`${base}/api/snapshot`)
-  assert.equal(terminal.observe?.actions.retry._tag, 'Ineligible')
-  if (terminal.observe?.actions.retry._tag === 'Ineligible')
-    assert.equal(terminal.observe.actions.retry.reason, 'terminalRun')
-  const rejected = await fetch(`${base}/api/observe/commands`, {
-    method: 'POST',
-    body: JSON.stringify({
-      intent: {
-        _tag: 'RetryPhase',
-        expectedLeaseRevision: terminal.control.revision,
-        expectedRunRevision: terminal.observe?.revision,
-        idempotencyKey: 'observe-transport-terminal',
+    const denied = await submitObserve(
+      base,
+      {
+        _tag: 'PauseRun',
+        expectedLeaseRevision: active.control.revision,
+        expectedRunRevision: active.observe.revision,
+        idempotencyKey,
       },
-    }),
-  })
-  assert.equal(rejected.status, 409)
-  const rejectedBody = Schema.decodeUnknownSync(ObserveCommandResponse)(
-    await rejected.json(),
-  )
-  assert.equal(rejectedBody._tag, 'Rejected')
-  if (
-    rejectedBody._tag === 'Rejected' &&
-    rejectedBody.failure._tag === 'Rejected'
-  )
-    assert.equal(rejectedBody.failure.reason, 'AlreadyTerminal')
+      headers,
+    )
+    assert.equal(denied.response.status, 403)
+  }
 })

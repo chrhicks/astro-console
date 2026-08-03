@@ -3,31 +3,20 @@ import test from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { Schema } from 'effect'
-import {
-  fixtureScenarios,
-  parseFixtureScenario,
-  projectFixture,
-} from './fixture-adapter'
 import { unavailableProjection } from './future-adapter'
 import { ActionResult, actionAvailability, actionResult } from './presentation'
 import { parseRoute, routePath, routeWithProjection } from './routes'
 import { Shell } from './Shell'
-import { LibraryView } from './workspaces/LibraryView'
-import { ObserveView } from './workspaces/ObserveView'
 import { planDraftStatus, PlanView } from './workspaces/PlanView'
 import { ProcessView } from './workspaces/ProcessView'
-import { ActionButton, Status } from './workspaces/shared'
+import { Status } from './workspaces/shared'
 import { BootstrapClientState } from './bootstrap-client'
 import { projectBootstrapState } from './bootstrap-projection'
 import {
   bootstrapFixtures,
   BootstrapSnapshot,
-  LibraryAssetDetail,
-  LibraryPage,
-  LibraryQuery,
   ProcessSourceHandoff,
 } from '@astro-console/v2-contracts'
-
 test('routes parse stable IDs and build escaped URLs', () => {
   assert.deepEqual(parseRoute('/library/assets/asset%2Fone'), {
     kind: 'asset',
@@ -50,8 +39,8 @@ test('routes parse stable IDs and build escaped URLs', () => {
   if (processSourceRoute.kind !== 'process-source')
     assert.fail('Expected a process-source route')
   assert.equal(
-    routeWithProjection(processSourceRoute, '?fixture=process-failure'),
-    '/process?sourceAssetId=asset%2Fone&fixture=process-failure',
+    routeWithProjection(processSourceRoute),
+    '/process?sourceAssetId=asset%2Fone',
   )
 })
 
@@ -255,100 +244,6 @@ test('typed unavailable results retain the visible protection reason', () => {
   })
 })
 
-test('future action results distinguish pending and rejected outcomes', () => {
-  const action = projectFixture('fresh').plan.action
-  if (!action) assert.fail('Expected fixture action')
-  assert.equal(
-    ActionResult.$is('Pending')(
-      actionResult({
-        ...action,
-        availability: 'available',
-      }),
-    ),
-    true,
-  )
-  assert.equal(
-    ActionResult.$is('Rejected')(
-      actionResult({
-        ...action,
-        availability: 'protected',
-      }),
-    ),
-    true,
-  )
-})
-
-test('fixture scenarios parse deterministically and remain read-only', () => {
-  assert.equal(parseFixtureScenario('unknown'), 'fresh')
-  assert.deepEqual(
-    fixtureScenarios.map((scenario) => parseFixtureScenario(scenario)),
-    fixtureScenarios,
-  )
-  const projections = fixtureScenarios.map(projectFixture)
-  assert.equal(
-    new Set(projections.map((projection) => projection.shell.service)).size,
-    fixtureScenarios.length,
-  )
-  for (const projection of projections)
-    for (const action of [
-      projection.plan.action,
-      projection.observe.action,
-      projection.library.action,
-    ])
-      assert.notEqual(action?.availability, 'available')
-})
-
-test('fixture Observe lifecycle projections state fixture evidence coherently', () => {
-  const lifecycle = [
-    ['observe-preflight', 'Preflight'],
-    ['observe-acquire', 'Acquire'],
-    ['observe-verify', 'Verify'],
-    ['observe-complete', 'Complete'],
-    ['observe-recovery', 'Recover'],
-  ] as const
-  for (const [scenario, phase] of lifecycle) {
-    const observe = projectFixture(scenario).observe
-    assert.equal(observe.phase, phase)
-    assert.match(observe.status, /Fixture|fixture/)
-    assert.match(observe.evidence, /fixture/i)
-    assert.equal(observe.lifecycle.includes(phase), true)
-    assert.equal(observe.annotation, observe.evidence)
-    assert.ok(observe.trace.length > 0)
-  }
-})
-
-test('fixture projections distinguish disconnected, rejected, and delivery states', () => {
-  const disconnected = projectFixture('disconnected')
-  assert.match(disconnected.shell.service, /disconnected/i)
-  assert.match(disconnected.shell.freshness, /current authoritative truth/i)
-  assert.doesNotMatch(disconnected.shell.service, /stale|reconnecting/i)
-  assert.match(disconnected.observe.status, /current run truth is unavailable/i)
-  assert.equal(disconnected.shell.currentRun, undefined)
-
-  const rejected = projectFixture('rejected')
-  assert.match(rejected.observe.status, /simulated action rejection/i)
-  assert.match(rejected.observe.action?.reason ?? '', /simulated rejection/i)
-
-  assert.match(
-    projectFixture('delivery-ready').library.assets[0]?.download ?? '',
-    /Fixture representation ready to download/,
-  )
-})
-
-test('read-only action boundaries expose facts without a button', () => {
-  const action = projectFixture('fresh').plan.action
-  if (!action) assert.fail('Expected fixture action')
-  const markup = renderToStaticMarkup(
-    createElement(ActionButton, {
-      action,
-      renderActions: false,
-      submit: () => undefined,
-    }),
-  )
-  assert.doesNotMatch(markup, /<button/)
-  assert.match(markup, /Development fixture has no command service/)
-})
-
 test('status and shell environment preserve semantic and projected facts', () => {
   const status = renderToStaticMarkup(
     createElement(Status, { tone: 'attention', children: 'Awaiting service' }),
@@ -373,34 +268,6 @@ test('status and shell environment preserve semantic and projected facts', () =>
   assert.match(shell, /Commands cannot be sent or replayed/)
   assert.match(shell, /Service availability unknown without a snapshot/)
   assert.match(shell, /Static result output remains visible/)
-})
-
-test('shell exposes a persisted current run outside Observe without commands', () => {
-  const projection = projectFixture('fresh')
-  const link = (route: ReturnType<typeof parseRoute>) => {
-    if (route.kind === 'not-found') assert.fail('Expected a workspace route')
-    return { href: routePath(route), onClick: () => undefined }
-  }
-  const library = renderToStaticMarkup(
-    createElement(Shell, {
-      workspace: 'library',
-      view: projection.shell,
-      link,
-      result: undefined,
-    }),
-  )
-  const observe = renderToStaticMarkup(
-    createElement(Shell, {
-      workspace: 'observe',
-      view: projection.shell,
-      link,
-      result: undefined,
-    }),
-  )
-  assert.match(library, /Return to Observe/)
-  assert.match(library, /Fixture estimate: 2h 18m remaining/)
-  assert.doesNotMatch(library, /<button/)
-  assert.doesNotMatch(observe, /Return to Observe/)
 })
 
 test('process has a focusable screen heading', () => {
@@ -447,162 +314,4 @@ test('Process source handoffs resolve only from the server without Process claim
     markup,
     /Build complete|Last valid image|evidence-image|group-1|Interactive processing is not available in this workspace/,
   )
-})
-
-test('room projections render their required landmarks', () => {
-  const projection = projectFixture('fresh')
-  const link = (route: ReturnType<typeof parseRoute>) => {
-    if (route.kind === 'not-found') assert.fail('Expected a workspace route')
-    return { href: routePath(route), onClick: () => undefined }
-  }
-  const plan = renderToStaticMarkup(
-    createElement(PlanView, { view: projection.plan }),
-  )
-  const observe = renderToStaticMarkup(
-    createElement(ObserveView, { view: projection.observe }),
-  )
-  const library = renderToStaticMarkup(
-    createElement(LibraryView, {
-      view: projection.library,
-      assetId: undefined,
-      link,
-    }),
-  )
-  assert.match(plan, /sequence-list/)
-  assert.match(plan, /sky-field/)
-  assert.match(plan, /plan-timeline/)
-  assert.match(observe, /observe-image/)
-  assert.match(observe, /observe-decision/)
-  assert.match(observe, /lifecycle/)
-  assert.match(library, /library-lineage/)
-  assert.match(library, /library-inspector/)
-  assert.match(library, /frame-grid/)
-  assert.match(observe, /evidence-image/)
-})
-
-test('Library renders only eligible desktop actions and keeps phone read-only', () => {
-  const detail = Schema.decodeUnknownSync(LibraryAssetDetail)({
-    assetId: 'asset-1',
-    revision: 1,
-    role: 'final',
-    format: 'fits',
-    availability: 'published',
-    capturedAt: '2026-08-03T00:00:00.000Z',
-    comparisonGroupId: 'group-1',
-    lineage: {
-      sourceAssetIds: ['source-1'],
-      runId: 'run-1',
-      solveAttemptId: 'solve-1',
-    },
-    representations: [{ label: 'Published FITS', state: 'published' }],
-    actions: [
-      { _tag: 'Eligible', action: 'download' },
-      {
-        _tag: 'Unavailable',
-        action: 'openInProcess',
-        reason: 'AssetNotAvailableLocally',
-      },
-    ],
-  })
-  const view = projectFixture('fresh').library
-  const link = (route: ReturnType<typeof parseRoute>) => {
-    if (route.kind === 'not-found') assert.fail('Expected a workspace route')
-    return { href: routePath(route), onClick: () => undefined }
-  }
-  const desktop = renderToStaticMarkup(
-    createElement(LibraryView, { view, assetId: 'asset-1', link, detail }),
-  )
-  const phone = renderToStaticMarkup(
-    createElement(LibraryView, {
-      view,
-      assetId: 'asset-1',
-      link,
-      detail,
-      readOnly: true,
-    }),
-  )
-  assert.match(desktop, /Download/)
-  assert.match(desktop, /AssetNotAvailableLocally/)
-  assert.doesNotMatch(desktop, /Open source handoff in Process/)
-  assert.doesNotMatch(phone, /href="\/api\/library\/assets\/asset-1\/download"/)
-})
-
-test('Library root selects the first loaded record without claiming its detail', () => {
-  const view = projectFixture('fresh').library
-  const query = Schema.decodeUnknownSync(LibraryQuery)({
-    queryId: 'nightbook',
-    pageSize: 40,
-    sort: 'capturedAtDescending',
-  })
-  const page = Schema.decodeUnknownSync(LibraryPage)({
-    queryId: 'nightbook',
-    querySnapshotVersion: 1,
-    results: [
-      {
-        assetId: 'asset-first',
-        revision: 1,
-        role: 'original',
-        format: 'fits',
-        availability: 'availableLocally',
-        comparisonGroupId: 'm27',
-      },
-      {
-        assetId: 'asset-second',
-        revision: 1,
-        role: 'final',
-        format: 'fits',
-        availability: 'published',
-        comparisonGroupId: 'm27',
-      },
-    ],
-    catalogChanged: false,
-  })
-  const link = (route: ReturnType<typeof parseRoute>) => {
-    if (route.kind === 'not-found') assert.fail('Expected a workspace route')
-    return { href: routePath(route), onClick: () => undefined }
-  }
-  const markup = renderToStaticMarkup(
-    createElement(LibraryView, {
-      view,
-      assetId: undefined,
-      link,
-      page: {
-        query,
-        value: page,
-      },
-    }),
-  )
-  assert.match(
-    markup,
-    /data-selected="true"[^>]*href="\/library\/assets\/asset-first"/,
-  )
-  assert.match(
-    markup,
-    /data-selected="false"[^>]*href="\/library\/assets\/asset-second"/,
-  )
-  assert.match(markup, /Select an asset to open detail\./)
-  assert.doesNotMatch(markup, /aria-current="page"/)
-  assert.doesNotMatch(markup, /Loading asset detail\./)
-})
-
-test('Library loading state omits records from the previous page', () => {
-  const view = projectFixture('fresh').library
-  const query = Schema.decodeUnknownSync(LibraryQuery)({
-    queryId: 'nightbook',
-    pageSize: 40,
-    sort: 'recentlyUpdated',
-  })
-  const markup = renderToStaticMarkup(
-    createElement(LibraryView, {
-      view,
-      assetId: undefined,
-      link: (route) => ({ href: routePath(route), onClick: () => undefined }),
-      page: {
-        query,
-        message: 'Loading Library records.',
-      },
-    }),
-  )
-  assert.match(markup, /Loading Library records\./)
-  assert.doesNotMatch(markup, /M31 luminance original/)
 })

@@ -17,23 +17,23 @@ semantic presentation, and reusable implementation.
 5. Validate keyboard, phone monitor, overflow, freshness, and stale-action
    rejection before component extraction.
 
-For visual implementation and review, inspect [`docs/v2-ui-final`](../../v2-ui-final/).
-Adapt its source composition and token system while retaining production route
-links, typed projections, and service-owned authority. Do not import its
-fixtures, theme runtime, viewport authority, local durable/mutation state, or
-button-based workspace navigation. Keep the Alignment Aperture asset.
+For visual implementation and review, inspect `apps/web` source and CSS with
+accepted screenshot evidence. `docs/v2-ui-final` is historical design evidence;
+do not import its fixtures, theme runtime, viewport authority, local
+durable/mutation state, or button-based workspace navigation. Keep the
+Alignment Aperture asset.
 
 ## Data-To-UI Mapping
 
-| Domain data | UI projection | Required presentation boundary |
-| --- | --- | --- |
-| Active Run + revision + phase | status anchor and Observe runbar | accepted definition/current phase/progress; changing workspace never mutates it |
-| Control lease + presence + freshness | capability/freshness and Authority trace | controller is distinct from viewer; stale intent is rejected before action |
-| Plan + sequence + viability | observing window and selected sequence context | future intent only; `Run plan` creates accepted run |
-| Acquisition Attempt + frame + solve | evidence surface, geometry, attempt history | desired/solved/uncertainty/bound visible; preserve failed frame |
-| Asset + representations + lineage | Library chronology and lineage | stable IDs/provenance/availability; originals may remain local |
-| Processing Session + history + checkpoint | Process navigator/canvas/Operation | preview, Apply, undo, checkpoint, failure retry scope are distinct |
-| Resource pressure/tool diagnostics | contextual notice/diagnostics | state measured pressure and protection; redact secrets/paths |
+| Domain data                               | UI projection                                  | Required presentation boundary                                                  |
+| ----------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------- |
+| Active Run + revision + phase             | status anchor and Observe runbar               | accepted definition/current phase/progress; changing workspace never mutates it |
+| Control lease + presence + freshness      | capability/freshness and Authority trace       | controller is distinct from viewer; stale intent is rejected before action      |
+| Plan + sequence + viability               | observing window and selected sequence context | future intent only; `Run plan` creates accepted run                             |
+| Acquisition Attempt + frame + solve       | evidence surface, geometry, attempt history    | desired/solved/uncertainty/bound visible; preserve failed frame                 |
+| Asset + representations + lineage         | Library chronology and lineage                 | stable IDs/provenance/availability; originals may remain local                  |
+| Processing Session + history + checkpoint | Process navigator/canvas/Operation             | preview, Apply, undo, checkpoint, failure retry scope are distinct              |
+| Resource pressure/tool diagnostics        | contextual notice/diagnostics                  | state measured pressure and protection; redact secrets/paths                    |
 
 ## Screen And State Inventory
 
@@ -49,10 +49,14 @@ allowed action, failure protection, and phone projection.
 - Reconnect installs the current authoritative snapshot; do not merge old local
   edits into service truth or use `reconstructed` as primary UI language.
 - Browser presence is not control authority; no buffered/replayed commands.
+- The typed control seam is preserved, but user-facing presence and control UI
+  are Phase 6 work; reconnect and presence lifecycle are not current claims.
 - Automation explains/proposes; it does not silently mutate hardware, plans,
   or image history.
 - Process preview is not Apply; discarded session work is not durable asset;
   saved outputs are related Library artifacts, not one universal final.
+- Interactive Process is Phase 5 work; the current production boundary is a
+  Process handoff only.
 - Phone is monitoring only in the initial release.
 
 ## Build Checklist
@@ -75,25 +79,25 @@ relevant gate, then update the library and style guide together.
 
 ## Component Selection Matrix
 
-| If the user must judge… | Use | Do not use |
-| --- | --- | --- |
-| future viability and ordered intent | observing window + selected sequence context | generic target cards as the primary object |
-| current image-derived result | evidence frame + aligned facts + consequence trace | telemetry dashboard or wizard stepper |
-| who may change an accepted run | authority trace + capability/freshness | presence avatar or local form state |
-| why an asset exists and is available | lineage + representation facts | unlinked thumbnail grid |
-| visual development result | canvas + linear session + Operation context | tool-card dashboard or generic settings page |
-| protected interruption | consequence panel/modal with scope and return | toast-only failure or hidden retry |
+| If the user must judge…              | Use                                                | Do not use                                   |
+| ------------------------------------ | -------------------------------------------------- | -------------------------------------------- |
+| future viability and ordered intent  | observing window + selected sequence context       | generic target cards as the primary object   |
+| current image-derived result         | evidence frame + aligned facts + consequence trace | telemetry dashboard or wizard stepper        |
+| who may change an accepted run       | authority trace + capability/freshness             | presence avatar or local form state          |
+| why an asset exists and is available | lineage + representation facts                     | unlinked thumbnail grid                      |
+| visual development result            | canvas + linear session + Operation context        | tool-card dashboard or generic settings page |
+| protected interruption               | consequence panel/modal with scope and return      | toast-only failure or hidden retry           |
 
 ## Screen Projection Inventory
 
-| Screen/state | Primary service source and owner | Dominant object | Allowed/visible action |
-| --- | --- | --- | --- |
-| Plan viable / invalid | Observing Plan and Sequence; Plan owns future intent | observing window | validate / Run plan only when eligible |
-| Observe healthy / warning / recovery | Active Run; service owns execution | current evidence and decision | bounded Observe action; recovery states protection |
-| Acquire retry / exhausted / approval | Acquisition Attempt; service owns bound | solved frame/geometry and attempt history | automatic trace / explicit recovery or approval |
-| Authority stale / reconnect / lease | Active Run + Control Lease; service owns authority | authority/freshness trace | request/take control only when capability permits |
-| Library availability / lineage | Asset; Library owns durable evidence | chronology and lineage | Open in Process/download only by authorization |
-| Process preview / failure / save | Processing Session; service owns session | canvas and current operation | Preview, Apply, retry stage, Save/Discard with scope |
+| Screen/state                         | Primary service source and owner                     | Dominant object                           | Allowed/visible action                             |
+| ------------------------------------ | ---------------------------------------------------- | ----------------------------------------- | -------------------------------------------------- |
+| Plan viable / invalid                | Observing Plan and Sequence; Plan owns future intent | observing window                          | validate / Run plan only when eligible             |
+| Observe healthy / warning / recovery | Active Run; service owns execution                   | current evidence and decision             | bounded Observe action; recovery states protection |
+| Acquire retry / exhausted / approval | Acquisition Attempt; service owns bound              | solved frame/geometry and attempt history | automatic trace / explicit recovery or approval    |
+| Authority stale / reconnect / lease  | Active Run + Control Lease; service owns authority   | authority/freshness trace                 | no user-facing control action until Phase 6        |
+| Library availability / lineage       | Asset; Library owns durable evidence                 | chronology and lineage                    | Open in Process/download only by authorization     |
+| Process preview / failure / save     | Processing Session; service owns session             | canvas and current operation              | Phase 5 interactive Process scope                  |
 
 ## Acceptance Test Protocol
 

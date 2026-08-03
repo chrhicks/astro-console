@@ -125,6 +125,16 @@ export const BootstrapControl = Schema.Struct({
   state: Schema.Literals(['held', 'reconnecting', 'unheld']),
   holderClientId: Schema.optionalKey(ClientId),
   reconnectGraceUntil: Schema.optionalKey(ExpiresAt),
+  pendingRequests: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        requestId: Schema.NonEmptyString,
+        personId: PersonId,
+        clientId: ClientId,
+        expiresAt: ExpiresAt,
+      }),
+    ),
+  ),
 })
 
 export interface BootstrapControl extends Schema.Schema.Type<

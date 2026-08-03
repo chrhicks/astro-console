@@ -1,7 +1,8 @@
 # V2 Prototype References
 
-This dependency-free static workspace separates accepted visual references
-from historical studies. Nothing here contacts observatory hardware.
+This dependency-free static workspace preserves historical Gate and design
+evidence. It is not a runtime implementation authority. Nothing here contacts
+observatory hardware.
 
 ## Open Locally
 
@@ -17,14 +18,14 @@ Then open:
 http://127.0.0.1:4173/prototype/v2-ui/
 ```
 
-## Accepted References
+## Historical References
 
 - `composite-prototype.html` — Gate 1 workspace shell and responsive model.
 - `acquire-prototype.html` — Gate 2 acquisition evidence and recovery.
 - `run-authority-prototype.html` — Gate 3 run mutation, reconnect, and control.
 - `process-prototype.html` — Gate 4 visual Build/Develop workflow.
 - `*-prototype-phase-0.5-preview.html` — clean, production-scale visual
-  previews used for Phase 1 implementation review. They are non-authoritative
+  previews used for Phase 1 implementation review. They are historical
   comparison surfaces, not product builds.
 - `phase-0.5-component-library.html` — clean visual companion for the accepted
   V2 component library; a reference showcase, not a dashboard.

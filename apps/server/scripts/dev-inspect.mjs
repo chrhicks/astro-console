@@ -23,11 +23,11 @@ if (!['m27', 'plan-draft', 'library-published'].includes(scenario))
 const scenarioSuffix = scenario === 'm27' ? '' : `-${scenario}`
 const profile = resolve(
   appRoot,
-  `.astro-local-web/inspect-chrome-profile-${requestedClient}${scenarioSuffix}`,
+  `.astro-server/inspect-chrome-profile-${requestedClient}${scenarioSuffix}`,
 )
 const database = resolve(
   appRoot,
-  `.astro-local-web/inspect-state-${requestedClient}${scenarioSuffix}.sqlite`,
+  `.astro-server/inspect-state-${requestedClient}${scenarioSuffix}.sqlite`,
 )
 const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 mkdirSync(profile, { recursive: true })
@@ -38,9 +38,9 @@ const server = spawn(
     cwd: appRoot,
     env: {
       ...process.env,
-      ASTRO_LOCAL_WEB_CLIENT: requestedClient,
-      ASTRO_LOCAL_WEB_FIXTURE: scenario,
-      ASTRO_LOCAL_WEB_DB: database,
+      ASTRO_SERVER_CLIENT: requestedClient,
+      ASTRO_SERVER_FIXTURE: scenario,
+      ASTRO_SERVER_DB: database,
     },
     stdio: ['inherit', 'pipe', 'pipe'],
   },
@@ -77,7 +77,6 @@ function startWeb() {
       env: {
         ...process.env,
         ASTRO_SERVER_ORIGIN: serverOrigin,
-        VITE_ASTRO_BOOTSTRAP: 'true',
       },
       stdio: ['inherit', 'pipe', 'pipe'],
     },

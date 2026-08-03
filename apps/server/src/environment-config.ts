@@ -8,6 +8,12 @@ const text = (name: string, fallback?: string) =>
   fallback === undefined
     ? Config.string(name)
     : Config.string(name).pipe(Config.withDefault(fallback))
+const migratedText = (name: string, alias: string, fallback?: string) =>
+  Config.orElse(Config.string(name), () => Config.string(alias)).pipe(
+    fallback === undefined ? (config) => config : Config.withDefault(fallback),
+  )
+const migratedOptional = (name: string, alias: string) =>
+  Config.option(Config.orElse(Config.string(name), () => Config.string(alias)))
 const configFailure = (message: string) =>
   Effect.fail(
     new Config.ConfigError(new ConfigProvider.SourceError({ message })),
@@ -44,17 +50,25 @@ export type OriginServerConfig = {
 export const originServerConfig = Config.all({
   admissionMode: text('ASTRO_ADMISSION_MODE', 'development'),
   audience: optional('CF_ACCESS_AUDIENCE'),
-  bind: text('ASTRO_LOCAL_WEB_BIND', '127.0.0.1'),
+  bind: migratedText('ASTRO_SERVER_BIND', 'ASTRO_LOCAL_WEB_BIND', '127.0.0.1'),
   bootstrapPath: optional('ASTRO_MEMBERSHIP_BOOTSTRAP_PATH'),
   cacheTtl: text('CF_ACCESS_JWKS_CACHE_TTL_MS', '300000'),
-  client: text('ASTRO_LOCAL_WEB_CLIENT', 'owner'),
+  client: migratedText(
+    'ASTRO_SERVER_CLIENT',
+    'ASTRO_LOCAL_WEB_CLIENT',
+    'owner',
+  ),
   clientContext: optional('ASTRO_CLIENT_CONTEXT'),
-  databasePath: text('ASTRO_LOCAL_WEB_DB', './.astro-local-web/state.sqlite'),
-  fixture: optional('ASTRO_LOCAL_WEB_FIXTURE'),
+  databasePath: migratedText(
+    'ASTRO_SERVER_DB',
+    'ASTRO_LOCAL_WEB_DB',
+    './.astro-server/state.sqlite',
+  ),
+  fixture: migratedOptional('ASTRO_SERVER_FIXTURE', 'ASTRO_LOCAL_WEB_FIXTURE'),
   issuer: optional('CF_ACCESS_ISSUER'),
   jwksUrl: optional('CF_ACCESS_JWKS_URL'),
-  port: text('ASTRO_LOCAL_WEB_PORT', '0'),
-  release: text('ASTRO_RELEASE', 'local-web-fixture'),
+  port: migratedText('ASTRO_SERVER_PORT', 'ASTRO_LOCAL_WEB_PORT', '0'),
+  release: text('ASTRO_RELEASE', 'server'),
   webDistPath: text('ASTRO_WEB_DIST', '../web/dist'),
   downloadGrantUrl: optional('ASTRO_DOWNLOAD_GRANT_URL'),
   downloadGrantSecretPath: optional('ASTRO_DOWNLOAD_GRANT_SHARED_SECRET_PATH'),
@@ -62,12 +76,10 @@ export const originServerConfig = Config.all({
   Config.mapOrFail(
     (input): Effect.Effect<OriginServerConfig, Config.ConfigError> => {
       if (input.bind !== '127.0.0.1' && input.bind !== '0.0.0.0')
-        return configFailure(
-          'ASTRO_LOCAL_WEB_BIND must be 127.0.0.1 or 0.0.0.0',
-        )
+        return configFailure('ASTRO_SERVER_BIND must be 127.0.0.1 or 0.0.0.0')
       if (!/^\d+$/.test(input.port) || Number(input.port) > 65_535)
         return configFailure(
-          'ASTRO_LOCAL_WEB_PORT must be an integer from 0 to 65535',
+          'ASTRO_SERVER_PORT must be an integer from 0 to 65535',
         )
       if (!/^\d+$/.test(input.cacheTtl))
         return configFailure(
@@ -80,7 +92,7 @@ export const originServerConfig = Config.all({
         input.fixture.value !== 'library-published'
       )
         return configFailure(
-          'ASTRO_LOCAL_WEB_FIXTURE must be m27, plan-draft, or library-published when set',
+          'ASTRO_SERVER_FIXTURE must be m27, plan-draft, or library-published when set',
         )
       if (
         Option.isNone(input.downloadGrantUrl) &&
@@ -233,7 +245,7 @@ function originServer(input: {
 }
 
 export const rigWorkerEnvironmentConfig = Config.all({
-  databasePath: text('ASTRO_LOCAL_WEB_DB'),
+  databasePath: migratedText('ASTRO_SERVER_DB', 'ASTRO_LOCAL_WEB_DB'),
   host: optional('ASTRO_SEESTAR_HOST'),
   mode: text('ASTRO_RIG_WORKER_MODE', 'disabled'),
   pemPath: optional('ASTRO_SEESTAR_PEM_PATH'),
@@ -241,7 +253,7 @@ export const rigWorkerEnvironmentConfig = Config.all({
   Config.mapOrFail(
     (input): Effect.Effect<RigWorkerConfig, Config.ConfigError> => {
       if (!input.databasePath || /[\r\n]/.test(input.databasePath))
-        return configFailure('Rig worker requires ASTRO_LOCAL_WEB_DB')
+        return configFailure('Rig worker requires ASTRO_SERVER_DB')
       if (input.mode === 'disabled')
         return Effect.succeed({
           mode: 'disabled',
@@ -276,7 +288,7 @@ export const publisherEnvironmentConfig = Config.all({
   accountId: text('R2_ACCOUNT_ID'),
   bucket: text('R2_BUCKET'),
   credentialsPath: text('R2_CREDENTIALS_PATH'),
-  databasePath: text('ASTRO_LOCAL_WEB_DB'),
+  databasePath: migratedText('ASTRO_SERVER_DB', 'ASTRO_LOCAL_WEB_DB'),
   endpoint: text('R2_ENDPOINT'),
   outputsRoot: text('ASTRO_PUBLISHER_OUTPUTS_ROOT'),
 }).pipe(
@@ -312,7 +324,7 @@ export const publisherEnvironmentConfig = Config.all({
 )
 
 export const processorEnvironmentConfig = Config.all({
-  databasePath: optional('ASTRO_LOCAL_WEB_DB'),
+  databasePath: migratedOptional('ASTRO_SERVER_DB', 'ASTRO_LOCAL_WEB_DB'),
   manifestPath: optional('ASTRO_PROCESSOR_MANIFEST_PATH'),
   mode: text('ASTRO_PROCESSOR_MODE', 'disabled'),
   originalsRoot: optional('ASTRO_PROCESSOR_ORIGINALS_ROOT'),
@@ -418,7 +430,11 @@ export type SolarCliConfig = {
 export const solarCliConfig = Config.all({
   action: text('ASTRO_SOLAR_TEST_ACTION', 'submit'),
   confirm: text('ASTRO_SOLAR_TEST_CONFIRM'),
-  databasePath: text('ASTRO_LOCAL_WEB_DB', './.astro-local-web/state.sqlite'),
+  databasePath: migratedText(
+    'ASTRO_SERVER_DB',
+    'ASTRO_LOCAL_WEB_DB',
+    './.astro-server/state.sqlite',
+  ),
   idempotencyKey: optional('ASTRO_SOLAR_TEST_IDEMPOTENCY_KEY'),
   intentId: optional('ASTRO_SOLAR_TEST_INTENT_ID'),
   name: optional('ASTRO_SOLAR_TEST_NAME'),

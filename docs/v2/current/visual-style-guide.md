@@ -7,11 +7,10 @@ product model is already known. It is not permission to change that model.
 
 ## Authority And Conflict Rule
 
-Owner clarification: [`docs/v2-ui-final`](../../v2-ui-final/) is the
-representative production visual authority for `apps/web`; its source and
-screenshots are visual evidence. This document conforms to that study. Phase
-0.5 prototypes remain semantic and historical evidence only, never current
-palette, type, shape, or composition authority.
+`apps/web` source and CSS plus accepted screenshot evidence are the production
+visual authority. `docs/v2-ui-final` and Phase 0.5 prototypes remain historical
+Gate and design evidence only, never current palette, type, shape, or
+composition authority.
 
 Read in this order: the [product specification](product-spec.md),
 [UX guidance](../ux-design-guidance.md), accepted contract/gate evidence, this
@@ -107,22 +106,22 @@ and consequential-state coverage over ornamental differentiation.
 
 ## Foundation Reference
 
-| Role | Reference | Use |
-| --- | --- | --- |
-| core ink / paper | `#070b12` / `#e6e1d7` | canvas / primary text |
-| core primary / secondary / tertiary | `#c6ad7a` / `#3d9ca6` / `#80679c` | selected working object / focus and evidence / image depth |
-| core safe / danger / attention / neutral | `#70ae94` / `#d36e64` / `#e4a443` / `#a9aeb7` | verified / failed / waiting / neutral facts |
-| surface / raised / current | derived from ink, neutral-dark-1, and primary at `14%` | owned work / selected or bounded material / current context |
-| text / secondary / faint | paper / paper at `72%` mixed with neutral / neutral mixed with ink at `55%` | primary / operational / decorative only |
-| border / strong border | neutral-dark-1 mixed with ink at `18%` / neutral mixed with ink at `38%` | relationship / major frame or control boundary |
-| primary / secondary / image | primary-light-1 / secondary-light-1 / secondary-dark-1 mixed with ink at `38%` | selection / focus / evidence field |
+| Role                                     | Reference                                                                      | Use                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| core ink / paper                         | `#070b12` / `#e6e1d7`                                                          | canvas / primary text                                       |
+| core primary / secondary / tertiary      | `#c6ad7a` / `#3d9ca6` / `#80679c`                                              | selected working object / focus and evidence / image depth  |
+| core safe / danger / attention / neutral | `#70ae94` / `#d36e64` / `#e4a443` / `#a9aeb7`                                  | verified / failed / waiting / neutral facts                 |
+| surface / raised / current               | derived from ink, neutral-dark-1, and primary at `14%`                         | owned work / selected or bounded material / current context |
+| text / secondary / faint                 | paper / paper at `72%` mixed with neutral / neutral mixed with ink at `55%`    | primary / operational / decorative only                     |
+| border / strong border                   | neutral-dark-1 mixed with ink at `18%` / neutral mixed with ink at `38%`       | relationship / major frame or control boundary              |
+| primary / secondary / image              | primary-light-1 / secondary-light-1 / secondary-dark-1 mixed with ink at `38%` | selection / focus / evidence field                          |
 
-| Type role | Size and line height | Use |
-| --- | --- | --- |
-| display | 24px / 1.15 | workspace title or major reference title |
-| heading | 20px / 1.25 | contained evidence or inspection subject |
-| body | 14px / 1.5 | decisions, explanations, controls |
-| fact | 12px / 1.35 | facts, labels, timestamps, bounds, provenance |
+| Type role | Size and line height | Use                                           |
+| --------- | -------------------- | --------------------------------------------- |
+| display   | 24px / 1.15          | workspace title or major reference title      |
+| heading   | 20px / 1.25          | contained evidence or inspection subject      |
+| body      | 14px / 1.5           | decisions, explanations, controls             |
+| fact      | 12px / 1.35          | facts, labels, timestamps, bounds, provenance |
 
 Use a 4px base spacing rhythm: 4/8 for tightly related facts, 12/16 for a
 contained region, 20/24 for a working-object boundary, and 32/48 for a screen
@@ -141,12 +140,10 @@ selected evidence / inspector / chronology; Process is steps / image canvas /
 operation rail. Study runtime fixtures, local mutation state, theme runtime,
 and button navigation are not production behavior authority.
 
-The operational visual reference is [`docs/v2-ui-final`](../../v2-ui-final/):
-its source CSS, components, workspaces, and screenshots are direct visual and
-composition authority. Adapt them closely; do not approximate their palette,
-type, status register, evidence surfaces, native rooms, compact reflows, or
-390px monitoring compositions. Its runtime fixtures, local mutation state,
-theme runtime, and button navigation are not production behavior authority.
+The operational visual reference is `apps/web` source and CSS, with accepted
+screenshots as visual evidence. `docs/v2-ui-final` records the historical study
+that informed this guide; its source, fixtures, local mutation state, theme
+runtime, and button navigation are not production implementation authority.
 
 The [Composite](../../../prototype/v2-ui/composite-prototype.html),
 [Acquire](../../../prototype/v2-ui/acquire-prototype.html),

@@ -19,6 +19,21 @@ export const ControlIntent = Schema.TaggedUnion({
     commandId: CommandId,
     idempotencyKey: IdempotencyKey,
   },
+  GrantControl: {
+    commandId: CommandId,
+    requestId: Schema.NonEmptyString,
+    targetClientId: Schema.NonEmptyString,
+    idempotencyKey: IdempotencyKey,
+  },
+  DeclineControl: {
+    commandId: CommandId,
+    requestId: Schema.NonEmptyString,
+    idempotencyKey: IdempotencyKey,
+  },
+  ReleaseControl: {
+    commandId: CommandId,
+    idempotencyKey: IdempotencyKey,
+  },
   TakeControl: {
     commandId: CommandId,
     idempotencyKey: IdempotencyKey,
@@ -180,6 +195,38 @@ function commandEnvelope(
         idempotencyKey,
       },
     }),
+    GrantControl: ({
+      commandId,
+      requestId,
+      targetClientId,
+      idempotencyKey,
+    }): unknown => ({
+      commandId,
+      command: {
+        _tag: 'GrantControl' as const,
+        expectedLeaseRevision,
+        requestId,
+        targetClientId,
+        idempotencyKey,
+      },
+    }),
+    DeclineControl: ({ commandId, requestId, idempotencyKey }): unknown => ({
+      commandId,
+      command: {
+        _tag: 'DeclineControl' as const,
+        expectedLeaseRevision,
+        requestId,
+        idempotencyKey,
+      },
+    }),
+    ReleaseControl: ({ commandId, idempotencyKey }): unknown => ({
+      commandId,
+      command: {
+        _tag: 'ReleaseControl' as const,
+        expectedLeaseRevision,
+        idempotencyKey,
+      },
+    }),
     TakeControl: ({ commandId, idempotencyKey }): unknown => ({
       commandId,
       command: {
@@ -255,8 +302,6 @@ function eligibility(
     Stale: () => 'The authoritative snapshot is stale.',
     Reconnecting: () => 'The authoritative snapshot is reconnecting.',
     Current: ({ snapshot }) => {
-      if (snapshot.membership.role !== 'owner')
-        return 'Owner membership is required for control commands.'
       if (snapshot.membership.capability !== 'controlCapable')
         return 'This client is read-only.'
       return ControlIntent.match(intent, {
@@ -264,10 +309,24 @@ function eligibility(
           snapshot.control.holderClientId === snapshot.membership.clientId
             ? 'This client already holds control.'
             : undefined,
+        GrantControl: () =>
+          snapshot.membership.role !== 'owner'
+            ? 'Owner membership is required for this control command.'
+            : undefined,
+        DeclineControl: () =>
+          snapshot.membership.role !== 'owner'
+            ? 'Owner membership is required for this control command.'
+            : undefined,
+        ReleaseControl: () =>
+          snapshot.control.holderClientId !== snapshot.membership.clientId
+            ? 'This client does not hold control.'
+            : undefined,
         TakeControl: () =>
           snapshot.control.holderClientId === snapshot.membership.clientId
             ? 'This client already holds control.'
-            : undefined,
+            : snapshot.membership.role !== 'owner'
+              ? 'Owner membership is required for this control command.'
+              : undefined,
       })
     },
   })

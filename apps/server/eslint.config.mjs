@@ -34,6 +34,8 @@ export default tseslint.config(
   {
     ignores: [
       'node_modules/',
+      '.astro-server/',
+      // Retain legacy generated state until old directories are manually removed.
       '.astro-local-web/',
       'dist/',
       'build/',

@@ -2,7 +2,7 @@
 
 This is a non-activating Compose starter, not a production deployment. The
 executable defaults to loopback. `config.example` sets
-`ASTRO_LOCAL_WEB_PORT=8080` to match the Compose-internal origin port. Compose
+`ASTRO_SERVER_PORT=8080` to match the Compose-internal origin port. Compose
 uses `0.0.0.0` only within its private service network so `cloudflared` can
 reach the origin; it does not publish a host port. `cloudflared` is the sole
 public-ingress component and must be configured to reach the private origin
@@ -39,7 +39,7 @@ SQLite.
 Build from the repository root with `docker build -f
 apps/server/deployment/Dockerfile .`; it builds the contracts, web bundle, and
 server runtime into one image. The runtime contains only the web `dist` output,
-not web fixtures, source, theme-study files, screenshots, or development
+not web source, fixtures, theme-study files, screenshots, or development
 dependencies. `ASTRO_WEB_DIST=../web/dist` is the packaged default. Activation
 must use a reviewed immutable image digest rather than the starter tag. Before activation: supply
 host-managed secrets, copy `config.example` outside the repository, validate

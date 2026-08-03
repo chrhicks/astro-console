@@ -1,11 +1,11 @@
 # Phase 3 Implementation Planning
 
-Status: **prepared V2.0 product phase — begins after Production Convergence**
+Status: **prepared V2.0 product phase — Production Convergence prerequisite cleared; owner acceptance and implementation remain pending**
 
 This document prepares Phase 3 in the durable [V2 delivery plan](delivery-plan.md).
-The Production Convergence milestone must complete before a Phase 3 slice is
-accepted for implementation. This document does not authorize a provider read,
-device command, Solar work, or capture by itself.
+Production Convergence is complete. This document still does not authorize a
+provider read, device command, Solar work, or capture: its first slice requires
+separate owner acceptance before implementation.
 
 ## Objective
 

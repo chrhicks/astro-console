@@ -6,7 +6,7 @@ services:
     image: ghcr.io/chicks/astro-console:REPLACE_WITH_PINNED_RELEASE
     env_file: ${ASTRO_ORIGIN_ENV_FILE:?Set the host-managed origin environment file in the Compose environment file}
     environment:
-      ASTRO_LOCAL_WEB_BIND: 0.0.0.0
+      ASTRO_SERVER_BIND: 0.0.0.0
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]

@@ -1,8 +1,8 @@
 # Copy outside the repository and set only non-secret release configuration.
-ASTRO_LOCAL_WEB_DB=/var/lib/astro-console/state.sqlite
-ASTRO_LOCAL_WEB_PORT=8080
+ASTRO_SERVER_DB=/var/lib/astro-console/state.sqlite
+ASTRO_SERVER_PORT=8080
 # Compose uses 0.0.0.0 only inside its private network; host publishes no port.
-ASTRO_LOCAL_WEB_BIND=0.0.0.0
+ASTRO_SERVER_BIND=0.0.0.0
 ASTRO_RELEASE=REPLACE_WITH_RELEASE
 # The release image packages the version-matched web build here. Override only
 # for an intentionally different mounted web bundle.

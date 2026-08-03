@@ -1,2 +1,4 @@
+.astro-server/
+# Retain legacy generated state until old directories are manually removed.
 .astro-local-web/
 node_modules/
