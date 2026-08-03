@@ -11,7 +11,11 @@ import {
   type ObserveAction,
   type ObserveCommandSubmission,
 } from './observe-command-client'
-import { IdempotencyKey } from '@astro-console/v2-contracts'
+import {
+  IdempotencyKey,
+  LibraryQuery as LibraryQuerySchema,
+  LibraryQueryId,
+} from '@astro-console/v2-contracts'
 import { projectBootstrapState } from './bootstrap-projection'
 import { createBootstrapRuntime } from './bootstrap-runtime'
 import { unavailableProjection } from './future-adapter'
@@ -24,6 +28,16 @@ import {
 } from './routes'
 import { Shell } from './Shell'
 import { LibraryView } from './workspaces/LibraryView'
+import {
+  LibraryClient,
+  LibraryNotFound,
+  LibraryUnavailable,
+  createLibraryRuntime,
+  type LibraryAssetDetail,
+  type LibraryPage,
+  type LibraryQuery,
+  type ProcessSourceHandoff,
+} from './library-client'
 import { ObserveView } from './workspaces/ObserveView'
 import { PlanView } from './workspaces/PlanView'
 import { ProcessView } from './workspaces/ProcessView'
@@ -51,12 +65,137 @@ export function App() {
   >()
   const workspace = routeWorkspace(route)
   const initialRoute = useRef(true)
+  const [libraryQuery, setLibraryQuery] = useState<LibraryQuery>(() =>
+    LibraryQuerySchema.make({
+      queryId: LibraryQueryId.make('nightbook'),
+      pageSize: 40,
+      sort: 'capturedAtDescending',
+    }),
+  )
+  const [libraryPage, setLibraryPage] = useState<{
+    value: LibraryPage | undefined
+    message: string | undefined
+  }>({ value: undefined, message: undefined })
+  const [libraryDetail, setLibraryDetail] = useState<{
+    value: LibraryAssetDetail | undefined
+    state: 'loading' | 'not-found' | 'unavailable' | undefined
+  }>({ value: undefined, state: undefined })
+  const libraryPageGeneration = useRef(0)
+  const libraryDetailGeneration = useRef(0)
+  const processSourceGeneration = useRef(0)
+  const [processSource, setProcessSource] = useState<{
+    value: ProcessSourceHandoff | undefined
+    state: 'loading' | 'unavailable' | undefined
+  }>({ value: undefined, state: undefined })
 
   useEffect(() => {
     const onPopState = () => setRoute(currentRoute())
     addEventListener('popstate', onPopState)
     return () => removeEventListener('popstate', onPopState)
   }, [])
+  useEffect(() => {
+    if (!import.meta.env.VITE_ASTRO_BOOTSTRAP || workspace !== 'library') return
+    const runtime = createLibraryRuntime()
+    const generation = ++libraryPageGeneration.current
+    setLibraryPage({
+      value: undefined,
+      message: 'Loading Library records.',
+    })
+    const load = async () => {
+      try {
+        const result = await runtime.runPromise(
+          Effect.gen(function* () {
+            const client = yield* LibraryClient
+            return yield* client.page(libraryQuery)
+          }),
+        )
+        if (generation === libraryPageGeneration.current)
+          setLibraryPage({ value: result, message: undefined })
+      } catch {
+        if (generation === libraryPageGeneration.current)
+          setLibraryPage({
+            value: undefined,
+            message: 'Library evidence is unavailable.',
+          })
+      }
+    }
+    void load()
+    return () => {
+      libraryPageGeneration.current += 1
+      void runtime.dispose()
+    }
+  }, [libraryQuery, workspace])
+  useEffect(() => {
+    if (!import.meta.env.VITE_ASTRO_BOOTSTRAP || route.kind !== 'asset') {
+      setLibraryDetail({ value: undefined, state: undefined })
+      return
+    }
+    const runtime = createLibraryRuntime()
+    const generation = ++libraryDetailGeneration.current
+    setLibraryDetail({ value: undefined, state: 'loading' })
+    void runtime
+      .runPromise(
+        Effect.gen(function* () {
+          const client = yield* LibraryClient
+          return yield* client.detail(route.assetId)
+        }),
+      )
+      .then(
+        (value) => {
+          if (generation === libraryDetailGeneration.current)
+            setLibraryDetail({ value, state: undefined })
+        },
+        (error: unknown) => {
+          if (generation !== libraryDetailGeneration.current) return
+          setLibraryDetail({
+            value: undefined,
+            state:
+              error instanceof LibraryNotFound
+                ? 'not-found'
+                : error instanceof LibraryUnavailable
+                  ? 'unavailable'
+                  : 'unavailable',
+          })
+        },
+      )
+    return () => {
+      libraryDetailGeneration.current += 1
+      void runtime.dispose()
+    }
+  }, [route])
+  useEffect(() => {
+    if (
+      !import.meta.env.VITE_ASTRO_BOOTSTRAP ||
+      route.kind !== 'process-source'
+    ) {
+      setProcessSource({ value: undefined, state: undefined })
+      return
+    }
+    const runtime = createLibraryRuntime()
+    const generation = ++processSourceGeneration.current
+    setProcessSource({ value: undefined, state: 'loading' })
+    void runtime
+      .runPromise(
+        Effect.gen(function* () {
+          const client = yield* LibraryClient
+          return yield* client.processSourceHandoff(route.sourceAssetId)
+        }),
+      )
+      .then(
+        (value) => {
+          if (generation === processSourceGeneration.current)
+            setProcessSource({ value, state: undefined })
+        },
+        () => {
+          if (generation === processSourceGeneration.current)
+            setProcessSource({ value: undefined, state: 'unavailable' })
+        },
+      )
+    return () => {
+      processSourceGeneration.current += 1
+      void runtime.dispose()
+    }
+  }, [route])
   useEffect(() => {
     if (import.meta.env.DEV && !import.meta.env.VITE_ASTRO_BOOTSTRAP) return
     const runtime = createBootstrapRuntime()
@@ -135,6 +274,13 @@ export function App() {
     onClick: (event: React.MouseEvent<HTMLAnchorElement>) =>
       intercept(event, next),
   })
+  const changeLibraryQuery = (query: LibraryQuery) => {
+    setLibraryPage({
+      value: undefined,
+      message: 'Loading Library records.',
+    })
+    setLibraryQuery(query)
+  }
 
   const content =
     route.kind === 'not-found' ? (
@@ -154,6 +300,27 @@ export function App() {
         view={projection.library}
         assetId={route.kind === 'asset' ? route.assetId : undefined}
         link={link}
+        {...(import.meta.env.VITE_ASTRO_BOOTSTRAP
+          ? {
+              page: {
+                query: libraryQuery,
+                ...(libraryPage.value === undefined
+                  ? {}
+                  : { value: libraryPage.value }),
+                ...(libraryPage.message === undefined
+                  ? {}
+                  : { message: libraryPage.message }),
+              },
+              ...(libraryDetail.value === undefined
+                ? {}
+                : { detail: libraryDetail.value }),
+              ...(libraryDetail.state === undefined
+                ? {}
+                : { detailState: libraryDetail.state }),
+              onQuery: changeLibraryQuery,
+              readOnly: projection.shell.readOnly,
+            }
+          : {})}
       />
     ) : workspace === 'process' ? (
       <ProcessView
@@ -162,6 +329,12 @@ export function App() {
         sourceAssetId={
           route.kind === 'process-source' ? route.sourceAssetId : undefined
         }
+        {...(processSource.value === undefined
+          ? {}
+          : { sourceHandoff: processSource.value })}
+        {...(processSource.state === undefined
+          ? {}
+          : { sourceHandoffState: processSource.state })}
       />
     ) : (
       <PlanView

@@ -36,7 +36,7 @@ export type OriginServerConfig = {
         readonly clientContext: 'desktop' | 'phone'
         readonly cacheTtlMs: number
       }
-  readonly fixture: 'm27' | 'plan-draft' | undefined
+  readonly fixture: 'm27' | 'plan-draft' | 'library-published' | undefined
   readonly downloadGrant:
     { readonly url: string; readonly secretPath: string } | undefined
 }
@@ -76,10 +76,11 @@ export const originServerConfig = Config.all({
       if (
         Option.isSome(input.fixture) &&
         input.fixture.value !== 'm27' &&
-        input.fixture.value !== 'plan-draft'
+        input.fixture.value !== 'plan-draft' &&
+        input.fixture.value !== 'library-published'
       )
         return configFailure(
-          'ASTRO_LOCAL_WEB_FIXTURE must be m27 or plan-draft when set',
+          'ASTRO_LOCAL_WEB_FIXTURE must be m27, plan-draft, or library-published when set',
         )
       if (
         Option.isNone(input.downloadGrantUrl) &&
@@ -125,7 +126,9 @@ function originServer(input: {
   return Effect.gen(function* () {
     const fixture =
       Option.isSome(input.fixture) &&
-      (input.fixture.value === 'm27' || input.fixture.value === 'plan-draft')
+      (input.fixture.value === 'm27' ||
+        input.fixture.value === 'plan-draft' ||
+        input.fixture.value === 'library-published')
         ? input.fixture.value
         : undefined
     const databasePath = yield* validText(

@@ -5,6 +5,26 @@
 .library-workspace .workspace-heading {
   grid-column: 1 / 4;
 }
+.library-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: var(--space-12);
+}
+.library-controls label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.library-controls select {
+  min-height: var(--control-min-height);
+  max-width: 12rem;
+}
 .library-lineage {
   grid-row: 2 / 4;
   border-right: 1px solid var(--color-border-strong);
@@ -62,10 +82,19 @@
 .library-inspector {
   grid-row: 2;
   grid-column: 2 / 4;
-  display: grid;
-  grid-template-columns: minmax(20rem, 1.5fr) minmax(14rem, 1fr);
-  gap: var(--space-20);
   border-left: 1px solid var(--color-border-strong);
+}
+.library-inspector > a {
+  display: inline-block;
+  margin-top: var(--space-8);
+  padding: var(--space-8) var(--space-12);
+  color: var(--color-text);
+  text-decoration: none;
+  border: 1px solid var(--color-border-strong);
+}
+.library-inspector > a:hover {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
 }
 @media (max-width: 1080px) and (min-width: 601px) {
   .library-workspace {
@@ -79,8 +108,6 @@
   .library-inspector {
     grid-row: 2;
     grid-column: 2;
-    grid-template-columns: 14rem minmax(0, 1fr);
-    gap: var(--space-16);
     border-top: var(--border-width) solid var(--color-border-strong);
     border-left: 0;
   }
@@ -98,6 +125,9 @@
   min-height: 17rem;
 }
 @media (max-width: 600px) {
+  .library-inspector > a {
+    display: none;
+  }
   .frame-grid {
     grid-template-columns: 1fr;
   }

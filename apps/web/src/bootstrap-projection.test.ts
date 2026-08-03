@@ -155,12 +155,11 @@ test('bootstrap projections render unavailable Observe and Process evidence with
     /Detailed Observe evidence is unavailable from bootstrap/,
   )
   assert.doesNotMatch(observe, /evidence-image/)
-  assert.match(process, /Unresolved session address \/ session-address/)
   assert.match(process, /Unresolved source address \/ source-address/)
-  assert.match(process, /Host policy and checkpoint evidence are unavailable/)
+  assert.match(process, /Source handoff is unavailable/)
   assert.doesNotMatch(
     process,
-    /Build complete|Gradient removal|Host policy healthy|Measured cause: no pressure|checkpoint preserved|Last valid image|stable handoff|evidence-image/,
+    /session-address|Build complete|Gradient removal|Host policy healthy|Measured cause: no pressure|checkpoint preserved|Last valid image|stable handoff|evidence-image/,
   )
 })
 

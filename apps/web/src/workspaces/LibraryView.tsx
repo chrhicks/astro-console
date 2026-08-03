@@ -1,12 +1,35 @@
-import { useState } from 'react'
+import type {
+  LibraryAssetDetail,
+  LibraryPage,
+  LibraryQuery,
+} from '../library-client'
 import type { LibraryView as View } from '../presentation'
 import type { Route } from '../routes'
-import { Evidence, Status } from './shared'
+import { Status } from './shared'
+
+const roles = [
+  'original',
+  'linearMaster',
+  'intermediate',
+  'final',
+  'preview',
+  'diagnostic',
+] as const
+const sorts = [
+  'capturedAtDescending',
+  'sharpestFirst',
+  'recentlyUpdated',
+] as const
 
 export function LibraryView({
   view,
   assetId,
   link,
+  page,
+  detail,
+  detailState,
+  onQuery,
+  readOnly,
 }: {
   view: View
   assetId: string | undefined
@@ -14,67 +37,236 @@ export function LibraryView({
     href: string
     onClick: React.MouseEventHandler<HTMLAnchorElement>
   }
+  page?: {
+    readonly query: LibraryQuery
+    readonly value?: LibraryPage
+    readonly message?: string
+  }
+  detail?: LibraryAssetDetail
+  detailState?: 'loading' | 'not-found' | 'unavailable'
+  onQuery?: (query: LibraryQuery) => void
+  readOnly?: boolean
 }) {
-  const requestedIndex = view.assets.findIndex((asset) => asset.id === assetId)
-  const [selected, setSelected] = useState(Math.max(0, requestedIndex))
-  const selectedIndex = requestedIndex === -1 ? selected : requestedIndex
-  const asset = view.assets[selectedIndex]
+  const remoteAssets = page?.value?.results
+  // The root catalogue gives the first bounded record visual placement, but
+  // does not claim that its detail has been loaded.
+  const selectedAssetId = assetId ?? remoteAssets?.[0]?.assetId
+  const fallback = page
+    ? undefined
+    : (view.assets.find((asset) => asset.id === assetId) ?? view.assets[0])
+  const selected = remoteAssets?.find(
+    (asset) => asset.assetId === selectedAssetId,
+  )
+  const availability = detail?.availability ?? fallback?.review
+  const download = detail?.actions.find(
+    (action) => action.action === 'download',
+  )
+  const process = detail?.actions.find(
+    (action) => action.action === 'openInProcess',
+  )
+  const nextCursor = page?.value?.nextCursor
+  const changeRole = (role: LibraryQuery['role'] | undefined) => {
+    if (!onQuery || !page) return
+    onQuery({
+      queryId: page.query.queryId,
+      pageSize: page.query.pageSize,
+      sort: page.query.sort,
+      ...(role === undefined ? {} : { role }),
+    })
+  }
+  const changeSort = (sort: LibraryQuery['sort']) => {
+    if (!onQuery || !page) return
+    onQuery({
+      queryId: page.query.queryId,
+      pageSize: page.query.pageSize,
+      ...(page.query.role === undefined ? {} : { role: page.query.role }),
+      sort,
+    })
+  }
   return (
     <div className="workspace library-workspace">
       <header className="workspace-heading">
         <div>
-          <span>Library / 25 July / M31</span>
+          <span>Library / durable evidence</span>
           <h1 tabIndex={-1}>Durable evidence</h1>
         </div>
+        {page && onQuery ? (
+          <div className="library-controls">
+            <label>
+              Role
+              <select
+                value={page.query.role ?? ''}
+                onChange={(event) =>
+                  changeRole(
+                    event.target.value === ''
+                      ? undefined
+                      : (event.target.value as LibraryQuery['role']),
+                  )
+                }
+              >
+                <option value="">All roles</option>
+                {roles.map((role) => (
+                  <option key={role}>{role}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Sort
+              <select
+                value={page.query.sort}
+                onChange={(event) =>
+                  changeSort(event.target.value as LibraryQuery['sort'])
+                }
+              >
+                {sorts.map((sort) => (
+                  <option key={sort}>{sort}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        ) : null}
       </header>
       <aside className="library-lineage">
         <span>Relationship</span>
-        <b>{asset?.lineage.split(' → ')[0]}</b>
-        <small>{asset?.lineage.split(' → ')[1]}</small>
-        <small>{asset?.lineage.split(' → ')[2]}</small>
+        <b>
+          {detail?.comparisonGroupId ??
+            selected?.comparisonGroupId ??
+            fallback?.lineage}
+        </b>
+        <small>
+          Source IDs:{' '}
+          {detail?.lineage.sourceAssetIds.join(', ') ?? 'Loading detail'}
+        </small>
+        <small>Run: {detail?.lineage.runId ?? 'Loading detail'}</small>
+        <small>
+          Solve: {detail?.lineage.solveAttemptId ?? 'Loading detail'}
+        </small>
         <p>Originals are immutable. Related saved outputs are peers.</p>
       </aside>
-      <section className="frame-grid" aria-label="Evidence frames">
+      <section className="frame-grid" aria-label="Evidence records">
         <div className="frame-grid__heading">
           <span>Capture chronology</span>
-          <small>Peer originals / select to compare</small>
+          <small>Metadata records / select for detail</small>
         </div>
-        {view.assets.map((item, index) => (
-          <a
-            key={item.id}
-            data-selected={selectedIndex === index}
-            {...link({ kind: 'asset', assetId: item.id })}
-            onClick={(event) => {
-              setSelected(index)
-              link({ kind: 'asset', assetId: item.id }).onClick(event)
-            }}
+        {page?.message ? <p className="action-result">{page.message}</p> : null}
+        {remoteAssets
+          ? remoteAssets.map((asset) => (
+              <a
+                key={asset.assetId}
+                data-selected={asset.assetId === selectedAssetId}
+                aria-current={asset.assetId === assetId ? 'page' : undefined}
+                {...link({ kind: 'asset', assetId: asset.assetId })}
+              >
+                <b>
+                  {asset.role} · {asset.format}
+                </b>
+                <small>{asset.availability}</small>
+              </a>
+            ))
+          : page
+            ? null
+            : view.assets.map((asset) => (
+                <a
+                  key={asset.id}
+                  data-selected={asset.id === selectedAssetId}
+                  aria-current={asset.id === assetId ? 'page' : undefined}
+                  {...link({ kind: 'asset', assetId: asset.id })}
+                >
+                  <b>{asset.name}</b>
+                  <small>{asset.review}</small>
+                </a>
+              ))}
+        {page && nextCursor && onQuery ? (
+          <button
+            onClick={() =>
+              onQuery({
+                queryId: page.query.queryId,
+                pageSize: page.query.pageSize,
+                ...(page.query.role === undefined
+                  ? {}
+                  : { role: page.query.role }),
+                sort: page.query.sort,
+                cursor: nextCursor,
+              })
+            }
           >
-            <Evidence label={item.name} />
-            <b>{item.name}</b>
-            <small>{item.review}</small>
-          </a>
-        ))}
+            Next page
+          </button>
+        ) : null}
       </section>
       <aside className="library-inspector">
-        {asset && (
-          <Evidence
-            label={`Selected ${asset.name}`}
-            variant={asset.review === 'Accepted' ? 'andromeda' : 'nebula'}
-          />
-        )}
-        <Status tone={asset?.review === 'Accepted' ? 'safe' : 'danger'}>
-          {asset?.review ?? 'Unavailable'}
+        {!assetId && remoteAssets ? (
+          <p>Select an asset to open detail.</p>
+        ) : null}
+        {detailState === 'loading' ? <p>Loading asset detail.</p> : null}
+        {detailState === 'not-found' ? <p>Asset not found.</p> : null}
+        {detailState === 'unavailable' ? (
+          <p>Asset detail is unavailable.</p>
+        ) : null}
+        <Status
+          tone={
+            availability === undefined
+              ? 'neutral'
+              : availability === 'published' ||
+                  availability === 'availableLocally'
+                ? 'safe'
+                : 'danger'
+          }
+        >
+          {availability ?? 'Select a record'}
         </Status>
-        <h2>{asset?.name}</h2>
-        <p>{asset?.representation}</p>
+        <h2>
+          {detail
+            ? `${detail.role} · ${detail.format}`
+            : (fallback?.name ?? 'No asset selected')}
+        </h2>
+        {!readOnly && detail && download?._tag === 'Eligible' ? (
+          <a
+            href={`/api/library/assets/${encodeURIComponent(detail.assetId)}/download`}
+          >
+            Download
+          </a>
+        ) : null}
+        {!readOnly && detail && process?._tag === 'Eligible' ? (
+          <a
+            {...link({ kind: 'process-source', sourceAssetId: detail.assetId })}
+          >
+            Open source in Process
+          </a>
+        ) : null}
+        <p>Metadata only; no preview is available.</p>
+        <p>
+          {detail?.representations
+            .map(
+              (representation) =>
+                `${representation.label} (${representation.state})`,
+            )
+            .join(' · ') ?? 'Representation detail unavailable.'}
+        </p>
         <dl>
           <div>
             <dt>Stable asset</dt>
-            <dd>{asset?.id}</dd>
+            <dd>{detail?.assetId ?? selected?.assetId ?? fallback?.id}</dd>
           </div>
           <div>
-            <dt>Download authorization</dt>
-            <dd>{asset?.download}</dd>
+            <dt>Captured</dt>
+            <dd>{detail?.capturedAt ?? 'Unavailable'}</dd>
+          </div>
+          <div>
+            <dt>Download</dt>
+            <dd>
+              {download?._tag === 'Eligible'
+                ? 'Eligible'
+                : (download?.reason ?? 'Unavailable')}
+            </dd>
+          </div>
+          <div>
+            <dt>Process source</dt>
+            <dd>
+              {process?._tag === 'Eligible'
+                ? 'Eligible'
+                : (process?.reason ?? 'Unavailable')}
+            </dd>
           </div>
         </dl>
         <p className="action-result">

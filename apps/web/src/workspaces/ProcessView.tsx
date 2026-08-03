@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { ProcessSourceHandoff } from '../library-client'
 import type { ProcessView as View } from '../presentation'
 import { Evidence, Status } from './shared'
 
@@ -6,11 +7,23 @@ export function ProcessView({
   view,
   sessionId,
   sourceAssetId,
+  sourceHandoff,
+  sourceHandoffState,
 }: {
   view: View
   sessionId: string | undefined
   sourceAssetId: string | undefined
+  sourceHandoff?: ProcessSourceHandoff
+  sourceHandoffState?: 'loading' | 'unavailable'
 }) {
+  if (sourceAssetId !== undefined)
+    return (
+      <ProcessSourceHandoffView
+        sourceAssetId={sourceAssetId}
+        handoff={sourceHandoff}
+        state={sourceHandoffState}
+      />
+    )
   const identity = view.detailAvailable
     ? (sessionId ?? view.sessionId)
     : sessionId
@@ -111,6 +124,61 @@ export function ProcessView({
             <dd>{view.diagnostics}</dd>
           </div>
         </dl>
+      </aside>
+    </div>
+  )
+}
+
+function ProcessSourceHandoffView({
+  sourceAssetId,
+  handoff,
+  state,
+}: {
+  sourceAssetId: string
+  handoff: ProcessSourceHandoff | undefined
+  state: 'loading' | 'unavailable' | undefined
+}) {
+  const resolved = handoff !== undefined
+  return (
+    <div className="workspace process-workspace">
+      <aside className="process-steps">
+        <span>
+          Source /{' '}
+          {resolved
+            ? `${handoff.sourceAssetId} / stable handoff`
+            : `Unresolved source address / ${sourceAssetId}`}
+        </span>
+        <h2>Process source</h2>
+        <Status tone="neutral">Processing unavailable</Status>
+      </aside>
+      <section className="process-canvas">
+        <header>
+          <span>Source handoff only</span>
+          <h1 tabIndex={-1}>Process unavailable</h1>
+        </header>
+        <p className="unavailable-evidence">
+          {state === 'loading'
+            ? 'Resolving source handoff.'
+            : resolved
+              ? `Source role: ${handoff.role}. Source availability: ${handoff.availability}.`
+              : 'Source handoff is unavailable.'}
+        </p>
+        <footer>
+          <span>{resolved ? handoff.sourceAssetId : sourceAssetId}</span>
+          <b>Interactive processing is unavailable.</b>
+        </footer>
+      </section>
+      <aside className="process-rail">
+        <span>Processing</span>
+        <Status tone="neutral">Unavailable</Status>
+        <h2>Read-only source handoff</h2>
+        {resolved ? (
+          handoff.processing.currentFixtureFacts.map((fact) => (
+            <p key={fact}>{fact}</p>
+          ))
+        ) : (
+          <p>Current processing facts are unavailable.</p>
+        )}
       </aside>
     </div>
   )

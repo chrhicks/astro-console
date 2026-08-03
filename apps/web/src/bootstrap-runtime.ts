@@ -26,6 +26,11 @@ import {
   browserObserveCommandTransportLayer,
   layer as observeCommandClientLayer,
 } from './observe-command-client'
+import {
+  LibraryClient,
+  browserLibraryTransportLayer,
+  layer as libraryClientLayer,
+} from './library-client'
 
 const clientLayer = (
   snapshotTransportLayer: Layer.Layer<SnapshotTransport>,
@@ -44,23 +49,27 @@ const clientLayer = (
       const commands = yield* CommandClient
       const planCommands = yield* PlanCommandClient
       const observeCommands = yield* ObserveCommandClient
+      const library = yield* LibraryClient
       return Context.empty().pipe(
         Context.add(BootstrapClient, bootstrap),
         Context.add(CommandClient, commands),
         Context.add(PlanCommandClient, planCommands),
         Context.add(ObserveCommandClient, observeCommands),
+        Context.add(LibraryClient, library),
       )
     }),
   ).pipe(
     Layer.provide(commandClientLayer),
     Layer.provide(planCommandClientLayer),
     Layer.provide(observeCommandClientLayer),
+    Layer.provide(libraryClientLayer),
   )
   return clients.pipe(
     Layer.provide(bootstrapClientLayer),
     Layer.provide(commandTransportLayer),
     Layer.provide(planCommandTransportLayer),
     Layer.provide(observeCommandTransportLayer),
+    Layer.provide(browserLibraryTransportLayer),
   )
 }
 

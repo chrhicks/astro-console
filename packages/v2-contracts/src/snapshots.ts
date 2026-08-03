@@ -339,6 +339,52 @@ export const LibraryAssetSummary = Schema.Struct({
   comparisonGroupId: Schema.NonEmptyString,
 })
 
+export const LibraryAssetAction = Schema.TaggedUnion({
+  Eligible: {
+    action: Schema.Literals(['download', 'openInProcess']),
+  },
+  Unavailable: {
+    action: Schema.Literals(['download', 'openInProcess']),
+    reason: Schema.Literals([
+      'AssetNotPublished',
+      'AssetNotAvailableLocally',
+      'PublicationUnavailable',
+    ]),
+  },
+})
+
+export const LibraryAssetDetail = Schema.Struct({
+  assetId: AssetId,
+  revision: AssetRevision,
+  role: AssetSnapshot.fields.role,
+  format: AssetSnapshot.fields.format,
+  availability: AssetSnapshot.fields.availability,
+  capturedAt: ObservedAt,
+  comparisonGroupId: Schema.NonEmptyString,
+  lineage: Schema.Struct({
+    sourceAssetIds: Schema.Array(AssetId),
+    runId: Schema.NonEmptyString,
+    solveAttemptId: Schema.NonEmptyString,
+  }),
+  representations: Schema.Array(
+    Schema.Struct({
+      label: Schema.NonEmptyString,
+      state: Schema.NonEmptyString,
+    }),
+  ),
+  actions: Schema.Array(LibraryAssetAction),
+})
+
+export const ProcessSourceHandoff = Schema.Struct({
+  sourceAssetId: AssetId,
+  role: AssetSnapshot.fields.role,
+  availability: AssetSnapshot.fields.availability,
+  processing: Schema.Struct({
+    availability: Schema.Literal('unavailable'),
+    currentFixtureFacts: Schema.Array(Schema.NonEmptyString),
+  }),
+})
+
 export const LibraryPage = Schema.Struct({
   queryId: LibraryQueryId,
   querySnapshotVersion: SnapshotVersion,

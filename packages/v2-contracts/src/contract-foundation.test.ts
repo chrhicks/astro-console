@@ -12,6 +12,8 @@ import {
   IncrementalProjectionEvent,
   LibraryPage,
   LibraryQuery,
+  LibraryAssetDetail,
+  ProcessSourceHandoff,
   ProjectionNoticeEnvelope,
   acceptedCommandTags,
   commandFailureFamilies,
@@ -392,6 +394,56 @@ describe('Gate 5 contract foundation', () => {
       })._tag,
       'Failure',
     )
+  })
+
+  it('projects Library delivery and Process eligibility without bearer data', () => {
+    const detail = Schema.decodeUnknownSync(LibraryAssetDetail)({
+      assetId: 'asset-1',
+      revision: 2,
+      role: 'final',
+      format: 'fits',
+      availability: 'published',
+      capturedAt: '2026-07-22T20:00:00Z',
+      comparisonGroupId: 'm27',
+      lineage: {
+        sourceAssetIds: ['asset-source-1'],
+        runId: 'run-1',
+        solveAttemptId: 'solve-1',
+      },
+      representations: [{ label: 'R2 download', state: 'published' }],
+      actions: [
+        { _tag: 'Eligible', action: 'download' },
+        {
+          _tag: 'Unavailable',
+          action: 'openInProcess',
+          reason: 'AssetNotAvailableLocally',
+        },
+      ],
+    })
+    assert.equal(detail.actions[0]?._tag, 'Eligible')
+    assert.equal(
+      Schema.decodeUnknownResult(LibraryAssetDetail)({
+        ...detail,
+        checksum: 'secret',
+      })._tag,
+      'Success',
+    )
+  })
+
+  it('keeps a Process source handoff separate from a processing session', () => {
+    const handoff = Schema.decodeUnknownSync(ProcessSourceHandoff)({
+      sourceAssetId: 'asset-source-1',
+      role: 'original',
+      availability: 'availableLocally',
+      processing: {
+        availability: 'unavailable',
+        currentFixtureFacts: [
+          'Interactive processing is not available in this workspace.',
+        ],
+      },
+    })
+    assert.equal(handoff.sourceAssetId, 'asset-source-1')
+    assert.equal(handoff.processing.availability, 'unavailable')
   })
 
   it('keeps projected action explanations typed and actionable', () => {

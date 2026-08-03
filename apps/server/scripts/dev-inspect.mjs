@@ -18,9 +18,9 @@ const scenario =
   process.argv
     .find((argument) => argument.startsWith('--scenario='))
     ?.slice('--scenario='.length) ?? 'm27'
-if (!['m27', 'plan-draft'].includes(scenario))
-  throw new Error('--scenario must be m27 or plan-draft')
-const scenarioSuffix = scenario === 'plan-draft' ? '-plan-draft' : ''
+if (!['m27', 'plan-draft', 'library-published'].includes(scenario))
+  throw new Error('--scenario must be m27, plan-draft, or library-published')
+const scenarioSuffix = scenario === 'm27' ? '' : `-${scenario}`
 const profile = resolve(
   appRoot,
   `.astro-local-web/inspect-chrome-profile-${requestedClient}${scenarioSuffix}`,

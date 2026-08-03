@@ -26,6 +26,7 @@ import {
   CommandHttpSuccessEnvelope,
   ObserveCommandResponse,
   PlanCommandResponse,
+  ProcessSourceHandoff,
   RunSnapshot,
 } from '@astro-console/v2-contracts'
 import {
@@ -847,6 +848,14 @@ test('focused executable configurations decode defaults and conditional branches
     (await read(originServerConfig, { ASTRO_LOCAL_WEB_FIXTURE: 'plan-draft' }))
       .fixture,
     'plan-draft',
+  )
+  assert.equal(
+    (
+      await read(originServerConfig, {
+        ASTRO_LOCAL_WEB_FIXTURE: 'library-published',
+      })
+    ).fixture,
+    'library-published',
   )
   const production = await read(originServerConfig, {
     ASTRO_ADMISSION_MODE: 'production',
@@ -4634,6 +4643,10 @@ test('Library queries enforce bounded pages, cursor order, role filters, and all
     ),
     true,
   )
+  const updated = await fetch(
+    `${base}/api/library?queryId=library-check&pageSize=1&sort=recentlyUpdated`,
+  ).then((response) => response.json())
+  assert.equal(updated.results.length, 1)
   assert.equal(
     (await fetch(`${base}/api/library?pageSize=101&sort=capturedAtDescending`))
       .status,
@@ -4668,6 +4681,14 @@ test('Library detail uses stable identities and snapshot delivery remains catalo
   )
   assert.equal(detail.assetId, 'asset-m27-001')
   assert.equal(detail.lineage.runId, 'run-m27-001')
+  assert.deepEqual(detail.actions, [
+    {
+      _tag: 'Unavailable',
+      action: 'download',
+      reason: 'PublicationUnavailable',
+    },
+    { _tag: 'Eligible', action: 'openInProcess' },
+  ])
   assert.equal(JSON.stringify(detail).includes('objectKey'), false)
   assert.equal(JSON.stringify(detail).includes('/Users/'), false)
   assert.equal(
@@ -4685,6 +4706,17 @@ test('Library detail uses stable identities and snapshot delivery remains catalo
     (await fetch(`${base}/api/library/assets/asset-m27-999`)).status,
     404,
   )
+  service.database
+    .prepare(
+      "UPDATE library_assets SET detail='{}' WHERE asset_id='asset-m27-001'",
+    )
+    .run()
+  const corrupt = await fetch(`${base}/api/library/assets/asset-m27-001`)
+  assert.equal(corrupt.status, 503)
+  assert.deepEqual(await corrupt.json(), {
+    outcome: 'rejected',
+    reason: 'LibraryUnavailable',
+  })
   const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
   assert.equal(snapshot.activeRun._tag, 'None')
   assert.equal(JSON.stringify(snapshot).includes('asset-m27-'), false)
@@ -4804,6 +4836,10 @@ test('authenticated workspace projections preserve future intent, bounded Librar
   const service = createFixtureService()
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
+  const outboxBefore = databaseRow(
+    CountRow,
+    service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+  ).count
   t.after(async () => {
     await listener.close()
     service.close()
@@ -4845,13 +4881,24 @@ test('authenticated workspace projections preserve future intent, bounded Librar
   )
   assert.equal(detail.assetId, assetId)
   assert.equal(detail.lineage.runId, 'run-m27-001')
-  const process = await fetch(
+  const processResponse = await fetch(
     `${base}/api/workspaces/process?sourceAssetId=${assetId}`,
-  ).then((response) => response.json())
-  assert.equal(process.sourceAssetId, assetId)
-  assert.equal(process.preview.state, 'synchronized')
-  assert.equal(process.history.at(-1).state, 'current')
-  assert.match(process.protection, /Apply, Save/)
+  )
+  assert.equal(processResponse.status, 200)
+  const process = Schema.decodeUnknownSync(ProcessSourceHandoff)(
+    await processResponse.json(),
+  )
+  assert.deepEqual(process, {
+    sourceAssetId: assetId,
+    role: 'preview',
+    availability: 'availableLocally',
+    processing: {
+      availability: 'unavailable',
+      currentFixtureFacts: [
+        'Interactive processing is not available in this workspace.',
+      ],
+    },
+  })
   const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
   assert.equal(snapshot.activeRun._tag, 'None')
   assert.equal(
@@ -4860,6 +4907,13 @@ test('authenticated workspace projections preserve future intent, bounded Librar
       service.database.prepare('SELECT count(*) AS count FROM events').get(),
     ).count,
     0,
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+    ).count,
+    outboxBefore,
   )
   assert.equal(
     (await fetch(`${base}/api/workspaces/process?sourceAssetId=asset-other`))
@@ -4876,6 +4930,14 @@ test('authenticated workspace projections preserve future intent, bounded Librar
     message:
       'This asset is temporarily unavailable and cannot open in Process.',
   })
+  service.database
+    .prepare("UPDATE library_assets SET detail='{}' WHERE asset_id=?")
+    .run(assetId)
+  assert.equal(
+    (await fetch(`${base}/api/workspaces/process?sourceAssetId=${assetId}`))
+      .status,
+    503,
+  )
 })
 
 test('SQLite-backed plan drafts persist deterministic verdicts, revision guards, idempotency, and SSE projection', async (t) => {
@@ -5712,6 +5774,89 @@ test('fixture installation restores only a missing M27 plan record and keeps a s
   })
   const snapshot = await bootstrapSnapshot(`${recoveredBase}/api/snapshot`)
   assert.equal(snapshot.activeRun._tag, 'None')
+})
+
+test('library-published fixture projects one durable Download Eligible M27 asset without work', async (t) => {
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-library-published-fixture-')),
+    'state.sqlite',
+  )
+  const service = createLocalWebService(
+    databasePath,
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'library-published' },
+  )
+  const listener = await service.listen()
+  let firstClosed = false
+  t.after(async () => {
+    if (firstClosed) return
+    await listener.close()
+    service.close()
+  })
+  const base = `http://127.0.0.1:${listener.port}`
+  const detailResponse = await fetch(`${base}/api/library/assets/asset-m27-001`)
+  assert.equal(detailResponse.status, 200)
+  const detail = await detailResponse.json()
+  assert.deepEqual(detail.actions, [
+    { _tag: 'Eligible', action: 'download' },
+    {
+      _tag: 'Unavailable',
+      action: 'openInProcess',
+      reason: 'AssetNotAvailableLocally',
+    },
+  ])
+  assert.equal(JSON.stringify(detail).includes('objectKey'), false)
+  assert.equal(JSON.stringify(detail).includes('published/'), false)
+  assert.equal(JSON.stringify(detail).includes('X-Amz'), false)
+  assert.equal(JSON.stringify(detail).includes('provider'), false)
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+    ).count,
+    0,
+  )
+  await listener.close()
+  service.close()
+  firstClosed = true
+
+  const recovered = createLocalWebService(
+    databasePath,
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'library-published' },
+  )
+  const recoveredListener = await recovered.listen()
+  t.after(async () => {
+    await recoveredListener.close()
+    recovered.close()
+  })
+  const recoveredDetail = await fetch(
+    `http://127.0.0.1:${recoveredListener.port}/api/library/assets/asset-m27-001`,
+  ).then((response) => response.json())
+  assert.deepEqual(recoveredDetail.actions[0], {
+    _tag: 'Eligible',
+    action: 'download',
+  })
+  const publication = databaseRow(
+    PublicationRow,
+    recovered.database
+      .prepare(
+        "SELECT object_key FROM asset_publications WHERE asset_id='asset-m27-001' AND state='published'",
+      )
+      .get(),
+  )
+  assert.match(publication.object_key, /^published\//)
+  assert.equal(
+    databaseRow(
+      CountRow,
+      recovered.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+    ).count,
+    0,
+  )
 })
 
 test('plan-draft fixture preserves UI-created fake definitions without run or hardware work', async (t) => {

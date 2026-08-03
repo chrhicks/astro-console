@@ -30,6 +30,10 @@ import {
   PlanCommandResponse,
   PlanIntent,
   PlanWorkspaceProjection,
+  LibraryAssetDetail,
+  LibraryPage,
+  LibraryQuery,
+  ProcessSourceHandoff,
 } from '@astro-console/v2-contracts'
 import { decodeSeestarPushEvent } from 'seestar-sdk'
 import {
@@ -676,6 +680,55 @@ class ObserveServiceUnavailable extends Schema.TaggedErrorClass<ObserveServiceUn
   'Server.ObserveServiceUnavailable',
   {},
 ) {}
+class LibraryInputInvalid extends Schema.TaggedErrorClass<LibraryInputInvalid>()(
+  'Server.LibraryInputInvalid',
+  {},
+) {}
+class LibraryAssetNotFound extends Schema.TaggedErrorClass<LibraryAssetNotFound>()(
+  'Server.LibraryAssetNotFound',
+  {},
+) {}
+class LibraryAssetUnavailable extends Schema.TaggedErrorClass<LibraryAssetUnavailable>()(
+  'Server.LibraryAssetUnavailable',
+  { reason: Schema.Literals(['AssetUnavailable', 'PublicationUnavailable']) },
+) {}
+class LibraryPersistenceUnavailable extends Schema.TaggedErrorClass<LibraryPersistenceUnavailable>()(
+  'Server.LibraryPersistenceUnavailable',
+  {},
+) {}
+interface LibraryServiceShape {
+  readonly page: (
+    query: typeof LibraryQuery.Type,
+  ) => Effect.Effect<typeof LibraryPage.Type, LibraryPersistenceUnavailable>
+  readonly detail: (
+    assetId: string,
+  ) => Effect.Effect<
+    typeof LibraryAssetDetail.Type,
+    LibraryInputInvalid | LibraryAssetNotFound | LibraryPersistenceUnavailable
+  >
+  readonly processSource: (
+    assetId: string,
+  ) => Effect.Effect<
+    typeof ProcessSourceHandoff.Type,
+    | LibraryInputInvalid
+    | LibraryAssetNotFound
+    | LibraryAssetUnavailable
+    | LibraryPersistenceUnavailable
+  >
+  readonly download: (
+    assetId: string,
+  ) => Effect.Effect<
+    { readonly objectKey: string },
+    | LibraryInputInvalid
+    | LibraryAssetNotFound
+    | LibraryAssetUnavailable
+    | LibraryPersistenceUnavailable
+  >
+}
+class LibraryService extends Context.Service<
+  LibraryService,
+  LibraryServiceShape
+>()('Server.LibraryService') {}
 interface PlanCommandServiceShape {
   readonly execute: (intent: typeof PlanIntent.Type) => Effect.Effect<
     {
@@ -904,18 +957,6 @@ const LibrarySort = Schema.Literals([
   'sharpestFirst',
   'recentlyUpdated',
 ])
-const LibraryQueryInput = Schema.Struct({
-  queryId: Schema.NonEmptyString,
-  cursor: Schema.optionalKey(
-    Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  ),
-  pageSize: Schema.Int.check(
-    Schema.isGreaterThanOrEqualTo(1),
-    Schema.isLessThanOrEqualTo(100),
-  ),
-  role: Schema.optionalKey(LibraryRole),
-  sort: LibrarySort,
-})
 const LibraryAssetRow = Schema.Struct({
   asset_id: Schema.String,
   revision: Schema.Int,
@@ -1232,7 +1273,7 @@ export function createLocalWebService(
   processSaveStorage?: ProcessSaveStorage,
   downloadGrants?: DownloadGrantConfig,
   options: {
-    readonly fixture?: 'm27' | 'plan-draft'
+    readonly fixture?: 'm27' | 'plan-draft' | 'library-published'
     readonly webDistPath?: string
   } = {},
 ) {
@@ -1241,9 +1282,11 @@ export function createLocalWebService(
   const database = new DatabaseSync(databasePath)
   database.exec('PRAGMA journal_mode = WAL')
   migrateDatabase(database)
-  if (options.fixture !== undefined)
-    installM27Fixture(database, options.fixture === 'm27')
-  else initializeRuntimeState(database)
+  if (options.fixture !== undefined) {
+    installM27Fixture(database, options.fixture !== 'plan-draft')
+    if (options.fixture === 'library-published')
+      installPublishedLibraryFixture(database)
+  } else initializeRuntimeState(database)
   const webHost = Effect.runSync(
     WebHost.pipe(
       Effect.provide(webHostLayer(options.webDistPath ?? '../web/dist')),
@@ -1350,7 +1393,7 @@ export function createLocalWebService(
       return libraryDetail(
         response,
         database,
-        decodedAssetId(url.pathname.slice('/api/library/assets/'.length)),
+        url.pathname.slice('/api/library/assets/'.length),
       )
     if (request.method === 'POST' && url.pathname === '/api/plan/commands')
       return Effect.runPromise(
@@ -2131,6 +2174,45 @@ export function installM27Fixture(
   seedWorkspaces(database)
   ensureM27FixturePlan(database, includeFixtureDefinition)
 }
+function installPublishedLibraryFixture(database: DatabaseSync) {
+  const assetId = 'asset-m27-001'
+  const raw: unknown = database
+    .prepare('SELECT detail FROM library_assets WHERE asset_id=?')
+    .get(assetId)
+  const detail = Schema.decodeUnknownSync(
+    Schema.Struct({ detail: Schema.String }),
+  )(raw)
+  const libraryDetail = Schema.decodeUnknownSync(LibraryDetail)(
+    JSON.parse(detail.detail),
+  )
+  database
+    .prepare(
+      'UPDATE library_assets SET availability=?,detail=? WHERE asset_id=?',
+    )
+    .run(
+      'published',
+      JSON.stringify({
+        ...libraryDetail,
+        availability: 'published',
+        representations: [
+          ...libraryDetail.representations,
+          { label: 'Published delivery available', state: 'published' },
+        ],
+      }),
+      assetId,
+    )
+  database
+    .prepare(
+      'INSERT OR IGNORE INTO asset_publications (asset_id,checksum,state,updated_at,object_key) VALUES (?,?,?,?,?)',
+    )
+    .run(
+      assetId,
+      'fixture-m27-001',
+      'published',
+      '2026-07-25T00:00:00.000Z',
+      'published/run-m27-001/previews/asset-m27-001-fixture.fits',
+    )
+}
 export function openPublisherDatabase(
   databasePath: string,
   allowedRoot = '/var/lib/astro-console/',
@@ -2685,11 +2767,43 @@ function evaluatePlan(input: {
     sequences,
   }
 }
-function processWorkspace(
+async function processWorkspace(
   response: ServerResponse,
   db: DatabaseSync,
   url: URL,
 ) {
+  const sourceAssetId = url.searchParams.get('sourceAssetId')
+  if (sourceAssetId !== null) {
+    const result = await Effect.runPromise(
+      LibraryService.pipe(
+        Effect.flatMap((library) => library.processSource(sourceAssetId)),
+        Effect.map((body) => ({ status: 200, body })),
+        Effect.catchTags({
+          'Server.LibraryInputInvalid': () =>
+            Effect.succeed({ status: 400, reason: 'InvalidInput' }),
+          'Server.LibraryAssetNotFound': () =>
+            Effect.succeed({ status: 404, reason: 'AssetNotFound' }),
+          'Server.LibraryAssetUnavailable': () =>
+            Effect.succeed({ status: 409, reason: 'AssetUnavailable' }),
+          'Server.LibraryPersistenceUnavailable': () =>
+            Effect.succeed({ status: 503, reason: 'LibraryUnavailable' }),
+        }),
+        Effect.provide(libraryServiceLayer(db)),
+      ),
+    )
+    if ('reason' in result)
+      return json(response, result.status, {
+        outcome: 'rejected',
+        reason: result.reason,
+        ...(result.status === 409
+          ? {
+              message:
+                'This asset is temporarily unavailable and cannot open in Process.',
+            }
+          : {}),
+      })
+    return json(response, result.status, result.body)
+  }
   const raw: unknown = db
     .prepare("SELECT value FROM workspace_projections WHERE name='process'")
     .get()
@@ -2697,130 +2811,72 @@ function processWorkspace(
   const session = Schema.decodeUnknownSync(ProcessWorkspace)(
     JSON.parse(row.value),
   )
-  const sourceAssetId = url.searchParams.get('sourceAssetId')
-  if (sourceAssetId === null) return json(response, 200, session)
-  const asset: unknown = db
-    .prepare('SELECT asset_id,detail FROM library_assets WHERE asset_id=?')
-    .get(sourceAssetId)
-  const source = Schema.decodeUnknownSync(
-    Schema.optional(
-      Schema.Struct({ asset_id: Schema.String, detail: Schema.String }),
-    ),
-  )(asset)
-  if (source === undefined)
-    return json(response, 404, { outcome: 'rejected', reason: 'AssetNotFound' })
-  const detail = Schema.decodeUnknownSync(LibraryDetail)(
-    JSON.parse(source.detail),
-  )
-  if (detail.availability !== 'availableLocally')
-    return json(response, 409, {
-      outcome: 'rejected',
-      reason: 'AssetUnavailable',
-      message:
-        'This asset is temporarily unavailable and cannot open in Process.',
-    })
-  return json(response, 200, {
-    ...session,
-    sourceAssetId: detail.assetId,
-    sourceLabel: `${detail.role} · ${detail.format} · ${detail.assetId}`,
-  })
+  return json(response, 200, session)
 }
-function libraryPage(response: ServerResponse, db: DatabaseSync, url: URL) {
-  try {
-    const query = decodeLibraryQuery(url)
-    const order = {
-      capturedAtDescending: 'captured_at DESC, asset_id ASC',
-      sharpestFirst: 'sharpness DESC, asset_id ASC',
-      recentlyUpdated: 'updated_at DESC, asset_id ASC',
-    } satisfies Record<LibrarySort, string>
-    const filter = query.role === undefined ? '' : 'WHERE role=?'
-    const bindings =
-      query.role === undefined
-        ? [query.pageSize + 1, query.cursor ?? 0]
-        : [query.role, query.pageSize + 1, query.cursor ?? 0]
-    const rowsRaw: unknown = db
-      .prepare(
-        `SELECT asset_id,revision,role,format,availability,comparison_group_id,detail FROM library_assets ${filter} ORDER BY ${order[query.sort]} LIMIT ? OFFSET ?`,
-      )
-      .all(...bindings)
-    const rows = Schema.decodeUnknownSync(Schema.Array(LibraryAssetRow))(
-      rowsRaw,
-    )
-    const results = rows.slice(0, query.pageSize).map((asset) => ({
-      assetId: asset.asset_id,
-      revision: asset.revision,
-      role: asset.role,
-      format: asset.format,
-      availability: asset.availability,
-      comparisonGroupId: asset.comparison_group_id,
-    }))
-    const current = state(db)
-    return json(response, 200, {
-      queryId: query.queryId,
-      querySnapshotVersion: current.snapshotVersion,
-      results,
-      ...(rows.length > query.pageSize
-        ? { nextCursor: String((query.cursor ?? 0) + query.pageSize) }
-        : {}),
-      catalogChanged: false,
-    })
-  } catch {
-    return json(response, 400, {
-      outcome: 'rejected',
-      reason: 'InvalidInput',
-      message: operatorMessages.InvalidInput,
-    })
-  }
+async function libraryPage(
+  response: ServerResponse,
+  db: DatabaseSync,
+  url: URL,
+) {
+  const result = await Effect.runPromise(
+    decodeLibraryQuery(url).pipe(
+      Effect.flatMap((query) =>
+        LibraryService.pipe(Effect.flatMap((library) => library.page(query))),
+      ),
+      Effect.map((body) => ({ status: 200, body })),
+      Effect.catchTags({
+        'Server.LibraryInputInvalid': () =>
+          Effect.succeed({ status: 400, body: libraryInvalidBody }),
+        'Server.LibraryPersistenceUnavailable': () =>
+          Effect.succeed({ status: 503, body: libraryUnavailableBody }),
+      }),
+      Effect.provide(libraryServiceLayer(db)),
+    ),
+  )
+  return json(response, result.status, result.body)
 }
 function decodeLibraryQuery(url: URL) {
   const allowed = new Set(['queryId', 'cursor', 'pageSize', 'role', 'sort'])
   if ([...url.searchParams.keys()].some((key) => !allowed.has(key)))
-    throw new Error('Unknown library query parameter')
+    return Effect.fail(new LibraryInputInvalid())
   const cursor = url.searchParams.get('cursor')
   const pageSize = url.searchParams.get('pageSize') ?? '40'
   if (cursor !== null && !/^\d+$/.test(cursor))
-    throw new Error('Malformed cursor')
-  if (!/^\d+$/.test(pageSize)) throw new Error('Malformed page size')
-  return Schema.decodeUnknownSync(LibraryQueryInput)({
+    return Effect.fail(new LibraryInputInvalid())
+  if (!/^\d+$/.test(pageSize)) return Effect.fail(new LibraryInputInvalid())
+  return Schema.decodeUnknownEffect(LibraryQuery)({
     queryId: url.searchParams.get('queryId') ?? 'library-m27',
-    ...(cursor === null ? {} : { cursor: Number(cursor) }),
+    ...(cursor === null ? {} : { cursor }),
     pageSize: Number(pageSize),
     ...(url.searchParams.get('role') === null
       ? {}
       : { role: url.searchParams.get('role') }),
     sort: url.searchParams.get('sort') ?? 'capturedAtDescending',
-  })
+  }).pipe(Effect.mapError(() => new LibraryInputInvalid()))
 }
-function libraryDetail(
+async function libraryDetail(
   response: ServerResponse,
   db: DatabaseSync,
-  assetId: string,
+  encodedAssetId: string,
 ) {
-  if (
-    !/^asset-(?:m27-\d{3}|process-[0-9a-f-]+|source-[a-z0-9-]+)$/.test(assetId)
+  const result = await Effect.runPromise(
+    LibraryService.pipe(
+      Effect.flatMap((library) =>
+        library.detail(decodedAssetId(encodedAssetId)),
+      ),
+      Effect.map((body) => ({ status: 200, body })),
+      Effect.catchTags({
+        'Server.LibraryInputInvalid': () =>
+          Effect.succeed({ status: 400, body: libraryInvalidBody }),
+        'Server.LibraryAssetNotFound': () =>
+          Effect.succeed({ status: 404, body: libraryNotFoundBody }),
+        'Server.LibraryPersistenceUnavailable': () =>
+          Effect.succeed({ status: 503, body: libraryUnavailableBody }),
+      }),
+      Effect.provide(libraryServiceLayer(db)),
+    ),
   )
-    return json(response, 400, {
-      outcome: 'rejected',
-      reason: 'InvalidInput',
-      message: operatorMessages.InvalidInput,
-    })
-  const raw: unknown = db
-    .prepare(
-      'SELECT asset_id,revision,role,format,availability,comparison_group_id,detail FROM library_assets WHERE asset_id=?',
-    )
-    .get(assetId)
-  const row = Schema.decodeUnknownSync(Schema.optional(LibraryAssetRow))(raw)
-  if (row === undefined)
-    return json(response, 404, { outcome: 'rejected', reason: 'AssetNotFound' })
-  try {
-    const parsed: unknown = JSON.parse(row.detail)
-    return json(response, 200, Schema.decodeUnknownSync(LibraryDetail)(parsed))
-  } catch {
-    return json(response, 500, {
-      outcome: 'rejected',
-      reason: 'LibraryCorrupt',
-    })
-  }
+  return json(response, result.status, result.body)
 }
 function decodedAssetId(value: string) {
   try {
@@ -2829,6 +2885,214 @@ function decodedAssetId(value: string) {
     return ''
   }
 }
+const libraryInvalidBody = {
+  outcome: 'rejected',
+  reason: 'InvalidInput',
+  message: operatorMessages.InvalidInput,
+}
+const libraryNotFoundBody = { outcome: 'rejected', reason: 'AssetNotFound' }
+const libraryUnavailableBody = {
+  outcome: 'rejected',
+  reason: 'LibraryUnavailable',
+}
+const libraryServiceLayer = (db: DatabaseSync) =>
+  Layer.succeed(
+    LibraryService,
+    LibraryService.of({
+      page: Effect.fn('Server.LibraryService.page')(function* (query) {
+        const order = {
+          capturedAtDescending: 'captured_at DESC, asset_id ASC',
+          sharpestFirst: 'sharpness DESC, asset_id ASC',
+          recentlyUpdated: 'updated_at DESC, asset_id ASC',
+        } satisfies Record<LibrarySort, string>
+        const cursor = Number(query.cursor ?? '0')
+        const filter = query.role === undefined ? '' : 'WHERE role=?'
+        const bindings =
+          query.role === undefined
+            ? [query.pageSize + 1, cursor]
+            : [query.role, query.pageSize + 1, cursor]
+        const rowsRaw = yield* Effect.try({
+          try: () =>
+            db
+              .prepare(
+                `SELECT asset_id,revision,role,format,availability,comparison_group_id,detail FROM library_assets ${filter} ORDER BY ${order[query.sort]} LIMIT ? OFFSET ?`,
+              )
+              .all(...bindings),
+          catch: () => new LibraryPersistenceUnavailable(),
+        })
+        const rows = yield* Schema.decodeUnknownEffect(
+          Schema.Array(LibraryAssetRow),
+        )(rowsRaw).pipe(
+          Effect.mapError(() => new LibraryPersistenceUnavailable()),
+        )
+        const snapshotVersion = yield* Effect.try({
+          try: () => state(db).snapshotVersion,
+          catch: () => new LibraryPersistenceUnavailable(),
+        })
+        return yield* Schema.decodeUnknownEffect(LibraryPage)({
+          queryId: query.queryId,
+          querySnapshotVersion: snapshotVersion,
+          results: rows.slice(0, query.pageSize).map((asset) => ({
+            assetId: asset.asset_id,
+            revision: asset.revision,
+            role: asset.role,
+            format: asset.format,
+            availability: asset.availability,
+            comparisonGroupId: asset.comparison_group_id,
+          })),
+          ...(rows.length > query.pageSize
+            ? { nextCursor: String(cursor + query.pageSize) }
+            : {}),
+          catalogChanged: false,
+        }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
+      }),
+      detail: Effect.fn('Server.LibraryService.detail')(function* (assetId) {
+        const detail = yield* libraryStoredDetail(db, assetId)
+        const publication = yield* libraryPublication(db, assetId)
+        return yield* Schema.decodeUnknownEffect(LibraryAssetDetail)({
+          ...detail,
+          actions: libraryActions(detail.availability, publication),
+        }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
+      }),
+      processSource: Effect.fn('Server.LibraryService.processSource')(
+        function* (assetId) {
+          const detail = yield* libraryStoredDetail(db, assetId, false)
+          if (detail.availability !== 'availableLocally')
+            return yield* Effect.fail(
+              new LibraryAssetUnavailable({ reason: 'AssetUnavailable' }),
+            )
+          return yield* Schema.decodeUnknownEffect(ProcessSourceHandoff)({
+            sourceAssetId: detail.assetId,
+            role: detail.role,
+            availability: detail.availability,
+            processing: {
+              availability: 'unavailable',
+              currentFixtureFacts: [
+                'Interactive processing is not available in this workspace.',
+              ],
+            },
+          }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
+        },
+      ),
+      download: Effect.fn('Server.LibraryService.download')(
+        function* (assetId) {
+          yield* libraryAssetId(assetId)
+          const publication = yield* libraryPublication(db, assetId)
+          if (publication === undefined) {
+            const known = yield* libraryKnownAsset(db, assetId)
+            if (!known) return yield* Effect.fail(new LibraryAssetNotFound())
+            return yield* Effect.fail(
+              new LibraryAssetUnavailable({ reason: 'PublicationUnavailable' }),
+            )
+          }
+          if (
+            publication.availability !== 'published' ||
+            publication.state !== 'published' ||
+            publication.object_key === ''
+          )
+            return yield* Effect.fail(
+              new LibraryAssetUnavailable({ reason: 'AssetUnavailable' }),
+            )
+          return { objectKey: publication.object_key }
+        },
+      ),
+    }),
+  )
+const libraryAssetId = (assetId: string, requireStableId = true) =>
+  Schema.decodeUnknownEffect(LibraryAssetDetail.fields.assetId)(assetId).pipe(
+    Effect.flatMap((id) =>
+      !requireStableId ||
+      /^asset-(?:m27-\d{3}|process-[0-9a-f-]+|source-[a-z0-9-]+)$/.test(id)
+        ? Effect.succeed(id)
+        : Effect.fail(new LibraryInputInvalid()),
+    ),
+    Effect.mapError(() => new LibraryInputInvalid()),
+  )
+const libraryStoredDetail = (
+  db: DatabaseSync,
+  assetId: string,
+  requireStableId = true,
+) =>
+  Effect.gen(function* () {
+    yield* libraryAssetId(assetId, requireStableId)
+    const raw = yield* Effect.try({
+      try: () =>
+        db
+          .prepare(
+            'SELECT asset_id,detail FROM library_assets WHERE asset_id=?',
+          )
+          .get(assetId),
+      catch: () => new LibraryPersistenceUnavailable(),
+    })
+    const row = yield* Schema.decodeUnknownEffect(
+      Schema.optional(
+        Schema.Struct({ asset_id: Schema.String, detail: Schema.String }),
+      ),
+    )(raw).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
+    if (row === undefined) return yield* Effect.fail(new LibraryAssetNotFound())
+    const parsed = yield* Effect.try({
+      try: () => JSON.parse(row.detail),
+      catch: () => new LibraryPersistenceUnavailable(),
+    })
+    return yield* Schema.decodeUnknownEffect(LibraryDetail)(parsed).pipe(
+      Effect.mapError(() => new LibraryPersistenceUnavailable()),
+    )
+  })
+const libraryPublication = (db: DatabaseSync, assetId: string) =>
+  Effect.try({
+    try: () =>
+      db
+        .prepare(
+          'SELECT library_assets.asset_id,library_assets.role,library_assets.format,library_assets.availability,asset_publications.state,asset_publications.object_key FROM library_assets JOIN asset_publications ON asset_publications.asset_id=library_assets.asset_id WHERE library_assets.asset_id=?',
+        )
+        .get(assetId),
+    catch: () => new LibraryPersistenceUnavailable(),
+  }).pipe(
+    Effect.flatMap(
+      Schema.decodeUnknownEffect(Schema.optional(DownloadAssetRow)),
+    ),
+    Effect.mapError(() => new LibraryPersistenceUnavailable()),
+  )
+const libraryKnownAsset = (db: DatabaseSync, assetId: string) =>
+  Effect.try({
+    try: () =>
+      db
+        .prepare('SELECT asset_id FROM library_assets WHERE asset_id=?')
+        .get(assetId),
+    catch: () => new LibraryPersistenceUnavailable(),
+  }).pipe(
+    Effect.flatMap(
+      Schema.decodeUnknownEffect(
+        Schema.optional(Schema.Struct({ asset_id: Schema.String })),
+      ),
+    ),
+    Effect.map((asset) => asset !== undefined),
+    Effect.mapError(() => new LibraryPersistenceUnavailable()),
+  )
+const libraryActions = (
+  availability: (typeof LibraryDetail.Type)['availability'],
+  publication: typeof DownloadAssetRow.Type | undefined,
+) => [
+  publication?.state === 'published' &&
+  publication.object_key !== '' &&
+  availability === 'published'
+    ? { _tag: 'Eligible' as const, action: 'download' as const }
+    : {
+        _tag: 'Unavailable' as const,
+        action: 'download' as const,
+        reason:
+          publication === undefined
+            ? 'PublicationUnavailable'
+            : 'AssetNotPublished',
+      },
+  availability === 'availableLocally'
+    ? { _tag: 'Eligible' as const, action: 'openInProcess' as const }
+    : {
+        _tag: 'Unavailable' as const,
+        action: 'openInProcess' as const,
+        reason: 'AssetNotAvailableLocally' as const,
+      },
+]
 async function downloadAsset(
   response: ServerResponse,
   db: DatabaseSync,
@@ -2840,47 +3104,44 @@ async function downloadAsset(
       outcome: 'rejected',
       reason: 'DownloadUnavailable',
     })
-  const match = /^\/api\/library\/assets\/(.+)\/download$/.exec(url.pathname)
-  if (match?.[1] === undefined)
+  const encodedAssetId = /^\/api\/library\/assets\/(.+)\/download$/.exec(
+    url.pathname,
+  )?.[1]
+  if (encodedAssetId === undefined)
     return json(response, 400, { outcome: 'rejected', reason: 'InvalidInput' })
-  const assetId = decodedAssetId(match[1])
-  if (
-    !/^asset-(?:m27-\d{3}|process-[0-9a-f-]+|source-[a-z0-9-]+)$/.test(assetId)
+  const asset = await Effect.runPromise(
+    LibraryService.pipe(
+      Effect.flatMap((library) =>
+        library.download(decodedAssetId(encodedAssetId)),
+      ),
+      Effect.map((asset) => ({ status: 200 as const, asset })),
+      Effect.catchTags({
+        'Server.LibraryInputInvalid': () =>
+          Effect.succeed({ status: 400 as const, reason: 'InvalidInput' }),
+        'Server.LibraryAssetNotFound': () =>
+          Effect.succeed({ status: 404 as const, reason: 'AssetNotFound' }),
+        'Server.LibraryAssetUnavailable': () =>
+          Effect.succeed({ status: 409 as const, reason: 'AssetUnavailable' }),
+        'Server.LibraryPersistenceUnavailable': () =>
+          Effect.succeed({
+            status: 503 as const,
+            reason: 'DownloadUnavailable',
+          }),
+      }),
+      Effect.provide(libraryServiceLayer(db)),
+    ),
   )
-    return json(response, 400, { outcome: 'rejected', reason: 'InvalidInput' })
-  const raw: unknown = db
-    .prepare(
-      'SELECT library_assets.asset_id,library_assets.role,library_assets.format,library_assets.availability,asset_publications.state,asset_publications.object_key FROM library_assets JOIN asset_publications ON asset_publications.asset_id=library_assets.asset_id WHERE library_assets.asset_id=?',
-    )
-    .get(assetId)
-  const asset = Schema.decodeUnknownSync(Schema.optional(DownloadAssetRow))(raw)
-  if (asset === undefined) {
-    const known = Schema.decodeUnknownSync(
-      Schema.optional(Schema.Struct({ asset_id: Schema.String })),
-    )(
-      db
-        .prepare('SELECT asset_id FROM library_assets WHERE asset_id=?')
-        .get(assetId),
-    )
-    return known === undefined
-      ? json(response, 404, { outcome: 'rejected', reason: 'AssetNotFound' })
-      : json(response, 409, { outcome: 'rejected', reason: 'AssetUnavailable' })
-  }
-  if (
-    asset.availability !== 'published' ||
-    asset.state !== 'published' ||
-    asset.object_key === ''
-  )
-    return json(response, 409, {
+  if ('reason' in asset)
+    return json(response, asset.status, {
       outcome: 'rejected',
-      reason: 'AssetUnavailable',
+      reason: asset.reason,
     })
   const now = grants.now?.() ?? new Date()
   const expiresAt = new Date(now.valueOf() + 300_000).toISOString()
   let signedUrl: string
   try {
     signedUrl = await grants.issuer.issue({
-      objectKey: asset.object_key,
+      objectKey: asset.asset.objectKey,
       expiresAt,
     })
   } catch {

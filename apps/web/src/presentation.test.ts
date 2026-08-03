@@ -22,6 +22,10 @@ import { projectBootstrapState } from './bootstrap-projection'
 import {
   bootstrapFixtures,
   BootstrapSnapshot,
+  LibraryAssetDetail,
+  LibraryPage,
+  LibraryQuery,
+  ProcessSourceHandoff,
 } from '@astro-console/v2-contracts'
 
 test('routes parse stable IDs and build escaped URLs', () => {
@@ -417,6 +421,34 @@ test('process has a focusable screen heading', () => {
   assert.match(markup, /<h1 tabindex="-1">No processing session<\/h1>/)
 })
 
+test('Process source handoffs resolve only from the server without Process claims', () => {
+  const markup = renderToStaticMarkup(
+    createElement(ProcessView, {
+      view: projectFixture('fresh').process,
+      sessionId: undefined,
+      sourceAssetId: 'asset-source-1',
+      sourceHandoff: Schema.decodeUnknownSync(ProcessSourceHandoff)({
+        sourceAssetId: 'asset-source-1',
+        role: 'original',
+        availability: 'availableLocally',
+        processing: {
+          availability: 'unavailable',
+          currentFixtureFacts: [
+            'Interactive processing is not available in this workspace.',
+          ],
+        },
+      }),
+    }),
+  )
+  assert.match(markup, /asset-source-1 \/ stable handoff/)
+  assert.match(
+    markup,
+    /Source role: original\. Source availability: availableLocally\./,
+  )
+  assert.match(markup, /Interactive processing is unavailable\./)
+  assert.doesNotMatch(markup, /Build complete|Last valid image|evidence-image/)
+})
+
 test('room projections render their required landmarks', () => {
   const projection = projectFixture('fresh')
   const link = (route: ReturnType<typeof parseRoute>) => {
@@ -457,4 +489,131 @@ test('room projections render their required landmarks', () => {
   assert.match(process, /process-rail/)
   assert.match(observe, /evidence-image/)
   assert.match(process, /evidence-image/)
+})
+
+test('Library renders only eligible desktop actions and keeps phone read-only', () => {
+  const detail = Schema.decodeUnknownSync(LibraryAssetDetail)({
+    assetId: 'asset-1',
+    revision: 1,
+    role: 'final',
+    format: 'fits',
+    availability: 'published',
+    capturedAt: '2026-08-03T00:00:00.000Z',
+    comparisonGroupId: 'group-1',
+    lineage: {
+      sourceAssetIds: ['source-1'],
+      runId: 'run-1',
+      solveAttemptId: 'solve-1',
+    },
+    representations: [{ label: 'Published FITS', state: 'published' }],
+    actions: [
+      { _tag: 'Eligible', action: 'download' },
+      {
+        _tag: 'Unavailable',
+        action: 'openInProcess',
+        reason: 'AssetNotAvailableLocally',
+      },
+    ],
+  })
+  const view = projectFixture('fresh').library
+  const link = (route: ReturnType<typeof parseRoute>) => {
+    if (route.kind === 'not-found') assert.fail('Expected a workspace route')
+    return { href: routePath(route), onClick: () => undefined }
+  }
+  const desktop = renderToStaticMarkup(
+    createElement(LibraryView, { view, assetId: 'asset-1', link, detail }),
+  )
+  const phone = renderToStaticMarkup(
+    createElement(LibraryView, {
+      view,
+      assetId: 'asset-1',
+      link,
+      detail,
+      readOnly: true,
+    }),
+  )
+  assert.match(desktop, /Download/)
+  assert.match(desktop, /AssetNotAvailableLocally/)
+  assert.doesNotMatch(desktop, /Open source handoff in Process/)
+  assert.doesNotMatch(phone, /href="\/api\/library\/assets\/asset-1\/download"/)
+})
+
+test('Library root selects the first loaded record without claiming its detail', () => {
+  const view = projectFixture('fresh').library
+  const query = Schema.decodeUnknownSync(LibraryQuery)({
+    queryId: 'nightbook',
+    pageSize: 40,
+    sort: 'capturedAtDescending',
+  })
+  const page = Schema.decodeUnknownSync(LibraryPage)({
+    queryId: 'nightbook',
+    querySnapshotVersion: 1,
+    results: [
+      {
+        assetId: 'asset-first',
+        revision: 1,
+        role: 'original',
+        format: 'fits',
+        availability: 'availableLocally',
+        comparisonGroupId: 'm27',
+      },
+      {
+        assetId: 'asset-second',
+        revision: 1,
+        role: 'final',
+        format: 'fits',
+        availability: 'published',
+        comparisonGroupId: 'm27',
+      },
+    ],
+    catalogChanged: false,
+  })
+  const link = (route: ReturnType<typeof parseRoute>) => {
+    if (route.kind === 'not-found') assert.fail('Expected a workspace route')
+    return { href: routePath(route), onClick: () => undefined }
+  }
+  const markup = renderToStaticMarkup(
+    createElement(LibraryView, {
+      view,
+      assetId: undefined,
+      link,
+      page: {
+        query,
+        value: page,
+      },
+    }),
+  )
+  assert.match(
+    markup,
+    /data-selected="true"[^>]*href="\/library\/assets\/asset-first"/,
+  )
+  assert.match(
+    markup,
+    /data-selected="false"[^>]*href="\/library\/assets\/asset-second"/,
+  )
+  assert.match(markup, /Select an asset to open detail\./)
+  assert.doesNotMatch(markup, /aria-current="page"/)
+  assert.doesNotMatch(markup, /Loading asset detail\./)
+})
+
+test('Library loading state omits records from the previous page', () => {
+  const view = projectFixture('fresh').library
+  const query = Schema.decodeUnknownSync(LibraryQuery)({
+    queryId: 'nightbook',
+    pageSize: 40,
+    sort: 'recentlyUpdated',
+  })
+  const markup = renderToStaticMarkup(
+    createElement(LibraryView, {
+      view,
+      assetId: undefined,
+      link: (route) => ({ href: routePath(route), onClick: () => undefined }),
+      page: {
+        query,
+        message: 'Loading Library records.',
+      },
+    }),
+  )
+  assert.match(markup, /Loading Library records\./)
+  assert.doesNotMatch(markup, /M31 luminance original/)
 })
