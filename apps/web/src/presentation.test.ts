@@ -34,8 +34,7 @@ test('routes parse stable IDs and build escaped URLs', () => {
     assetId: 'asset/one',
   })
   assert.deepEqual(parseRoute('/process/sessions/session%20one'), {
-    kind: 'session',
-    sessionId: 'session one',
+    kind: 'not-found',
   })
   assert.deepEqual(parseRoute('/process', '?sourceAssetId=asset%2Fone'), {
     kind: 'process-source',
@@ -69,7 +68,6 @@ test('production projection fails closed for every consequential action', () => 
   )
   assert.equal('action' in unavailableProjection.plan, false)
   assert.equal('action' in unavailableProjection.library, false)
-  assert.equal('action' in unavailableProjection.process, false)
 })
 
 test('unavailable Plan projection does not claim a draft or revision', () => {
@@ -296,7 +294,6 @@ test('fixture scenarios parse deterministically and remain read-only', () => {
       projection.plan.action,
       projection.observe.action,
       projection.library.action,
-      projection.process.action,
     ])
       assert.notEqual(action?.availability, 'available')
 })
@@ -320,7 +317,7 @@ test('fixture Observe lifecycle projections state fixture evidence coherently', 
   }
 })
 
-test('fixture projections distinguish disconnected, rejected, process, and delivery states', () => {
+test('fixture projections distinguish disconnected, rejected, and delivery states', () => {
   const disconnected = projectFixture('disconnected')
   assert.match(disconnected.shell.service, /disconnected/i)
   assert.match(disconnected.shell.freshness, /current authoritative truth/i)
@@ -332,10 +329,6 @@ test('fixture projections distinguish disconnected, rejected, process, and deliv
   assert.match(rejected.observe.status, /simulated action rejection/i)
   assert.match(rejected.observe.action?.reason ?? '', /simulated rejection/i)
 
-  assert.match(
-    projectFixture('process-failure').process.failure ?? '',
-    /Fixture Stretch failed/,
-  )
   assert.match(
     projectFixture('delivery-ready').library.assets[0]?.download ?? '',
     /Fixture representation ready to download/,
@@ -413,24 +406,31 @@ test('shell exposes a persisted current run outside Observe without commands', (
 test('process has a focusable screen heading', () => {
   const markup = renderToStaticMarkup(
     createElement(ProcessView, {
-      view: unavailableProjection.process,
-      sessionId: undefined,
       sourceAssetId: undefined,
     }),
   )
-  assert.match(markup, /<h1 tabindex="-1">No processing session<\/h1>/)
+  assert.match(
+    markup,
+    /<h1 tabindex="-1">Interactive processing unavailable<\/h1>/,
+  )
 })
 
 test('Process source handoffs resolve only from the server without Process claims', () => {
   const markup = renderToStaticMarkup(
     createElement(ProcessView, {
-      view: projectFixture('fresh').process,
-      sessionId: undefined,
       sourceAssetId: 'asset-source-1',
       sourceHandoff: Schema.decodeUnknownSync(ProcessSourceHandoff)({
         sourceAssetId: 'asset-source-1',
+        revision: 1,
         role: 'original',
+        format: 'fits',
         availability: 'availableLocally',
+        comparisonGroupId: 'group-1',
+        lineage: {
+          sourceAssetIds: ['asset-raw-1'],
+          runId: 'run-1',
+          solveAttemptId: 'solve-1',
+        },
         processing: {
           availability: 'unavailable',
           currentFixtureFacts: [
@@ -440,13 +440,13 @@ test('Process source handoffs resolve only from the server without Process claim
       }),
     }),
   )
-  assert.match(markup, /asset-source-1 \/ stable handoff/)
-  assert.match(
+  assert.match(markup, /asset-source-1/)
+  assert.match(markup, /original · fits · availableLocally/)
+  assert.match(markup, /Interactive processing is not installed\./)
+  assert.doesNotMatch(
     markup,
-    /Source role: original\. Source availability: availableLocally\./,
+    /Build complete|Last valid image|evidence-image|group-1|Interactive processing is not available in this workspace/,
   )
-  assert.match(markup, /Interactive processing is unavailable\./)
-  assert.doesNotMatch(markup, /Build complete|Last valid image|evidence-image/)
 })
 
 test('room projections render their required landmarks', () => {
@@ -468,13 +468,6 @@ test('room projections render their required landmarks', () => {
       link,
     }),
   )
-  const process = renderToStaticMarkup(
-    createElement(ProcessView, {
-      view: projection.process,
-      sessionId: undefined,
-      sourceAssetId: undefined,
-    }),
-  )
   assert.match(plan, /sequence-list/)
   assert.match(plan, /sky-field/)
   assert.match(plan, /plan-timeline/)
@@ -484,11 +477,7 @@ test('room projections render their required landmarks', () => {
   assert.match(library, /library-lineage/)
   assert.match(library, /library-inspector/)
   assert.match(library, /frame-grid/)
-  assert.match(process, /process-steps/)
-  assert.match(process, /process-canvas/)
-  assert.match(process, /process-rail/)
   assert.match(observe, /evidence-image/)
-  assert.match(process, /evidence-image/)
 })
 
 test('Library renders only eligible desktop actions and keeps phone read-only', () => {

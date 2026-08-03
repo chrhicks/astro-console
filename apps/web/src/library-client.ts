@@ -25,6 +25,11 @@ export class LibraryUnavailable extends Schema.TaggedErrorClass<LibraryUnavailab
   { reason: Schema.NonEmptyString },
 ) {}
 
+export class LibraryAssetUnavailable extends Schema.TaggedErrorClass<LibraryAssetUnavailable>()(
+  'Web.LibraryAssetUnavailable',
+  {},
+) {}
+
 export interface LibraryTransportShape {
   readonly loadPage: (
     query: LibraryQuery,
@@ -34,7 +39,10 @@ export interface LibraryTransportShape {
   ) => Effect.Effect<unknown, LibraryNotFound | LibraryUnavailable>
   readonly loadProcessSourceHandoff: (
     assetId: string,
-  ) => Effect.Effect<unknown, LibraryNotFound | LibraryUnavailable>
+  ) => Effect.Effect<
+    unknown,
+    LibraryNotFound | LibraryAssetUnavailable | LibraryUnavailable
+  >
 }
 
 export class LibraryTransport extends Context.Service<
@@ -51,7 +59,10 @@ export interface LibraryClientShape {
   ) => Effect.Effect<LibraryAssetDetail, LibraryNotFound | LibraryUnavailable>
   readonly processSourceHandoff: (
     assetId: string,
-  ) => Effect.Effect<ProcessSourceHandoff, LibraryNotFound | LibraryUnavailable>
+  ) => Effect.Effect<
+    ProcessSourceHandoff,
+    LibraryNotFound | LibraryAssetUnavailable | LibraryUnavailable
+  >
 }
 
 export class LibraryClient extends Context.Service<
@@ -104,7 +115,8 @@ export const layer = Layer.effect(
               Schema.decodeUnknownEffect(ProcessSourceHandoffSchema),
             ),
             Effect.mapError((error) =>
-              error instanceof LibraryNotFound
+              error instanceof LibraryNotFound ||
+              error instanceof LibraryAssetUnavailable
                 ? error
                 : new LibraryUnavailable({
                     reason: 'The Process source handoff could not be read.',
@@ -131,11 +143,17 @@ export function libraryPagePath(query: LibraryQuery) {
 const load = (
   url: string,
   detail = false,
-): Effect.Effect<unknown, LibraryNotFound | LibraryUnavailable> =>
+  sourceHandoff = false,
+): Effect.Effect<
+  unknown,
+  LibraryNotFound | LibraryAssetUnavailable | LibraryUnavailable
+> =>
   Effect.tryPromise({
     try: async (signal) => {
       const response = await fetch(url, { signal })
       if (response.status === 404 && detail) throw new LibraryNotFound()
+      if (response.status === 409 && sourceHandoff)
+        throw new LibraryAssetUnavailable()
       if (!response.ok)
         throw new LibraryUnavailable({
           reason: 'The Library service is unavailable.',
@@ -143,7 +161,9 @@ const load = (
       return response.json()
     },
     catch: (error) =>
-      error instanceof LibraryNotFound || error instanceof LibraryUnavailable
+      error instanceof LibraryNotFound ||
+      error instanceof LibraryAssetUnavailable ||
+      error instanceof LibraryUnavailable
         ? error
         : new LibraryUnavailable({
             reason: 'The Library service is unavailable.',
@@ -156,7 +176,8 @@ export const browserLibraryTransportLayer = Layer.succeed(
     loadPage: (query) =>
       load(libraryPagePath(query)).pipe(
         Effect.mapError((error) =>
-          error instanceof LibraryNotFound
+          error instanceof LibraryNotFound ||
+          error instanceof LibraryAssetUnavailable
             ? new LibraryUnavailable({
                 reason: 'The Library service is unavailable.',
               })
@@ -164,10 +185,19 @@ export const browserLibraryTransportLayer = Layer.succeed(
         ),
       ),
     loadDetail: (assetId) =>
-      load(`/api/library/assets/${encodeURIComponent(assetId)}`, true),
+      load(`/api/library/assets/${encodeURIComponent(assetId)}`, true).pipe(
+        Effect.mapError((error) =>
+          error instanceof LibraryAssetUnavailable
+            ? new LibraryUnavailable({
+                reason: 'The Library service is unavailable.',
+              })
+            : error,
+        ),
+      ),
     loadProcessSourceHandoff: (assetId) =>
       load(
         `/api/workspaces/process?sourceAssetId=${encodeURIComponent(assetId)}`,
+        true,
         true,
       ),
   }),

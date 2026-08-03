@@ -30,9 +30,7 @@
 .sequence-list > span,
 .plan-inspector > span,
 .observe-decision > span,
-.library-lineage > span,
-.process-steps > span,
-.process-rail > span {
+.library-lineage > span {
   color: var(--color-text-secondary);
   font-size: 0.75rem;
   font-weight: 700;
@@ -96,8 +94,6 @@ button[aria-pressed='true'] {
 .plan-inspector,
 .library-lineage,
 .library-inspector,
-.process-steps,
-.process-rail,
 .observe-decision {
   padding: var(--space-20);
   overflow: auto;
@@ -232,9 +228,7 @@ button[aria-pressed='true'] {
   .plan-inspector,
   .observe-decision,
   .library-lineage,
-  .library-inspector,
-  .process-steps,
-  .process-rail {
+  .library-inspector {
     padding: var(--space-16);
   }
 }

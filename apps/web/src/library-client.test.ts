@@ -8,6 +8,7 @@ import {
 import { Effect, Layer } from 'effect'
 import {
   LibraryClient,
+  LibraryAssetUnavailable,
   LibraryNotFound,
   LibraryTransport,
   LibraryUnavailable,
@@ -43,8 +44,16 @@ const detail = {
 
 const handoff = {
   sourceAssetId: 'asset-1',
+  revision: 1,
   role: 'original',
+  format: 'fits',
   availability: 'availableLocally',
+  comparisonGroupId: 'group-1',
+  lineage: {
+    sourceAssetIds: ['source-1'],
+    runId: 'run-1',
+    solveAttemptId: 'solve-1',
+  },
   processing: {
     availability: 'unavailable',
     currentFixtureFacts: [
@@ -160,5 +169,31 @@ test('keeps Process source route failures unavailable', async () => {
         ),
       ),
     (error: unknown) => error instanceof LibraryNotFound,
+  )
+})
+
+test('keeps a not-local Process source distinct from missing and service failures', async () => {
+  await assert.rejects(
+    () =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const client = yield* LibraryClient
+          return yield* client.processSourceHandoff('asset-1')
+        }).pipe(
+          Effect.provide(layer),
+          Effect.provide(
+            Layer.succeed(
+              LibraryTransport,
+              LibraryTransport.of({
+                loadPage: () => Effect.die('unused'),
+                loadDetail: () => Effect.die('unused'),
+                loadProcessSourceHandoff: () =>
+                  Effect.fail(new LibraryAssetUnavailable()),
+              }),
+            ),
+          ),
+        ),
+      ),
+    (error: unknown) => error instanceof LibraryAssetUnavailable,
   )
 })

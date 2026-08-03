@@ -2504,7 +2504,7 @@ test('numbered SQLite migrations upgrade a legacy database and reject a newer sc
         .prepare('SELECT count(*) AS count FROM workspace_projections')
         .get(),
     ).count,
-    2,
+    1,
   )
   assert.equal(
     databaseRow(
@@ -4833,9 +4833,13 @@ test('HTTP boundary rejects stale and server-configured phone intents without st
 })
 
 test('authenticated workspace projections preserve future intent, bounded Library evidence, and a stable Process handoff', async (t) => {
-  const service = createFixtureService()
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-process-source-handoff-')),
+    'state.sqlite',
+  )
+  let service = createFixtureService(databasePath)
+  let listener = await service.listen()
+  let base = `http://127.0.0.1:${listener.port}`
   const outboxBefore = databaseRow(
     CountRow,
     service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
@@ -4890,8 +4894,16 @@ test('authenticated workspace projections preserve future intent, bounded Librar
   )
   assert.deepEqual(process, {
     sourceAssetId: assetId,
+    revision: 1,
     role: 'preview',
+    format: 'fits',
     availability: 'availableLocally',
+    comparisonGroupId: 'm27-stack-1',
+    lineage: {
+      sourceAssetIds: ['asset-m27-001'],
+      runId: 'run-m27-001',
+      solveAttemptId: 'solve-m27-001',
+    },
     processing: {
       availability: 'unavailable',
       currentFixtureFacts: [
@@ -4899,8 +4911,38 @@ test('authenticated workspace projections preserve future intent, bounded Librar
       ],
     },
   })
+  assert.equal('sessionId' in process, false)
+  assert.equal('preview' in process, false)
   const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
   assert.equal(snapshot.activeRun._tag, 'None')
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM events').get(),
+    ).count,
+    0,
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+    ).count,
+    outboxBefore,
+  )
+  await listener.close()
+  service.close()
+  service = createFixtureService(databasePath)
+  listener = await service.listen()
+  base = `http://127.0.0.1:${listener.port}`
+  const refreshed = await fetch(
+    `${base}/api/workspaces/process?sourceAssetId=${assetId}`,
+  )
+  assert.equal(refreshed.status, 200)
+  assert.equal(
+    Schema.decodeUnknownSync(ProcessSourceHandoff)(await refreshed.json())
+      .lineage.runId,
+    'run-m27-001',
+  )
   assert.equal(
     databaseRow(
       CountRow,
@@ -4938,6 +4980,7 @@ test('authenticated workspace projections preserve future intent, bounded Librar
       .status,
     503,
   )
+  assert.equal((await fetch(`${base}/api/workspaces/process`)).status, 400)
 })
 
 test('SQLite-backed plan drafts persist deterministic verdicts, revision guards, idempotency, and SSE projection', async (t) => {
@@ -6461,7 +6504,6 @@ test('serves the web bundle with route fallback while preserving API precedence'
     '/library',
     '/process',
     '/library/assets/asset-m27-001',
-    '/process/sessions/process-m27-001',
   ]) {
     const index = await fetch(`${base}${path}`)
     assert.equal(index.status, 200)
@@ -6473,6 +6515,10 @@ test('serves the web bundle with route fallback while preserving API precedence'
       /unsafe-inline/,
     )
   }
+  assert.equal(
+    (await fetch(`${base}/process/sessions/process-m27-001`)).status,
+    404,
+  )
   const script = await fetch(`${base}/assets/index-abcdefgh.js`)
   assert.equal(
     script.headers.get('content-type'),

@@ -13,5 +13,21 @@ const contents = await Promise.all(
   assets.map((asset) => readFile(`dist/assets/${asset}`, 'utf8')),
 )
 
-if (contents.some((content) => content.includes('Development fixture')))
-  throw new Error('Production build must exclude the development fixture.')
+const forbidden = [
+  'Development fixture',
+  'Fixture Stretch',
+  'Build complete',
+  'Gradient removal',
+  'Host policy healthy',
+  'checkpoint preserved',
+  'Last valid image',
+  'process-m31-v3',
+  'process-steps',
+  'process-rail',
+  'process-canvas',
+  'process-image',
+]
+
+for (const text of forbidden)
+  if (contents.some((content) => content.includes(text)))
+    throw new Error(`Production build must exclude ${text}.`)

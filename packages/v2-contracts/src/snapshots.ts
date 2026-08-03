@@ -377,8 +377,16 @@ export const LibraryAssetDetail = Schema.Struct({
 
 export const ProcessSourceHandoff = Schema.Struct({
   sourceAssetId: AssetId,
+  revision: AssetRevision,
   role: AssetSnapshot.fields.role,
+  format: AssetSnapshot.fields.format,
   availability: AssetSnapshot.fields.availability,
+  comparisonGroupId: Schema.NonEmptyString,
+  lineage: Schema.Struct({
+    sourceAssetIds: Schema.Array(AssetId),
+    runId: Schema.NonEmptyString,
+    solveAttemptId: Schema.NonEmptyString,
+  }),
   processing: Schema.Struct({
     availability: Schema.Literal('unavailable'),
     currentFixtureFacts: Schema.Array(Schema.NonEmptyString),

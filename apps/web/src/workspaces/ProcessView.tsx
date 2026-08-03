@@ -1,20 +1,14 @@
-import { useState } from 'react'
 import type { ProcessSourceHandoff } from '../library-client'
-import type { ProcessView as View } from '../presentation'
-import { Evidence, Status } from './shared'
+import { Status } from './shared'
 
 export function ProcessView({
-  view,
-  sessionId,
   sourceAssetId,
   sourceHandoff,
   sourceHandoffState,
 }: {
-  view: View
-  sessionId: string | undefined
   sourceAssetId: string | undefined
   sourceHandoff?: ProcessSourceHandoff
-  sourceHandoffState?: 'loading' | 'unavailable'
+  sourceHandoffState?: 'loading' | 'not-found' | 'not-local' | 'unavailable'
 }) {
   if (sourceAssetId !== undefined)
     return (
@@ -24,162 +18,141 @@ export function ProcessView({
         state={sourceHandoffState}
       />
     )
-  const identity = view.detailAvailable
-    ? (sessionId ?? view.sessionId)
-    : sessionId
-      ? `Unresolved session address / ${sessionId}`
-      : 'Session detail unavailable'
-  const source = view.detailAvailable
-    ? sourceAssetId
-      ? `${sourceAssetId} / stable handoff`
-      : view.source
-    : sourceAssetId
-      ? `Unresolved source address / ${sourceAssetId}`
-      : view.source
-  const [selected, setSelected] = useState(1)
-  const step = view.steps[selected]
-  return (
-    <div className="workspace process-workspace">
-      <aside className="process-steps">
-        <span>Session / {identity}</span>
-        <h2>Build & Develop</h2>
-        {view.steps.map((step, index) => (
-          <button
-            key={step.label}
-            data-selected={index === selected}
-            onClick={() => setSelected(index)}
-          >
-            {step.label}
-          </button>
-        ))}
-        <div>
-          <Status tone={view.detailAvailable ? 'safe' : 'neutral'}>
-            {view.detailAvailable
-              ? 'Build complete'
-              : 'Session detail unavailable'}
-          </Status>
-          <p>{view.checkpoint}</p>
-        </div>
-      </aside>
-      <section className="process-canvas">
-        <header>
-          <span>
-            {view.detailAvailable
-              ? `Service-supplied projection / ${step?.status}`
-              : `Detailed projection unavailable / ${step?.status}`}
-          </span>
-          <h1 tabIndex={-1}>{view.label}</h1>
-        </header>
-        <div className="process-image">
-          {view.detailAvailable ? (
-            <Evidence label="Current valid processing image" />
-          ) : (
-            <p className="unavailable-evidence">{view.preview}</p>
-          )}
-        </div>
-        <footer>
-          <span>{source}</span>
-          <b>{view.preview}</b>
-        </footer>
-      </section>
-      <aside className="process-rail">
-        <span>{step?.label}</span>
-        <Status
-          tone={
-            view.failure ? 'danger' : view.detailAvailable ? 'safe' : 'neutral'
-          }
-        >
-          {view.failure
-            ? 'Failure held'
-            : view.detailAvailable
-              ? 'Last valid image'
-              : 'Evidence unavailable'}
-        </Status>
-        <h2>
-          {view.failure ??
-            (view.detailAvailable
-              ? 'Gradient removal'
-              : 'Operation unavailable')}
-        </h2>
-        <p>{view.preview}</p>
-        <div className="policy-trace">
-          {view.detailAvailable ? (
-            <>
-              <Status tone="neutral">Host policy healthy</Status>
-              <span>Measured cause: no pressure</span>
-              <span>Effect: processing remains read-only</span>
-              <span>Protection: checkpoint preserved</span>
-            </>
-          ) : (
-            <span>Host policy and checkpoint evidence are unavailable.</span>
-          )}
-        </div>
-        <dl>
-          <div>
-            <dt>Checkpoint</dt>
-            <dd>{view.checkpoint}</dd>
-          </div>
-          <div>
-            <dt>Diagnostics</dt>
-            <dd>{view.diagnostics}</dd>
-          </div>
-        </dl>
-      </aside>
-    </div>
-  )
+  return <ProcessUnavailableView />
 }
 
-function ProcessSourceHandoffView({
+export function ProcessSourceHandoffView({
   sourceAssetId,
   handoff,
   state,
 }: {
   sourceAssetId: string
   handoff: ProcessSourceHandoff | undefined
-  state: 'loading' | 'unavailable' | undefined
+  state: 'loading' | 'not-found' | 'not-local' | 'unavailable' | undefined
 }) {
-  const resolved = handoff !== undefined
   return (
-    <div className="workspace process-workspace">
-      <aside className="process-steps">
-        <span>
-          Source /{' '}
-          {resolved
-            ? `${handoff.sourceAssetId} / stable handoff`
-            : `Unresolved source address / ${sourceAssetId}`}
-        </span>
-        <h2>Process source</h2>
-        <Status tone="neutral">Processing unavailable</Status>
-      </aside>
-      <section className="process-canvas">
-        <header>
-          <span>Source handoff only</span>
-          <h1 tabIndex={-1}>Process unavailable</h1>
+    <div className="workspace process-source">
+      <section
+        className="process-source__surface"
+        aria-label="Process unavailable"
+      >
+        <header className="process-source__heading">
+          <span>Library / source handoff</span>
+          <h1 tabIndex={-1}>Interactive processing unavailable</h1>
+          <Status tone="neutral">No processing service installed</Status>
         </header>
-        <p className="unavailable-evidence">
-          {state === 'loading'
-            ? 'Resolving source handoff.'
-            : resolved
-              ? `Source role: ${handoff.role}. Source availability: ${handoff.availability}.`
-              : 'Source handoff is unavailable.'}
-        </p>
-        <footer>
-          <span>{resolved ? handoff.sourceAssetId : sourceAssetId}</span>
-          <b>Interactive processing is unavailable.</b>
-        </footer>
-      </section>
-      <aside className="process-rail">
-        <span>Processing</span>
-        <Status tone="neutral">Unavailable</Status>
-        <h2>Read-only source handoff</h2>
-        {resolved ? (
-          handoff.processing.currentFixtureFacts.map((fact) => (
-            <p key={fact}>{fact}</p>
-          ))
+        {handoff ? (
+          <SourceFacts handoff={handoff} />
         ) : (
-          <p>Current processing facts are unavailable.</p>
+          <SourceFailure state={state} sourceAssetId={sourceAssetId} />
         )}
-      </aside>
+        <p className="process-source__protection">
+          Interactive processing is not installed. This is a read-only Library
+          handoff: no processing session, image preview, or saved output has
+          been created; the source remains protected in the Library.
+        </p>
+      </section>
     </div>
   )
+}
+
+function SourceFacts({ handoff }: { handoff: ProcessSourceHandoff }) {
+  return (
+    <div className="process-source__facts">
+      <section aria-labelledby="source-identity-heading">
+        <h2 id="source-identity-heading">Source identity</h2>
+        <dl>
+          <div>
+            <dt>Stable asset</dt>
+            <dd>{handoff.sourceAssetId}</dd>
+          </div>
+          <div>
+            <dt>Revision</dt>
+            <dd>{handoff.revision}</dd>
+          </div>
+          <div>
+            <dt>Source</dt>
+            <dd>{`${handoff.role} · ${handoff.format} · ${handoff.availability}`}</dd>
+          </div>
+        </dl>
+      </section>
+      <section aria-labelledby="source-lineage-heading">
+        <h2 id="source-lineage-heading">Lineage</h2>
+        <dl>
+          <div>
+            <dt>Source assets</dt>
+            <dd>{handoff.lineage.sourceAssetIds.join(' · ')}</dd>
+          </div>
+          <div>
+            <dt>Observing run</dt>
+            <dd>{handoff.lineage.runId}</dd>
+          </div>
+          <div>
+            <dt>Solve attempt</dt>
+            <dd>{handoff.lineage.solveAttemptId}</dd>
+          </div>
+        </dl>
+      </section>
+    </div>
+  )
+}
+
+function SourceFailure({
+  state,
+  sourceAssetId,
+}: {
+  state: 'loading' | 'not-found' | 'not-local' | 'unavailable' | undefined
+  sourceAssetId: string
+}) {
+  return (
+    <div className="process-source__failure" role="status">
+      <p>{sourceMessage(state)}</p>
+      <dl>
+        <div>
+          <dt>Requested source</dt>
+          <dd>{sourceAssetId}</dd>
+        </div>
+        <div>
+          <dt>Processing</dt>
+          <dd>Unavailable; no session was opened</dd>
+        </div>
+      </dl>
+    </div>
+  )
+}
+
+function ProcessUnavailableView() {
+  return (
+    <div className="workspace process-source">
+      <section
+        className="process-source__surface"
+        aria-label="Process unavailable"
+      >
+        <header className="process-source__heading">
+          <span>Process</span>
+          <h1 tabIndex={-1}>Interactive processing unavailable</h1>
+          <Status tone="neutral">No processing service installed</Status>
+        </header>
+        <p className="process-source__summary">
+          Interactive processing is not installed. Open a Library source to
+          review its stable identity, availability, and lineage.
+        </p>
+        <p className="process-source__protection">
+          No processing session, image preview, checkpoint, or controls are
+          available. Library sources remain unchanged.
+        </p>
+      </section>
+    </div>
+  )
+}
+
+function sourceMessage(
+  state: 'loading' | 'not-found' | 'not-local' | 'unavailable' | undefined,
+) {
+  if (state === 'loading') return 'Resolving source handoff.'
+  if (state === 'not-found')
+    return 'This source asset is unknown or missing from the Library.'
+  if (state === 'not-local')
+    return 'This source asset is not available locally.'
+  return 'The Library service is unavailable.'
 }

@@ -433,8 +433,16 @@ describe('Gate 5 contract foundation', () => {
   it('keeps a Process source handoff separate from a processing session', () => {
     const handoff = Schema.decodeUnknownSync(ProcessSourceHandoff)({
       sourceAssetId: 'asset-source-1',
+      revision: 1,
       role: 'original',
+      format: 'fits',
       availability: 'availableLocally',
+      comparisonGroupId: 'group-1',
+      lineage: {
+        sourceAssetIds: ['asset-raw-1'],
+        runId: 'run-1',
+        solveAttemptId: 'solve-1',
+      },
       processing: {
         availability: 'unavailable',
         currentFixtureFacts: [
@@ -444,6 +452,8 @@ describe('Gate 5 contract foundation', () => {
     })
     assert.equal(handoff.sourceAssetId, 'asset-source-1')
     assert.equal(handoff.processing.availability, 'unavailable')
+    assert.equal('sessionId' in handoff, false)
+    assert.equal('preview' in handoff, false)
   })
 
   it('keeps projected action explanations typed and actionable', () => {

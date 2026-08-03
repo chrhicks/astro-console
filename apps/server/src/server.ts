@@ -1067,36 +1067,6 @@ const RunDefinitionRow = Schema.Struct({
   accepted_at: Schema.String,
 })
 const RunDefinitionReceiptRow = Schema.Struct({ response: Schema.String })
-const ProcessWorkspace = Schema.Struct({
-  sessionId: Schema.String,
-  revision: Schema.Int,
-  phase: Schema.Literal('develop'),
-  sourceAssetId: Schema.String,
-  sourceLabel: Schema.String,
-  preview: Schema.Struct({
-    label: Schema.String,
-    state: Schema.Literal('synchronized'),
-    evidence: Schema.String,
-  }),
-  history: Schema.Array(
-    Schema.Struct({
-      stepId: Schema.String,
-      label: Schema.String,
-      state: Schema.Literals(['applied', 'current']),
-      tool: Schema.String,
-    }),
-  ),
-  checkpoint: Schema.Struct({
-    stepId: Schema.String,
-    label: Schema.String,
-    protectedBy: Schema.String,
-  }),
-  failure: Schema.Struct({
-    state: Schema.Literal('none'),
-    retryScope: Schema.String,
-  }),
-  protection: Schema.String,
-})
 const ReceiptRow = Schema.Struct({ response: Schema.String })
 const InterventionReceiptRow = Schema.Struct({
   semantic_key: Schema.String,
@@ -2649,51 +2619,6 @@ function seedWorkspaces(db: DatabaseSync) {
     'UPDATE observing_plans SET run_eligible=1 WHERE plan_id=? AND revision=?',
   ).run(plan.planId, plan.revision)
   insert.run('plan', JSON.stringify(plan))
-  insert.run(
-    'process',
-    JSON.stringify({
-      sessionId: 'process-m27-001',
-      revision: 4,
-      phase: 'develop',
-      sourceAssetId: 'asset-m27-001',
-      sourceLabel: 'M27 linear master · FITS',
-      preview: {
-        label: 'Neutral stretch preview',
-        state: 'synchronized',
-        evidence:
-          'Preview is synchronized from the service; it is not applied history.',
-      },
-      history: [
-        {
-          stepId: 'calibrate',
-          label: 'Calibrate',
-          state: 'applied',
-          tool: 'Siril 1.2',
-        },
-        {
-          stepId: 'stack',
-          label: 'Linear stack',
-          state: 'applied',
-          tool: 'Siril 1.2',
-        },
-        {
-          stepId: 'stretch',
-          label: 'Neutral stretch',
-          state: 'current',
-          tool: 'Siril 1.2',
-        },
-      ],
-      checkpoint: {
-        stepId: 'stack',
-        label: 'Linear stack checkpoint',
-        protectedBy:
-          'Source asset and applied history are retained while this preview is inspected.',
-      },
-      failure: { state: 'none', retryScope: 'No failed stage.' },
-      protection:
-        'Apply, Save, retry, discard, and source switching remain service commands outside this read-only slice.',
-    }),
-  )
 }
 function workspace(response: ServerResponse, db: DatabaseSync, name: 'plan') {
   return json(response, 200, planWorkspaceProjection(db, name))
@@ -2804,14 +2729,7 @@ async function processWorkspace(
       })
     return json(response, result.status, result.body)
   }
-  const raw: unknown = db
-    .prepare("SELECT value FROM workspace_projections WHERE name='process'")
-    .get()
-  const row = Schema.decodeUnknownSync(StoredRow)(raw)
-  const session = Schema.decodeUnknownSync(ProcessWorkspace)(
-    JSON.parse(row.value),
-  )
-  return json(response, 200, session)
+  return json(response, 400, { outcome: 'rejected', reason: 'InvalidInput' })
 }
 async function libraryPage(
   response: ServerResponse,
@@ -2963,8 +2881,12 @@ const libraryServiceLayer = (db: DatabaseSync) =>
             )
           return yield* Schema.decodeUnknownEffect(ProcessSourceHandoff)({
             sourceAssetId: detail.assetId,
+            revision: detail.revision,
             role: detail.role,
+            format: detail.format,
             availability: detail.availability,
+            comparisonGroupId: detail.comparisonGroupId,
+            lineage: detail.lineage,
             processing: {
               availability: 'unavailable',
               currentFixtureFacts: [

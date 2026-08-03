@@ -93,19 +93,6 @@ function projectSnapshot(
       currentRun?.target ?? 'No active run',
     ),
     library: { assets: [] },
-    process: {
-      detailAvailable: false,
-      sessionId: 'Unavailable',
-      label: 'Processing detail unavailable',
-      source: 'Bootstrap does not include processing session detail.',
-      steps: [
-        { label: 'Build', status: 'Unavailable from bootstrap' },
-        { label: 'Develop', status: 'Unavailable from bootstrap' },
-      ],
-      preview: 'No processing preview is included in bootstrap.',
-      checkpoint: 'No processing checkpoint is included in bootstrap.',
-      diagnostics: 'Processing detail is unavailable from bootstrap.',
-    },
   }
 }
 
@@ -210,19 +197,6 @@ function unavailableProjection(reason: string): Projection {
       lifecycle: lifecycle,
     },
     library: { assets: [] },
-    process: {
-      detailAvailable: false,
-      sessionId: 'Unavailable',
-      label: 'No processing session',
-      source: 'No source asset',
-      steps: [
-        { label: 'Build', status: 'Unavailable' },
-        { label: 'Develop', status: 'Unavailable' },
-      ],
-      preview: 'Preview unavailable',
-      checkpoint: 'No checkpoint',
-      diagnostics: 'No diagnostics',
-    },
   }
 }
 

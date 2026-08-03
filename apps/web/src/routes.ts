@@ -3,13 +3,10 @@ import type { Workspace } from './presentation'
 
 export const AssetId = Schema.NonEmptyString.pipe(Schema.brand('AssetId'))
 export type AssetId = Schema.Schema.Type<typeof AssetId>
-export const SessionId = Schema.NonEmptyString.pipe(Schema.brand('SessionId'))
-export type SessionId = Schema.Schema.Type<typeof SessionId>
 
 export type Route =
   | { kind: 'workspace'; workspace: Workspace }
   | { kind: 'asset'; assetId: AssetId }
-  | { kind: 'session'; sessionId: SessionId }
   | { kind: 'process-source'; sourceAssetId: AssetId }
   | { kind: 'not-found' }
 
@@ -23,11 +20,6 @@ function decodePathId(value: string) {
 
 function decodeAssetId(value: unknown): AssetId | undefined {
   const result = Schema.decodeUnknownResult(AssetId)(value)
-  return Result.isSuccess(result) ? result.success : undefined
-}
-
-function decodeSessionId(value: unknown): SessionId | undefined {
-  const result = Schema.decodeUnknownResult(SessionId)(value)
   return Result.isSuccess(result) ? result.success : undefined
 }
 
@@ -59,10 +51,6 @@ export function parseRoute(pathname: string, search = ''): Route {
     const id = decodeAssetId(pathId)
     if (id) return { kind: 'asset', assetId: id }
   }
-  if (first === 'process' && second === 'sessions' && pathId) {
-    const id = decodeSessionId(pathId)
-    if (id) return { kind: 'session', sessionId: id }
-  }
   return { kind: 'not-found' }
 }
 
@@ -70,8 +58,6 @@ export function routePath(route: Exclude<Route, { kind: 'not-found' }>) {
   if (route.kind === 'workspace') return `/${route.workspace}`
   if (route.kind === 'asset')
     return `/library/assets/${encodeURIComponent(route.assetId)}`
-  if (route.kind === 'session')
-    return `/process/sessions/${encodeURIComponent(route.sessionId)}`
   return `/process?sourceAssetId=${encodeURIComponent(route.sourceAssetId)}`
 }
 
@@ -88,6 +74,5 @@ export function routeWithProjection(
 export function routeWorkspace(route: Route): Workspace | undefined {
   if (route.kind === 'workspace') return route.workspace
   if (route.kind === 'asset') return 'library'
-  if (route.kind === 'session' || route.kind === 'process-source')
-    return 'process'
+  if (route.kind === 'process-source') return 'process'
 }

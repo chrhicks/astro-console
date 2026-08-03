@@ -30,6 +30,7 @@ import { Shell } from './Shell'
 import { LibraryView } from './workspaces/LibraryView'
 import {
   LibraryClient,
+  LibraryAssetUnavailable,
   LibraryNotFound,
   LibraryUnavailable,
   createLibraryRuntime,
@@ -85,7 +86,7 @@ export function App() {
   const processSourceGeneration = useRef(0)
   const [processSource, setProcessSource] = useState<{
     value: ProcessSourceHandoff | undefined
-    state: 'loading' | 'unavailable' | undefined
+    state: 'loading' | 'not-found' | 'not-local' | 'unavailable' | undefined
   }>({ value: undefined, state: undefined })
 
   useEffect(() => {
@@ -186,9 +187,17 @@ export function App() {
           if (generation === processSourceGeneration.current)
             setProcessSource({ value, state: undefined })
         },
-        () => {
+        (error: unknown) => {
           if (generation === processSourceGeneration.current)
-            setProcessSource({ value: undefined, state: 'unavailable' })
+            setProcessSource({
+              value: undefined,
+              state:
+                error instanceof LibraryNotFound
+                  ? 'not-found'
+                  : error instanceof LibraryAssetUnavailable
+                    ? 'not-local'
+                    : 'unavailable',
+            })
         },
       )
     return () => {
@@ -324,8 +333,6 @@ export function App() {
       />
     ) : workspace === 'process' ? (
       <ProcessView
-        view={projection.process}
-        sessionId={route.kind === 'session' ? route.sessionId : undefined}
         sourceAssetId={
           route.kind === 'process-source' ? route.sourceAssetId : undefined
         }

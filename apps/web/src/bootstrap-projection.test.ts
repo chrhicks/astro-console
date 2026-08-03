@@ -10,7 +10,6 @@ import { projectBootstrapState } from './bootstrap-projection'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createElement } from 'react'
 import { ObserveView } from './workspaces/ObserveView'
-import { ProcessView } from './workspaces/ProcessView'
 
 const snapshot = (fixture: keyof typeof bootstrapFixtures) =>
   Schema.decodeUnknownSync(BootstrapSnapshot)(bootstrapFixtures[fixture])
@@ -131,23 +130,15 @@ test('projects unavailable state without invented service or workspace truth', (
   assert.equal(projection.shell.health[0]?.state, 'unavailable')
   assert.equal(projection.observe.phase, 'Unavailable')
   assert.equal(projection.observe.detailAvailable, false)
-  assert.equal(projection.process.detailAvailable, false)
   assert.equal(projection.library.assets.length, 0)
 })
 
-test('bootstrap projections render unavailable Observe and Process evidence without fixture imagery or claims', () => {
+test('bootstrap projections render unavailable Observe evidence without fixture imagery or claims', () => {
   const projection = projectBootstrapState(
     BootstrapClientState.Current({ snapshot: snapshot('fresh') }),
   )
   const observe = renderToStaticMarkup(
     createElement(ObserveView, { view: projection.observe }),
-  )
-  const process = renderToStaticMarkup(
-    createElement(ProcessView, {
-      view: projection.process,
-      sessionId: 'session-address',
-      sourceAssetId: 'source-address',
-    }),
   )
   assert.match(observe, /Detailed evidence unavailable/)
   assert.match(
@@ -155,12 +146,6 @@ test('bootstrap projections render unavailable Observe and Process evidence with
     /Detailed Observe evidence is unavailable from bootstrap/,
   )
   assert.doesNotMatch(observe, /evidence-image/)
-  assert.match(process, /Unresolved source address \/ source-address/)
-  assert.match(process, /Source handoff is unavailable/)
-  assert.doesNotMatch(
-    process,
-    /session-address|Build complete|Gradient removal|Host policy healthy|Measured cause: no pressure|checkpoint preserved|Last valid image|stable handoff|evidence-image/,
-  )
 })
 
 test('Observe renders fake lifecycle evidence and omits terminal controls', () => {

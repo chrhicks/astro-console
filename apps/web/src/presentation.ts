@@ -127,22 +127,9 @@ export type LibraryAsset = {
   download: string
 }
 export type LibraryView = { assets: readonly LibraryAsset[]; action?: Action }
-export type ProcessView = {
-  detailAvailable: boolean
-  sessionId: string
-  label: string
-  source: string
-  steps: readonly { label: string; status: string }[]
-  preview: string
-  checkpoint: string
-  diagnostics: string
-  failure?: string
-  action?: Action
-}
 export type Projection = {
   shell: ShellView
   plan: PlanView
   observe: ObserveView
   library: LibraryView
-  process: ProcessView
 }

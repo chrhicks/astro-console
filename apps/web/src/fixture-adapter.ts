@@ -401,7 +401,6 @@ function action(
 export function projectFixture(scenario: FixtureScenario): Projection {
   const state = fixtureStates[scenario]
   const scenarioAction = (label: string) => action(label, scenario, state)
-  const failed = scenario === 'process-failure'
   const deliveryReady = scenario === 'delivery-ready'
 
   return {
@@ -505,36 +504,6 @@ export function projectFixture(scenario: FixtureScenario): Projection {
         },
       ],
       action: scenarioAction('Open in Process'),
-    },
-    process: {
-      detailAvailable: true,
-      sessionId: 'session-m31-v3',
-      label: 'M31 linear master v3',
-      source: 'asset-frame-m31-l-186 / stable raw identity',
-      steps: [
-        { label: 'Build', status: 'Aligned 24 frames' },
-        { label: 'Develop', status: 'Gradient removal' },
-        { label: 'History', status: 'Current position 3' },
-        { label: 'Inspector', status: 'Measured evidence' },
-      ],
-      preview: failed
-        ? 'Fixture preview did not apply; prior valid image remains visible.'
-        : 'Preview is separate from applied history.',
-      checkpoint: failed
-        ? 'CP-M31-STRETCH-03 / fixture last valid linear image'
-        : 'CP-M31-DEVELOP-02 / fixture current valid image',
-      diagnostics: failed
-        ? 'Fixture Stretch / attempt 2 / owner-safe output available'
-        : 'Tool, version, inputs, and parameters require a service session.',
-      ...(failed
-        ? {
-            failure:
-              'Fixture Stretch failed after preview; Build and the last valid image are preserved.',
-          }
-        : {}),
-      action: scenarioAction(
-        failed ? 'Retry Stretch from checkpoint' : 'Preview',
-      ),
     },
   }
 }
