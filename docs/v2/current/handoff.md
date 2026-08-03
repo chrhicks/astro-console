@@ -1,6 +1,6 @@
 # Production Convergence Handoff
 
-Status: **Phases 1 and 2 closed — Production Convergence in progress; complete it before accepting a Phase 3 implementation slice**
+Status: **Phases 1 and 2 closed — Production Convergence Epics 1–4 complete; complete Epic 5 before accepting a Phase 3 implementation slice**
 
 ## Completed Host-Verification Bundle
 
@@ -46,6 +46,7 @@ the five sequential Production Convergence Epics:
 3. `tkt-uuom4upo` — establish the decoded snapshot, SSE, capability, command,
    and failure seam. **Complete.**
 4. `tkt-qffwfa47` — ship web and server from one version-matched origin.
+   **Complete.**
 5. `tkt-zcsucxyx` — migrate proven workspace slices and retire experimental
    implementation paths.
 
@@ -99,6 +100,25 @@ proxy. It does not establish deployment integration: Epic 4 owns the actual
 one-origin shipping and integrated local workflow. This work preserves the
 existing proof boundary: it authorizes no provider read, device command,
 capture, or Phase 3 behavior.
+
+## Production Origin Complete
+
+Epic 4 ships the one-origin architecture: the Effect WebHost and scoped
+OriginListener serve the version-matched client, with one pinned image embedding
+`apps/web` `dist`. The integrated Vite real-bootstrap/SSE workflow is complete,
+and the inline shell and its inline CSP allowances have been removed. Final
+evidence passes
+**182** contract, **69** server, and **38** web tests; strict review,
+ui-validator, and Designer are PASS across wide, compact, and 390 px layouts
+for owner, friend, and phone projections. The image
+`sha256:920d6caf56afab3afe7f5cdb0625ff6b295525358b63ec32c3ffdc8798ad6334`
+and Compose renders were verified. No physical, provider, Solar, or device
+action was issued.
+
+Epic 5, `tkt-zcsucxyx`, is next. It still owns the detailed Plan, Observe,
+Library, and Process migration and experimental-path retirement; Epic 4 does
+not claim those details shipped. Phase 3 remains separately authorized only by
+its accepted bounded slices.
 
 The user accepts NVMe live/recent data plus the SSD backup as current
 same-host resilience. Off-host recovery is not current Phase 1 scope.

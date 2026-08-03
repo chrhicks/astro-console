@@ -90,6 +90,7 @@ export type PlanView = {
   action?: Action
 }
 export type ObserveView = {
+  detailAvailable: boolean
   target: string
   phase: string
   status: string
@@ -113,6 +114,7 @@ export type LibraryAsset = {
 }
 export type LibraryView = { assets: readonly LibraryAsset[]; action?: Action }
 export type ProcessView = {
+  detailAvailable: boolean
   sessionId: string
   label: string
   source: string

@@ -51,7 +51,7 @@ function projectSnapshot(
         }
   const fresh = freshness === 'current'
   const connection = fresh
-    ? `Current snapshot confirmed at ${snapshot.generatedAt}`
+    ? `Current bootstrap snapshot confirmed at ${snapshot.generatedAt}`
     : `${freshness === 'stale' ? 'Last-confirmed' : 'Reconnecting'} snapshot from ${snapshot.generatedAt}`
   const protection = fresh
     ? 'Read-only: detailed workspace and command projections are not available from bootstrap.'
@@ -91,6 +91,7 @@ function projectSnapshot(
     observe: observe(snapshot, freshness, reason, run.target),
     library: { assets: [] },
     process: {
+      detailAvailable: false,
       sessionId: 'Unavailable',
       label: 'Processing detail unavailable',
       source: 'Bootstrap does not include processing session detail.',
@@ -144,6 +145,7 @@ function unavailableProjection(reason: string): Projection {
       sequences: [],
     },
     observe: {
+      detailAvailable: false,
       target: 'Observe unavailable',
       phase: 'Unavailable',
       status: 'No authoritative run evidence',
@@ -157,6 +159,7 @@ function unavailableProjection(reason: string): Projection {
     },
     library: { assets: [] },
     process: {
+      detailAvailable: false,
       sessionId: 'Unavailable',
       label: 'No processing session',
       source: 'No source asset',
@@ -188,6 +191,7 @@ function observe(
 ): ObserveView {
   const fresh = freshness === 'current'
   return {
+    detailAvailable: false,
     target,
     phase:
       snapshot.activeRun._tag === 'Active'

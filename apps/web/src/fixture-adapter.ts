@@ -37,7 +37,12 @@ type FixtureState = {
   >
   observe: Omit<
     ObserveView,
-    'target' | 'action' | 'annotation' | 'heading' | 'lifecycle'
+    | 'detailAvailable'
+    | 'target'
+    | 'action'
+    | 'annotation'
+    | 'heading'
+    | 'lifecycle'
   >
 }
 
@@ -450,6 +455,7 @@ export function projectFixture(scenario: FixtureScenario): Projection {
       action: scenarioAction('Run plan'),
     },
     observe: {
+      detailAvailable: true,
       target: 'M31 / Andromeda',
       annotation: state.observe.evidence,
       heading: state.observe.status,
@@ -488,6 +494,7 @@ export function projectFixture(scenario: FixtureScenario): Projection {
       action: scenarioAction('Open in Process'),
     },
     process: {
+      detailAvailable: true,
       sessionId: 'session-m31-v3',
       label: 'M31 linear master v3',
       source: 'asset-frame-m31-l-186 / stable raw identity',

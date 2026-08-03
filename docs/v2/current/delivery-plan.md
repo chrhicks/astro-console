@@ -1,6 +1,6 @@
 # Astro Console V2 Delivery Plan
 
-Status: **durable V2 completion roadmap — Phases 0, 0.5, 1, and 2 complete; Production Convergence in progress; Phase 3 follows**
+Status: **durable V2 completion roadmap — Phases 0, 0.5, 1, and 2 complete; Production Convergence Epics 1–4 complete; Phase 3 follows Epic 5**
 
 ## Keep This Plan
 
@@ -70,7 +70,7 @@ Phase 2 is complete with deterministic fake-run evidence only. It does not
 prove provider-backed preflight, acquisition, capture, recovery, stopping, or
 parking; those remain Phase 3 work.
 
-## Production Convergence — In Progress
+## Production Convergence — Epic 5 Remaining
 
 Production Convergence turns the completed V2 infrastructure, contract, and UI
 learning into the real implementation target before new Phase 3 behavior is
@@ -116,14 +116,28 @@ proven behavior only. It does not authorize provider-backed preflight, a device
 command, physical capture, processing workflow, or other deferred Phase 3–6
 behavior.
 
-Epics 1, 2, and 3 are complete. Epic 3 supplies emitted shared contracts and a
+Epics 1, 2, 3, and 4 are complete. Epic 3 supplies emitted shared contracts and a
 bounded bootstrap HTTP/SSE/control
 seam: the Effect-owned web client loads snapshot-first, reconnects without
 replaying commands, guards stale state, and consumes server-owned phone
 capability and typed command submission. Its validation used real native SSE
 and a temporary validation-only same-origin development proxy; it does not
-prove a shipped one-origin deployment. Epic 4 owns that release integration and
-the integrated local workflow.
+prove a shipped one-origin deployment. Epic 4 completes that release
+integration: Effect WebHost and a scoped OriginListener serve the
+version-matched bundle from one pinned image embedding `apps/web` `dist`; the
+integrated Vite real-bootstrap/SSE workflow replaced the inline shell and
+removed its inline CSP allowances.
+Final evidence passes **182** contract, **69** server, and **38** web tests,
+with strict review, ui-validator, and Designer PASS at wide, compact, and 390 px
+for owner, friend, and phone projections. Image
+`sha256:920d6caf56afab3afe7f5cdb0625ff6b295525358b63ec32c3ffdc8798ad6334`
+and Compose renders were verified, with no physical, provider, Solar, or device
+action.
+
+Epic 5, `tkt-zcsucxyx`, remains next and owns the detailed Plan, Observe,
+Library, and Process migration and experimental-path retirement. It is not
+claimed by Epic 4. Phase 3 remains separately authorized only by its accepted
+bounded slices.
 
 ## Phase 3: Observe, Acquire, and Capture — After Production Convergence
 

@@ -33,7 +33,7 @@ export function App() {
     return () => removeEventListener('popstate', onPopState)
   }, [])
   useEffect(() => {
-    if (import.meta.env.DEV) return
+    if (import.meta.env.DEV && !import.meta.env.VITE_ASTRO_BOOTSTRAP) return
     const runtime = createBootstrapRuntime()
     const fiber = runtime.runFork(
       Effect.gen(function* () {
@@ -59,7 +59,7 @@ export function App() {
     requestAnimationFrame(() => document.querySelector('h1')?.focus())
   }, [route])
   useEffect(() => {
-    if (import.meta.env.DEV)
+    if (import.meta.env.DEV && !import.meta.env.VITE_ASTRO_BOOTSTRAP)
       void import('./fixture-adapter').then((module) =>
         setProjection(module.fixtureProjection),
       )

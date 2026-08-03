@@ -274,4 +274,6 @@ test('room projections render their required landmarks', () => {
   assert.match(process, /process-steps/)
   assert.match(process, /process-canvas/)
   assert.match(process, /process-rail/)
+  assert.match(observe, /evidence-image/)
+  assert.match(process, /evidence-image/)
 })

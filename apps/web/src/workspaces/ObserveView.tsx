@@ -6,14 +6,24 @@ export function ObserveView({ view }: { view: View }) {
     <div className="workspace observe-workspace">
       <header className="workspace-heading">
         <div>
-          <span>Current verified evidence</span>
+          <span>
+            {view.detailAvailable
+              ? 'Current verified evidence'
+              : 'Detailed evidence unavailable'}
+          </span>
           <h1 tabIndex={-1}>{view.target}</h1>
         </div>
         <Status tone={view.tone}>{view.status}</Status>
       </header>
       <section className="observe-image">
-        <Evidence label={view.evidence} />
-        <span>{view.annotation}</span>
+        {view.detailAvailable ? (
+          <>
+            <Evidence label={view.evidence} />
+            <span>{view.annotation}</span>
+          </>
+        ) : (
+          <p className="unavailable-evidence">{view.evidence}</p>
+        )}
       </section>
       <aside className="observe-decision">
         <span>Decision now</span>

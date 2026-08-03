@@ -14,7 +14,6 @@ import {
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
-import { Script, createContext } from 'node:vm'
 import type { IncomingMessage } from 'node:http'
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { ConfigProvider, Effect, Schema } from 'effect'
@@ -53,7 +52,6 @@ import { createDownloadGrantService } from './download-grant-service.ts'
 import { isSqliteBusy } from './publisher-service.ts'
 import { createProcessorService, runProcessor } from './processor-service.ts'
 import { ingestSourceAsset } from './source-ingest.ts'
-import { applicationShell } from './application-shell.ts'
 import {
   downloadGrantSignerConfig,
   originServerConfig,
@@ -66,14 +64,12 @@ import {
 function createFixtureService(
   databasePath?: Parameters<typeof createLocalWebService>[0],
   identityResolver?: Parameters<typeof createLocalWebService>[1],
-  brandAssetPath?: Parameters<typeof createLocalWebService>[2],
-  processSaveStorage?: Parameters<typeof createLocalWebService>[3],
-  downloadGrants?: Parameters<typeof createLocalWebService>[4],
+  processSaveStorage?: Parameters<typeof createLocalWebService>[2],
+  downloadGrants?: Parameters<typeof createLocalWebService>[3],
 ) {
   return createLocalWebService(
     databasePath,
     identityResolver,
-    brandAssetPath,
     processSaveStorage,
     downloadGrants,
     { fixture: 'm27' },
@@ -246,6 +242,7 @@ test('focused executable configurations decode defaults and conditional branches
     release: 'local-web-fixture',
     port: 0,
     host: '127.0.0.1',
+    webDistPath: '../web/dist',
   })
   assert.deepEqual(development.admission, {
     mode: 'development',
@@ -471,16 +468,11 @@ function publisherFixture(idempotencyKey: string) {
   const outputs = join(root, 'outputs')
   mkdirSync(sources)
   writeFileSync(join(sources, 'final.tiff'), 'publication-bytes')
-  const service = createFixtureService(
-    join(root, 'state.sqlite'),
-    undefined,
-    undefined,
-    {
-      sourcesRoot: sources,
-      outputsRoot: outputs,
-      sources: { final: 'final.tiff' },
-    },
-  )
+  const service = createFixtureService(join(root, 'state.sqlite'), undefined, {
+    sourcesRoot: sources,
+    outputsRoot: outputs,
+    sources: { final: 'final.tiff' },
+  })
   const saved = service.saveProcess({
     sessionId: 'process-m27-001',
     expectedRevision: 4,
@@ -999,22 +991,16 @@ test('authorized Library downloads issue an Asset-ID grant and redirect without 
             capability: 'controlCapable' as const,
           }
         : undefined
-  const service = createFixtureService(
-    ':memory:',
-    admission,
-    undefined,
-    undefined,
-    {
-      now: () => now,
-      issuer: {
-        issue: async (grant) => {
-          if (issuerUnavailable) throw new Error('R2 unavailable')
-          grants.push(grant)
-          return `https://r2.example/${grant.objectKey}?X-Amz-Signature=bearer-${grants.length}`
-        },
+  const service = createFixtureService(':memory:', admission, undefined, {
+    now: () => now,
+    issuer: {
+      issue: async (grant) => {
+        if (issuerUnavailable) throw new Error('R2 unavailable')
+        grants.push(grant)
+        return `https://r2.example/${grant.objectKey}?X-Amz-Signature=bearer-${grants.length}`
       },
     },
-  )
+  })
   const assetId = 'asset-m27-001'
   service.database
     .prepare(
@@ -1271,20 +1257,15 @@ test('Process Save materializes configured sources before one Asset, lineage, re
   mkdirSync(sources)
   writeFileSync(join(sources, 'linear.fits'), 'linear-bytes')
   writeFileSync(join(sources, 'final.tiff'), 'final-bytes')
-  const service = createFixtureService(
-    join(root, 'state.sqlite'),
-    undefined,
-    undefined,
-    {
-      sourcesRoot: sources,
-      outputsRoot: outputs,
-      sources: {
-        linear: 'linear.fits',
-        final: 'final.tiff',
-        escape: '../outside.fits',
-      },
+  const service = createFixtureService(join(root, 'state.sqlite'), undefined, {
+    sourcesRoot: sources,
+    outputsRoot: outputs,
+    sources: {
+      linear: 'linear.fits',
+      final: 'final.tiff',
+      escape: '../outside.fits',
     },
-  )
+  })
   const command = {
     sessionId: 'process-m27-001',
     expectedRevision: 4,
@@ -1366,16 +1347,11 @@ test('Process Save rejects symlinks and records transaction-failure bytes as rem
   writeFileSync(join(sources, 'source.fits'), 'bytes')
   writeFileSync(join(root, 'outside.fits'), 'outside')
   symlinkSync(join(root, 'outside.fits'), join(sources, 'link.fits'))
-  const service = createFixtureService(
-    join(root, 'state.sqlite'),
-    undefined,
-    undefined,
-    {
-      sourcesRoot: sources,
-      outputsRoot: outputs,
-      sources: { source: 'source.fits', link: 'link.fits' },
-    },
-  )
+  const service = createFixtureService(join(root, 'state.sqlite'), undefined, {
+    sourcesRoot: sources,
+    outputsRoot: outputs,
+    sources: { source: 'source.fits', link: 'link.fits' },
+  })
   assert.equal(
     service.saveProcess({
       sessionId: 'process-m27-001',
@@ -1429,16 +1405,11 @@ test('Process Save leaves no success metadata when later filesystem materializat
   const outputs = join(root, 'outputs')
   mkdirSync(sources)
   writeFileSync(join(sources, 'first.fits'), 'first')
-  const service = createFixtureService(
-    join(root, 'state.sqlite'),
-    undefined,
-    undefined,
-    {
-      sourcesRoot: sources,
-      outputsRoot: outputs,
-      sources: { first: 'first.fits', missing: 'missing.tiff' },
-    },
-  )
+  const service = createFixtureService(join(root, 'state.sqlite'), undefined, {
+    sourcesRoot: sources,
+    outputsRoot: outputs,
+    sources: { first: 'first.fits', missing: 'missing.tiff' },
+  })
   const result = service.saveProcess({
     sessionId: 'process-m27-001',
     expectedRevision: 4,
@@ -2138,9 +2109,6 @@ test('non-fixture origin, workers, and service databases migrate without M27 Pla
   )
   assert.equal(snapshot.activeRun._tag, 'None')
   assert.equal(ready.status, 'unavailable')
-  const shell = await fetch(`${base}/`).then((response) => response.text())
-  assert.doesNotMatch(shell, /M27|Run plan/)
-  assert.match(shell, /unavailable|No observation plan is installed/)
   const start = await fetch(`${base}/api/commands/start-run`, {
     method: 'POST',
     body: JSON.stringify({
@@ -3325,7 +3293,7 @@ test('rig outbox dispatch leaves a claimed PublishAsset for its publisher', asyn
   const databasePath = join(root, 'state.sqlite')
   mkdirSync(sources)
   writeFileSync(join(sources, 'final.tiff'), 'publisher-bytes')
-  const service = createFixtureService(databasePath, undefined, undefined, {
+  const service = createFixtureService(databasePath, undefined, {
     sourcesRoot: sources,
     outputsRoot: outputs,
     sources: { final: 'final.tiff' },
@@ -3703,18 +3671,6 @@ test('current controller terminally stops an active fixture run without hardware
   assert.equal(snapshot.activeRun._tag, 'Active')
   if (snapshot.activeRun._tag === 'Active')
     assert.equal(snapshot.activeRun.run.phase, 'stopped')
-  const html = await fetch(`${base}/`).then((response) => response.text())
-  assert.match(
-    html,
-    /Latest solve evidence is preserved\. This run is terminally stopped; no automatic correction or capture will continue\./,
-  )
-  assert.match(html, /s\.run\?\.phase==='paused'/)
-  assert.equal(
-    html.includes(
-      "text(q('#correction-protection'),s.evidence.correction.protection)",
-    ),
-    false,
-  )
 })
 
 test('startup backfills shared-control state for a legacy local database without changing accepted work', async (t) => {
@@ -4119,41 +4075,6 @@ test('Library detail uses stable identities and snapshot delivery remains catalo
   const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
   assert.equal(snapshot.activeRun._tag, 'None')
   assert.equal(JSON.stringify(snapshot).includes('asset-m27-'), false)
-  const html = await fetch(`${base}/`).then((response) => response.text())
-  assert.match(html, /id="library-results"/)
-  assert.match(html, /id="evidence-surface"/)
-  assert.match(html, /id="stack-source"/)
-  assert.match(html, /id="stack-trace" role="status"/)
-  assert.match(html, /Pause capture/)
-  assert.match(html, /Resume capture/)
-  assert.match(html, /Stop run/)
-  assert.match(html, /\/api\/commands\/stop-run/)
-  assert.match(html, /\/api\/commands\/resume-run/)
-  assert.match(html, /expectedRunRevision:s\.run\.revision/)
-  assert.match(html, /id="pause-consequence" role="status"/)
-  assert.match(html, /button\[hidden\]\{display:none\}/)
-  assert.match(
-    html,
-    /Pause preserves this deterministic managed run; it does not send hardware work./,
-  )
-  assert.match(
-    html,
-    /Resume restores the preserved deterministic phase; it does not send hardware work./,
-  )
-  assert.match(html, /Stop is terminal: this managed run cannot be resumed/)
-  assert.match(html, /Stack observed /)
-  assert.match(html, /correction-protection/)
-  assert.match(
-    html,
-    /id="library-prev" aria-label="Previous Library results window" disabled/,
-  )
-  assert.match(
-    html,
-    /id="library-next" aria-label="Next Library results window" disabled/,
-  )
-  assert.match(html, /libraryNext\.onclick=/)
-  assert.match(html, /start\+12/)
-  assert.match(html, /\/api\/library\?queryId=library-m27&pageSize=40/)
   await listener.close()
   service.close()
 })
@@ -5085,11 +5006,6 @@ test('fixture installation restores only a missing M27 plan record and keeps a s
     ).planId,
     'plan-m27',
   )
-  const restoredShell = await fetch(`${restoredBase}/`).then((response) =>
-    response.text(),
-  )
-  assert.match(restoredShell, /data-room="Plan"/)
-  assert.match(restoredShell, /Save deterministic two-sequence draft/)
   await restoredListener.close()
   restored.close()
 
@@ -5131,11 +5047,6 @@ test('fixture installation restores only a missing M27 plan record and keeps a s
   })
   const snapshot = await bootstrapSnapshot(`${recoveredBase}/api/snapshot`)
   assert.equal(snapshot.activeRun._tag, 'None')
-  const shell = await fetch(`${recoveredBase}/`).then((response) =>
-    response.text(),
-  )
-  assert.match(shell, /data-room="Plan"/)
-  assert.doesNotMatch(shell, /No observation plan is installed/)
 })
 
 test('workspace projections remain behind existing admission', async (t) => {
@@ -5178,41 +5089,6 @@ test('a request query cannot select phone or controller capability', async (t) =
     `http://127.0.0.1:${phoneListener.port}/api/snapshot?mode=desktop`,
   )
   assert.equal(trustedPhone.membership.capability, 'readOnly')
-  const html = await fetch(`http://127.0.0.1:${phoneListener.port}/`).then(
-    (response) => response.text(),
-  )
-  assert.match(html, /s\.identity\.capability==='readOnly'/)
-  assert.match(html, /v\.message/)
-  assert.match(html, /data-room="Plan"/)
-  assert.match(html, /data-room="Observe"/)
-  assert.match(html, /data-room="Library"/)
-  assert.match(html, /data-room="Process"/)
-  assert.match(html, /if\(s\.identity\.capability==='readOnly'\)return/)
-  assert.match(html, /Save deterministic two-sequence draft/)
-  assert.match(html, /\/api\/commands\/save-plan-draft/)
-  assert.match(html, /deterministicTwoSequenceDraft/)
-  assert.match(
-    html,
-    /if\(label==='Run plan'\)return document\.createComment\('Run plan deferred'\)/,
-  )
-  assert.match(html, /function bootstrapProjection\(data\)/)
-  assert.match(html, /if\(innerWidth<=600\)return/)
-  assert.match(
-    html,
-    /addEventListener\('resize',\(\)=>\{if\(projection\)\{render\(projection\);renderPlanActions\(\)\}\}\)/,
-  )
-  assert.match(
-    html,
-    /addEventListener\('orientationchange',\(\)=>\{if\(projection\)\{render\(projection\);renderPlanActions\(\)\}\}\)/,
-  )
-  assert.match(html, /detail\.availability==='availableLocally'/)
-  assert.match(html, /temporarily unavailable and cannot open in Process/)
-  assert.match(html, /select\('Observe'\)/)
-  assert.match(html, /SERVICE TRUTH<button id="return" hidden/)
-  assert.match(html, /q\('#return'\)\.hidden=!s\.run/)
-  assert.equal(html.includes('MutationObserver'), false)
-  for (const raw of ['ControlGranted', 'ControlRequested', 'ControlLeaseLost'])
-    assert.equal(html.includes(raw), false)
   await listener.close()
   service.close()
   await phoneListener.close()
@@ -5267,11 +5143,9 @@ test('protected responses install browser security headers without caching servi
     response.headers.get('content-security-policy') ?? '',
     /frame-ancestors 'none'/,
   )
-  const asset = await fetch(`${base}/assets/brand/alignment-aperture-light.svg`)
-  assert.equal(asset.headers.get('cache-control'), 'public, max-age=3600')
-  assert.equal(
-    asset.headers.get('content-security-policy'),
-    response.headers.get('content-security-policy'),
+  assert.doesNotMatch(
+    response.headers.get('content-security-policy') ?? '',
+    /unsafe-inline/,
   )
 })
 
@@ -5345,10 +5219,6 @@ test('browser reconnect installs a current snapshot and its stale shell offers n
     ).count,
     0,
   )
-  const shell = await fetch(`${base}/`).then((response) => response.text())
-  assert.match(shell, /connection lost · last confirmed/)
-  assert.match(shell, /no action will be replayed/)
-  assert.match(shell, /s\.connection==='stale'/)
   await reconnectReader?.cancel()
   await listener.close()
   service.close()
@@ -5623,213 +5493,98 @@ test('listener shutdown closes a consumed keep-alive request', async (t) => {
   ])
 })
 
-test('serves the accepted V1 light symbol from the local application origin', async (t) => {
-  const service = createFixtureService()
-  const listener = await service.listen()
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  const response = await fetch(
-    `http://127.0.0.1:${listener.port}/assets/brand/alignment-aperture-light.svg`,
-  )
-  assert.equal(response.headers.get('content-type'), 'image/svg+xml')
-  assert.match(await response.text(), /Astro Console V1 symbol/)
-  await listener.close()
-  service.close()
-})
-
-test('a missing packaged brand asset is a bounded 404 rather than a server failure', async (t) => {
-  const service = createFixtureService(
+test('serves the web bundle with route fallback while preserving API precedence', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-web-bundle-'))
+  const webDistPath = join(root, 'dist')
+  const assets = join(webDistPath, 'assets')
+  mkdirSync(assets, { recursive: true })
+  writeFileSync(join(webDistPath, 'index.html'), '<main>Nightbook</main>')
+  writeFileSync(join(assets, 'index-abcdefgh.js'), 'export {}')
+  writeFileSync(join(assets, 'index-abcdefgh.css'), 'body{}')
+  writeFileSync(join(webDistPath, 'alignment-aperture-light.svg'), '<svg/>')
+  writeFileSync(join(root, 'outside.js'), 'outside')
+  symlinkSync(join(root, 'outside.js'), join(assets, 'outside.js'))
+  const service = createLocalWebService(
     ':memory:',
     undefined,
-    new URL('file:///tmp/astro-console-missing-brand.svg'),
+    undefined,
+    undefined,
+    { fixture: 'm27', webDistPath },
   )
   const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
     service.close()
   })
-  const response = await fetch(
-    `http://127.0.0.1:${listener.port}/assets/brand/alignment-aperture-light.svg`,
-  )
-  assert.equal(response.status, 404)
-  assert.equal(await response.text(), 'Brand asset unavailable')
-})
-
-test('generated fixture shell has executable browser JavaScript', () => {
-  const script = applicationShell({ fixture: true }).match(
-    /<script>([\s\S]*)<\/script>/,
-  )?.[1]
-  if (script === undefined) throw new Error('Fixture shell script is missing')
-  new Function(script)
-  assert.match(script, /Preflight · fake run is preparing/)
-  assert.match(script, /Acquire · fake run is centering/)
-  assert.match(script, /Verify · fake run is checking/)
-  assert.doesNotMatch(script, /Capture · M27 is continuing/)
-  assert.match(script, /function validBootstrap\(data\)/)
-  assert.match(script, /id!==data\.eventCursor/)
-  assert.match(script, /data\.eventCursor!==eventCursor\+1/)
-  assert.match(script, /data\.snapshotVersion<snapshotVersion/)
-  assert.match(script, /function markStale\(\)/)
-  assert.match(script, /e\.onerror=\(\)=>reconnect\(\)/)
-})
-
-test('generated shell refreshes bootstrap truth after malformed and out-of-order SSE', async () => {
-  const script = applicationShell({ fixture: true }).match(
-    /<script>([\s\S]*)<\/script>/,
-  )?.[1]
-  if (script === undefined) throw new Error('Fixture shell script is missing')
-  const nodes = new Map<string, ReturnType<typeof shellNode>>()
-  const node = (selector: string) => {
-    const existing = nodes.get(selector)
-    if (existing !== undefined) return existing
-    const created = shellNode()
-    nodes.set(selector, created)
-    return created
+  for (const path of [
+    '/',
+    '/plan',
+    '/observe',
+    '/library',
+    '/process',
+    '/library/assets/asset-m27-001',
+    '/process/sessions/process-m27-001',
+  ]) {
+    const index = await fetch(`${base}${path}`)
+    assert.equal(index.status, 200)
+    assert.equal(index.headers.get('content-type'), 'text/html; charset=utf-8')
+    assert.equal(index.headers.get('cache-control'), 'no-store')
+    assert.equal(await index.text(), '<main>Nightbook</main>')
+    assert.doesNotMatch(
+      index.headers.get('content-security-policy') ?? '',
+      /unsafe-inline/,
+    )
   }
-  const snapshots = [
-    shellBootstrap(1, 1),
-    shellBootstrap(4, 4),
-    shellBootstrap(5, 5),
-    new Error('offline'),
-    shellBootstrap(6, 6),
-  ]
-  const fetches: Array<{ readonly path: string; readonly init?: unknown }> = []
-  const context = createContext({
-    document: {
-      querySelector: node,
-      querySelectorAll: () => [],
-      createElement: () => shellNode(),
-      createComment: () => shellNode(),
-    },
-    EventSource: class {
-      readonly listeners = new Map<string, (event: ShellEvent) => void>()
-      onerror: (() => void) | undefined
-      addEventListener(type: string, listener: (event: ShellEvent) => void) {
-        this.listeners.set(type, listener)
-      }
-    },
-    fetch: async (path: string, init?: unknown) => {
-      fetches.push({ path, ...(init === undefined ? {} : { init }) })
-      if (path === '/api/snapshot') {
-        const next = snapshots.shift()
-        if (next instanceof Error) throw next
-        return { json: async () => ({ ok: true, data: next }) }
-      }
-      return { json: async () => shellPlan }
-    },
-    crypto: { randomUUID: () => 'command-id' },
-    queueMicrotask,
-    addEventListener: () => undefined,
-    innerWidth: 1440,
-  })
-  new Script(
-    `${script};globalThis.shell={eventProjection,refreshProjection,reconnect,send}`,
-  ).runInContext(context)
-  const shell: unknown = new Script('shell').runInContext(context)
-  if (!isShellHarness(shell)) throw new Error('Shell harness is unavailable')
-  await shell.refreshProjection()
-  await settleShell()
-  const emit = (cursor: number, data: unknown) =>
-    shell.eventProjection({
-      lastEventId: String(cursor),
-      data: JSON.stringify(data),
-    })
-  emit(1, shellBootstrap(1, 1))
-  emit(2, shellBootstrap(2, 2))
-  emit(4, shellBootstrap(4, 4))
-  await settleShell()
-  emit(5, shellBootstrap(1, 5))
-  await settleShell()
-  shell.eventProjection({ lastEventId: '6', data: '{' })
-  await shell.send('/api/commands/control', {})
-  await settleShell()
-  shell.reconnect()
-  await settleShell()
-  assert.equal(nodes.get('#runfact')?.textContent, 'M27 · capture')
-  assert.equal(fetches.filter(({ path }) => path === '/api/snapshot').length, 5)
+  const script = await fetch(`${base}/assets/index-abcdefgh.js`)
   assert.equal(
-    fetches.some(({ init }) => init !== undefined),
-    false,
+    script.headers.get('content-type'),
+    'text/javascript; charset=utf-8',
   )
+  assert.equal(
+    script.headers.get('cache-control'),
+    'public, max-age=31536000, immutable',
+  )
+  const stylesheet = await fetch(`${base}/assets/index-abcdefgh.css`)
+  assert.equal(
+    stylesheet.headers.get('content-type'),
+    'text/css; charset=utf-8',
+  )
+  const symbol = await fetch(`${base}/alignment-aperture-light.svg`)
+  assert.equal(symbol.headers.get('content-type'), 'image/svg+xml')
+  assert.equal(symbol.headers.get('cache-control'), 'no-store')
+  assert.equal((await fetch(`${base}/api/unknown`)).status, 404)
+  assert.equal(
+    (await fetch(`${base}/api/unknown`)).headers.get('content-type'),
+    'application/json; charset=utf-8',
+  )
+  assert.equal((await fetch(`${base}/not-a-web-route`)).status, 404)
+  assert.equal((await fetch(`${base}/assets/outside.js`)).status, 404)
+  assert.equal((await fetch(`${base}/assets/%2e%2e/outside.js`)).status, 404)
 })
 
-function shellNode() {
-  return {
-    textContent: '',
-    hidden: false,
-    disabled: false,
-    style: {},
-    className: '',
-    classList: { toggle: () => undefined },
-    replaceChildren: () => undefined,
-    append: () => undefined,
-    addEventListener: () => undefined,
-    toggleAttribute: () => undefined,
-  }
-}
-
-const shellPlan = {
-  planId: 'plan-m27',
-  revision: 1,
-  readiness: 'ready',
-  readinessSummary: 'Ready.',
-  sequences: [],
-  limitations: [],
-}
-
-function shellBootstrap(snapshotVersion: number, eventCursor: number) {
-  return {
-    snapshotVersion,
-    eventCursor,
-    generatedAt: '2026-08-02T20:00:00Z',
-    membership: {
-      personId: 'owner-chicks',
-      role: 'owner',
-      clientId: 'desktop-owner',
-      capability: 'controlCapable',
+test('reports a missing web bundle without substituting an inline shell', async (t) => {
+  const service = createLocalWebService(
+    ':memory:',
+    undefined,
+    undefined,
+    undefined,
+    {
+      fixture: 'm27',
+      webDistPath: join(tmpdir(), 'astro-web-bundle-missing'),
     },
-    control: { revision: 1, state: 'held', holderClientId: 'desktop-owner' },
-    activeRun: {
-      _tag: 'Active',
-      run: {
-        runId: 'run-m27-001',
-        revision: 1,
-        phase: 'capture',
-        target: 'M27',
-        progress: 0.5,
-        completedSequenceCount: 1,
-      },
-    },
-    health: {},
-  }
-}
-
-async function settleShell() {
-  for (let index = 0; index < 10; index += 1) await Promise.resolve()
-}
-
-type ShellEvent = { readonly lastEventId: string; readonly data: string }
-
-function isShellHarness(value: unknown): value is {
-  readonly eventProjection: (event: ShellEvent) => void
-  readonly refreshProjection: () => Promise<void>
-  readonly reconnect: () => void
-  readonly send: (path: string, payload: unknown) => Promise<void>
-} {
-  if (typeof value !== 'object' || value === null) return false
-  return (
-    'eventProjection' in value &&
-    typeof value.eventProjection === 'function' &&
-    'refreshProjection' in value &&
-    typeof value.refreshProjection === 'function' &&
-    'reconnect' in value &&
-    typeof value.reconnect === 'function' &&
-    'send' in value &&
-    typeof value.send === 'function'
   )
-}
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const response = await fetch(`${base}/`)
+  assert.equal(response.status, 404)
+  assert.equal(await response.text(), '')
+  assert.equal((await fetch(`${base}/api/snapshot`)).status, 200)
+})
 
 test('fake run resolution and consequence-aware edits persist only durable fake state', async (t) => {
   const databasePath = join(

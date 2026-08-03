@@ -1,8 +1,4 @@
-import {
-  createServer,
-  type IncomingMessage,
-  type ServerResponse,
-} from 'node:http'
+import { type IncomingMessage, type ServerResponse } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import {
   randomUUID,
@@ -14,7 +10,7 @@ import {
 } from 'node:crypto'
 import { mkdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { Context, Effect, Layer, Schema } from 'effect'
+import { Context, Effect, Exit, Layer, Schema, Scope } from 'effect'
 import {
   BootstrapHttpFailureEnvelope,
   BootstrapHttpSuccessEnvelope,
@@ -34,12 +30,13 @@ import {
 } from './process-save.ts'
 import type { DownloadGrantIssuer } from './r2-download-grant.ts'
 import { configuredDownloadGrantIssuer } from './download-grant-config.ts'
-import { applicationShell } from './application-shell.ts'
 import {
   originServerConfig,
   type OriginServerConfig,
 } from './environment-config.ts'
 import { runExecutable } from './executable.ts'
+import { OriginListener, originListenerLayer } from './origin-listener.ts'
+import { WebHost, webHostLayer } from './web-host.ts'
 const StartRun = Schema.TaggedStruct('StartRunFromPlan', {
   planId: Schema.NonEmptyString,
   expectedPlanRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -1199,13 +1196,9 @@ export function createLocalWebService(
     clientId: 'desktop-owner',
     capability: 'controlCapable',
   }),
-  brandAssetPath: URL = new URL(
-    '../assets/brand/alignment-aperture-light.svg',
-    import.meta.url,
-  ),
   processSaveStorage?: ProcessSaveStorage,
   downloadGrants?: DownloadGrantConfig,
-  options: { readonly fixture?: 'm27' } = {},
+  options: { readonly fixture?: 'm27'; readonly webDistPath?: string } = {},
 ) {
   if (databasePath !== ':memory:')
     mkdirSync(dirname(databasePath), { recursive: true })
@@ -1214,6 +1207,14 @@ export function createLocalWebService(
   migrateDatabase(database)
   if (options.fixture === 'm27') installM27Fixture(database)
   else initializeRuntimeState(database)
+  const webHost = Effect.runSync(
+    WebHost.pipe(
+      Effect.provide(webHostLayer(options.webDistPath ?? '../web/dist')),
+    ),
+  )
+  const originListener = Effect.runSync(
+    OriginListener.pipe(Effect.provide(originListenerLayer)),
+  )
   const listeners = new Map<ServerResponse, LocalIdentity>()
   let closed = false
   let emittedCursor = 0
@@ -1241,17 +1242,8 @@ export function createLocalWebService(
       return json(response, 200, { status: 'alive' })
     expireReconnectGrace(database)
     const identity = await identityResolver(request)
-    if (
-      request.method === 'GET' &&
-      url.pathname === '/assets/brand/alignment-aperture-light.svg'
-    )
-      return asset(response, brandAssetPath)
     if (identity === undefined)
       return unauthenticated(response, request.method, url.pathname)
-    if (request.method === 'GET' && url.pathname === '/')
-      return state(database).plan.readiness !== 'unavailable'
-        ? html(response, options.fixture === 'm27')
-        : unavailableHtml(response)
     if (request.method === 'GET' && url.pathname === '/api/snapshot')
       return void Effect.runSync(
         bootstrapSnapshot(database, identity).pipe(
@@ -1465,38 +1457,35 @@ export function createLocalWebService(
             publish,
           )
     }
+    if (
+      request.method === 'GET' &&
+      Effect.runSync(webHost.asset(response, url.pathname, responseHeaders))
+    )
+      return
+    if (
+      request.method === 'GET' &&
+      Effect.runSync(webHost.route(response, url.pathname, responseHeaders))
+    )
+      return
+    if (url.pathname.startsWith('/api/'))
+      return json(response, 404, reject('InvalidInput').body)
     response.writeHead(404, responseHeaders('text/plain; charset=utf-8')).end()
   }
-  const listen = (port = 0, host = '127.0.0.1') =>
-    new Promise<{ readonly port: number; readonly close: () => Promise<void> }>(
-      (resolve, reject) => {
-        if (!Number.isInteger(port) || port < 0 || port > 65_535)
-          return reject(
-            new Error('Listen port must be an integer from 0 to 65535'),
-          )
-        if (host !== '127.0.0.1' && host !== '0.0.0.0')
-          return reject(
-            new Error(
-              'Listen host must be loopback or the private Compose network',
-            ),
-          )
-        const server = createServer((request, response) => {
+  const listen = async (port = 0, host = '127.0.0.1') => {
+    const scope = Effect.runSync(Scope.make())
+    const listener = await Effect.runPromise(
+      Scope.provide(
+        originListener.listen(port, host, (request, response) => {
           void handler(request, response)
-        }).listen(port, host, () => {
-          const address = server.address()
-          if (address === null || typeof address === 'string')
-            return reject(new Error('Local server did not bind a TCP port'))
-          resolve({
-            port: address.port,
-            close: () =>
-              new Promise<void>((done) => {
-                server.closeAllConnections()
-                server.close(() => done())
-              }),
-          })
-        })
-      },
+        }),
+        scope,
+      ),
     )
+    return {
+      ...listener,
+      close: () => Effect.runPromise(Scope.close(scope, Exit.void)),
+    }
+  }
   const close = () => {
     if (closed) return
     closed = true
@@ -4670,7 +4659,7 @@ function responseHeaders(contentType: string, cacheControl = 'no-store') {
     'content-type': contentType,
     'cache-control': cacheControl,
     'content-security-policy':
-      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
     'cross-origin-opener-policy': 'same-origin',
     'permissions-policy': 'camera=(), geolocation=(), microphone=()',
     'referrer-policy': 'no-referrer',
@@ -4731,32 +4720,6 @@ function stream(
     listeners.delete(response)
   })
 }
-function asset(response: ServerResponse, path: URL) {
-  try {
-    const contents = readFileSync(path)
-    return response
-      .writeHead(200, responseHeaders('image/svg+xml', 'public, max-age=3600'))
-      .end(contents)
-  } catch {
-    return response
-      .writeHead(404, responseHeaders('text/plain; charset=utf-8'))
-      .end('Brand asset unavailable')
-  }
-}
-function html(response: ServerResponse, fixture: boolean) {
-  response
-    .writeHead(200, responseHeaders('text/html; charset=utf-8'))
-    .end(applicationShell({ fixture }))
-}
-
-function unavailableHtml(response: ServerResponse) {
-  response
-    .writeHead(200, responseHeaders('text/html; charset=utf-8'))
-    .end(
-      `<!doctype html><html><head><meta name="viewport" content="width=device-width"><title>Astro Console</title><style>body{margin:0;background:#081014;color:#e5f0f1;font:16px system-ui}main{max-width:720px;margin:12vh auto;padding:24px;border:1px solid #354851;border-radius:4px;background:#0d151a}.ey{color:#9de8ed;font:12px ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase}</style></head><body><main><p class="ey">Service truth · plan unavailable</p><h1>No observation plan is installed.</h1><p>No active run, library, or processing session is available until an authorized workflow installs real state.</p></main></body></html>`,
-    )
-}
-
 export function createOriginAdmission(
   config: OriginServerConfig,
 ): RequestAdmission {
@@ -4796,9 +4759,11 @@ if (process.argv[1]?.endsWith('server.ts')) {
       config.runtime.databasePath,
       admission,
       undefined,
-      undefined,
       issuer === undefined ? undefined : { issuer },
-      config.fixture === 'm27' ? { fixture: config.fixture } : {},
+      {
+        ...(config.fixture === 'm27' ? { fixture: config.fixture } : {}),
+        webDistPath: config.runtime.webDistPath,
+      },
     )
     await service
       .listen(config.runtime.port, config.runtime.host)

@@ -7,6 +7,10 @@ import {
 import { Schema } from 'effect'
 import { BootstrapClientState } from './bootstrap-client'
 import { projectBootstrapState } from './bootstrap-projection'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { createElement } from 'react'
+import { ObserveView } from './workspaces/ObserveView'
+import { ProcessView } from './workspaces/ProcessView'
 
 const snapshot = (fixture: keyof typeof bootstrapFixtures) =>
   Schema.decodeUnknownSync(BootstrapSnapshot)(bootstrapFixtures[fixture])
@@ -15,7 +19,7 @@ test('projects a fresh authoritative snapshot with distinct health facts', () =>
   const projection = projectBootstrapState(
     BootstrapClientState.Current({ snapshot: snapshot('fresh') }),
   )
-  assert.match(projection.shell.freshness, /^Current snapshot/)
+  assert.match(projection.shell.freshness, /^Current bootstrap snapshot/)
   assert.equal(projection.shell.membership, 'Owner member')
   assert.equal(
     projection.shell.attentionOwner,
@@ -71,7 +75,38 @@ test('projects unavailable state without invented service or workspace truth', (
   assert.equal(projection.shell.activeRun, 'Active run unknown')
   assert.equal(projection.shell.health[0]?.state, 'unavailable')
   assert.equal(projection.observe.phase, 'Unavailable')
+  assert.equal(projection.observe.detailAvailable, false)
+  assert.equal(projection.process.detailAvailable, false)
   assert.equal(projection.library.assets.length, 0)
+})
+
+test('bootstrap projections render unavailable Observe and Process evidence without fixture imagery or claims', () => {
+  const projection = projectBootstrapState(
+    BootstrapClientState.Current({ snapshot: snapshot('fresh') }),
+  )
+  const observe = renderToStaticMarkup(
+    createElement(ObserveView, { view: projection.observe }),
+  )
+  const process = renderToStaticMarkup(
+    createElement(ProcessView, {
+      view: projection.process,
+      sessionId: 'session-address',
+      sourceAssetId: 'source-address',
+    }),
+  )
+  assert.match(observe, /Detailed evidence unavailable/)
+  assert.match(
+    observe,
+    /Detailed Observe evidence is unavailable from bootstrap/,
+  )
+  assert.doesNotMatch(observe, /evidence-image/)
+  assert.match(process, /Unresolved session address \/ session-address/)
+  assert.match(process, /Unresolved source address \/ source-address/)
+  assert.match(process, /Host policy and checkpoint evidence are unavailable/)
+  assert.doesNotMatch(
+    process,
+    /Build complete|Gradient removal|Host policy healthy|Measured cause: no pressure|checkpoint preserved|Last valid image|stable handoff|evidence-image/,
+  )
 })
 
 test('projects membership and server capability independently', () => {

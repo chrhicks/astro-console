@@ -230,6 +230,12 @@
     gap: var(--space-4);
     text-align: left;
   }
+  .status-anchor__presence,
+  .status-anchor__attention-owner,
+  .status-anchor__service,
+  .status-anchor__protection {
+    display: none;
+  }
   .status-anchor__health {
     display: grid;
     grid-column: 1 / -1;

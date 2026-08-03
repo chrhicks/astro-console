@@ -23,6 +23,7 @@ export type OriginServerConfig = {
     readonly release: string
     readonly port: number
     readonly host: string
+    readonly webDistPath: string
   }
   readonly admission:
     | { readonly mode: 'development'; readonly client: string }
@@ -54,6 +55,7 @@ export const originServerConfig = Config.all({
   jwksUrl: optional('CF_ACCESS_JWKS_URL'),
   port: text('ASTRO_LOCAL_WEB_PORT', '0'),
   release: text('ASTRO_RELEASE', 'local-web-fixture'),
+  webDistPath: text('ASTRO_WEB_DIST', '../web/dist'),
   downloadGrantUrl: optional('ASTRO_DOWNLOAD_GRANT_URL'),
   downloadGrantSecretPath: optional('ASTRO_DOWNLOAD_GRANT_SHARED_SECRET_PATH'),
 }).pipe(
@@ -110,6 +112,7 @@ function originServer(input: {
   readonly jwksUrl: Option.Option<string>
   readonly port: string
   readonly release: string
+  readonly webDistPath: string
   readonly downloadGrantUrl: Option.Option<string>
   readonly downloadGrantSecretPath: Option.Option<string>
 }) {
@@ -120,6 +123,10 @@ function originServer(input: {
     )
     const release = yield* validText(
       input.release,
+      'Runtime configuration contains an invalid non-secret value',
+    )
+    const webDistPath = yield* validText(
+      input.webDistPath,
       'Runtime configuration contains an invalid non-secret value',
     )
     if (input.admissionMode === 'development') {
@@ -133,6 +140,7 @@ function originServer(input: {
           release,
           port: Number(input.port),
           host: input.bind,
+          webDistPath,
         },
         admission: { mode: 'development' as const, client: input.client },
         fixture: Option.getOrUndefined(input.fixture),
@@ -182,6 +190,7 @@ function originServer(input: {
         release,
         port: Number(input.port),
         host: input.bind,
+        webDistPath,
       },
       admission: {
         mode: 'production' as const,

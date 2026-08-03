@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **Phases 0, 0.5, 1, and 2 complete; Production Convergence is in progress; Phase 3 follows**
+Status: **Phases 0, 0.5, 1, and 2 complete; Production Convergence Epics 1–4 are complete; Phase 3 follows Epic 5**
 
 This directory is organized to keep normal working context small. Do not read
 the entire V2 tree by default.
@@ -65,12 +65,12 @@ Phase 1 is closed: the local-web and host-verification evidence are recorded,
 and the branch-wide quality regression has landed its bounded fixes. Phase 2
 (Plan and Managed Runs) is also closed with fake-only managed-run evidence.
 Production Convergence now promotes that infrastructure and the accepted
-Nightbook UI into `apps/server` and `apps/web`. The first three of its five
-sequential Continuum Epics, `tkt-ezxr1fsb`, `tkt-n9yoieoz`, and
-`tkt-uuom4upo`, are complete. Epic 3 establishes the shared emitted contracts
-and bounded bootstrap HTTP/SSE/control seam; Epic 4 still owns shipping web and
-server from one version-matched rig-local origin and the integrated local
-workflow.
+Nightbook UI into `apps/server` and `apps/web`. Its first four sequential
+Continuum Epics, `tkt-ezxr1fsb`, `tkt-n9yoieoz`, `tkt-uuom4upo`, and
+`tkt-qffwfa47`, are complete. Epic 4 ships the Effect WebHost and scoped
+OriginListener with the version-matched web bundle from one rig-local origin.
+Epic 5, `tkt-zcsucxyx`, remains next for the detailed Plan, Observe, Library,
+and Process migration and experimental-path retirement.
 Phase 3 (Observe, Acquire, and Capture) follows convergence and still proceeds
 only in separately accepted bounded vertical slices.
 

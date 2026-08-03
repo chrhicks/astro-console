@@ -11,10 +11,18 @@ export function ProcessView({
   sessionId: string | undefined
   sourceAssetId: string | undefined
 }) {
-  const identity = sessionId ?? view.sessionId
-  const source = sourceAssetId
-    ? `${sourceAssetId} / stable handoff`
-    : view.source
+  const identity = view.detailAvailable
+    ? (sessionId ?? view.sessionId)
+    : sessionId
+      ? `Unresolved session address / ${sessionId}`
+      : 'Session detail unavailable'
+  const source = view.detailAvailable
+    ? sourceAssetId
+      ? `${sourceAssetId} / stable handoff`
+      : view.source
+    : sourceAssetId
+      ? `Unresolved source address / ${sourceAssetId}`
+      : view.source
   const [selected, setSelected] = useState(1)
   const step = view.steps[selected]
   return (
@@ -32,17 +40,29 @@ export function ProcessView({
           </button>
         ))}
         <div>
-          <Status tone="safe">Build complete</Status>
+          <Status tone={view.detailAvailable ? 'safe' : 'neutral'}>
+            {view.detailAvailable
+              ? 'Build complete'
+              : 'Session detail unavailable'}
+          </Status>
           <p>{view.checkpoint}</p>
         </div>
       </aside>
       <section className="process-canvas">
         <header>
-          <span>Service-supplied projection / {step?.status}</span>
+          <span>
+            {view.detailAvailable
+              ? `Service-supplied projection / ${step?.status}`
+              : `Detailed projection unavailable / ${step?.status}`}
+          </span>
           <h1 tabIndex={-1}>{view.label}</h1>
         </header>
         <div className="process-image">
-          <Evidence label="Current valid processing image" />
+          {view.detailAvailable ? (
+            <Evidence label="Current valid processing image" />
+          ) : (
+            <p className="unavailable-evidence">{view.preview}</p>
+          )}
         </div>
         <footer>
           <span>{source}</span>
@@ -51,16 +71,35 @@ export function ProcessView({
       </section>
       <aside className="process-rail">
         <span>{step?.label}</span>
-        <Status tone={view.failure ? 'danger' : 'safe'}>
-          {view.failure ? 'Failure held' : 'Last valid image'}
+        <Status
+          tone={
+            view.failure ? 'danger' : view.detailAvailable ? 'safe' : 'neutral'
+          }
+        >
+          {view.failure
+            ? 'Failure held'
+            : view.detailAvailable
+              ? 'Last valid image'
+              : 'Evidence unavailable'}
         </Status>
-        <h2>{view.failure ?? 'Gradient removal'}</h2>
+        <h2>
+          {view.failure ??
+            (view.detailAvailable
+              ? 'Gradient removal'
+              : 'Operation unavailable')}
+        </h2>
         <p>{view.preview}</p>
         <div className="policy-trace">
-          <Status tone="neutral">Host policy healthy</Status>
-          <span>Measured cause: no pressure</span>
-          <span>Effect: processing remains read-only</span>
-          <span>Protection: checkpoint preserved</span>
+          {view.detailAvailable ? (
+            <>
+              <Status tone="neutral">Host policy healthy</Status>
+              <span>Measured cause: no pressure</span>
+              <span>Effect: processing remains read-only</span>
+              <span>Protection: checkpoint preserved</span>
+            </>
+          ) : (
+            <span>Host policy and checkpoint evidence are unavailable.</span>
+          )}
         </div>
         <dl>
           <div>

@@ -9,6 +9,11 @@ const requestedClient =
     ?.slice('--client='.length) ?? 'owner'
 if (!['owner', 'friend', 'phone'].includes(requestedClient))
   throw new Error('--client must be owner, friend, or phone')
+const requestedPath =
+  process.argv
+    .find((argument) => argument.startsWith('--path='))
+    ?.slice('--path='.length) ?? '/'
+if (!requestedPath.startsWith('/')) throw new Error('--path must start with /')
 const profile = resolve(
   appRoot,
   `.astro-local-web/inspect-chrome-profile-${requestedClient}`,
@@ -34,9 +39,16 @@ const server = spawn(
   },
 )
 let browser
+let web
+let serverOrigin
+let webOrigin
+let stopped = false
 const stop = () => {
+  if (stopped) return
+  stopped = true
   if (browser) browser.kill()
   server.kill()
+  web?.kill()
 }
 process.on('SIGINT', stop)
 process.on('SIGTERM', stop)
@@ -44,8 +56,44 @@ server.stdout.on('data', (chunk) => {
   const text = chunk.toString()
   process.stdout.write(text)
   const match = text.match(/http:\/\/127\.0\.0\.1:(\d+)/)
-  if (!match || browser) return
-  const url = match[0]
+  if (!match) return
+  serverOrigin = match[0]
+  startWeb()
+})
+function startWeb() {
+  if (web) return
+  web = spawn(
+    process.execPath,
+    ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1'],
+    {
+      cwd: resolve(appRoot, '../web'),
+      env: {
+        ...process.env,
+        ASTRO_SERVER_ORIGIN: serverOrigin,
+        VITE_ASTRO_BOOTSTRAP: 'true',
+      },
+      stdio: ['inherit', 'pipe', 'pipe'],
+    },
+  )
+  web.stdout.on('data', (chunk) => {
+    const text = chunk.toString()
+    process.stdout.write(text)
+    const match = text.match(/http:\/\/127\.0\.0\.1:(\d+)/)
+    if (!match) return
+    webOrigin = match[0]
+    openBrowser()
+  })
+  web.stderr.pipe(process.stderr)
+  web.on('exit', (code) => {
+    if (!stopped) {
+      stop()
+      process.exitCode = code ?? 1
+    }
+  })
+}
+function openBrowser() {
+  if (!serverOrigin || !webOrigin || browser) return
+  const url = `${webOrigin}${requestedPath}`
   browser = spawn(
     chrome,
     [
@@ -53,6 +101,7 @@ server.stdout.on('data', (chunk) => {
       `--user-data-dir=${profile}`,
       '--no-first-run',
       '--no-default-browser-check',
+      '--new-window',
       url,
     ],
     { stdio: 'inherit' },
@@ -63,6 +112,11 @@ server.stdout.on('data', (chunk) => {
   process.stdout.write(
     `Inspector ready for ${requestedClient}: agent-browser connect 9223\n`,
   )
-})
+}
 server.stderr.pipe(process.stderr)
-server.on('exit', (code) => process.exit(code ?? 0))
+server.on('exit', (code) => {
+  if (!stopped) {
+    stop()
+    process.exitCode = code ?? 1
+  }
+})

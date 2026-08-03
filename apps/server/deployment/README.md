@@ -37,8 +37,11 @@ email revokes origin admission even if its prior Access subject remains in
 SQLite.
 
 Build from the repository root with `docker build -f
-apps/server/deployment/Dockerfile .`; activation must use a reviewed
-immutable image digest rather than the starter tag. Before activation: supply
+apps/server/deployment/Dockerfile .`; it builds the contracts, web bundle, and
+server runtime into one image. The runtime contains only the web `dist` output,
+not web fixtures, source, theme-study files, screenshots, or development
+dependencies. `ASTRO_WEB_DIST=../web/dist` is the packaged default. Activation
+must use a reviewed immutable image digest rather than the starter tag. Before activation: supply
 host-managed secrets, copy `config.example` outside the repository, validate
 the non-secret runtime configuration at process startup, run the image's
 startup migrations against a backed-up local database, and check admitted
