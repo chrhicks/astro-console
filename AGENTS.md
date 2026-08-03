@@ -26,8 +26,7 @@ reading table. The default context is only `docs/v2/ux-design-guidance.md` and
 ### Subagents - delegation and context preservation
 
 * Use the `coder` agent as the default implementation path for coding tasks in this project.
-* Use `ui-validator` as the default subagent for desktop UI smoke validation and screenshot-backed verification.
-* Use the `designer` subagent after every UI-affecting change in V2 or the web implementation.
+* Use the `designer` subagent after every UI-affecting change in V2 or the web implementation, including UI validation. This agent is allowed to make UI (React/CSS/Markup) changes and will report back everything else.
 
 ### Executor
 
@@ -56,7 +55,7 @@ profile with CDP on port `9223`; it never attaches to or closes normal Chrome.
 
 - `agent-browser connect 9223`
 - `agent-browser snapshot`
-- `agent-browser screenshot /tmp/astro-local-web.png`
+- `agent-browser screenshot ./.tmp/astro-local-web.png`
 
 Stop the originating runner with Ctrl-C. If port 9223 is occupied, stop the
 previous local-web inspect runner before starting another. Prefer this path for
