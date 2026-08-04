@@ -383,7 +383,7 @@ function acquireSnapshot(
           ]
         : writable &&
             session.acquisitionMethod !== undefined &&
-            session.phase === 'solving'
+            (session.phase === 'solving' || session.phase === 'verifying')
           ? [
               {
                 _tag: 'Available' as const,

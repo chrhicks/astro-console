@@ -1,6 +1,6 @@
 # Astro Console V2 Delivery Plan
 
-Status: **durable V2 completion roadmap — Phases 0, 0.5, 1, and 2 and Production Convergence complete; Phase 3 preflight is complete with deterministic adapter proof**
+Status: **durable V2 completion roadmap — Phases 0, 0.5, 1, 2, and 3 and Production Convergence complete; Phase 4 planning is next**
 
 ## Keep This Plan
 
@@ -137,12 +137,14 @@ work was performed or authorized.
 The typed control request/grant/decline/release/take seam remains preserved,
 but user-facing presence and control UI is deferred to Phase 6; reconnect and
 presence lifecycle are not claimed. Interactive Process is deferred to Phase 5.
-Phase 3 is organized as the ordered Continuum Epic `tkt-2xpkp65f`. Its
-preflight child is complete: the opt-in Alpaca adapter makes only declared GET
-reads and has deterministic boundary proof. No real rig call is claimed. The
-remaining children proceed in their documented dependency order.
+Phase 3 is complete through Continuum Epic `tkt-2xpkp65f`. It proves the
+opt-in Alpaca GET-only preflight boundary, server-owned Acquire and Capture
+evidence, image-verified corrections, bounded recovery, and responsive
+Observe presentation with deterministic local fixtures. No real rig call,
+device action, or physical capture is claimed. Its execution record is in the
+[Phase 3 archive](../archive/phase-3/README.md).
 
-## Phase 3: Observe, Acquire, and Capture — After Production Convergence
+## Phase 3: Observe, Acquire, and Capture — Complete
 
 ### Outcomes
 
@@ -160,6 +162,9 @@ remaining children proceed in their documented dependency order.
   confirms it.
 - Capture answers whether useful evidence is accumulating.
 - Recovery remains visible across workspace and responsive layouts.
+
+All Phase 3 exit criteria are complete with deterministic local proof. The
+current counts and proof limits are in the [current handoff](handoff.md).
 
 ## Phase 4: Library and Frame Review
 

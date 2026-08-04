@@ -654,9 +654,13 @@ function TargetAcquisition({
       )}
       {targetAcquisitionCommand !== undefined &&
         acquire.actions.length > 0 &&
-        acquire.phase === 'solving' && (
+        (acquire.phase === 'solving' || acquire.phase === 'verifying') && (
           <button onClick={acquireTarget} disabled={pending}>
-            {lunar ? 'Capture lunar measurement' : 'Capture and plate solve'}
+            {acquire.phase === 'verifying'
+              ? 'Capture fresh verification frame'
+              : lunar
+                ? 'Capture lunar measurement'
+                : 'Capture and plate solve'}
           </button>
         )}
       {recordLiveFrameEvidence !== undefined &&

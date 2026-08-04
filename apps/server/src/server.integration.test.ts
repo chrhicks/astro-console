@@ -630,6 +630,73 @@ test('Acquire recovery is bounded, reconciled, idempotent, streamed, restart-saf
   skipService.close()
 })
 
+test('AbortAcquire is lease and revision guarded, durable, idempotent, and streamed', async () => {
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-acquire-abort-')),
+    'state.sqlite',
+  )
+  let service = createLocalWebService(
+    databasePath,
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'acquire-recovery' },
+  )
+  let listener = await service.listen()
+  let base = `http://127.0.0.1:${listener.port}`
+  const stream = await fetch(`${base}/api/events`)
+  const reader = stream.body?.getReader()
+  await reader?.read()
+  const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (
+    initial.activeRun._tag !== 'Active' ||
+    initial.observe?.acquire === undefined
+  )
+    throw new Error('Acquire abort fixture is unavailable')
+  const intent = {
+    _tag: 'AbortAcquire' as const,
+    expectedLeaseRevision: initial.control.revision,
+    expectedRunRevision: initial.activeRun.run.revision,
+    expectedAcquireRevision: initial.observe.acquire.revision,
+    idempotencyKey: 'abort-replay',
+  }
+  assert.equal(
+    (
+      await submitPolar(base, {
+        ...intent,
+        expectedLeaseRevision: initial.control.revision + 1,
+        idempotencyKey: 'abort-lease-stale',
+      })
+    ).response.status,
+    409,
+  )
+  assert.equal((await submitPolar(base, intent)).response.status, 200)
+  assert.match(await nextEvent(reader), /"phase":"aborted"/)
+  assert.equal((await submitPolar(base, intent)).response.status, 200)
+  assert.equal(
+    (
+      await submitPolar(base, {
+        ...intent,
+        idempotencyKey: 'abort-revision-stale',
+      })
+    ).response.status,
+    409,
+  )
+  await reader?.cancel()
+  await listener.close()
+  service.close()
+
+  service = createLocalWebService(databasePath)
+  listener = await service.listen()
+  base = `http://127.0.0.1:${listener.port}`
+  assert.equal(
+    (await bootstrapSnapshot(`${base}/api/snapshot`)).observe?.acquire?.phase,
+    'aborted',
+  )
+  await listener.close()
+  service.close()
+})
+
 test('target correction fixture installs a durable large pending proposal without a provider call', async (t) => {
   const service = createLocalWebService(
     undefined,
@@ -651,6 +718,32 @@ test('target correction fixture installs a durable large pending proposal withou
     90,
   )
   assert.equal(snapshot.observe?.acquire?.correctionAttemptsRemaining, 2)
+})
+
+test('target verification fixture exposes provisional acknowledgement and fresh-image verification', async (t) => {
+  const service = createLocalWebService(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'target-verification' },
+  )
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(snapshot.observe?.acquire?.phase, 'verifying')
+  assert.equal(snapshot.observe?.acquire?.latestEvidence?._tag, 'Solved')
+  assert.match(
+    snapshot.observe?.acquire?.attention ?? '',
+    /acknowledgement is provisional.*fresh solved frame/i,
+  )
+  assert.deepEqual(snapshot.observe?.acquire?.actions, [
+    { _tag: 'Available', action: 'CaptureTargetAcquisitionEvidence' },
+  ])
 })
 
 test('pointing correction keeps provider acknowledgement provisional until a fresh solved frame verifies it', async (t) => {
@@ -747,6 +840,110 @@ test('pointing correction keeps provider acknowledgement provisional until a fre
   )(service.database.prepare('SELECT session FROM acquire_sessions').get())
   assert.match(row.session, /CorrectionAccepted/)
   assert.match(row.session, /verificationOfCorrectionAttemptId/)
+})
+
+test('recovery retains prior solved evidence when later verification frames have no solution', async (t) => {
+  let captures = 0
+  const service = createLocalWebService(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      fixture: 'target-deep-sky',
+      targetAcquisitionProvider: {
+        capture: () => {
+          captures += 1
+          return Effect.succeed({
+            _tag: 'Captured' as const,
+            slewAcknowledgement: {
+              acknowledgedAtEpochMs: 1_722_729_600_000,
+              acknowledgementRef: 'fixture-retained-slew',
+            },
+            evidence:
+              captures === 1
+                ? {
+                    sourceFrameAssetId: 'fixture-retained-solved-frame',
+                    capturedAtEpochMs: 1_722_729_600_100,
+                    solverId: 'fixture-plate-solver',
+                    solverVersion: '1.0.0',
+                    result: {
+                      _tag: 'Solved' as const,
+                      desiredCenter: {
+                        rightAscensionDegrees: 299.901,
+                        declinationDegrees: 22.721,
+                      },
+                      solvedCenter: {
+                        rightAscensionDegrees: 299.901,
+                        declinationDegrees: 22.721,
+                      },
+                      correction: {
+                        rightAscensionArcsec: 40,
+                        declinationArcsec: 0,
+                        convention: 'mountRaDec' as const,
+                      },
+                      uncertaintyArcsec: 4,
+                    },
+                  }
+                : {
+                    sourceFrameAssetId: `fixture-retained-unverified-${captures}`,
+                    capturedAtEpochMs: 1_722_729_600_100 + captures,
+                    solverId: 'fixture-plate-solver',
+                    solverVersion: '1.0.0',
+                    result: {
+                      _tag: 'NoSolution' as const,
+                      category: 'stars-insufficient',
+                      retryable: true,
+                      diagnosticRef: `fixture-retained-diagnostic-${captures}`,
+                    },
+                  },
+          })
+        },
+        correct: () =>
+          Effect.succeed({
+            _tag: 'Accepted' as const,
+            acknowledgedAtEpochMs: 1_722_729_600_200,
+            acknowledgementRef: 'fixture-retained-correction',
+          }),
+      },
+    },
+  )
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const capture = async (idempotencyKey: string) => {
+    const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+    if (
+      snapshot.activeRun._tag !== 'Active' ||
+      snapshot.observe?.acquire === undefined
+    )
+      throw new Error('Retained evidence fixture is unavailable')
+    return submitPolar(base, {
+      _tag: 'CaptureTargetAcquisitionEvidence',
+      expectedLeaseRevision: snapshot.control.revision,
+      expectedRunRevision: snapshot.activeRun.run.revision,
+      expectedAcquireRevision: snapshot.observe.acquire.revision,
+      idempotencyKey,
+    })
+  }
+  assert.equal((await capture('retained-solved')).response.status, 200)
+  assert.equal((await capture('retained-unverified-1')).response.status, 200)
+  assert.equal((await capture('retained-unverified-2')).response.status, 200)
+  const paused = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(paused.observe?.acquire?.phase, 'paused')
+  assert.equal(paused.observe?.acquire?.latestEvidence?._tag, 'NoSolution')
+  assert.equal(
+    paused.observe?.acquire?.recovery?.priorVerifiedState,
+    'retained',
+  )
+  assert.match(
+    paused.observe?.acquire?.recovery?.reconciliation ?? '',
+    /Prior solved image evidence is retained/,
+  )
+  assert.equal(captures, 3)
 })
 
 test('pointing correction revision replays idempotently before approval and still requires fresh image verification', async (t) => {
@@ -1001,6 +1198,35 @@ test('read-only preflight persists configured provider facts, survives restart, 
   )
 })
 
+test('polar inspect fixture records deterministic guidance with acceptance available', async (t) => {
+  const service = createLocalWebService(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'polar' },
+  )
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
+  const capture = polarCaptureIntent(initial, 'polar-inspect-guidance')
+  assert.equal((await submitPolar(base, capture)).response.status, 200)
+  const guidance = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(guidance.observe?.acquire?.phase, 'polarGuidance')
+  assert.equal(
+    guidance.observe?.acquire?.latestEvidence?._tag,
+    'PolarMeasurement',
+  )
+  assert.equal(guidance.observe?.acquire?.latestEvidence?.withinTolerance, true)
+  assert.deepEqual(guidance.observe?.acquire?.actions, [
+    { _tag: 'Available', action: 'AcceptPolarAlignmentEvidence' },
+  ])
+})
+
 test('polar Acquire records only solved evidence, requires current in-tolerance acceptance, replays idempotently, survives restart, and publishes SSE', async (t) => {
   const databasePath = join(
     mkdtempSync(join(tmpdir(), 'astro-polar-')),
@@ -1027,7 +1253,12 @@ test('polar Acquire records only solved evidence, requires current in-tolerance 
     undefined,
     undefined,
     undefined,
-    { fixture: 'polar' },
+    {
+      fixture: 'polar',
+      polarMeasurementProvider: {
+        measure: () => Effect.fail('fixture provider unavailable'),
+      },
+    },
   )
   const unavailableListener = await unavailable.listen()
   const unavailableBase = `http://127.0.0.1:${unavailableListener.port}`

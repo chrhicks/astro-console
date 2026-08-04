@@ -104,6 +104,8 @@ import {
   AcquireIntent,
   AssetId,
   AttemptId,
+  RecoverySeriesId,
+  recordCorrectionAcknowledgement,
   recordManagedCapture,
   recordLiveFrameEvidence,
   recordSolveCompletion,
@@ -131,6 +133,7 @@ export function createLocalWebService(
       | 'target-deep-sky'
       | 'target-lunar'
       | 'target-correction'
+      | 'target-verification'
       | 'live-frame'
       | 'managed-capture'
       | 'acquire-recovery'
@@ -205,6 +208,7 @@ export function createLocalWebService(
     options.fixture === 'target-deep-sky' ||
     options.fixture === 'target-lunar' ||
     options.fixture === 'target-correction' ||
+    options.fixture === 'target-verification' ||
     options.fixture === 'live-frame' ||
     options.fixture === 'managed-capture' ||
     options.fixture === 'acquire-recovery'
@@ -249,6 +253,7 @@ export function createLocalWebService(
     const session = targetAcquisitionSession(run.id, acquisitionMethod)
     if (
       options.fixture === 'target-correction' ||
+      options.fixture === 'target-verification' ||
       options.fixture === 'live-frame' ||
       options.fixture === 'managed-capture'
     ) {
@@ -273,7 +278,9 @@ export function createLocalWebService(
               options.fixture === 'live-frame' ||
               options.fixture === 'managed-capture'
                 ? 0
-                : 90,
+                : options.fixture === 'target-verification'
+                  ? 40
+                  : 90,
             declinationArcsec: 0,
             convention: 'mountRaDec',
           },
@@ -285,6 +292,21 @@ export function createLocalWebService(
         proposalExpiresAtEpochMs: 1_722_729_660_000,
       })
       const acquired = 'session' in evidence ? evidence.session : session
+      const verifiedFixture =
+        options.fixture === 'target-verification'
+          ? recordCorrectionAcknowledgement(acquired, {
+              correctionAttemptId: AttemptId.make('fixture-correction-apply'),
+              accepted: true,
+              occurredAtEpochMs: 1_722_729_600_200,
+              acknowledgementRef: 'fixture-correction-acknowledged',
+              verificationSeriesId: RecoverySeriesId.make(
+                'fixture-correction-verification',
+              ),
+              verificationAttemptId: AttemptId.make(
+                'fixture-correction-verification-1',
+              ),
+            })
+          : undefined
       acquireRepository.install(
         options.fixture === 'managed-capture'
           ? recordManagedCapture(
@@ -317,7 +339,9 @@ export function createLocalWebService(
                 quality: 'good',
               },
             )
-          : acquired,
+          : verifiedFixture !== undefined && 'session' in verifiedFixture
+            ? verifiedFixture.session
+            : acquired,
       )
     } else if (options.fixture === 'acquire-recovery') {
       const first = recordSolveCompletion(session, {
@@ -388,6 +412,11 @@ export function createLocalWebService(
     options.fixture === 'live-frame' ||
     options.fixture === 'managed-capture'
       ? deterministicTargetAcquisitionProvider
+      : undefined)
+  const polarMeasurementProvider =
+    options.polarMeasurementProvider ??
+    (options.fixture === 'polar'
+      ? deterministicPolarMeasurementProvider
       : undefined)
 
   const handler = createOriginRouter({
@@ -638,12 +667,12 @@ export function createLocalWebService(
         await Effect.runPromise(
           program.pipe(
             (effect) =>
-              options.polarMeasurementProvider === undefined
+              polarMeasurementProvider === undefined
                 ? effect
                 : effect.pipe(
                     Effect.provideService(
                       PolarMeasurementProvider,
-                      options.polarMeasurementProvider,
+                      polarMeasurementProvider,
                     ),
                   ),
             (effect) =>
@@ -774,6 +803,19 @@ export function createLocalWebService(
     cleanupSavedOrphans,
     advanceFakeRun,
   }
+}
+
+const deterministicPolarMeasurementProvider: PolarMeasurementProviderShape = {
+  measure: (attemptId) =>
+    Effect.succeed({
+      sourceFrameAssetId: AssetId.make(`fixture-polar-${attemptId}`),
+      measuredAtEpochMs: 1_722_729_600_000,
+      desiredPole: { rightAscensionDegrees: 0, declinationDegrees: 90 },
+      measuredMountAxis: { rightAscensionDegrees: 0, declinationDegrees: 90 },
+      altitudeErrorArcsec: 12,
+      azimuthErrorArcsec: 0,
+      uncertaintyArcsec: 4,
+    }),
 }
 
 const deterministicTargetAcquisitionProvider: TargetAcquisitionProviderShape = {

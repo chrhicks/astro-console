@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **Phases 0, 0.5, 1, 2, and the Phase 3 preflight, guided polar-alignment, target-acquisition, pointing-correction, live-frame-evidence, managed-capture, and recovery-and-rollback children complete; Phase 3 exit proof is next**
+Status: **Phases 0, 0.5, 1, 2, and 3 are complete with deterministic local proof; Phase 4 planning is next**
 
 This directory is organized to keep normal working context small. Do not read
 the entire V2 tree by default.
@@ -15,8 +15,8 @@ Read these in order when starting or resuming V2 work:
    deferred boundaries.
 3. [V2 delivery plan](current/delivery-plan.md) — durable end-to-end V2.0
    scope and phase exit criteria.
-4. [Phase 3 implementation planning](current/phase-3-planning.md) — the prepared
-   next product phase after Production Convergence.
+4. [V2 delivery plan](current/delivery-plan.md) — current Phase 4 scope and
+   exit criteria.
 
 That is the complete default context. Load another document only when the task
 requires its specific detail.
@@ -32,8 +32,8 @@ requires its specific detail.
 | Accepted canonical Gate 5 contract language              | [Gate 5 contract vocabulary](current/gate-05-contract-vocabulary.md)                                                                                                                                                                             |
 | Executable Effect Schema candidates and fixtures         | [V2 contracts package](../../packages/v2-contracts/README.md)                                                                                                                                                                                    |
 | End-to-end V2.0 scope, phases, and exit criteria         | [V2 delivery plan](current/delivery-plan.md)                                                                                                                                                                                                     |
-| Phase 2 slice selection and execution method             | [Phase 2 implementation planning](current/phase-2-planning.md)                                                                                                                                                                                   |
-| Phase 3 slice selection and execution method             | [Phase 3 implementation planning](current/phase-3-planning.md)                                                                                                                                                                                   |
+| Completed Phase 2 execution history                      | [Phase 2 implementation plan archive](archive/plans/phase-2-implementation-plan-2026-08-04.md)                                                                                                                                                  |
+| Completed Phase 3 execution history                      | [Phase 3 archive](archive/phase-3/README.md)                                                                                                                                                                                                      |
 | Ideas outside V2.0                                       | [Post-V2.0 notes](current/v2-post-v2.0-notes.md)                                                                                                                                                                                                 |
 | Production UI visual implementation                      | `apps/web` source and CSS, the owner-corrected [visual style guide](current/visual-style-guide.md), [UI component library](current/ui-component-library.md), [UI build contract](current/ui-build-contract.md), and accepted screenshot evidence |
 | Why Phase 0.5 made a specific visual decision            | [Phase 0.5 design-system archive](archive/phase-0.5/README.md) — historical only; do not use for active implementation authority                                                                                                                 |
@@ -71,10 +71,11 @@ Epics, `tkt-ezxr1fsb`, `tkt-n9yoieoz`, `tkt-uuom4upo`, `tkt-qffwfa47`, and
 version-matched web bundle from the rig-local server origin and has migrated
 the Plan, fake managed-run Observe, Library delivery, and current Process
 handoff boundaries while retiring experimental runtime paths.
-Phase 3 (Observe, Acquire, and Capture) follows convergence. Its read-only
-decision-grade preflight child is complete with an opt-in Alpaca GET-only
-adapter and deterministic proof. A real rig has not yet been contacted.
-Later slices remain ordered bounded work.
+Phase 3 (Observe, Acquire, and Capture) is complete with deterministic local
+proof. Its opt-in Alpaca preflight adapter makes only declared GET reads; its
+Acquire and Capture workflows persist server-owned evidence, actions, and
+recovery truth. A real rig has not yet been contacted. Phase 4 Library and
+Frame Review is the next planning decision.
 
 `apps/web` source, CSS, and accepted screenshot evidence are the production
 visual authority. `docs/v2-ui-final` and `prototype/v2-ui` are historical Gate

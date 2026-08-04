@@ -3,7 +3,7 @@
 Status: **complete July 30, 2026 — Plan and Managed Runs, fake-executor proof only**
 
 This document plans execution of Phase 2 in the durable
-[V2 delivery plan](delivery-plan.md). It is not an alternative backlog and it
+[V2 delivery plan](../../current/delivery-plan.md). It is not an alternative backlog and it
 does not replace the delivery plan during cleanup.
 
 ## Objective
@@ -31,7 +31,7 @@ intent; it never owns execution.
 - Do not add physical Solar execution, general processing, storage-health
   operations, or stronger client/session presence merely because they were
   previously deferred. They belong to their named later phase or to
-  [post-V2.0 notes](v2-post-v2.0-notes.md) unless the delivery plan changes.
+  [post-V2.0 notes](../../current/v2-post-v2.0-notes.md) unless the delivery plan changes.
 - Minimal implementation does not weaken evidence: the selected proof boundary
   must match the claim.
 

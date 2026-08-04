@@ -3,7 +3,7 @@
 Status: **one ordered Epic; read-only preflight, guided polar alignment, target acquisition, pointing-correction verification, live frame evidence, managed capture, and recovery and rollback are complete; Phase 3 exit proof is next**
 
 This is the execution plan for Phase 3 in the durable
-[V2 delivery plan](delivery-plan.md). It turns the six Phase 3 outcomes into
+[V2 delivery plan](../../current/delivery-plan.md). It turns the six Phase 3 outcomes into
 one dependent Epic, rather than treating them as unrelated slices.
 
 ## Objective

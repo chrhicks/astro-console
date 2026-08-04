@@ -44,4 +44,4 @@ resolved the malformed Library asset path and opaque local-web shell in
 
 The unrelated desktop commit `4308796` was fast-forwarded onto `main`, leaving
 no desktop or SDK paths unique to `v2`. Phase 1 is closed; use the
-[Phase 2 planning handoff](phase-2-planning.md) for subsequent work.
+[Phase 2 planning handoff](../archive/plans/phase-2-implementation-plan-2026-08-04.md) for historical context.

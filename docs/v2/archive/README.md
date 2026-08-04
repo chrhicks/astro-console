@@ -25,6 +25,10 @@ to override `docs/v2/current/`, accepted gate records, or the UX guidance.
   visual implementation authorities instead.
 - [Phase 1 foundation archive](phase-1-foundation/README.md) — completed
   convergence planning, walkthrough, and solve-geometry evidence.
+- [Phase 3 archive](phase-3/README.md) — completed Observe, Acquire, and
+  Capture execution history; use the current handoff for the active boundary.
+- [Phase 2 implementation plan](plans/phase-2-implementation-plan-2026-08-04.md)
+  — completed fake-run execution plan retained for historical lookup.
 - [Phase 1 delivery record](phase-1-foundation/delivery-plan-2026-07-29.md)
   — completed local-web implementation narrative.
 - [July activation ledger](handoffs/activation-ledger-2026-07-27.md) —
