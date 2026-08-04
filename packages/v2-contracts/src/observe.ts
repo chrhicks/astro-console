@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
 import { NonNegativeInt, RunId, RunRevision } from './primitives.js'
 import { PreflightSnapshot } from './preflight.js'
+import { AcquireSnapshot } from './snapshots.js'
 
 export const ObserveActionEligibility = Schema.TaggedUnion({
   Eligible: {},
@@ -43,6 +44,7 @@ export const ObserveWorkspaceProjection = Schema.Struct({
   ),
   retryUsed: Schema.Boolean,
   preflight: Schema.optionalKey(PreflightSnapshot),
+  acquire: Schema.optionalKey(AcquireSnapshot),
   lifecycleFacts: Schema.NonEmptyArray(Schema.NonEmptyString),
   attemptFacts: Schema.NonEmptyArray(Schema.NonEmptyString),
   actions: Schema.Struct({

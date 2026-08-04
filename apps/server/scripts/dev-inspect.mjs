@@ -18,8 +18,10 @@ const scenario =
   process.argv
     .find((argument) => argument.startsWith('--scenario='))
     ?.slice('--scenario='.length) ?? 'm27'
-if (!['m27', 'plan-draft', 'library-published'].includes(scenario))
-  throw new Error('--scenario must be m27, plan-draft, or library-published')
+if (!['m27', 'polar', 'plan-draft', 'library-published'].includes(scenario))
+  throw new Error(
+    '--scenario must be m27, polar, plan-draft, or library-published',
+  )
 const scenarioSuffix = scenario === 'm27' ? '' : `-${scenario}`
 const profile = resolve(
   appRoot,

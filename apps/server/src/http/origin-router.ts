@@ -54,6 +54,11 @@ export type OriginRouterDependencies = {
     identity: LocalIdentity,
     request: IncomingMessage,
   ) => RouteResult
+  readonly polarCommand: (
+    response: ServerResponse,
+    identity: LocalIdentity,
+    request: IncomingMessage,
+  ) => RouteResult
   readonly webAsset: (response: ServerResponse, pathname: string) => boolean
   readonly webRoute: (response: ServerResponse, pathname: string) => boolean
   readonly apiNotFound: (response: ServerResponse) => RouteResult
@@ -110,6 +115,8 @@ export const createOriginRouter =
       return dependencies.observeCommand(response, identity, request)
     if (request.method === 'POST' && url.pathname === '/api/observe/preflight')
       return dependencies.refreshPreflight(response, identity, request)
+    if (request.method === 'POST' && url.pathname === '/api/acquire/commands')
+      return dependencies.polarCommand(response, identity, request)
     if (
       request.method === 'GET' &&
       dependencies.webAsset(response, url.pathname)

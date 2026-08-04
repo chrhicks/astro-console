@@ -4,6 +4,9 @@ import { Schema } from 'effect'
 import {
   ObserveWorkspaceProjection,
   PlanWorkspaceProjection,
+  AcquireSession,
+  AcquireEvidence,
+  AcquireActiveWork,
 } from '@astro-console/v2-contracts'
 import type { Snapshot } from './domain-state.ts'
 import type { LocalIdentity } from '../auth/identity.ts'
@@ -39,6 +42,7 @@ const LifecycleEventRow = Schema.Struct({
 const LifecycleEventPayload = Schema.Struct({
   run: Schema.Struct({ id: Schema.String }),
 })
+const StoredAcquireSession = Schema.Struct({ session: Schema.String })
 const isOwner = (identity: LocalIdentity) => identity.role === 'owner'
 
 export const observeWorkspaceProjection = (
@@ -99,6 +103,22 @@ export const observeWorkspaceProjection = (
   )
     .filter(({ snapshot }) => lifecycleEventRunId(snapshot) === run.id)
     .map(({ type }) => `Fake/fixture lifecycle fact: ${type}.`)
+  const acquireRow = Schema.decodeUnknownSync(
+    Schema.optional(StoredAcquireSession),
+  )(
+    db
+      .prepare('SELECT session FROM acquire_sessions WHERE run_id=?')
+      .get(run.id),
+  )
+  const acquire =
+    acquireRow === undefined
+      ? undefined
+      : acquireSnapshot(
+          Schema.decodeUnknownSync(AcquireSession)(
+            JSON.parse(acquireRow.session),
+          ),
+          writable && controller,
+        )
   return Schema.decodeUnknownSync(ObserveWorkspaceProjection)({
     runId: run.id,
     revision: run.revision,
@@ -114,6 +134,7 @@ export const observeWorkspaceProjection = (
       : { resumablePhase: run.resumablePhase }),
     retryUsed: run.retryPhase !== undefined,
     ...(run.preflight === undefined ? {} : { preflight: run.preflight }),
+    ...(acquire === undefined ? {} : { acquire }),
     lifecycleFacts:
       events.length === 0 ? ['Fake/fixture lifecycle started.'] : events,
     attemptFacts: [
@@ -152,6 +173,70 @@ export const observeWorkspaceProjection = (
       park: eligible(active || pausedRecovery, baseReason),
     },
   })
+}
+
+function acquireSnapshot(
+  session: typeof AcquireSession.Type,
+  writable: boolean,
+) {
+  const latest = session.evidence.at(-1)
+  const polar =
+    latest === undefined
+      ? undefined
+      : AcquireEvidence.match(latest, {
+          SolveAttempt: () => undefined,
+          CorrectionAccepted: () => undefined,
+          CorrectionRejected: () => undefined,
+          PolarMeasurement: (measurement) => ({
+            _tag: 'PolarMeasurement' as const,
+            attemptId: measurement.attemptId,
+            sourceFrameAssetId: measurement.sourceFrameAssetId,
+            altitudeErrorArcsec: measurement.altitudeErrorArcsec,
+            azimuthErrorArcsec: measurement.azimuthErrorArcsec,
+            totalErrorArcsec: measurement.totalErrorArcsec,
+            uncertaintyArcsec: measurement.uncertaintyArcsec,
+            withinTolerance: measurement.withinTolerance,
+          }),
+        })
+  return {
+    revision: session.revision,
+    mode: session.mode,
+    phase: session.phase,
+    recoverySeries: 0,
+    attemptCount: session.evidence.length,
+    ...(session.activeWork === null
+      ? {}
+      : AcquireActiveWork.match(session.activeWork, {
+          CorrectionRequested: () => ({}),
+          SolveRequested: ({ attemptId }) => ({ activeAttemptId: attemptId }),
+          PolarMeasurementRequested: ({ attemptId }) => ({
+            activeAttemptId: attemptId,
+          }),
+        })),
+    ...(polar === undefined ? {} : { latestEvidence: polar }),
+    ...(session.phase === 'polarGuidance'
+      ? {
+          attention:
+            polar === undefined
+              ? 'Capture a solved polar measurement.'
+              : polar.withinTolerance
+                ? 'Accept the current in-tolerance measurement.'
+                : 'Adjust Alt/Az manually, then capture a new measurement.',
+        }
+      : {}),
+    actions:
+      writable && session.mode === 'polar' && session.phase === 'polarGuidance'
+        ? [
+            {
+              _tag: 'Available' as const,
+              action:
+                polar === undefined
+                  ? ('CapturePolarAlignmentMeasurement' as const)
+                  : ('AcceptPolarAlignmentEvidence' as const),
+            },
+          ]
+        : [],
+  }
 }
 
 export const bootstrapPlanWorkspaceProjection = (

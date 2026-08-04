@@ -117,6 +117,7 @@ export type ObserveView = {
   recovery?: string
   action?: Action
   source?: ObserveWorkspaceProjection
+  leaseRevision?: number
 }
 export type LibraryAsset = {
   id: AssetId

@@ -1,4 +1,5 @@
-import { Effect, Exit, Schema, Scope } from 'effect'
+import { Effect, Exit, Match, Schema, Scope } from 'effect'
+import type { ServerResponse } from 'node:http'
 import {
   BootstrapHttpSuccessEnvelope,
   CommandHttpFailureEnvelope,
@@ -19,7 +20,7 @@ import { runExecutable } from './executable.ts'
 import { OriginListener, originListenerLayer } from '../http/origin-listener.ts'
 import { WebHost, webHostLayer } from '../http/web-host.ts'
 import { openOriginDatabase } from '../persistence/database.ts'
-import type { RequestAdmission } from '../auth/identity.ts'
+import type { LocalIdentity, RequestAdmission } from '../auth/identity.ts'
 import {
   createJwksKeyResolver,
   createLocalFixtureAdmission,
@@ -79,6 +80,21 @@ import {
   type ReadOnlyPreflightProviderShape,
 } from '../services/preflight-service.ts'
 import { alpacaPreflightProvider } from '../providers/alpaca-preflight-provider.ts'
+import {
+  acquireSqliteRepository,
+  polarSession,
+} from '../persistence/acquire-sqlite-repository.ts'
+import {
+  AcquirePersistence,
+  executePolarCommand,
+  PolarMeasurementProvider,
+  type PolarCommandResult,
+  type PolarMeasurementProviderShape,
+} from '../services/polar-service.ts'
+import {
+  AcquireCommandRequest,
+  AcquireCommandResponse,
+} from '@astro-console/v2-contracts'
 export type DownloadGrantConfig = {
   readonly issuer: DownloadGrantIssuer
   readonly now?: () => Date
@@ -93,9 +109,11 @@ export function createLocalWebService(
   processSaveStorage?: ProcessSaveStorage,
   downloadGrants?: DownloadGrantConfig,
   options: {
-    readonly fixture?: 'm27' | 'preflight' | 'plan-draft' | 'library-published'
+    readonly fixture?:
+      'm27' | 'preflight' | 'plan-draft' | 'library-published' | 'polar'
     readonly webDistPath?: string
     readonly preflightProvider?: ReadOnlyPreflightProviderShape
+    readonly polarMeasurementProvider?: PolarMeasurementProviderShape
   } = {},
 ) {
   const database = openOriginDatabase(databasePath)
@@ -111,6 +129,7 @@ export function createLocalWebService(
     if (options.fixture === 'library-published')
       installPublishedLibraryFixture(database)
   } else initializeRuntimeState(database)
+  const acquireRepository = acquireSqliteRepository(database)
   const stateRepository: StateSqliteRepositoryShape = Effect.runSync(
     StateSqliteRepository.pipe(
       Effect.provide(
@@ -128,6 +147,36 @@ export function createLocalWebService(
       ),
     ),
   )
+  if (options.fixture === 'polar') {
+    const run = {
+      id: 'run-polar-fixture',
+      revision: 1,
+      phase: 'acquire' as const,
+      target: 'Polar alignment',
+      progress: 0,
+      sourceDefinitionId: 'run-definition-m27-fixture',
+      activeSequenceIndex: 0,
+      completedSequenceCount: 0,
+      resumablePhase: 'acquire' as const,
+      preflight: {
+        observedAt: '2026-08-04T00:00:00.000Z',
+        verdict: 'unavailable' as const,
+        nextAction:
+          'Polar fixture starts from deterministic solved-frame evidence only.',
+        checks: [
+          {
+            key: 'fixture-preflight',
+            state: 'unavailable' as const,
+            observedAt: '2026-08-04T00:00:00.000Z',
+            reason:
+              'No real preflight provider read is part of the polar fixture.',
+          },
+        ],
+      },
+    }
+    stateRepository.commit({ run })
+    acquireRepository.install(polarSession(run.id))
+  }
   const webHost = Effect.runSync(
     WebHost.pipe(
       Effect.provide(webHostLayer(options.webDistPath ?? '../web/dist')),
@@ -323,6 +372,90 @@ export function createLocalWebService(
         Unavailable: (body) => json(response, 503, body),
       })
     },
+    polarCommand: async (response, identity, request) => {
+      if (identity.capability !== 'controlCapable')
+        return json(
+          response,
+          403,
+          AcquireCommandResponse.cases.Unavailable.make({
+            summary:
+              'This client is read-only and cannot record polar evidence.',
+          }),
+        )
+      const raw = await body(request)
+      let decoded: typeof AcquireCommandRequest.Type | undefined
+      try {
+        decoded = Schema.decodeUnknownSync(AcquireCommandRequest)(raw)
+      } catch {}
+      if (decoded !== undefined) {
+        const prior = acquireRepository.receipt(
+          decoded.intent.idempotencyKey,
+          identity.clientId,
+        )
+        if (prior !== undefined) return json(response, prior.status, prior.body)
+        const current = stateRepository.state()
+        if (
+          current.run === null ||
+          decoded.intent.expectedLeaseRevision !== current.control.revision ||
+          decoded.intent.expectedRunRevision !== current.run.revision
+        )
+          return json(
+            response,
+            409,
+            AcquireCommandResponse.cases.Rejected.make({
+              summary:
+                'The control lease or active run changed. Read the current Observe projection.',
+              snapshot: Effect.runSync(
+                stateRepository.bootstrapSnapshot(identity),
+              ),
+            }),
+          )
+      }
+      const program = Effect.succeed(raw).pipe(
+        Effect.flatMap(executePolarCommand),
+        Effect.provideService(
+          AcquirePersistence,
+          AcquirePersistence.of({
+            current: () => {
+              const run = stateRepository.state().run
+              return run === null
+                ? undefined
+                : acquireRepository.current(run.id)
+            },
+            commit: (session, type) => acquireRepository.commit(session, type),
+          }),
+        ),
+      )
+      const result: PolarCommandResult = await Effect.runPromise(
+        options.polarMeasurementProvider === undefined
+          ? program
+          : program.pipe(
+              Effect.provideService(
+                PolarMeasurementProvider,
+                options.polarMeasurementProvider,
+              ),
+            ),
+      )
+      if ('cursor' in result) {
+        publish('PolarEvidenceUpdated', result.cursor)
+        const resultBody = AcquireCommandResponse.cases.Accepted.make({
+          snapshot: Effect.runSync(stateRepository.bootstrapSnapshot(identity)),
+        })
+        if (decoded !== undefined)
+          acquireRepository.saveReceipt(
+            decoded.intent.idempotencyKey,
+            identity.clientId,
+            { status: 200, body: resultBody },
+          )
+        return json(response, 200, resultBody)
+      }
+      return matchPolarCommandResult(
+        result,
+        response,
+        stateRepository,
+        identity,
+      )
+    },
     webAsset: (response, pathname) =>
       Effect.runSync(webHost.asset(response, pathname, responseHeaders)),
     webRoute: (response, pathname) =>
@@ -420,6 +553,31 @@ export function createLocalWebService(
     cleanupSavedOrphans,
     advanceFakeRun,
   }
+}
+
+function matchPolarCommandResult(
+  result: Exclude<PolarCommandResult, { readonly _tag: 'Committed' }>,
+  response: ServerResponse,
+  stateRepository: StateSqliteRepositoryShape,
+  identity: LocalIdentity,
+) {
+  return Match.value(result).pipe(
+    Match.tag('Rejected', ({ summary }) => {
+      const resultBody = AcquireCommandResponse.cases.Rejected.make({
+        summary,
+        snapshot: Effect.runSync(stateRepository.bootstrapSnapshot(identity)),
+      })
+      return json(response, 409, resultBody)
+    }),
+    Match.tag('Unavailable', ({ summary }) =>
+      json(
+        response,
+        503,
+        AcquireCommandResponse.cases.Unavailable.make({ summary }),
+      ),
+    ),
+    Match.exhaustive,
+  )
 }
 
 export function createOriginAdmission(

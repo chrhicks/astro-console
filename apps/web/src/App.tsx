@@ -53,6 +53,8 @@ export function App() {
   const [projection, setProjection] = useState<Projection>(
     unavailableProjection,
   )
+  const projectionRef = useRef(projection)
+  projectionRef.current = projection
   const [route, setRoute] = useState<Route>(currentRoute)
   const [submitPlan, setSubmitPlan] = useState<
     | ((
@@ -70,6 +72,10 @@ export function App() {
   >()
   const [refreshPreflight, setRefreshPreflight] = useState<
     (() => Promise<PreflightRefreshSubmission>) | undefined
+  >()
+  const [polarCommand, setPolarCommand] = useState<
+    | ((action: 'capture' | 'accept', attemptId?: string) => Promise<void>)
+    | undefined
   >()
   const workspace = routeWorkspace(route)
   const initialRoute = useRef(true)
@@ -238,6 +244,39 @@ export function App() {
           }),
         ),
     )
+    setPolarCommand(
+      () => async (action: 'capture' | 'accept', attemptId?: string) => {
+        const observe = projectionRef.current.observe
+        if (
+          observe.source?.acquire === undefined ||
+          observe.leaseRevision === undefined
+        )
+          throw new Error('Polar state unavailable')
+        const intent =
+          action === 'capture'
+            ? {
+                _tag: 'CapturePolarAlignmentMeasurement',
+                expectedLeaseRevision: observe.leaseRevision,
+                expectedRunRevision: observe.source.revision,
+                expectedAcquireRevision: observe.source.acquire.revision,
+                idempotencyKey: crypto.randomUUID(),
+              }
+            : {
+                _tag: 'AcceptPolarAlignmentEvidence',
+                expectedLeaseRevision: observe.leaseRevision,
+                expectedRunRevision: observe.source.revision,
+                expectedAcquireRevision: observe.source.acquire.revision,
+                attemptId,
+                idempotencyKey: crypto.randomUUID(),
+              }
+        const response = await fetch('/api/acquire/commands', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ intent }),
+        })
+        if (!response.ok) throw new Error('Polar command rejected')
+      },
+    )
     const fiber = runtime.runFork(
       Effect.gen(function* () {
         const client = yield* BootstrapClient
@@ -252,6 +291,7 @@ export function App() {
       setSubmitPlan(undefined)
       setSubmitObserve(undefined)
       setRefreshPreflight(undefined)
+      setPolarCommand(undefined)
       void runtime
         .runPromise(Fiber.interrupt(fiber))
         .then(() => runtime.dispose())
@@ -314,6 +354,9 @@ export function App() {
         projection.observe.source?.phase !== 'preflight'
           ? {}
           : { refreshPreflight })}
+        {...(polarCommand === undefined || projection.shell.readOnly
+          ? {}
+          : { polarCommand })}
       />
     ) : workspace === 'library' ? (
       <LibraryView

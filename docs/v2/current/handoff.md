@@ -2,6 +2,14 @@
 
 Status: **Phases 1, 2, and 2.5 closed — the unrelated Solar test slice is retired; the Phase 3 read-only preflight child is complete with deterministic Alpaca adapter proof**
 
+The Phase 3 guided polar-alignment child is also complete with a separate
+SQLite Acquire aggregate, typed command route, projection/SSE/restart proof,
+and Observe guidance. A deterministic provider supplies solved-frame geometry;
+the operator receives manual Alt/Az guidance and explicitly accepts only the
+latest in-tolerance evidence. It issues no motor command and makes no
+real-hardware claim. Contracts pass 184/184, server 60/60, web 60/60, and the
+Designer re-review passes at wide, compact, and 390 px.
+
 ## Completed Phase 2.5: Server Boundary Extraction
 
 Phase 2.5 is authorized before Phase 3. It is an internal cleanup only: no

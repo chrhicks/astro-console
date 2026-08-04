@@ -15,6 +15,7 @@ import { generateKeyPairSync, sign } from 'node:crypto'
 import { ConfigProvider, Effect, Schema } from 'effect'
 import {
   AcquireSnapshot,
+  AcquireCommandResponse,
   BootstrapHttpSuccessEnvelope,
   BootstrapSseEventEnvelope,
   CommandHttpFailureEnvelope,
@@ -330,6 +331,152 @@ test('read-only preflight persists configured provider facts, survives restart, 
     Schema.decodeUnknownSync(RefreshPreflightResponse)(await unavailable.json())
       ._tag,
     'Unavailable',
+  )
+})
+
+test('polar Acquire records only solved evidence, requires current in-tolerance acceptance, replays idempotently, survives restart, and publishes SSE', async (t) => {
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-polar-')),
+    'state.sqlite',
+  )
+  let measurements = 0
+  const provider = {
+    measure: () => {
+      measurements += 1
+      const error = measurements === 1 ? 90 : 12
+      return Effect.succeed({
+        sourceFrameAssetId: `polar-frame-${measurements}`,
+        measuredAtEpochMs: 1_754_187_200_000 + measurements,
+        desiredPole: { rightAscensionDegrees: 0, declinationDegrees: 90 },
+        measuredMountAxis: { rightAscensionDegrees: 0, declinationDegrees: 90 },
+        altitudeErrorArcsec: error,
+        azimuthErrorArcsec: 0,
+        uncertaintyArcsec: 4,
+      })
+    },
+  }
+  const unavailable = createLocalWebService(
+    ':memory:',
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'polar' },
+  )
+  const unavailableListener = await unavailable.listen()
+  const unavailableBase = `http://127.0.0.1:${unavailableListener.port}`
+  const unavailableSnapshot = await bootstrapSnapshot(
+    `${unavailableBase}/api/snapshot`,
+  )
+  const unavailableResponse = await fetch(
+    `${unavailableBase}/api/acquire/commands`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        intent: polarCaptureIntent(unavailableSnapshot, 'polar-unavailable'),
+      }),
+    },
+  )
+  assert.equal(unavailableResponse.status, 503)
+  assert.equal(
+    Schema.decodeUnknownSync(AcquireCommandResponse)(
+      await unavailableResponse.json(),
+    )._tag,
+    'Unavailable',
+  )
+  await unavailableListener.close()
+  unavailable.close()
+
+  let service = createLocalWebService(
+    databasePath,
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'polar', polarMeasurementProvider: provider },
+  )
+  let listener = await service.listen()
+  let base = `http://127.0.0.1:${listener.port}`
+  const stream = await fetch(`${base}/api/events`)
+  const reader = stream.body?.getReader()
+  await reader?.read()
+  const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
+  const firstIntent = polarCaptureIntent(initial, 'polar-measurement-1')
+  const first = await submitPolar(base, firstIntent)
+  assert.equal(first.response.status, 200)
+  assert.equal(first.body._tag, 'Accepted')
+  assert.match(await nextEvent(reader), /"_tag":"PolarMeasurement"/)
+  assert.equal(measurements, 1)
+  const afterOutOfTolerance = await bootstrapSnapshot(`${base}/api/snapshot`)
+  const firstEvidence = polarEvidence(afterOutOfTolerance)
+  assert.equal(firstEvidence.withinTolerance, false)
+  const rejected = await submitPolar(
+    base,
+    polarAcceptIntent(
+      afterOutOfTolerance,
+      firstEvidence.attemptId,
+      'polar-accept-outside',
+    ),
+  )
+  assert.equal(rejected.response.status, 409)
+  assert.equal(rejected.body._tag, 'Rejected')
+  const replay = await submitPolar(base, firstIntent)
+  assert.equal(replay.response.status, 200)
+  assert.equal(replay.body._tag, 'Accepted')
+  assert.equal(measurements, 1)
+  assert.equal(
+    (await bootstrapSnapshot(`${base}/api/snapshot`)).eventCursor,
+    afterOutOfTolerance.eventCursor,
+  )
+
+  const secondSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+  const second = await submitPolar(
+    base,
+    polarCaptureIntent(secondSnapshot, 'polar-measurement-2'),
+  )
+  assert.equal(second.response.status, 200)
+  const withinTolerance = await bootstrapSnapshot(`${base}/api/snapshot`)
+  const secondEvidence = polarEvidence(withinTolerance)
+  assert.equal(secondEvidence.withinTolerance, true)
+  const accepted = await submitPolar(
+    base,
+    polarAcceptIntent(
+      withinTolerance,
+      secondEvidence.attemptId,
+      'polar-accept-2',
+    ),
+  )
+  assert.equal(accepted.response.status, 200)
+  assert.equal(accepted.body._tag, 'Accepted')
+  assert.equal(
+    (await bootstrapSnapshot(`${base}/api/snapshot`)).observe?.acquire?.phase,
+    'completed',
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+    ).count,
+    0,
+  )
+  await reader?.cancel()
+  await listener.close()
+  service.close()
+
+  service = createLocalWebService(databasePath)
+  listener = await service.listen()
+  base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const recovered = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(recovered.observe?.acquire?.phase, 'completed')
+  assert.equal(
+    recovered.observe?.acquire?.latestEvidence?._tag,
+    'PolarMeasurement',
+  )
+  assert.equal(
+    recovered.observe?.acquire?.latestEvidence?.withinTolerance,
+    true,
   )
 })
 
@@ -2567,6 +2714,58 @@ async function submitObserve(
       await response.json(),
     ),
   }
+}
+
+async function submitPolar(base: string, intent: unknown) {
+  const response = await fetch(`${base}/api/acquire/commands`, {
+    method: 'POST',
+    body: JSON.stringify({ intent }),
+  })
+  return {
+    response,
+    body: Schema.decodeUnknownSync(AcquireCommandResponse)(
+      await response.json(),
+    ),
+  }
+}
+
+function polarCaptureIntent(
+  snapshot: Awaited<ReturnType<typeof bootstrapSnapshot>>,
+  idempotencyKey: string,
+) {
+  if (
+    snapshot.activeRun._tag !== 'Active' ||
+    snapshot.observe?.acquire === undefined
+  )
+    throw new Error('Polar fixture is unavailable')
+  return {
+    _tag: 'CapturePolarAlignmentMeasurement' as const,
+    expectedLeaseRevision: snapshot.control.revision,
+    expectedRunRevision: snapshot.activeRun.run.revision,
+    expectedAcquireRevision: snapshot.observe.acquire.revision,
+    idempotencyKey,
+  }
+}
+
+function polarAcceptIntent(
+  snapshot: Awaited<ReturnType<typeof bootstrapSnapshot>>,
+  attemptId: string,
+  idempotencyKey: string,
+) {
+  return {
+    ...polarCaptureIntent(snapshot, idempotencyKey),
+    _tag: 'AcceptPolarAlignmentEvidence' as const,
+    attemptId,
+  }
+}
+
+function polarEvidence(
+  snapshot: Awaited<ReturnType<typeof bootstrapSnapshot>>,
+) {
+  const evidence = snapshot.observe?.acquire?.latestEvidence
+  if (evidence === undefined || evidence._tag !== 'PolarMeasurement')
+    throw new Error('Polar measurement evidence is unavailable')
+  return evidence
 }
 
 async function startFixtureRun(base: string, idempotencyKey: string) {

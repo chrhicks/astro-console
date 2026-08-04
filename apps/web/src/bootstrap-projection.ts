@@ -219,6 +219,7 @@ function observe(
   const source = snapshot.observe
   if (fresh && source !== undefined) {
     const terminal = source.terminalOutcome
+    const polar = source.acquire?.mode === 'polar'
     const eligible = Object.values(source.actions).some(
       (action) => action._tag === 'Eligible',
     )
@@ -230,8 +231,11 @@ function observe(
       detailAvailable: true,
       target: source.target,
       phase: phaseLabel(source.phase),
-      status:
-        terminal === undefined
+      status: polar
+        ? terminal === undefined
+          ? 'Polar alignment guidance is current.'
+          : 'Polar alignment session is complete.'
+        : terminal === undefined
           ? `Fake/fixture ${phaseLabel(source.phase).toLowerCase()} lifecycle is current.`
           : `Fake/fixture run ${terminal}; no physical capture is claimed.`,
       tone:
@@ -240,10 +244,19 @@ function observe(
           : terminal === undefined
             ? 'attention'
             : 'neutral',
-      evidence: `Sequence ${source.currentSequence + 1} of ${source.totalSequences}; ${source.completedSequences} completed.`,
-      annotation: 'All attempt evidence is fake/fixture only.',
-      heading:
-        terminal === undefined
+      evidence: polar
+        ? `${source.acquire.attemptCount} polar measurement${source.acquire.attemptCount === 1 ? '' : 's'} recorded.`
+        : `Sequence ${source.currentSequence + 1} of ${source.totalSequences}; ${source.completedSequences} completed.`,
+      annotation: polar
+        ? 'Fixture provenance: measurement evidence is deterministic; no physical alignment is claimed.'
+        : 'All attempt evidence is fake/fixture only.',
+      heading: polar
+        ? terminal === undefined
+          ? source.acquire.phase === 'completed'
+            ? 'Polar alignment accepted'
+            : 'Complete polar alignment'
+          : 'Polar alignment session complete'
+        : terminal === undefined
           ? eligible
             ? 'Manage the current fake/fixture run'
             : 'Monitor the current fake/fixture run'
@@ -251,6 +264,7 @@ function observe(
       trace: source.lifecycleFacts,
       facts: source.attemptFacts,
       lifecycle,
+      leaseRevision: snapshot.control.revision,
       ...(terminal !== undefined
         ? { recovery: 'Return to Plan to review the next accepted run.' }
         : controlRequired

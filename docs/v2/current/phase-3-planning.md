@@ -1,6 +1,6 @@
 # Phase 3 Implementation Planning
 
-Status: **one ordered Epic; read-only preflight is complete, guided polar alignment is next**
+Status: **one ordered Epic; read-only preflight and guided polar alignment are complete, target acquisition is next**
 
 This is the execution plan for Phase 3 in the durable
 [V2 delivery plan](delivery-plan.md). It turns the six Phase 3 outcomes into
@@ -24,7 +24,7 @@ order and proof gates.
 | Order | Child task | Delivery responsibility | Depends on |
 | --- | --- | --- | --- |
 | 1 | `tkt-2e396ziz` — Complete real read-only preflight adapter | **Complete.** An opt-in Alpaca adapter reads four mount facts using GET only. It has deterministic boundary proof; no real rig call is claimed. | — |
-| 2 | `tkt-ue2yl172` — Guide polar alignment from solved frames | Capture/solve a polar measurement, show manual Alt/Az overlay guidance, and require explicit acceptance of current in-tolerance evidence. | 1 |
+| 2 | `tkt-ue2yl172` — Guide polar alignment from solved frames | **Complete.** Deterministic solved-frame evidence produces manual Alt/Az guidance; only explicit acceptance of current in-tolerance evidence completes it. No motor command is issued. | 1 |
 | 3 | `tkt-gj8btl1l` — Acquire targets with deep-sky and lunar paths | Use plate solve for deep-sky slew/center and a separate disk/limb path for lunar acquisition. | 1, 2 |
 | 4 | `tkt-gwl6lc30` — Verify pointing corrections from successive images | Persist the correction proposal and bound; verify the physical result from a new solved image. | 3 |
 | 5 | `tkt-dqmkymd7` — Project live frame evidence and quality | Project frame identity, quality, drift, target-in-frame, and storage facts during Capture. Full Library review stays in Phase 4. | 4 |

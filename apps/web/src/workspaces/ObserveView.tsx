@@ -17,6 +17,7 @@ export function ObserveView({
   view,
   submit,
   refreshPreflight,
+  polarCommand,
 }: {
   view: View
   submit?: (
@@ -24,6 +25,10 @@ export function ObserveView({
     key: typeof IdempotencyKey.Type,
   ) => Promise<ObserveCommandSubmission>
   refreshPreflight?: () => Promise<PreflightRefreshSubmission>
+  polarCommand?: (
+    action: 'capture' | 'accept',
+    attemptId?: string,
+  ) => Promise<void>
 }) {
   const [result, setResult] = useState<{
     readonly runId: string
@@ -34,6 +39,7 @@ export function ObserveView({
   const operation = useRef<ObserveOperation | undefined>(undefined)
   const operationId = useRef(0)
   const current = view.source
+  const polarAlignment = current?.acquire?.mode === 'polar'
   const currentRef = useRef(current)
   currentRef.current = current
   useEffect(() => {
@@ -153,15 +159,37 @@ export function ObserveView({
       },
     )
   }
+  const polar = () => {
+    if (polarCommand === undefined || current?.acquire === undefined) return
+    const evidence = current.acquire.latestEvidence
+    const action = evidence?._tag === 'PolarMeasurement' ? 'accept' : 'capture'
+    setPending(true)
+    void polarCommand(
+      action,
+      evidence?._tag === 'PolarMeasurement' ? evidence.attemptId : undefined,
+    ).then(
+      () => setPending(false),
+      () => {
+        setPending(false)
+        setResult({
+          runId: current.runId,
+          revision: current.revision,
+          message: 'The polar command could not be completed.',
+        })
+      },
+    )
+  }
   return (
     <div className="workspace observe-workspace">
       <header className="workspace-heading">
         <div>
           <span>
             {view.detailAvailable
-              ? view.source?.executor === 'fixture'
-                ? 'Current fixture lifecycle evidence'
-                : 'Current fake lifecycle evidence'
+              ? polarAlignment
+                ? 'Current polar alignment evidence'
+                : view.source?.executor === 'fixture'
+                  ? 'Current fixture lifecycle evidence'
+                  : 'Current fake lifecycle evidence'
               : 'Detailed evidence unavailable'}
           </span>
           <h1 tabIndex={-1}>{view.target}</h1>
@@ -180,20 +208,13 @@ export function ObserveView({
       </section>
       <aside className="observe-decision">
         <span>Decision now</span>
-        <h2>{view.heading}</h2>
-        <p>{view.trace.join(' ')}</p>
-        <dl>
-          {view.facts.map((fact, index) => (
-            <div key={fact}>
-              <dt>{index === 0 ? 'Evidence' : 'Assessment'}</dt>
-              <dd>{fact}</dd>
-            </div>
-          ))}
-        </dl>
-        {view.recovery && (
-          <p className="recovery">
-            <b>Recovery:</b> {view.recovery}
-          </p>
+        {polarAlignment && (
+          <PolarAlignment
+            current={current}
+            polarCommand={polarCommand}
+            pending={pending}
+            polar={polar}
+          />
         )}
         {current?.phase === 'preflight' && (
           <section className="preflight-checklist" aria-label="Preflight">
@@ -220,6 +241,24 @@ export function ObserveView({
               </button>
             )}
           </section>
+        )}
+        {polarAlignment && (
+          <span className="observe-secondary">Run lifecycle</span>
+        )}
+        <h2>{view.heading}</h2>
+        <p>{view.trace.join(' ')}</p>
+        <dl>
+          {view.facts.map((fact, index) => (
+            <div key={fact}>
+              <dt>{index === 0 ? 'Evidence' : 'Assessment'}</dt>
+              <dd>{fact}</dd>
+            </div>
+          ))}
+        </dl>
+        {view.recovery && (
+          <p className="recovery">
+            <b>Recovery:</b> {view.recovery}
+          </p>
         )}
         {view.source && (
           <div className="observe-actions">
@@ -249,6 +288,56 @@ export function ObserveView({
         <p>Lifecycle is current service truth, not navigation.</p>
       </footer>
     </div>
+  )
+}
+
+function PolarAlignment({
+  current,
+  polarCommand,
+  pending,
+  polar,
+}: {
+  current: NonNullable<View['source']>
+  polarCommand: Parameters<typeof ObserveView>[0]['polarCommand']
+  pending: boolean
+  polar: () => void
+}) {
+  const acquire = current.acquire
+  if (acquire?.mode !== 'polar') return null
+  const measurement = acquire.latestEvidence
+  return (
+    <section className="preflight-checklist" aria-label="Polar alignment">
+      <span>Polar alignment</span>
+      <h2>
+        {acquire.phase === 'completed'
+          ? 'Polar evidence accepted'
+          : 'Manual Alt/Az guidance'}
+      </h2>
+      {measurement?._tag === 'PolarMeasurement' ? (
+        <p>
+          Altitude {measurement.altitudeErrorArcsec.toFixed(1)} arcsec; azimuth{' '}
+          {measurement.azimuthErrorArcsec.toFixed(1)} arcsec; total{' '}
+          {measurement.totalErrorArcsec.toFixed(1)} arcsec.{' '}
+          {measurement.withinTolerance
+            ? 'Within tolerance.'
+            : 'Adjust manually, then capture another solved frame.'}
+        </p>
+      ) : (
+        <p>
+          Capture a solved frame to measure the mount axis. The service does not
+          move Alt/Az motors.
+        </p>
+      )}
+      {polarCommand !== undefined &&
+        acquire.actions.length > 0 &&
+        acquire.phase !== 'completed' && (
+          <button onClick={polar} disabled={pending}>
+            {measurement?._tag === 'PolarMeasurement'
+              ? 'Accept polar evidence'
+              : 'Capture polar measurement'}
+          </button>
+        )}
+    </section>
   )
 }
 

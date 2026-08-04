@@ -1,0 +1,31 @@
+import { Schema } from 'effect'
+import { BootstrapSnapshot } from './bootstrap.js'
+import {
+  AcquireRevision,
+  AttemptId,
+  IdempotencyKey,
+  LeaseRevision,
+  RunRevision,
+} from './primitives.js'
+
+export const AcquireIntent = Schema.TaggedUnion({
+  CapturePolarAlignmentMeasurement: {
+    expectedLeaseRevision: LeaseRevision,
+    expectedRunRevision: RunRevision,
+    expectedAcquireRevision: AcquireRevision,
+    idempotencyKey: IdempotencyKey,
+  },
+  AcceptPolarAlignmentEvidence: {
+    expectedLeaseRevision: LeaseRevision,
+    expectedRunRevision: RunRevision,
+    expectedAcquireRevision: AcquireRevision,
+    attemptId: AttemptId,
+    idempotencyKey: IdempotencyKey,
+  },
+})
+export const AcquireCommandRequest = Schema.Struct({ intent: AcquireIntent })
+export const AcquireCommandResponse = Schema.TaggedUnion({
+  Accepted: { snapshot: BootstrapSnapshot },
+  Rejected: { summary: Schema.NonEmptyString, snapshot: BootstrapSnapshot },
+  Unavailable: { summary: Schema.NonEmptyString },
+})

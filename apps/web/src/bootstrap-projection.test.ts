@@ -186,6 +186,61 @@ test('Observe renders fake lifecycle evidence and omits terminal controls', () =
   assert.doesNotMatch(markup, /<button/)
 })
 
+test('Observe promotes Polar alignment guidance and its action before fixture lifecycle detail', () => {
+  const projection = projectBootstrapState(
+    BootstrapClientState.Current({
+      snapshot: observeSnapshot(ineligibleObserveActions('activeRunRequired'), {
+        observe: {
+          runId: 'run-polar-001',
+          revision: 2,
+          executor: 'fixture',
+          phase: 'acquire',
+          target: 'Polar alignment',
+          currentSequence: 0,
+          completedSequences: 0,
+          totalSequences: 1,
+          retryUsed: false,
+          lifecycleFacts: ['Fixture lifecycle fact: Acquire started.'],
+          attemptFacts: ['Fixture provenance: deterministic measurement.'],
+          acquire: {
+            revision: 1,
+            mode: 'polar',
+            phase: 'polarGuidance',
+            recoverySeries: 0,
+            attemptCount: 0,
+            actions: [
+              {
+                _tag: 'Available',
+                action: 'CapturePolarAlignmentMeasurement',
+              },
+            ],
+          },
+          actions: ineligibleObserveActions('activeRunRequired'),
+        },
+      }),
+    }),
+  )
+  const markup = renderToStaticMarkup(
+    createElement(ObserveView, {
+      view: projection.observe,
+      polarCommand: async () => undefined,
+    }),
+  )
+  assert.match(markup, /Current polar alignment evidence/)
+  assert.match(markup, /Polar alignment guidance is current/)
+  assert.match(
+    markup,
+    /Fixture provenance: measurement evidence is deterministic/,
+  )
+  assert.match(markup, /Manual Alt\/Az guidance/)
+  assert.match(markup, /Capture polar measurement/)
+  assert.match(markup, /Run lifecycle/)
+  assert.ok(
+    markup.indexOf('Manual Alt/Az guidance') < markup.indexOf('Run lifecycle'),
+  )
+  assert.doesNotMatch(markup, /Current fixture lifecycle evidence/)
+})
+
 test('projects membership and server capability independently', () => {
   const viewer = projectBootstrapState(
     BootstrapClientState.Current({ snapshot: snapshot('viewer') }),
@@ -318,7 +373,6 @@ function observeSnapshot(
 ) {
   return Schema.decodeUnknownSync(BootstrapSnapshot)({
     ...bootstrapFixtures.activeRun,
-    ...overrides,
     observe: {
       runId: 'run-active-001',
       revision: 2,
@@ -333,6 +387,7 @@ function observeSnapshot(
       attemptFacts: ['All attempt evidence is fake/fixture only.'],
       actions,
     },
+    ...overrides,
   })
 }
 
