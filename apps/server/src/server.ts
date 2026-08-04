@@ -52,6 +52,25 @@ import { OriginListener, originListenerLayer } from './origin-listener.ts'
 import { WebHost, webHostLayer } from './web-host.ts'
 import { openOriginDatabase } from './database.ts'
 import type { LocalIdentity, RequestAdmission } from './identity.ts'
+import {
+  resumableRunPhase,
+  type AcceptRunDefinitionResult,
+  type CommandResult,
+  type ControlEvent,
+  type DraftSequence,
+  type Evidence,
+  type FailureReason,
+  type PlanProjection,
+  type PlanReadiness,
+  type Run,
+  type RunDefinition,
+  type SavePlanDraftResult,
+  type Snapshot,
+} from './domain-state.ts'
+import {
+  ProjectionPublication,
+  projectionPublicationLayer,
+} from './projection-publication.ts'
 type StartRun = Extract<
   typeof PlanIntent.Type,
   { readonly _tag: 'StartAcceptedRun' }
@@ -459,153 +478,6 @@ export const createLocalFixtureAdmission =
       identity.role ??
       (identity.personId === 'owner-chicks' ? 'owner' : 'viewer'),
   })
-type RunPhase =
-  | 'preflight'
-  | 'acquire'
-  | 'capture'
-  | 'verify'
-  | 'completed'
-  | 'paused'
-  | 'stopped'
-  | 'parkRequested'
-type RunMutation = {
-  readonly previewId: string
-  readonly kind: 'reprioritizeSecond' | 'shortenSecond' | 'discardCurrent'
-}
-type Run = {
-  readonly id: string
-  readonly revision: number
-  readonly phase: RunPhase
-  readonly target: string
-  readonly progress: number
-  readonly sourceDefinitionId?: string
-  readonly activeSequenceIndex?: number
-  readonly completedSequenceCount?: number
-  readonly resumablePhase?: Exclude<
-    RunPhase,
-    'paused' | 'completed' | 'stopped' | 'parkRequested'
-  >
-  readonly retryPhase?: 'preflight' | 'acquire' | 'capture' | 'verify'
-  readonly appliedMutations?: ReadonlyArray<RunMutation>
-}
-function resumableRunPhase(
-  phase: RunPhase,
-):
-  | Exclude<RunPhase, 'paused' | 'completed' | 'stopped' | 'parkRequested'>
-  | undefined {
-  return phase === 'preflight' ||
-    phase === 'acquire' ||
-    phase === 'capture' ||
-    phase === 'verify'
-    ? phase
-    : undefined
-}
-type Evidence = {
-  readonly frameId: string
-  readonly capturedAt: string
-  readonly quality: 'verified' | 'warning'
-  readonly desired: string
-  readonly solved: string
-  readonly uncertaintyArcsec: number
-  readonly stack?: {
-    readonly availability: 'available' | 'unavailable'
-    readonly observedAt: string
-    readonly frameCount: number
-    readonly message: string
-  }
-  readonly correction: {
-    readonly state: 'automatic' | 'exhausted'
-    readonly evidence: string
-    readonly bound: string
-    readonly protection: string
-    readonly action: string
-  }
-}
-type Snapshot = {
-  readonly snapshotVersion: number
-  readonly eventCursor: number
-  readonly generatedAt: string
-  readonly identity: LocalIdentity
-  readonly plan: {
-    readonly id: string
-    readonly revision: number
-    readonly target: string
-    readonly readiness: PlanReadiness | 'unavailable'
-    readonly runEligible: boolean
-  }
-  readonly control: {
-    readonly holderClientId: string | null
-    readonly revision: number
-    readonly state: 'held' | 'reconnecting' | 'unheld'
-    readonly reconnectGraceUntil?: string
-    readonly pendingRequests: ReadonlyArray<{
-      readonly requestId: string
-      readonly clientId: string
-      readonly personId: string
-      readonly expiresAt: string
-    }>
-  }
-  readonly run: Run | null
-  readonly dispatch:
-    'none' | 'pending' | 'dispatched' | 'unavailable' | 'failed'
-  readonly dispatchAction: 'none' | 'pause' | 'resume' | 'stop'
-  readonly evidence: Evidence
-  readonly connection: 'current'
-}
-type ControlEvent =
-  | 'ControlRequested'
-  | 'ControlGranted'
-  | 'ControlDeclined'
-  | 'ControlReleased'
-  | 'OwnerTookControl'
-  | 'ControlLeaseExpired'
-  | 'RunPaused'
-  | 'RunResumed'
-  | 'RunStopped'
-  | 'FakeSequenceSkipped'
-  | 'FakePhaseRetried'
-  | 'FakeParkRequested'
-  | 'RunMutationApplied'
-type FailureReason =
-  | 'Unauthenticated'
-  | 'FreshnessConflict'
-  | 'PlanUnavailable'
-  | 'PlanNotReady'
-  | 'RunDefinitionAlreadyAccepted'
-  | 'ClientReadOnly'
-  | 'ControlLeaseLost'
-  | 'AlreadyController'
-  | 'ControlRequestAlreadyPending'
-  | 'OwnerRequired'
-  | 'ControlRequestUnavailable'
-  | 'ActiveRunConflict'
-  | 'RunRevisionConflict'
-  | 'AlreadyPaused'
-  | 'AlreadyTerminal'
-  | 'NotPaused'
-  | 'ResumePhaseUnavailable'
-  | 'IdempotencyConflict'
-  | 'PreviewUnavailable'
-  | 'PreviewExpired'
-  | 'ApprovalRequired'
-  | 'ApprovalMismatch'
-  | 'RetryExhausted'
-  | 'PolicyUnavailable'
-  | 'InvalidInput'
-  | 'DraftUnchanged'
-type CommandResult =
-  | {
-      readonly outcome: 'accepted'
-      readonly eventType?: ControlEvent
-      readonly message?: string
-      readonly run?: Run
-      readonly snapshot: Snapshot
-    }
-  | {
-      readonly outcome: 'rejected'
-      readonly reason: FailureReason
-      readonly message: string
-    }
 class CommandRejected extends Schema.TaggedErrorClass<CommandRejected>()(
   'Server.CommandRejected',
   { failure: CommandFailure },
@@ -721,48 +593,6 @@ class ControlCommandService extends Context.Service<
   ControlCommandService,
   ControlCommandServiceShape
 >()('Server.ControlCommandService') {}
-type PlanReadiness = 'ready' | 'readyWithLimitations' | 'blocked'
-type DraftSequence = SavePlanDraft['sequences'][number]
-type PlanProjection = {
-  readonly planId: string
-  readonly revision: number
-  readonly readiness: PlanReadiness
-  readonly readinessSummary: string
-  readonly limitations: ReadonlyArray<string>
-  readonly sequences: ReadonlyArray<
-    DraftSequence & { readonly viability: 'viable' | 'limited' | 'blocked' }
-  >
-}
-type SavePlanDraftResult =
-  | {
-      readonly outcome: 'accepted'
-      readonly plan: PlanProjection
-      readonly snapshot: Snapshot
-    }
-  | {
-      readonly outcome: 'rejected'
-      readonly reason: FailureReason
-      readonly message: string
-    }
-type RunDefinition = {
-  readonly id: string
-  readonly sourcePlanId: string
-  readonly sourcePlanRevision: number
-  readonly acceptedAt: string
-  readonly executor: 'fake' | 'fixture'
-  readonly plan: PlanProjection
-}
-type AcceptRunDefinitionResult =
-  | {
-      readonly outcome: 'accepted'
-      readonly runDefinition: RunDefinition
-      readonly snapshot: Snapshot
-    }
-  | {
-      readonly outcome: 'rejected'
-      readonly reason: FailureReason
-      readonly message: string
-    }
 type LibraryRole =
   | 'original'
   | 'linearMaster'
@@ -1201,23 +1031,21 @@ export function createLocalWebService(
   const originListener = Effect.runSync(
     OriginListener.pipe(Effect.provide(originListenerLayer)),
   )
-  const listeners = new Map<ServerResponse, LocalIdentity>()
+  const projectionPublication = Effect.runSync(
+    ProjectionPublication.pipe(
+      Effect.provide(
+        projectionPublicationLayer({
+          expire: () => expireReconnectGrace(database),
+          currentCursor: () => state(database).eventCursor,
+          eventFor: (identity) => sseProjection(database, identity),
+          responseHeaders,
+        }),
+      ),
+    ),
+  )
   let closed = false
-  let emittedCursor = 0
-  const publish = (type: string, cursor: number) => {
-    void type
-    void cursor
-    for (const [response, identity] of listeners)
-      response.write(sseProjection(database, identity))
-  }
-  const poll = setInterval(() => {
-    expireReconnectGrace(database)
-    const current = state(database)
-    if (current.eventCursor <= emittedCursor) return
-    emittedCursor = current.eventCursor
-    publish('ProjectionChanged', current.eventCursor)
-  }, 250)
-  poll.unref()
+  const publish = (type: string, cursor: number) =>
+    Effect.runSync(projectionPublication.publish(type, cursor))
 
   const handler = async (
     request: IncomingMessage,
@@ -1248,8 +1076,11 @@ export function createLocalWebService(
       return isOwner(identity)
         ? json(response, 200, operations(database))
         : json(response, 403, reject('OwnerRequired').body)
-    if (request.method === 'GET' && url.pathname === '/api/events')
-      return stream(request, response, database, identity, listeners)
+    if (request.method === 'GET' && url.pathname === '/api/events') {
+      return Effect.runSync(
+        projectionPublication.stream(request, response, identity),
+      )
+    }
     if (request.method === 'POST' && url.pathname === '/api/commands/control')
       return Effect.runPromise(
         controlCommandFromEnvelope(
@@ -1368,7 +1199,7 @@ export function createLocalWebService(
   const close = () => {
     if (closed) return
     closed = true
-    clearInterval(poll)
+    Effect.runSync(projectionPublication.close())
     database.close()
   }
   const projectionIdentity = () => {
@@ -5161,26 +4992,6 @@ function unauthenticated(
       }).pipe(Effect.map((body) => json(response, 401, body))),
     )
   return json(response, 401, reject('Unauthenticated').body)
-}
-function stream(
-  request: IncomingMessage,
-  response: ServerResponse,
-  db: DatabaseSync,
-  identity: LocalIdentity,
-  listeners: Map<ServerResponse, LocalIdentity>,
-) {
-  response.writeHead(200, {
-    ...responseHeaders('text/event-stream'),
-    connection: 'keep-alive',
-  })
-  response.write(sseProjection(db, identity))
-  listeners.set(response, identity)
-  const heartbeat = setInterval(() => response.write(`: heartbeat\n\n`), 15_000)
-  heartbeat.unref()
-  request.on('close', () => {
-    clearInterval(heartbeat)
-    listeners.delete(response)
-  })
 }
 export function createOriginAdmission(
   config: OriginServerConfig,
