@@ -12,6 +12,10 @@ import {
   type ObserveCommandSubmission,
 } from './observe-command-client'
 import {
+  PreflightRefreshClient,
+  type PreflightRefreshSubmission,
+} from './preflight-refresh-client'
+import {
   IdempotencyKey,
   LibraryQuery as LibraryQuerySchema,
   LibraryQueryId,
@@ -63,6 +67,9 @@ export function App() {
         key: typeof IdempotencyKey.Type,
       ) => Promise<ObserveCommandSubmission>)
     | undefined
+  >()
+  const [refreshPreflight, setRefreshPreflight] = useState<
+    (() => Promise<PreflightRefreshSubmission>) | undefined
   >()
   const workspace = routeWorkspace(route)
   const initialRoute = useRef(true)
@@ -222,6 +229,15 @@ export function App() {
           }),
         ),
     )
+    setRefreshPreflight(
+      () => () =>
+        runtime.runPromise(
+          Effect.gen(function* () {
+            const client = yield* PreflightRefreshClient
+            return yield* client.refresh()
+          }),
+        ),
+    )
     const fiber = runtime.runFork(
       Effect.gen(function* () {
         const client = yield* BootstrapClient
@@ -235,6 +251,7 @@ export function App() {
     return () => {
       setSubmitPlan(undefined)
       setSubmitObserve(undefined)
+      setRefreshPreflight(undefined)
       void runtime
         .runPromise(Fiber.interrupt(fiber))
         .then(() => runtime.dispose())
@@ -292,6 +309,11 @@ export function App() {
         }
         view={projection.observe}
         {...(submitObserve === undefined ? {} : { submit: submitObserve })}
+        {...(refreshPreflight === undefined ||
+        projection.shell.readOnly ||
+        projection.observe.source?.phase !== 'preflight'
+          ? {}
+          : { refreshPreflight })}
       />
     ) : workspace === 'library' ? (
       <LibraryView

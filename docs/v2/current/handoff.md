@@ -1,6 +1,6 @@
 # Production Convergence Complete Handoff
 
-Status: **Phases 1, 2, and 2.5 closed — the unrelated Solar test slice is retired; Phase 3 read-only preflight remains prepared, not accepted or implemented**
+Status: **Phases 1, 2, and 2.5 closed — the unrelated Solar test slice is retired; Phase 3 preflight provider boundary and projection are implemented, while a real provider adapter remains pending**
 
 ## Completed Phase 2.5: Server Boundary Extraction
 
@@ -31,12 +31,15 @@ was added.
 
 Phase 2.5 closeout evidence was contracts **184/184**, server **62/62**, and
 web **57/57**. The later server test reorganization and Effect beta.103
-maintenance upgrade currently validate contracts **184/184**, server **56/56**,
-web **57/57**, and SDK **62/62**. Local `file:` packages now install as copies
+maintenance upgrade and the Phase 3 boundary currently validate contracts
+**184/184**, server **57/57**, web **59/59**, and SDK **62/62**. Local `file:` packages now install as copies
 through root `.npmrc`, so shared Effect Schemas resolve one runtime instance.
 Both remaining Compose files render with inert absolute placeholders; unset real
-host-secret paths correctly refuse to render. Phase 3 remains unimplemented
-and requires separate owner acceptance.
+host-secret paths correctly refuse to render. The owner accepted the bounded
+Phase 3 preflight slice. Its typed boundary, persistence, endpoint, SSE
+publication, unavailable behavior, and Observe presentation are implemented.
+A real provider adapter remains deliberately pending: existing SDK connection
+and authentication paths are not proven read-only.
 
 ### Solar Test Slice Retired
 
@@ -80,8 +83,9 @@ Compose base/download, rig, and publisher renders; and Designer PASS at wide,
 compact, and 390 px for owner, friend, and phone projections. Final image:
 `sha256:10c3f8ccbcf9530b24a595e90242ad497720d177b8ffdaae95104cf62b18835e`.
 No provider, device, Solar, physical, or capture work was performed or
-authorized. The Phase 3 read-only decision-grade preflight packet is prepared
-but requires separate owner acceptance before implementation.
+authorized. The owner accepted Phase 3's bounded read-only preflight slice;
+see the current Phase 3 plan for its implemented boundary and pending real
+provider adapter.
 
 ## Completed Host-Verification Bundle
 
@@ -116,8 +120,9 @@ and [Deterministic Run Resolution and Consequence-Aware Edits](phase-2-planning.
 They prove deterministic Plan persistence/projection, a revisioned immutable
 RunDefinition snapshot, a two-sequence fake executor through completion, and
 durable fake-run pause/resume, resolution policies, and consequence-aware
-edits. The prepared next packet is [Read-Only Decision-Grade Preflight](phase-3-planning.md#first-slice-read-only-decision-grade-preflight).
-It remains prepared and requires owner acceptance before implementation. The
+edits. The current next packet is [Read-Only Decision-Grade Preflight](phase-3-planning.md#first-slice-read-only-decision-grade-preflight).
+Its provider boundary and projection are implemented; the real adapter remains
+pending. The
 five sequential Production Convergence Epics are complete:
 
 1. `tkt-ezxr1fsb` — promote the proven server. **Complete.**
@@ -134,8 +139,8 @@ Each Epic was blocked by its predecessor and contained its own ordered child
 implementation tasks. Convergence preserves existing proof boundaries and does
 not authorize a provider read, device command, physical capture, interactive
 processing workflow, off-host recovery, or storage-health operation. The
-preflight packet must still be accepted before implementation; it authorizes
-only a current provider read and truthful checklist projection.
+preflight packet is accepted for its bounded read-only provider boundary and
+truthful checklist projection. It does not authorize real device commands.
 
 ## Production Web Application Complete
 
@@ -206,7 +211,7 @@ same-host resilience. Off-host recovery is not current Phase 1 scope.
 ## Verified Baseline
 
 - `apps/server` type checks and its SQLite/HTTP/SSE/worker/filesystem
-  integration suite currently passes **56/56**. The suite covers the retained
+  integration suite currently passes **57/57**. The suite covers the retained
   local-web foundation, Process Save/publisher boundary, and the deliberately installed
   deterministic M27 fixture without creating generic hardware work. Normal
   origin, publisher, and processor database opening runs migrations without
@@ -241,8 +246,10 @@ same-host resilience. Off-host recovery is not current Phase 1 scope.
   Phase 2 managed-run semantics with no provider call, device command, outbox
   work, capture evidence, or Solar activity; browser phone projection remains
   read-only.
-- Phase 3 has no implementation evidence yet. Its prepared first slice is
-  read-only decision-grade preflight against current provider facts.
+- Phase 3 has a verified read-only provider boundary, typed preflight
+  projection, SQLite/HTTP/SSE proof, and bounded Observe presentation.
+  Normal runtime returns unavailable. A real provider adapter is pending because
+  current SDK connection/authentication paths are not proven read-only.
 - Process Save is a service API only: app-owned source IDs resolve under
   configured roots, selected bytes are checksummed and atomically promoted,
   and Asset/provenance/receipt/`PublishAsset` records commit together. Recorded

@@ -113,6 +113,7 @@ export const observeWorkspaceProjection = (
       ? {}
       : { resumablePhase: run.resumablePhase }),
     retryUsed: run.retryPhase !== undefined,
+    ...(run.preflight === undefined ? {} : { preflight: run.preflight }),
     lifecycleFacts:
       events.length === 0 ? ['Fake/fixture lifecycle started.'] : events,
     attemptFacts: [

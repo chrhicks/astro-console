@@ -2,6 +2,7 @@ import { Effect, Exit, Schema, Scope } from 'effect'
 import {
   BootstrapHttpSuccessEnvelope,
   CommandHttpFailureEnvelope,
+  RefreshPreflightResponse,
 } from '@astro-console/v2-contracts'
 import {
   cleanupProcessOrphans,
@@ -71,6 +72,12 @@ import {
   processWorkspace,
   workspace,
 } from '../http/library-handlers.ts'
+import {
+  ReadOnlyPreflightProvider,
+  preflightPersistenceLayer,
+  refreshPreflight,
+  type ReadOnlyPreflightProviderShape,
+} from '../services/preflight-service.ts'
 export type DownloadGrantConfig = {
   readonly issuer: DownloadGrantIssuer
   readonly now?: () => Date
@@ -85,13 +92,21 @@ export function createLocalWebService(
   processSaveStorage?: ProcessSaveStorage,
   downloadGrants?: DownloadGrantConfig,
   options: {
-    readonly fixture?: 'm27' | 'plan-draft' | 'library-published'
+    readonly fixture?: 'm27' | 'preflight' | 'plan-draft' | 'library-published'
     readonly webDistPath?: string
+    readonly preflightProvider?: ReadOnlyPreflightProviderShape
   } = {},
 ) {
   const database = openOriginDatabase(databasePath)
   if (options.fixture !== undefined) {
-    installM27Fixture(database, options.fixture !== 'plan-draft')
+    installM27Fixture(
+      database,
+      options.fixture === 'plan-draft'
+        ? false
+        : options.fixture === 'preflight'
+          ? 'fake'
+          : 'fixture',
+    )
     if (options.fixture === 'library-published')
       installPublishedLibraryFixture(database)
   } else initializeRuntimeState(database)
@@ -266,6 +281,47 @@ export function createLocalWebService(
           Effect.map(({ status, body }) => json(response, status, body)),
         ),
       ),
+    refreshPreflight: async (response, identity, request) => {
+      if (identity.capability !== 'controlCapable')
+        return json(
+          response,
+          403,
+          RefreshPreflightResponse.cases.Rejected.make({
+            summary: 'This client is read-only and cannot refresh preflight.',
+          }),
+        )
+      const persistence = preflightPersistenceLayer({
+        activeRun: () => stateRepository.state().run,
+        persist: (snapshot) =>
+          Effect.try({
+            try: () => stateRepository.persistPreflight(snapshot),
+            catch: (cause) => cause,
+          }),
+      })
+      const program = Effect.promise(() => body(request)).pipe(
+        Effect.flatMap(refreshPreflight),
+        Effect.provide(persistence),
+      )
+      const result = await Effect.runPromise(
+        options.preflightProvider === undefined
+          ? program
+          : program.pipe(
+              Effect.provideService(
+                ReadOnlyPreflightProvider,
+                options.preflightProvider,
+              ),
+            ),
+      )
+      if ('response' in result) {
+        publish('PreflightRefreshed', result.cursor)
+        return json(response, 200, result.response)
+      }
+      return RefreshPreflightResponse.match(result, {
+        Refreshed: (body) => json(response, 200, body),
+        Rejected: (body) => json(response, 409, body),
+        Unavailable: (body) => json(response, 503, body),
+      })
+    },
     webAsset: (response, pathname) =>
       Effect.runSync(webHost.asset(response, pathname, responseHeaders)),
     webRoute: (response, pathname) =>

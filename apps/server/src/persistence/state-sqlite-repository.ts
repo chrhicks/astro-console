@@ -4,6 +4,7 @@ import {
   BootstrapSnapshot,
   BootstrapSseEventEnvelope,
   PlanWorkspaceProjection,
+  PreflightSnapshot,
 } from '@astro-console/v2-contracts'
 import type { Evidence, Snapshot } from '../services/domain-state.ts'
 import type { LocalIdentity } from '../auth/identity.ts'
@@ -67,6 +68,7 @@ const StoredRun = Schema.Struct({
       }),
     ),
   ),
+  preflight: Schema.optionalKey(PreflightSnapshot),
 })
 const StoredState = Schema.Struct({
   snapshotVersion: Schema.Int,
@@ -118,6 +120,9 @@ export interface StateSqliteRepositoryShape {
     evidence: Evidence,
     identity: () => LocalIdentity,
   ) => Snapshot
+  readonly persistPreflight: (snapshot: typeof PreflightSnapshot.Type) => {
+    readonly cursor: number
+  }
 }
 export class StateSqliteRepository extends Context.Service<
   StateSqliteRepository,
@@ -408,6 +413,29 @@ export const stateSqliteRepositoryLayer = (
         throw error
       }
     }
+    const persistPreflight = (preflight: typeof PreflightSnapshot.Type) => {
+      const current = state()
+      if (current.run === null) throw new Error('No active run')
+      const cursor = current.eventCursor + 1
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        commit({
+          run: { ...current.run, preflight },
+          snapshotVersion: current.snapshotVersion + 1,
+          eventCursor: cursor,
+        })
+        db.prepare('INSERT INTO events VALUES (?,?,?)').run(
+          cursor,
+          'PreflightRefreshed',
+          JSON.stringify(preflight),
+        )
+        db.exec('COMMIT')
+        return { cursor }
+      } catch (error) {
+        db.exec('ROLLBACK')
+        throw error
+      }
+    }
     return {
       state,
       snapshot,
@@ -418,6 +446,7 @@ export const stateSqliteRepositoryLayer = (
       sseProjection,
       commit,
       persistEvidence,
+      persistPreflight,
     }
   })
 

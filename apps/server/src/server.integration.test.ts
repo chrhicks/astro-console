@@ -23,6 +23,7 @@ import {
   ObserveCommandResponse,
   PlanCommandResponse,
   ProcessSourceHandoff,
+  RefreshPreflightResponse,
   RunSnapshot,
 } from '@astro-console/v2-contracts'
 import {
@@ -167,6 +168,120 @@ test('Plan command transport decodes one closed request boundary and projects pe
   assert.equal(
     Schema.decodeUnknownSync(PlanCommandResponse)(await started.json())._tag,
     'Accepted',
+  )
+})
+
+test('read-only preflight persists configured provider facts, survives restart, and publishes SSE without work', async (t) => {
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-preflight-')),
+    'state.sqlite',
+  )
+  const provider = {
+    observe: () =>
+      Effect.succeed({
+        observedAt: '2026-08-03T03:00:00.000Z',
+        verdict: 'blocked' as const,
+        nextAction: 'Resolve the mount horizon blocker before any command.',
+        checks: [
+          {
+            key: 'mount-horizon',
+            state: 'blocked' as const,
+            observedAt: '2026-08-03T03:00:00.000Z',
+            reason: 'The target is below the configured horizon.',
+          },
+        ],
+      }),
+  }
+  const service = createLocalWebService(
+    databasePath,
+    (request) =>
+      request?.headers.authorization === 'Bearer phone'
+        ? {
+            personId: 'owner-chicks',
+            clientId: 'phone-owner',
+            role: 'owner' as const,
+            capability: 'readOnly' as const,
+          }
+        : {
+            personId: 'owner-chicks',
+            clientId: 'desktop-owner',
+            role: 'owner' as const,
+            capability: 'controlCapable' as const,
+          },
+    undefined,
+    undefined,
+    { fixture: 'preflight', preflightProvider: provider },
+  )
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  const started = await startFixtureRun(base, 'preflight-start')
+  if (started.activeRun._tag !== 'Active') throw new Error('Run unavailable')
+  const phone = await fetch(`${base}/api/observe/preflight`, {
+    method: 'POST',
+    headers: { authorization: 'Bearer phone' },
+    body: JSON.stringify({
+      runId: started.activeRun.run.runId,
+      expectedRunRevision: started.activeRun.run.revision,
+    }),
+  })
+  assert.equal(phone.status, 403)
+  assert.equal(
+    Schema.decodeUnknownSync(RefreshPreflightResponse)(await phone.json())._tag,
+    'Rejected',
+  )
+  const stream = await fetch(`${base}/api/events`)
+  const reader = stream.body?.getReader()
+  await reader?.read()
+  const response = await fetch(`${base}/api/observe/preflight`, {
+    method: 'POST',
+    body: JSON.stringify({
+      runId: started.activeRun.run.runId,
+      expectedRunRevision: started.activeRun.run.revision,
+    }),
+  })
+  const responseBody: unknown = await response.json()
+  assert.equal(response.status, 200, JSON.stringify(responseBody))
+  assert.equal(
+    Schema.decodeUnknownSync(RefreshPreflightResponse)(responseBody)._tag,
+    'Refreshed',
+  )
+  assert.match(await nextEvent(reader), /"preflight"/)
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+    ).count,
+    0,
+  )
+  await reader?.cancel()
+  await listener.close()
+  service.close()
+  const recovered = createLocalWebService(databasePath)
+  const recoveredListener = await recovered.listen()
+  t.after(async () => {
+    await recoveredListener.close()
+    recovered.close()
+  })
+  const snapshot = await bootstrapSnapshot(
+    `http://127.0.0.1:${recoveredListener.port}/api/snapshot`,
+  )
+  assert.equal(snapshot.observe?.preflight?.verdict, 'blocked')
+  assert.equal(snapshot.observe?.preflight?.checks[0]?.state, 'blocked')
+  const unavailable = await fetch(
+    `http://127.0.0.1:${recoveredListener.port}/api/observe/preflight`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        runId: started.activeRun.run.runId,
+        expectedRunRevision: started.activeRun.run.revision,
+      }),
+    },
+  )
+  assert.equal(unavailable.status, 503)
+  assert.equal(
+    Schema.decodeUnknownSync(RefreshPreflightResponse)(await unavailable.json())
+      ._tag,
+    'Unavailable',
   )
 })
 

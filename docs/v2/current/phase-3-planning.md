@@ -1,11 +1,11 @@
 # Phase 3 Implementation Planning
 
-Status: **prepared V2.0 product phase — Production Convergence prerequisite cleared; owner acceptance and implementation remain pending**
+Status: **authorized V2.0 first slice — provider-boundary and projection proof implemented; real provider adapter remains pending**
 
 This document prepares Phase 3 in the durable [V2 delivery plan](delivery-plan.md).
-Production Convergence is complete. This document still does not authorize a
-provider read, device command, Solar work, or capture: its first slice requires
-separate owner acceptance before implementation.
+Production Convergence is complete. The owner has accepted the first read-only
+slice. It authorizes provider reads only; device commands, Solar work, and
+capture remain out of scope.
 
 ## Objective
 
@@ -15,22 +15,26 @@ success; subsequent image evidence remains the proof of pointing and capture.
 
 ## First Slice: Read-Only Decision-Grade Preflight
 
-Status: **prepared for acceptance — implementation is not authorized yet**
+Status: **authorized — provider-boundary and projection proof implemented**
 
 ### Entry Gate
 
-Preparation is complete. The next owner decision is to accept this exact
-read-only slice. Acceptance authorizes only the configured provider read,
+Preparation is complete and the owner has accepted this exact read-only slice.
+The authorization permits only the configured provider read,
 typed `PreflightSnapshot` projection, SQLite/HTTP/SSE proof, and the bounded
 Observe presentation described below. It does not authorize a provider write,
 device command, capture, Solar capability, or a later Phase 3 slice.
 
-Continuum task `tkt-2e396ziz` tracks this entry slice. Its first pending step
-is that owner acceptance; it is intentionally open rather than ready.
+Continuum task `tkt-2e396ziz` tracks this entry slice. Owner acceptance,
+contract, SQLite/HTTP/SSE projection, unavailable behavior, and Observe
+presentation are implemented and verified with a deterministic read-only
+provider. A real configured adapter remains pending.
 
-After acceptance, implementation starts from one current fake `ActiveRun` at
-`preflight`, with one configured read-only provider adapter. Missing provider
-configuration must project `unavailable` or `unknown`, never a safe verdict.
+Implementation starts from one current fake `ActiveRun` at `preflight` and a
+typed read-only provider boundary. In normal runtime no provider is configured,
+so it returns `unavailable`, never a safe verdict. Existing SDK connection and
+authentication paths are not proven read-only, so a real configured adapter is
+deliberately deferred to a separate accepted implementation step.
 
 The first slice should make a current accepted fake `ActiveRun` legible at
 `preflight` through a service-owned, timestamped checklist. It reads provider
@@ -61,12 +65,12 @@ service/provider, unsupported required capability, and malformed input. A fresh
 response replaces the browser projection through the existing snapshot/SSE
 path.
 
-Focused proof requires a configured read-only provider adapter, real
-SQLite/HTTP/SSE persistence across restart, explicit ready/blocked/unknown
-cases, source timestamps, and a proof that no outbox row, device command,
-capture evidence, or Solar activity is created. If the provider is not present,
-the product projects `unavailable` or `unknown`; it must not fabricate a safe
-result.
+The implemented proof covers a deterministic configured provider boundary,
+SQLite/HTTP/SSE persistence across restart, a blocked case, source timestamps,
+and no outbox row. Missing provider returns `unavailable`; it never fabricates
+a safe result. The still-pending real adapter must prove ready, blocked, and
+unknown provider cases with no device command, capture evidence, or Solar
+activity.
 
 The Observe desktop surface leads with the next blocker and its evidence, not
 a telemetry grid. Compact desktop retains the verdict and action. Phone remains

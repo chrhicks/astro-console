@@ -1,4 +1,5 @@
 import type { LocalIdentity } from '../auth/identity.ts'
+import type { PreflightSnapshot } from '@astro-console/v2-contracts'
 
 export type RunPhase =
   | 'preflight'
@@ -28,6 +29,7 @@ export type Run = {
   >
   readonly retryPhase?: 'preflight' | 'acquire' | 'capture' | 'verify'
   readonly appliedMutations?: ReadonlyArray<RunMutation>
+  readonly preflight?: PreflightSnapshot
 }
 export const resumableRunPhase = (
   phase: RunPhase,

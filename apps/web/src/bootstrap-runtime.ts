@@ -27,6 +27,12 @@ import {
   layer as observeCommandClientLayer,
 } from './observe-command-client'
 import {
+  PreflightRefreshClient,
+  PreflightRefreshTransport,
+  browserPreflightRefreshTransportLayer,
+  layer as preflightRefreshClientLayer,
+} from './preflight-refresh-client'
+import {
   LibraryClient,
   browserLibraryTransportLayer,
   layer as libraryClientLayer,
@@ -38,6 +44,7 @@ const clientLayer = (
   commandTransportLayer: Layer.Layer<CommandTransport>,
   planCommandTransportLayer: Layer.Layer<PlanCommandTransport>,
   observeCommandTransportLayer: Layer.Layer<ObserveCommandTransport> = browserObserveCommandTransportLayer,
+  preflightRefreshTransportLayer: Layer.Layer<PreflightRefreshTransport> = browserPreflightRefreshTransportLayer,
 ) => {
   const bootstrapClientLayer = layer.pipe(
     Layer.provide(snapshotTransportLayer),
@@ -49,12 +56,14 @@ const clientLayer = (
       const commands = yield* CommandClient
       const planCommands = yield* PlanCommandClient
       const observeCommands = yield* ObserveCommandClient
+      const preflightRefresh = yield* PreflightRefreshClient
       const library = yield* LibraryClient
       return Context.empty().pipe(
         Context.add(BootstrapClient, bootstrap),
         Context.add(CommandClient, commands),
         Context.add(PlanCommandClient, planCommands),
         Context.add(ObserveCommandClient, observeCommands),
+        Context.add(PreflightRefreshClient, preflightRefresh),
         Context.add(LibraryClient, library),
       )
     }),
@@ -62,6 +71,7 @@ const clientLayer = (
     Layer.provide(commandClientLayer),
     Layer.provide(planCommandClientLayer),
     Layer.provide(observeCommandClientLayer),
+    Layer.provide(preflightRefreshClientLayer),
     Layer.provide(libraryClientLayer),
   )
   return clients.pipe(
@@ -69,6 +79,7 @@ const clientLayer = (
     Layer.provide(commandTransportLayer),
     Layer.provide(planCommandTransportLayer),
     Layer.provide(observeCommandTransportLayer),
+    Layer.provide(preflightRefreshTransportLayer),
     Layer.provide(browserLibraryTransportLayer),
   )
 }
@@ -79,6 +90,7 @@ export const makeBootstrapRuntime = (
   commandTransportLayer: Layer.Layer<CommandTransport>,
   planCommandTransportLayer: Layer.Layer<PlanCommandTransport>,
   observeCommandTransportLayer: Layer.Layer<ObserveCommandTransport> = browserObserveCommandTransportLayer,
+  preflightRefreshTransportLayer: Layer.Layer<PreflightRefreshTransport> = browserPreflightRefreshTransportLayer,
 ) =>
   ManagedRuntime.make(
     clientLayer(
@@ -87,6 +99,7 @@ export const makeBootstrapRuntime = (
       commandTransportLayer,
       planCommandTransportLayer,
       observeCommandTransportLayer,
+      preflightRefreshTransportLayer,
     ),
   )
 
@@ -97,4 +110,5 @@ export const createBootstrapRuntime = () =>
     browserCommandTransportLayer,
     browserPlanCommandTransportLayer,
     browserObserveCommandTransportLayer,
+    browserPreflightRefreshTransportLayer,
   )

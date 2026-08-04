@@ -209,7 +209,7 @@ const seedWorkspaces = (db: DatabaseSync) => {
 
 export const installM27Fixture = (
   database: DatabaseSync,
-  includeFixtureDefinition = true,
+  definitionKind: 'fixture' | 'fake' | false = 'fixture',
 ) => {
   seedFixtureState(database)
   seedLibrary(database)
@@ -221,13 +221,16 @@ export const installM27Fixture = (
     const plan = Schema.decodeUnknownSync(PlanWorkspaceProjection)(
       JSON.parse(Schema.decodeUnknownSync(StoredRow)(raw).value),
     )
-    if (!includeFixtureDefinition) return
+    if (definitionKind === false) return
     const definition: RunDefinition = {
-      id: 'run-definition-m27-fixture',
+      id:
+        definitionKind === 'fake'
+          ? 'run-definition-m27-preflight'
+          : 'run-definition-m27-fixture',
       sourcePlanId: plan.planId,
       sourcePlanRevision: plan.revision,
       acceptedAt: '2026-07-25T00:00:00.000Z',
-      executor: 'fixture',
+      executor: definitionKind,
       plan,
     }
     database

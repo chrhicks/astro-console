@@ -4,6 +4,7 @@ import {
   ObserveCommandSubmission,
   type ObserveAction,
 } from '../observe-command-client'
+import { PreflightRefreshSubmission } from '../preflight-refresh-client'
 import {
   beginObserveOperation,
   isCurrentObserveOperation,
@@ -15,12 +16,14 @@ import { Evidence, Status } from './shared'
 export function ObserveView({
   view,
   submit,
+  refreshPreflight,
 }: {
   view: View
   submit?: (
     action: ObserveAction,
     key: typeof IdempotencyKey.Type,
   ) => Promise<ObserveCommandSubmission>
+  refreshPreflight?: () => Promise<PreflightRefreshSubmission>
 }) {
   const [result, setResult] = useState<{
     readonly runId: string
@@ -98,6 +101,58 @@ export function ObserveView({
       },
     )
   }
+  const refresh = () => {
+    if (refreshPreflight === undefined) return
+    const currentOperation = beginObserveOperation(
+      operation.current,
+      current,
+      operationId.current + 1,
+    )
+    if (currentOperation === undefined) return
+    operationId.current = currentOperation.id
+    operation.current = currentOperation
+    setPending(true)
+    void refreshPreflight().then(
+      (submission) => {
+        if (operation.current?.id !== currentOperation.id) return
+        operation.current = undefined
+        setPending(false)
+        if (
+          !isCurrentObserveOperation(
+            currentOperation,
+            currentRef.current,
+            currentOperation,
+          )
+        )
+          return
+        PreflightRefreshSubmission.$match(submission, {
+          Refreshed: ({ message }) =>
+            setResult({ ...currentOperation, message }),
+          Rejected: ({ message }) =>
+            setResult({ ...currentOperation, message }),
+          Unavailable: ({ message }) =>
+            setResult({ ...currentOperation, message }),
+        })
+      },
+      () => {
+        if (operation.current?.id !== currentOperation.id) return
+        operation.current = undefined
+        setPending(false)
+        if (
+          !isCurrentObserveOperation(
+            currentOperation,
+            currentRef.current,
+            currentOperation,
+          )
+        )
+          return
+        setResult({
+          ...currentOperation,
+          message: 'The preflight read could not be completed.',
+        })
+      },
+    )
+  }
   return (
     <div className="workspace observe-workspace">
       <header className="workspace-heading">
@@ -140,6 +195,32 @@ export function ObserveView({
             <b>Recovery:</b> {view.recovery}
           </p>
         )}
+        {current?.phase === 'preflight' && (
+          <section className="preflight-checklist" aria-label="Preflight">
+            <span>Current preflight</span>
+            {current.preflight === undefined ? (
+              <p>No preflight facts have been read for this run.</p>
+            ) : (
+              <>
+                <h2>{preflightVerdict(current.preflight.verdict)}</h2>
+                <p>{current.preflight.nextAction}</p>
+                <ul>
+                  {current.preflight.checks.map((check) => (
+                    <li key={check.key} data-state={check.state}>
+                      <b>{check.key}</b>: {check.reason}{' '}
+                      <time>{check.observedAt}</time>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {refreshPreflight !== undefined && (
+              <button onClick={refresh} disabled={pending}>
+                Refresh preflight
+              </button>
+            )}
+          </section>
+        )}
         {view.source && (
           <div className="observe-actions">
             {observeActions(view.source).map(({ action, label }) => (
@@ -169,6 +250,16 @@ export function ObserveView({
       </footer>
     </div>
   )
+}
+
+function preflightVerdict(verdict: string) {
+  return verdict === 'ready'
+    ? 'Preflight ready'
+    : verdict === 'blocked'
+      ? 'Preflight blocked'
+      : verdict === 'unavailable'
+        ? 'Preflight unavailable'
+        : 'Preflight unknown'
 }
 
 function observeActions(source: NonNullable<View['source']>) {
