@@ -154,6 +154,7 @@ export const acceptedCommandTags = [
   'SkipAcquireTarget',
   'ApprovePointingCorrection',
   'RevisePointingCorrection',
+  'CaptureTargetAcquisitionEvidence',
   'CapturePolarAlignmentMeasurement',
   'AcceptPolarAlignmentEvidence',
   'StartProcessingSession',
@@ -252,6 +253,10 @@ export const Command = Schema.TaggedUnion({
     ...AcquireCommandFreshness,
     proposalId: ProposalId,
     parameters: CorrectionRevision,
+  },
+  CaptureTargetAcquisitionEvidence: {
+    ...AcquireCommandFreshness,
+    ...DurableMutation,
   },
   CapturePolarAlignmentMeasurement: {
     ...AcquireCommandFreshness,

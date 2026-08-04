@@ -77,6 +77,9 @@ export function App() {
     | ((action: 'capture' | 'accept', attemptId?: string) => Promise<void>)
     | undefined
   >()
+  const [targetAcquisitionCommand, setTargetAcquisitionCommand] = useState<
+    (() => Promise<void>) | undefined
+  >()
   const workspace = routeWorkspace(route)
   const initialRoute = useRef(true)
   const [libraryQuery, setLibraryQuery] = useState<LibraryQuery>(() =>
@@ -277,6 +280,28 @@ export function App() {
         if (!response.ok) throw new Error('Polar command rejected')
       },
     )
+    setTargetAcquisitionCommand(() => async () => {
+      const observe = projectionRef.current.observe
+      if (
+        observe.source?.acquire === undefined ||
+        observe.leaseRevision === undefined
+      )
+        throw new Error('Target acquisition state unavailable')
+      const response = await fetch('/api/acquire/commands', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          intent: {
+            _tag: 'CaptureTargetAcquisitionEvidence',
+            expectedLeaseRevision: observe.leaseRevision,
+            expectedRunRevision: observe.source.revision,
+            expectedAcquireRevision: observe.source.acquire.revision,
+            idempotencyKey: crypto.randomUUID(),
+          },
+        }),
+      })
+      if (!response.ok) throw new Error('Target acquisition command rejected')
+    })
     const fiber = runtime.runFork(
       Effect.gen(function* () {
         const client = yield* BootstrapClient
@@ -292,6 +317,7 @@ export function App() {
       setSubmitObserve(undefined)
       setRefreshPreflight(undefined)
       setPolarCommand(undefined)
+      setTargetAcquisitionCommand(undefined)
       void runtime
         .runPromise(Fiber.interrupt(fiber))
         .then(() => runtime.dispose())
@@ -357,6 +383,9 @@ export function App() {
         {...(polarCommand === undefined || projection.shell.readOnly
           ? {}
           : { polarCommand })}
+        {...(targetAcquisitionCommand === undefined || projection.shell.readOnly
+          ? {}
+          : { targetAcquisitionCommand })}
       />
     ) : workspace === 'library' ? (
       <LibraryView

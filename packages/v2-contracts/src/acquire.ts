@@ -101,6 +101,12 @@ export const PointingSolveResult = Schema.TaggedUnion({
 export type PointingSolveResult = typeof PointingSolveResult.Type
 
 export const AcquireEvidence = Schema.TaggedUnion({
+  TargetSlewAcknowledged: {
+    attemptId: AttemptId,
+    acquisitionMethod: Schema.Literals(['deepSkyPlateSolve', 'lunarDiskLimb']),
+    acknowledgedAtEpochMs: NonNegativeInt,
+    acknowledgementRef: Schema.NonEmptyString,
+  },
   SolveAttempt: {
     attemptId: AttemptId,
     seriesId: RecoverySeriesId,
@@ -141,6 +147,17 @@ export const AcquireEvidence = Schema.TaggedUnion({
     totalErrorArcsec: NonNegativeNumber,
     uncertaintyArcsec: NonNegativeNumber,
     withinTolerance: Schema.Boolean,
+  },
+  LunarDiskLimbMeasurement: {
+    attemptId: AttemptId,
+    sourceFrameAssetId: AssetId,
+    capturedAtEpochMs: NonNegativeInt,
+    detectorId: Schema.NonEmptyString,
+    detectorVersion: Schema.NonEmptyString,
+    desiredCenter: CelestialCoordinate,
+    measuredCenter: CelestialCoordinate,
+    correction: PointingVector,
+    uncertaintyArcsec: NonNegativeNumber,
   },
 })
 
@@ -185,6 +202,9 @@ export const AcquireSession = Schema.Struct({
   runId: RunId,
   revision: AcquireRevision,
   mode: Schema.Literals(['pointing', 'polar']),
+  acquisitionMethod: Schema.optionalKey(
+    Schema.Literals(['deepSkyPlateSolve', 'lunarDiskLimb']),
+  ),
   phase: Schema.Literals([
     'solving',
     'correcting',
@@ -224,6 +244,22 @@ export const SolveCompletion = Schema.Struct({
 
 export interface SolveCompletion extends Schema.Schema.Type<
   typeof SolveCompletion
+> {}
+
+export const LunarDiskLimbCompletion = Schema.Struct({
+  attemptId: AttemptId,
+  sourceFrameAssetId: AssetId,
+  capturedAtEpochMs: NonNegativeInt,
+  detectorId: Schema.NonEmptyString,
+  detectorVersion: Schema.NonEmptyString,
+  desiredCenter: CelestialCoordinate,
+  measuredCenter: CelestialCoordinate,
+  correction: PointingVector,
+  uncertaintyArcsec: NonNegativeNumber,
+})
+
+export interface LunarDiskLimbCompletion extends Schema.Schema.Type<
+  typeof LunarDiskLimbCompletion
 > {}
 
 export type SolveCompletionDecision = Data.TaggedEnum<{
@@ -377,6 +413,72 @@ export const recordSolveCompletion = (
         proposal,
       })
     },
+  })
+}
+
+export const recordTargetSlewAcknowledgement = (
+  session: AcquireSession,
+  input: {
+    readonly attemptId: typeof AttemptId.Type
+    readonly acquisitionMethod: 'deepSkyPlateSolve' | 'lunarDiskLimb'
+    readonly acknowledgedAtEpochMs: number
+    readonly acknowledgementRef: string
+  },
+): AcquireSession =>
+  AcquireSession.make({
+    ...session,
+    revision: AcquireRevision.make(session.revision + 1),
+    evidence: [
+      ...session.evidence,
+      AcquireEvidence.cases.TargetSlewAcknowledged.make({
+        attemptId: input.attemptId,
+        acquisitionMethod: input.acquisitionMethod,
+        acknowledgedAtEpochMs: NonNegativeInt.make(input.acknowledgedAtEpochMs),
+        acknowledgementRef: input.acknowledgementRef,
+      }),
+    ],
+  })
+
+export const recordLunarDiskLimbCompletion = (
+  session: AcquireSession,
+  completion: LunarDiskLimbCompletion,
+): SolveCompletionDecision => {
+  const activeWork = session.activeWork
+  if (!AcquireActiveWork.guards.SolveRequested(activeWork))
+    return SolveCompletionDecision.Rejected({ reason: 'SolveNotExpected' })
+  if (activeWork.attemptId !== completion.attemptId)
+    return SolveCompletionDecision.Rejected({ reason: 'AttemptMismatch' })
+  const series = session.solveSeries.find(
+    ({ seriesId }) => seriesId === activeWork.seriesId,
+  )
+  if (series === undefined)
+    return SolveCompletionDecision.Rejected({ reason: 'SeriesUnavailable' })
+  const evidence =
+    AcquireEvidence.cases.LunarDiskLimbMeasurement.make(completion)
+  const recorded = {
+    ...session,
+    solveSeries: session.solveSeries.map((candidate) =>
+      candidate.seriesId === series.seriesId
+        ? {
+            ...candidate,
+            completedAttemptIds: [
+              ...candidate.completedAttemptIds,
+              completion.attemptId,
+            ],
+          }
+        : candidate,
+    ),
+    evidence: [...session.evidence, evidence],
+  }
+  const magnitudeArcsec = pointingMagnitude(completion.correction)
+  if (magnitudeArcsec <= session.policy.centeringToleranceArcsec)
+    return SolveCompletionDecision.Centered({
+      session: advanceEvidenceSession(recorded, 'completed', null, null),
+      solveAttemptId: completion.attemptId,
+    })
+  return SolveCompletionDecision.Paused({
+    session: advanceEvidenceSession(recorded, 'paused', null, null),
+    reason: 'CorrectionOutsideSafetyBound',
   })
 }
 
@@ -826,6 +928,7 @@ export const skipPausedAcquireTarget = (
 
 function validateAcquireSession(session: {
   readonly mode: 'pointing' | 'polar'
+  readonly acquisitionMethod?: 'deepSkyPlateSolve' | 'lunarDiskLimb'
   readonly phase:
     | 'solving'
     | 'correcting'
@@ -948,10 +1051,14 @@ function validateAcquireSession(session: {
   }
   const evidenceIds = session.evidence.map((evidence) =>
     AcquireEvidence.match(evidence, {
-      SolveAttempt: ({ attemptId }) => attemptId,
-      CorrectionAccepted: ({ correctionAttemptId }) => correctionAttemptId,
-      CorrectionRejected: ({ correctionAttemptId }) => correctionAttemptId,
-      PolarMeasurement: ({ attemptId }) => attemptId,
+      TargetSlewAcknowledged: ({ attemptId }) => `slew:${attemptId}`,
+      SolveAttempt: ({ attemptId }) => `solve:${attemptId}`,
+      CorrectionAccepted: ({ correctionAttemptId }) =>
+        `correction:${correctionAttemptId}`,
+      CorrectionRejected: ({ correctionAttemptId }) =>
+        `correction:${correctionAttemptId}`,
+      PolarMeasurement: ({ attemptId }) => `polar:${attemptId}`,
+      LunarDiskLimbMeasurement: ({ attemptId }) => `lunar:${attemptId}`,
     }),
   )
   if (new Set(evidenceIds).size !== evidenceIds.length) {
@@ -959,6 +1066,9 @@ function validateAcquireSession(session: {
   }
   const solveEvidence = session.evidence.filter(
     AcquireEvidence.guards.SolveAttempt,
+  )
+  const lunarEvidence = session.evidence.filter(
+    AcquireEvidence.guards.LunarDiskLimbMeasurement,
   )
   const correctionEvidence = session.evidence.filter(
     (evidence) =>
@@ -972,20 +1082,25 @@ function validateAcquireSession(session: {
     AcquireEvidence.guards.PolarMeasurement,
   )
   const seriesMismatch = session.solveSeries.some((series) => {
-    const recordedIds = solveEvidence
-      .filter((evidence) => evidence.seriesId === series.seriesId)
-      .map(({ attemptId }) => attemptId)
+    const recordedIds =
+      session.acquisitionMethod === 'lunarDiskLimb'
+        ? lunarEvidence.map(({ attemptId }) => attemptId)
+        : solveEvidence
+            .filter((evidence) => evidence.seriesId === series.seriesId)
+            .map(({ attemptId }) => attemptId)
     return (
       recordedIds.length !== series.completedAttemptIds.length ||
       recordedIds.some(
         (attemptId, index) => attemptId !== series.completedAttemptIds[index],
       ) ||
-      solveEvidence.some(
-        (evidence) =>
-          evidence.seriesId === series.seriesId &&
-          evidence.verificationOfCorrectionAttemptId !==
-            series.verificationOfCorrectionAttemptId,
-      )
+      (session.acquisitionMethod === 'lunarDiskLimb'
+        ? false
+        : solveEvidence.some(
+            (evidence) =>
+              evidence.seriesId === series.seriesId &&
+              evidence.verificationOfCorrectionAttemptId !==
+                series.verificationOfCorrectionAttemptId,
+          ))
     )
   })
   if (
@@ -1052,7 +1167,9 @@ function validateAcquireSession(session: {
         activeSeries.completedAttemptIds.length + 1 ||
       activeWork.verificationOfCorrectionAttemptId !==
         activeSeries.verificationOfCorrectionAttemptId ||
-      evidenceIds.includes(activeWork.attemptId)
+      evidenceIds.includes(
+        `${session.acquisitionMethod === 'lunarDiskLimb' ? 'lunar' : 'solve'}:${activeWork.attemptId}`,
+      )
     ) {
       return {
         path: ['activeWork'],
@@ -1074,7 +1191,7 @@ function validateAcquireSession(session: {
           basedOnSolve.result.correction,
           activeWork.correction,
         )) ||
-      evidenceIds.includes(activeWork.correctionAttemptId)
+      evidenceIds.includes(`correction:${activeWork.correctionAttemptId}`)
     ) {
       return {
         path: ['activeWork'],

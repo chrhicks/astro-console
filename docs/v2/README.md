@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **Phases 0, 0.5, 1, 2, and the Phase 3 preflight and guided polar-alignment children complete; target acquisition is next**
+Status: **Phases 0, 0.5, 1, 2, and the Phase 3 preflight, guided polar-alignment, and target-acquisition children complete; pointing-correction verification is next**
 
 This directory is organized to keep normal working context small. Do not read
 the entire V2 tree by default.

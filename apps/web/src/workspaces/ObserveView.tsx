@@ -18,6 +18,7 @@ export function ObserveView({
   submit,
   refreshPreflight,
   polarCommand,
+  targetAcquisitionCommand,
 }: {
   view: View
   submit?: (
@@ -29,6 +30,7 @@ export function ObserveView({
     action: 'capture' | 'accept',
     attemptId?: string,
   ) => Promise<void>
+  targetAcquisitionCommand?: () => Promise<void>
 }) {
   const [result, setResult] = useState<{
     readonly runId: string
@@ -40,6 +42,7 @@ export function ObserveView({
   const operationId = useRef(0)
   const current = view.source
   const polarAlignment = current?.acquire?.mode === 'polar'
+  const targetAcquisition = current?.acquire?.acquisitionMethod
   const currentRef = useRef(current)
   currentRef.current = current
   useEffect(() => {
@@ -179,6 +182,25 @@ export function ObserveView({
       },
     )
   }
+  const acquireTarget = () => {
+    if (
+      targetAcquisitionCommand === undefined ||
+      current?.acquire === undefined
+    )
+      return
+    setPending(true)
+    void targetAcquisitionCommand().then(
+      () => setPending(false),
+      () => {
+        setPending(false)
+        setResult({
+          runId: current.runId,
+          revision: current.revision,
+          message: 'The target acquisition command could not be completed.',
+        })
+      },
+    )
+  }
   return (
     <div className="workspace observe-workspace">
       <header className="workspace-heading">
@@ -187,9 +209,11 @@ export function ObserveView({
             {view.detailAvailable
               ? polarAlignment
                 ? 'Current polar alignment evidence'
-                : view.source?.executor === 'fixture'
-                  ? 'Current fixture lifecycle evidence'
-                  : 'Current fake lifecycle evidence'
+                : targetAcquisition !== undefined
+                  ? 'Current target acquisition evidence'
+                  : view.source?.executor === 'fixture'
+                    ? 'Current fixture lifecycle evidence'
+                    : 'Current fake lifecycle evidence'
               : 'Detailed evidence unavailable'}
           </span>
           <h1 tabIndex={-1}>{view.target}</h1>
@@ -214,6 +238,14 @@ export function ObserveView({
             polarCommand={polarCommand}
             pending={pending}
             polar={polar}
+          />
+        )}
+        {current !== undefined && targetAcquisition !== undefined && (
+          <TargetAcquisition
+            current={current}
+            pending={pending}
+            targetAcquisitionCommand={targetAcquisitionCommand}
+            acquireTarget={acquireTarget}
           />
         )}
         {current?.phase === 'preflight' && (
@@ -337,6 +369,45 @@ function PolarAlignment({
               : 'Capture polar measurement'}
           </button>
         )}
+    </section>
+  )
+}
+
+function TargetAcquisition({
+  current,
+  pending,
+  targetAcquisitionCommand,
+  acquireTarget,
+}: {
+  current: NonNullable<View['source']>
+  pending: boolean
+  targetAcquisitionCommand: Parameters<
+    typeof ObserveView
+  >[0]['targetAcquisitionCommand']
+  acquireTarget: () => void
+}) {
+  const acquire = current.acquire
+  if (acquire?.acquisitionMethod === undefined) return null
+  const lunar = acquire.acquisitionMethod === 'lunarDiskLimb'
+  const evidence = acquire.latestEvidence
+  return (
+    <section className="preflight-checklist" aria-label="Target acquisition">
+      <span>Target acquisition</span>
+      <h2>{lunar ? 'Lunar disk and limb' : 'Deep-sky plate solve'}</h2>
+      <p>
+        {evidence?._tag === 'LunarDiskLimbMeasurement'
+          ? `Lunar center error ${evidence.magnitudeArcsec.toFixed(1)} arcsec.`
+          : evidence?._tag === 'Solved'
+            ? `Plate-solve center error ${evidence.magnitudeArcsec.toFixed(1)} arcsec.`
+            : lunar
+              ? 'Measure the lunar disk and limb from a fresh frame. Star solving is not used.'
+              : 'Capture and plate-solve a fresh deep-sky frame.'}
+      </p>
+      {targetAcquisitionCommand !== undefined && acquire.actions.length > 0 && (
+        <button onClick={acquireTarget} disabled={pending}>
+          {lunar ? 'Capture lunar measurement' : 'Capture and plate solve'}
+        </button>
+      )}
     </section>
   )
 }

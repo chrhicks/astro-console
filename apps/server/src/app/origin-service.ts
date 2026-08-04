@@ -83,6 +83,7 @@ import { alpacaPreflightProvider } from '../providers/alpaca-preflight-provider.
 import {
   acquireSqliteRepository,
   polarSession,
+  targetAcquisitionSession,
 } from '../persistence/acquire-sqlite-repository.ts'
 import {
   AcquirePersistence,
@@ -92,8 +93,15 @@ import {
   type PolarMeasurementProviderShape,
 } from '../services/polar-service.ts'
 import {
+  executeTargetAcquisitionCommand,
+  TargetAcquisitionProvider,
+  type TargetAcquisitionCommandResult,
+  type TargetAcquisitionProviderShape,
+} from '../services/target-acquisition-service.ts'
+import {
   AcquireCommandRequest,
   AcquireCommandResponse,
+  AcquireIntent,
 } from '@astro-console/v2-contracts'
 export type DownloadGrantConfig = {
   readonly issuer: DownloadGrantIssuer
@@ -110,10 +118,17 @@ export function createLocalWebService(
   downloadGrants?: DownloadGrantConfig,
   options: {
     readonly fixture?:
-      'm27' | 'preflight' | 'plan-draft' | 'library-published' | 'polar'
+      | 'm27'
+      | 'preflight'
+      | 'plan-draft'
+      | 'library-published'
+      | 'polar'
+      | 'target-deep-sky'
+      | 'target-lunar'
     readonly webDistPath?: string
     readonly preflightProvider?: ReadOnlyPreflightProviderShape
     readonly polarMeasurementProvider?: PolarMeasurementProviderShape
+    readonly targetAcquisitionProvider?: TargetAcquisitionProviderShape
   } = {},
 ) {
   const database = openOriginDatabase(databasePath)
@@ -177,6 +192,48 @@ export function createLocalWebService(
     stateRepository.commit({ run })
     acquireRepository.install(polarSession(run.id))
   }
+  if (
+    options.fixture === 'target-deep-sky' ||
+    options.fixture === 'target-lunar'
+  ) {
+    const acquisitionMethod =
+      options.fixture === 'target-deep-sky'
+        ? 'deepSkyPlateSolve'
+        : 'lunarDiskLimb'
+    const run = {
+      id: `run-${acquisitionMethod}-fixture`,
+      revision: 1,
+      phase: 'acquire' as const,
+      target:
+        acquisitionMethod === 'deepSkyPlateSolve'
+          ? 'M27 Dumbbell Nebula'
+          : 'Moon',
+      progress: 0,
+      sourceDefinitionId: 'run-definition-m27-fixture',
+      activeSequenceIndex: 0,
+      completedSequenceCount: 0,
+      resumablePhase: 'acquire' as const,
+      preflight: {
+        observedAt: '2026-08-04T00:00:00.000Z',
+        verdict: 'unavailable' as const,
+        nextAction:
+          'Target fixture records deterministic acquisition evidence only.',
+        checks: [
+          {
+            key: 'fixture-preflight',
+            state: 'unavailable' as const,
+            observedAt: '2026-08-04T00:00:00.000Z',
+            reason:
+              'No live device or physical capture is part of this target fixture.',
+          },
+        ],
+      },
+    }
+    stateRepository.commit({ run })
+    acquireRepository.install(
+      targetAcquisitionSession(run.id, acquisitionMethod),
+    )
+  }
   const webHost = Effect.runSync(
     WebHost.pipe(
       Effect.provide(webHostLayer(options.webDistPath ?? '../web/dist')),
@@ -200,6 +257,11 @@ export function createLocalWebService(
   let closed = false
   const publish = (type: string, cursor: number) =>
     Effect.runSync(projectionPublication.publish(type, cursor))
+  const targetAcquisitionProvider =
+    options.targetAcquisitionProvider ??
+    (options.fixture === 'target-deep-sky' || options.fixture === 'target-lunar'
+      ? deterministicTargetAcquisitionProvider
+      : undefined)
 
   const handler = createOriginRouter({
     identityResolver,
@@ -412,7 +474,12 @@ export function createLocalWebService(
           )
       }
       const program = Effect.succeed(raw).pipe(
-        Effect.flatMap(executePolarCommand),
+        Effect.flatMap((input) =>
+          decoded !== undefined &&
+          AcquireIntent.guards.CaptureTargetAcquisitionEvidence(decoded.intent)
+            ? executeTargetAcquisitionCommand(input)
+            : executePolarCommand(input),
+        ),
         Effect.provideService(
           AcquirePersistence,
           AcquirePersistence.of({
@@ -426,18 +493,31 @@ export function createLocalWebService(
           }),
         ),
       )
-      const result: PolarCommandResult = await Effect.runPromise(
-        options.polarMeasurementProvider === undefined
-          ? program
-          : program.pipe(
-              Effect.provideService(
-                PolarMeasurementProvider,
-                options.polarMeasurementProvider,
-              ),
-            ),
-      )
+      const result: PolarCommandResult | TargetAcquisitionCommandResult =
+        await Effect.runPromise(
+          program.pipe(
+            (effect) =>
+              options.polarMeasurementProvider === undefined
+                ? effect
+                : effect.pipe(
+                    Effect.provideService(
+                      PolarMeasurementProvider,
+                      options.polarMeasurementProvider,
+                    ),
+                  ),
+            (effect) =>
+              targetAcquisitionProvider === undefined
+                ? effect
+                : effect.pipe(
+                    Effect.provideService(
+                      TargetAcquisitionProvider,
+                      targetAcquisitionProvider,
+                    ),
+                  ),
+          ),
+        )
       if ('cursor' in result) {
-        publish('PolarEvidenceUpdated', result.cursor)
+        publish('AcquireEvidenceUpdated', result.cursor)
         const resultBody = AcquireCommandResponse.cases.Accepted.make({
           snapshot: Effect.runSync(stateRepository.bootstrapSnapshot(identity)),
         })
@@ -555,14 +635,80 @@ export function createLocalWebService(
   }
 }
 
+const deterministicTargetAcquisitionProvider: TargetAcquisitionProviderShape = {
+  capture: (method) =>
+    Effect.succeed({
+      _tag: 'Captured' as const,
+      slewAcknowledgement: {
+        acknowledgedAtEpochMs: 1_722_729_600_000,
+        acknowledgementRef: `fixture-${method}-slew-acknowledged`,
+      },
+      evidence:
+        method === 'deepSkyPlateSolve'
+          ? {
+              sourceFrameAssetId: 'fixture-deep-sky-solve-frame',
+              capturedAtEpochMs: 1_722_729_600_100,
+              solverId: 'fixture-plate-solver',
+              solverVersion: '1.0.0',
+              result: {
+                _tag: 'Solved',
+                desiredCenter: {
+                  rightAscensionDegrees: 299.901,
+                  declinationDegrees: 22.721,
+                },
+                solvedCenter: {
+                  rightAscensionDegrees: 299.901,
+                  declinationDegrees: 22.721,
+                },
+                correction: {
+                  rightAscensionArcsec: 0,
+                  declinationArcsec: 0,
+                  convention: 'mountRaDec',
+                },
+                uncertaintyArcsec: 4,
+              },
+            }
+          : {
+              sourceFrameAssetId: 'fixture-lunar-disk-frame',
+              capturedAtEpochMs: 1_722_729_600_100,
+              detectorId: 'fixture-lunar-disk-limb',
+              detectorVersion: '1.0.0',
+              desiredCenter: {
+                rightAscensionDegrees: 0,
+                declinationDegrees: 0,
+              },
+              measuredCenter: {
+                rightAscensionDegrees: 0,
+                declinationDegrees: 0,
+              },
+              correction: {
+                rightAscensionArcsec: 0,
+                declinationArcsec: 0,
+                convention: 'imageAxis',
+              },
+              uncertaintyArcsec: 2,
+            },
+    }),
+}
+
 function matchPolarCommandResult(
-  result: Exclude<PolarCommandResult, { readonly _tag: 'Committed' }>,
+  result: Exclude<
+    PolarCommandResult | TargetAcquisitionCommandResult,
+    { readonly _tag: 'Committed' }
+  >,
   response: ServerResponse,
   stateRepository: StateSqliteRepositoryShape,
   identity: LocalIdentity,
 ) {
   return Match.value(result).pipe(
     Match.tag('Rejected', ({ summary }) => {
+      const resultBody = AcquireCommandResponse.cases.Rejected.make({
+        summary,
+        snapshot: Effect.runSync(stateRepository.bootstrapSnapshot(identity)),
+      })
+      return json(response, 409, resultBody)
+    }),
+    Match.tag('Aborted', ({ summary }) => {
       const resultBody = AcquireCommandResponse.cases.Rejected.make({
         summary,
         snapshot: Effect.runSync(stateRepository.bootstrapSnapshot(identity)),

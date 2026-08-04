@@ -117,6 +117,9 @@ export const PlanSnapshot = Schema.Struct({
 export const AcquireSnapshot = Schema.Struct({
   revision: AcquireRevision,
   mode: Schema.Literals(['pointing', 'polar']),
+  acquisitionMethod: Schema.optionalKey(
+    Schema.Literals(['deepSkyPlateSolve', 'lunarDiskLimb']),
+  ),
   phase: Schema.Literals([
     'solving',
     'correcting',
@@ -166,6 +169,15 @@ export const AcquireSnapshot = Schema.Struct({
           Schema.isGreaterThanOrEqualTo(0),
         ),
         withinTolerance: Schema.Boolean,
+      },
+      LunarDiskLimbMeasurement: {
+        attemptId: AttemptId,
+        sourceFrameAssetId: AssetId,
+        correction: PointingVector,
+        magnitudeArcsec: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+        uncertaintyArcsec: Schema.Finite.check(
+          Schema.isGreaterThanOrEqualTo(0),
+        ),
       },
     }),
   ),

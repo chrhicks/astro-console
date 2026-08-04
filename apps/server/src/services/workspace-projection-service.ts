@@ -7,6 +7,8 @@ import {
   AcquireSession,
   AcquireEvidence,
   AcquireActiveWork,
+  PointingSolveResult,
+  AcquireSnapshot,
 } from '@astro-console/v2-contracts'
 import type { Snapshot } from './domain-state.ts'
 import type { LocalIdentity } from '../auth/identity.ts'
@@ -180,27 +182,63 @@ function acquireSnapshot(
   writable: boolean,
 ) {
   const latest = session.evidence.at(-1)
-  const polar =
-    latest === undefined
-      ? undefined
-      : AcquireEvidence.match(latest, {
-          SolveAttempt: () => undefined,
-          CorrectionAccepted: () => undefined,
-          CorrectionRejected: () => undefined,
-          PolarMeasurement: (measurement) => ({
-            _tag: 'PolarMeasurement' as const,
-            attemptId: measurement.attemptId,
-            sourceFrameAssetId: measurement.sourceFrameAssetId,
-            altitudeErrorArcsec: measurement.altitudeErrorArcsec,
-            azimuthErrorArcsec: measurement.azimuthErrorArcsec,
-            totalErrorArcsec: measurement.totalErrorArcsec,
-            uncertaintyArcsec: measurement.uncertaintyArcsec,
-            withinTolerance: measurement.withinTolerance,
-          }),
-        })
+  let latestEvidence: (typeof AcquireSnapshot.Type)['latestEvidence']
+  if (latest !== undefined && AcquireEvidence.guards.SolveAttempt(latest)) {
+    latestEvidence = PointingSolveResult.guards.Solved(latest.result)
+      ? {
+          _tag: 'Solved',
+          attemptId: latest.attemptId,
+          sourceFrameAssetId: latest.sourceFrameAssetId,
+          correction: latest.result.correction,
+          magnitudeArcsec: Math.hypot(
+            latest.result.correction.rightAscensionArcsec,
+            latest.result.correction.declinationArcsec,
+          ),
+          uncertaintyArcsec: latest.result.uncertaintyArcsec,
+        }
+      : {
+          _tag: 'NoSolution',
+          attemptId: latest.attemptId,
+          sourceFrameAssetId: latest.sourceFrameAssetId,
+          category: latest.result.category,
+          diagnosticRef: latest.result.diagnosticRef,
+        }
+  } else if (
+    latest !== undefined &&
+    AcquireEvidence.guards.PolarMeasurement(latest)
+  ) {
+    latestEvidence = {
+      _tag: 'PolarMeasurement',
+      attemptId: latest.attemptId,
+      sourceFrameAssetId: latest.sourceFrameAssetId,
+      altitudeErrorArcsec: latest.altitudeErrorArcsec,
+      azimuthErrorArcsec: latest.azimuthErrorArcsec,
+      totalErrorArcsec: latest.totalErrorArcsec,
+      uncertaintyArcsec: latest.uncertaintyArcsec,
+      withinTolerance: latest.withinTolerance,
+    }
+  } else if (
+    latest !== undefined &&
+    AcquireEvidence.guards.LunarDiskLimbMeasurement(latest)
+  ) {
+    latestEvidence = {
+      _tag: 'LunarDiskLimbMeasurement',
+      attemptId: latest.attemptId,
+      sourceFrameAssetId: latest.sourceFrameAssetId,
+      correction: latest.correction,
+      magnitudeArcsec: Math.hypot(
+        latest.correction.rightAscensionArcsec,
+        latest.correction.declinationArcsec,
+      ),
+      uncertaintyArcsec: latest.uncertaintyArcsec,
+    }
+  }
   return {
     revision: session.revision,
     mode: session.mode,
+    ...(session.acquisitionMethod === undefined
+      ? {}
+      : { acquisitionMethod: session.acquisitionMethod }),
     phase: session.phase,
     recoverySeries: 0,
     attemptCount: session.evidence.length,
@@ -213,15 +251,24 @@ function acquireSnapshot(
             activeAttemptId: attemptId,
           }),
         })),
-    ...(polar === undefined ? {} : { latestEvidence: polar }),
+    ...(latestEvidence === undefined ? {} : { latestEvidence }),
     ...(session.phase === 'polarGuidance'
       ? {
           attention:
-            polar === undefined
+            latestEvidence === undefined
               ? 'Capture a solved polar measurement.'
-              : polar.withinTolerance
+              : AcquireEvidence.guards.PolarMeasurement(latestEvidence) &&
+                  latestEvidence.withinTolerance
                 ? 'Accept the current in-tolerance measurement.'
                 : 'Adjust Alt/Az manually, then capture a new measurement.',
+        }
+      : {}),
+    ...(session.acquisitionMethod !== undefined && session.phase === 'solving'
+      ? {
+          attention:
+            session.acquisitionMethod === 'deepSkyPlateSolve'
+              ? 'Capture and plate-solve a fresh target frame.'
+              : 'Capture a fresh lunar frame and measure its disk and limb.',
         }
       : {}),
     actions:
@@ -230,12 +277,21 @@ function acquireSnapshot(
             {
               _tag: 'Available' as const,
               action:
-                polar === undefined
+                latestEvidence === undefined
                   ? ('CapturePolarAlignmentMeasurement' as const)
                   : ('AcceptPolarAlignmentEvidence' as const),
             },
           ]
-        : [],
+        : writable &&
+            session.acquisitionMethod !== undefined &&
+            session.phase === 'solving'
+          ? [
+              {
+                _tag: 'Available' as const,
+                action: 'CaptureTargetAcquisitionEvidence' as const,
+              },
+            ]
+          : [],
   }
 }
 

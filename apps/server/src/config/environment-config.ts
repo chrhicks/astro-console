@@ -42,7 +42,13 @@ export type OriginServerConfig = {
         readonly cacheTtlMs: number
       }
   readonly fixture:
-    'm27' | 'polar' | 'plan-draft' | 'library-published' | undefined
+    | 'm27'
+    | 'polar'
+    | 'target-deep-sky'
+    | 'target-lunar'
+    | 'plan-draft'
+    | 'library-published'
+    | undefined
   readonly downloadGrant:
     { readonly url: string; readonly secretPath: string } | undefined
   readonly preflightProvider: PreflightProviderConfig | undefined
@@ -103,11 +109,13 @@ export const originServerConfig = Config.all({
         Option.isSome(input.fixture) &&
         input.fixture.value !== 'm27' &&
         input.fixture.value !== 'polar' &&
+        input.fixture.value !== 'target-deep-sky' &&
+        input.fixture.value !== 'target-lunar' &&
         input.fixture.value !== 'plan-draft' &&
         input.fixture.value !== 'library-published'
       )
         return configFailure(
-          'ASTRO_SERVER_FIXTURE must be m27, polar, plan-draft, or library-published when set',
+          'ASTRO_SERVER_FIXTURE must be m27, polar, target-deep-sky, target-lunar, plan-draft, or library-published when set',
         )
       if (
         Option.isNone(input.downloadGrantUrl) &&
@@ -159,6 +167,8 @@ function originServer(input: {
       Option.isSome(input.fixture) &&
       (input.fixture.value === 'm27' ||
         input.fixture.value === 'polar' ||
+        input.fixture.value === 'target-deep-sky' ||
+        input.fixture.value === 'target-lunar' ||
         input.fixture.value === 'plan-draft' ||
         input.fixture.value === 'library-published')
         ? input.fixture.value

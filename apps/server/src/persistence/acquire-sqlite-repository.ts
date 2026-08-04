@@ -1,8 +1,12 @@
 import { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
 import {
+  AcquireActiveWork,
   AcquireRevision,
   AcquireSession,
+  AttemptId,
+  PositiveInt,
+  RecoverySeriesId,
   RunId,
 } from '@astro-console/v2-contracts'
 
@@ -36,6 +40,58 @@ export const polarSession = (runId: string) =>
     latestPolarMeasurementAttemptId: null,
     acceptedPolarMeasurementAttemptId: null,
   })
+
+export const targetAcquisitionSession = (
+  runId: string,
+  acquisitionMethod: 'deepSkyPlateSolve' | 'lunarDiskLimb',
+) => {
+  const attemptId = AttemptId.make(`${acquisitionMethod}-initial-1`)
+  const seriesId = RecoverySeriesId.make(`${acquisitionMethod}-initial`)
+  return AcquireSession.make({
+    runId: RunId.make(runId),
+    revision: AcquireRevision.make(0),
+    mode: 'pointing',
+    acquisitionMethod,
+    phase: 'solving',
+    policy: {
+      centeringToleranceArcsec: 30,
+      automaticCorrectionLimitArcsec: 60,
+      hardCorrectionLimitArcsec: 180,
+      maxSolveAttemptsPerSeries: 2,
+      maxCorrectionAttempts: 2,
+      maxRecoverySeries: 1,
+      polarToleranceArcsec: 60,
+    },
+    solveSeries: [
+      {
+        seriesId,
+        purpose: 'initial',
+        parameters: {
+          exposureSeconds: 5,
+          binning: 1,
+          solverProfile:
+            acquisitionMethod === 'deepSkyPlateSolve'
+              ? 'deep-sky-plate-solve'
+              : 'lunar-disk-limb',
+        },
+        maxAttempts: PositiveInt.make(2),
+        verificationOfCorrectionAttemptId: null,
+        completedAttemptIds: [],
+      },
+    ],
+    evidence: [],
+    activeWork: AcquireActiveWork.cases.SolveRequested.make({
+      attemptId,
+      seriesId,
+      attemptNumber: PositiveInt.make(1),
+      purpose: 'initial',
+      verificationOfCorrectionAttemptId: null,
+    }),
+    pendingCorrectionProposal: null,
+    latestPolarMeasurementAttemptId: null,
+    acceptedPolarMeasurementAttemptId: null,
+  })
+}
 
 export const acquireSqliteRepository = (database: DatabaseSync) => ({
   current: (runId: string) => {

@@ -87,6 +87,10 @@ export const commandPolicies = {
   SkipAcquireTarget: { authority: 'controller', requiresDesktop: true },
   ApprovePointingCorrection: { authority: 'controller', requiresDesktop: true },
   RevisePointingCorrection: { authority: 'controller', requiresDesktop: true },
+  CaptureTargetAcquisitionEvidence: {
+    authority: 'controller',
+    requiresDesktop: true,
+  },
   CapturePolarAlignmentMeasurement: {
     authority: 'controller',
     requiresDesktop: true,

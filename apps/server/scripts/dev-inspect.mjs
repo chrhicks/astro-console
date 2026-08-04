@@ -18,9 +18,18 @@ const scenario =
   process.argv
     .find((argument) => argument.startsWith('--scenario='))
     ?.slice('--scenario='.length) ?? 'm27'
-if (!['m27', 'polar', 'plan-draft', 'library-published'].includes(scenario))
+if (
+  ![
+    'm27',
+    'polar',
+    'target-deep-sky',
+    'target-lunar',
+    'plan-draft',
+    'library-published',
+  ].includes(scenario)
+)
   throw new Error(
-    '--scenario must be m27, polar, plan-draft, or library-published',
+    '--scenario must be m27, polar, target-deep-sky, target-lunar, plan-draft, or library-published',
   )
 const scenarioSuffix = scenario === 'm27' ? '' : `-${scenario}`
 const profile = resolve(
@@ -73,7 +82,7 @@ function startWeb() {
   if (web) return
   web = spawn(
     process.execPath,
-    ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1'],
+    ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--force'],
     {
       cwd: resolve(appRoot, '../web'),
       env: {

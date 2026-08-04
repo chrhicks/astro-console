@@ -220,6 +220,98 @@ test('Alpaca preflight adapter emits only GET reads and derives a blocked mount 
   )
 })
 
+test('target fixtures keep provisional slew acknowledgement separate from deep-sky and lunar image evidence', async (t) => {
+  for (const fixture of ['target-deep-sky', 'target-lunar'] as const) {
+    const service = createLocalWebService(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        fixture,
+      },
+    )
+    const listener = await service.listen()
+    const base = `http://127.0.0.1:${listener.port}`
+    const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+    if (
+      snapshot.activeRun._tag !== 'Active' ||
+      snapshot.observe?.acquire === undefined
+    )
+      throw new Error('Target fixture is unavailable')
+    const response = await submitPolar(base, {
+      _tag: 'CaptureTargetAcquisitionEvidence',
+      expectedLeaseRevision: snapshot.control.revision,
+      expectedRunRevision: snapshot.activeRun.run.revision,
+      expectedAcquireRevision: snapshot.observe.acquire.revision,
+      idempotencyKey: `target-${fixture}`,
+    })
+    assert.equal(response.response.status, 200)
+    const recorded = await bootstrapSnapshot(`${base}/api/snapshot`)
+    assert.equal(recorded.observe?.acquire?.phase, 'completed')
+    assert.equal(
+      recorded.observe?.acquire?.latestEvidence?._tag,
+      fixture === 'target-deep-sky' ? 'Solved' : 'LunarDiskLimbMeasurement',
+    )
+    const session = Schema.decodeUnknownSync(
+      Schema.Struct({ session: Schema.String }),
+    )(service.database.prepare('SELECT session FROM acquire_sessions').get())
+    assert.match(session.session, /TargetSlewAcknowledged/)
+    await listener.close()
+    service.close()
+  }
+  t.after(() => undefined)
+})
+
+test('lunar target acquisition publishes image evidence and survives restart', async () => {
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-target-lunar-')),
+    'state.sqlite',
+  )
+  let service = createLocalWebService(
+    databasePath,
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'target-lunar' },
+  )
+  let listener = await service.listen()
+  let base = `http://127.0.0.1:${listener.port}`
+  const stream = await fetch(`${base}/api/events`)
+  const reader = stream.body?.getReader()
+  await reader?.read()
+  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (
+    snapshot.activeRun._tag !== 'Active' ||
+    snapshot.observe?.acquire === undefined
+  )
+    throw new Error('Lunar target fixture is unavailable')
+  const response = await submitPolar(base, {
+    _tag: 'CaptureTargetAcquisitionEvidence',
+    expectedLeaseRevision: snapshot.control.revision,
+    expectedRunRevision: snapshot.activeRun.run.revision,
+    expectedAcquireRevision: snapshot.observe.acquire.revision,
+    idempotencyKey: 'target-lunar-restart',
+  })
+  assert.equal(response.response.status, 200)
+  assert.match(await nextEvent(reader), /LunarDiskLimbMeasurement/)
+  await reader?.cancel()
+  await listener.close()
+  service.close()
+
+  service = createLocalWebService(databasePath)
+  listener = await service.listen()
+  base = `http://127.0.0.1:${listener.port}`
+  const restarted = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(restarted.observe?.acquire?.phase, 'completed')
+  assert.equal(
+    restarted.observe?.acquire?.latestEvidence?._tag,
+    'LunarDiskLimbMeasurement',
+  )
+  await listener.close()
+  service.close()
+})
+
 test('read-only preflight persists configured provider facts, survives restart, and publishes SSE without work', async (t) => {
   const databasePath = join(
     mkdtempSync(join(tmpdir(), 'astro-preflight-')),

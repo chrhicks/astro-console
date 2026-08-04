@@ -10,6 +10,15 @@ latest in-tolerance evidence. It issues no motor command and makes no
 real-hardware claim. Contracts pass 184/184, server 60/60, web 60/60, and the
 Designer re-review passes at wide, compact, and 390 px.
 
+The target-acquisition child is complete as deterministic server-backed
+behavior. The pinned method is either deep-sky plate solve or lunar disk/limb;
+the lunar path never falls back to star solving. Both paths persist a driver
+slew acknowledgement as provisional before they persist fresh image evidence.
+Deep sky records a plate solve; lunar records disk/limb geometry. The Observe
+panel makes this distinction clear, and phone remains read-only. The proof
+covers durable SQLite state, typed HTTP command, idempotency, SSE, and restart.
+It does not claim a real provider call, mount movement, or physical image.
+
 ## Completed Phase 2.5: Server Boundary Extraction
 
 Phase 2.5 is authorized before Phase 3. It is an internal cleanup only: no

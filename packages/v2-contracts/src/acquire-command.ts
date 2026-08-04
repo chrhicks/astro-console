@@ -9,6 +9,12 @@ import {
 } from './primitives.js'
 
 export const AcquireIntent = Schema.TaggedUnion({
+  CaptureTargetAcquisitionEvidence: {
+    expectedLeaseRevision: LeaseRevision,
+    expectedRunRevision: RunRevision,
+    expectedAcquireRevision: AcquireRevision,
+    idempotencyKey: IdempotencyKey,
+  },
   CapturePolarAlignmentMeasurement: {
     expectedLeaseRevision: LeaseRevision,
     expectedRunRevision: RunRevision,
