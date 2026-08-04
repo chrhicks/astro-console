@@ -42,20 +42,11 @@ compact, and 390 px. It does not prove a provider, device, or physical capture.
 
 ## Next Action
 
-Phase 4 Library and Frame Review planning is recorded in
-[the Phase 4 plan](phase-4-planning.md), including Continuum Epic
-`tkt-jnzkma5n`. Its capture-to-asset, inspection, and durable-review contract
-boundary is accepted. Immutable deterministic captured frames now materialize
-into Library with checksum, lineage, receipts, restart, HTTP, and SSE proof.
-Inspection now records deterministic preview facts, quality metrics, rationale,
-provenance, and unavailable/failed truth separately from originals. The next
-task adds compact Observe live-frame review. Library now provides durable
-owner-only review decisions, browser-transient comparison, and read-only phone
-protection with functional and Designer evidence. Observe now projects the
-current Library-backed frame in a compact card. Plan the separately authorized
-Phase 5 Process Workspace work. Do not extend the Phase 3
-fixtures into provider or hardware behavior without a new authorized boundary
-and proof plan.
+Phase 5 Process Workspace planning is recorded in
+[the Phase 5 plan](phase-5-planning.md), including Continuum Epic
+`tkt-wpkbh9tz`. It is prepared, not authorized for implementation. Do not
+extend deterministic adapters into real external processing tools, provider,
+or hardware behavior without a new approved boundary and proof plan.
 
 ## Historical Record
 

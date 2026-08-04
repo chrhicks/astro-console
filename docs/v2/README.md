@@ -15,8 +15,8 @@ Read these in order when starting or resuming V2 work:
    deferred boundaries.
 3. [V2 delivery plan](current/delivery-plan.md) — durable end-to-end V2.0
    scope and phase exit criteria.
-4. [Phase 4 planning](current/phase-4-planning.md) — accepted delivery order
-   and contract boundary.
+4. [Phase 5 planning](current/phase-5-planning.md) — prepared delivery order
+   and Process proof boundary.
 
 That is the complete default context. Load another document only when the task
 requires its specific detail.

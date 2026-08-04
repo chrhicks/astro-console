@@ -193,6 +193,9 @@ the closeout evidence and remaining proof boundary are in the
 
 ## Phase 5: Process Workspace
 
+Implementation is prepared under Continuum Epic `tkt-wpkbh9tz`; see the
+[Phase 5 plan](phase-5-planning.md). It remains pending owner approval.
+
 ### Outcomes
 
 - Start a service-owned processing session from saved FITS inputs.
