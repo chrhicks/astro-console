@@ -6,7 +6,7 @@ import {
   PlanWorkspaceProjection,
   type ObserveIntent,
 } from '@astro-console/v2-contracts'
-import type { LocalIdentity } from './identity.ts'
+import type { LocalIdentity } from '../auth/identity.ts'
 import {
   resumableRunPhase,
   type AcceptRunDefinitionResult,
@@ -16,8 +16,11 @@ import {
   type Run,
   type RunDefinition,
   type SavePlanDraftResult,
-} from './domain-state.ts'
-import { evaluatePlan, planWorkspaceProjection } from './runtime-bootstrap.ts'
+} from '../services/domain-state.ts'
+import {
+  evaluatePlan,
+  planWorkspaceProjection,
+} from '../services/runtime-bootstrap.ts'
 import type { StateSqliteRepositoryShape } from './state-sqlite-repository.ts'
 
 type StartRun = Extract<

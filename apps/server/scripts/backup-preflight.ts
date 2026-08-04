@@ -2,7 +2,7 @@ import {
   createSqliteSnapshot,
   restoreDrill,
   verifySqlite,
-} from '../src/sqlite-resilience.ts'
+} from '../src/persistence/sqlite-resilience.ts'
 
 const [command, databasePath, targetPath] = process.argv.slice(2)
 if (

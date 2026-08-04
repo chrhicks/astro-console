@@ -1,4 +1,4 @@
-import type { LocalIdentity } from './identity.ts'
+import type { LocalIdentity } from '../auth/identity.ts'
 
 export type RunPhase =
   | 'preflight'

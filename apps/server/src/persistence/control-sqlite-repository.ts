@@ -13,9 +13,9 @@ import {
   controlPersistenceLayer,
   controlServiceLayer,
   executeControlRequest,
-} from './control-command-service.ts'
-import type { CommandResult, FailureReason } from './domain-state.ts'
-import type { LocalIdentity } from './identity.ts'
+} from '../services/control-command-service.ts'
+import type { CommandResult, FailureReason } from '../services/domain-state.ts'
+import type { LocalIdentity } from '../auth/identity.ts'
 import type { StateSqliteRepositoryShape } from './state-sqlite-repository.ts'
 
 const ControlRequestRow = Schema.Struct({

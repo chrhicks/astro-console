@@ -108,7 +108,7 @@ the M13 source/output/publication evidence. It is not an origin environment,
 Compose service, HTTP command, browser control, or ongoing processing
 workflow. For a separately authorized evidence run, copy
 `processor.config.example` outside the repository and run the immutable image
-once with `node --experimental-strip-types src/processor-service.ts`.
+once with `node --experimental-strip-types src/workers/processor-service.ts`.
 
 Mount only the canonical state volume at `/var/lib/astro-console`, an
 app-owned `processor-sources` bind read-only at the same path, writable

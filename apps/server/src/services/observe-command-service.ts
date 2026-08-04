@@ -6,7 +6,7 @@ import {
   ObserveCommandResult,
   type BootstrapSnapshot,
 } from '@astro-console/v2-contracts'
-import type { LocalIdentity } from './identity.ts'
+import type { LocalIdentity } from '../auth/identity.ts'
 
 export class ObserveCommandInputInvalid extends Schema.TaggedErrorClass<ObserveCommandInputInvalid>()(
   'Server.ObserveCommandInputInvalid',

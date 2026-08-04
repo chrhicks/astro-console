@@ -1,10 +1,10 @@
-import { openPublisherDatabase } from './database.ts'
-import type { R2PublisherConfig } from './publisher-config.ts'
-import { createR2Provider } from './r2-provider.ts'
+import { openPublisherDatabase } from '../persistence/database.ts'
+import type { R2PublisherConfig } from '../config/publisher-config.ts'
+import { createR2Provider } from '../storage/r2-provider.ts'
 import { createPublisherWorker } from './publisher-worker.ts'
 import { Effect } from 'effect'
-import { publisherEnvironmentConfig } from './environment-config.ts'
-import { runExecutable } from './executable.ts'
+import { publisherEnvironmentConfig } from '../config/environment-config.ts'
+import { runExecutable } from '../app/executable.ts'
 
 export async function runPublisher(config: R2PublisherConfig) {
   const database = openPublisherDatabase(config.databasePath)
@@ -42,7 +42,7 @@ export function isSqliteBusy(error: unknown) {
   )
 }
 
-if (process.argv[1]?.endsWith('publisher-service.ts'))
+if (process.argv[1]?.endsWith('./publisher-service.ts'))
   runExecutable('publisher', async () =>
     runPublisher(await Effect.runPromise(publisherEnvironmentConfig)),
   )

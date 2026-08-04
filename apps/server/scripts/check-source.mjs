@@ -36,6 +36,12 @@ const assertCurrentServerImportBoundary = () => {
 
 assertCurrentServerImportBoundary()
 
+const serverSource = readFileSync('./src/server.ts', 'utf8')
+if (/^export\s/m.test(serverSource))
+  throw new Error(
+    'src/server.ts must be an executable composition root with no exports',
+  )
+
 for (const source of [...sourceFiles('src'), ...sourceFiles('scripts')]) {
   const result = spawnSync(
     process.execPath,

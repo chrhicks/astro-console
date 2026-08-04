@@ -7,7 +7,7 @@ import type {
   RunDefinition,
 } from './domain-state.ts'
 import { PlanWorkspaceProjection } from '@astro-console/v2-contracts'
-import { seedLibrary } from './library-sqlite-repository.ts'
+import { seedLibrary } from '../persistence/library-sqlite-repository.ts'
 
 const StoredRow = Schema.Struct({ value: Schema.String })
 const LatestCursorRow = Schema.Struct({ cursor: Schema.Int })

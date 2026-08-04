@@ -31,31 +31,39 @@ import {
 } from '@astro-console/v2-contracts'
 import {
   createOriginAdmission,
+  createLocalWebService,
+} from './app/origin-service.ts'
+import {
   createJwksKeyResolver,
   createMembershipBootstrapResolver,
   createProductionAccessAdmission,
-  createLocalWebService,
-} from './server.ts'
-import { DatabasePathNotAppOwned, openAppOwnedDatabase } from './database.ts'
-import { createPublisherWorker } from './publisher-worker.ts'
+} from './auth/access-admission.ts'
+import {
+  DatabasePathNotAppOwned,
+  openAppOwnedDatabase,
+} from './persistence/database.ts'
+import { createPublisherWorker } from './workers/publisher-worker.ts'
 import {
   assertSeparateFilesystems,
   createSqliteSnapshot,
   restoreDrill,
   verifySqlite,
-} from './sqlite-resilience.ts'
-import { createR2Provider } from './r2-provider.ts'
-import { createR2DownloadGrantIssuer } from './r2-download-grant.ts'
-import { createDownloadGrantService } from './download-grant-service.ts'
-import { isSqliteBusy } from './publisher-service.ts'
-import { createProcessorService, runProcessor } from './processor-service.ts'
-import { ingestSourceAsset } from './source-ingest.ts'
+} from './persistence/sqlite-resilience.ts'
+import { createR2Provider } from './storage/r2-provider.ts'
+import { createR2DownloadGrantIssuer } from './storage/r2-download-grant.ts'
+import { createDownloadGrantService } from './workers/download-grant-service.ts'
+import { isSqliteBusy } from './workers/publisher-service.ts'
+import {
+  createProcessorService,
+  runProcessor,
+} from './workers/processor-service.ts'
+import { ingestSourceAsset } from './services/source-ingest.ts'
 import {
   downloadGrantSignerConfig,
   originServerConfig,
   processorEnvironmentConfig,
   publisherEnvironmentConfig,
-} from './environment-config.ts'
+} from './config/environment-config.ts'
 
 function createFixtureService(
   databasePath?: Parameters<typeof createLocalWebService>[0],

@@ -8,9 +8,9 @@ import { Effect, Schema } from 'effect'
 import {
   createR2DownloadGrantIssuer,
   type DownloadGrantIssuer,
-} from './r2-download-grant.ts'
-import { downloadGrantSignerConfig } from './environment-config.ts'
-import { runExecutable } from './executable.ts'
+} from '../storage/r2-download-grant.ts'
+import { downloadGrantSignerConfig } from '../config/environment-config.ts'
+import { runExecutable } from '../app/executable.ts'
 
 const Request = Schema.Struct({
   objectKey: Schema.NonEmptyString,
@@ -67,7 +67,7 @@ export function createDownloadGrantService(
     })()
   })
 }
-if (process.argv[1]?.endsWith('download-grant-service.ts')) {
+if (process.argv[1]?.endsWith('./download-grant-service.ts')) {
   runExecutable('download-grant signer', async () => {
     const config = await Effect.runPromise(downloadGrantSignerConfig)
     const server = createDownloadGrantService(config)

@@ -3,8 +3,11 @@ import { createReadStream, readFileSync } from 'node:fs'
 import { basename } from 'node:path'
 import { Readable } from 'node:stream'
 import { Schema } from 'effect'
-import type { PublisherFile, PublisherProvider } from './publisher-worker.ts'
-import type { R2PublisherConfig } from './publisher-config.ts'
+import type {
+  PublisherFile,
+  PublisherProvider,
+} from '../workers/publisher-worker.ts'
+import type { R2PublisherConfig } from '../config/publisher-config.ts'
 
 const Credentials = Schema.Struct({
   accessKeyId: Schema.NonEmptyString,

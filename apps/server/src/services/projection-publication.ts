@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Context, Effect, Layer } from 'effect'
-import type { LocalIdentity } from './identity.ts'
+import type { LocalIdentity } from '../auth/identity.ts'
 
 export interface ProjectionPublicationShape {
   readonly publish: (type: string, cursor: number) => Effect.Effect<void>

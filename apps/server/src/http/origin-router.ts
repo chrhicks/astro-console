@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { LocalIdentity, RequestAdmission } from './identity.ts'
+import type { LocalIdentity, RequestAdmission } from '../auth/identity.ts'
 
 type RouteResult = void | ServerResponse | Promise<void | ServerResponse>
 

@@ -6,7 +6,7 @@ import {
   PlanWorkspaceProjection,
 } from '@astro-console/v2-contracts'
 import type { Snapshot } from './domain-state.ts'
-import type { LocalIdentity } from './identity.ts'
+import type { LocalIdentity } from '../auth/identity.ts'
 import { planWorkspaceProjection } from './runtime-bootstrap.ts'
 
 const StoredRunDefinition = Schema.Struct({

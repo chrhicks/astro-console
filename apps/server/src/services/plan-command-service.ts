@@ -5,7 +5,7 @@ import {
   PlanIntent,
   type BootstrapSnapshot,
 } from '@astro-console/v2-contracts'
-import type { LocalIdentity } from './identity.ts'
+import type { LocalIdentity } from '../auth/identity.ts'
 
 export class PlanCommandInputInvalid extends Schema.TaggedErrorClass<PlanCommandInputInvalid>()(
   'Server.PlanCommandInputInvalid',

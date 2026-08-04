@@ -1,0 +1,410 @@
+import { Effect, Exit, Schema, Scope } from 'effect'
+import {
+  BootstrapHttpSuccessEnvelope,
+  CommandHttpFailureEnvelope,
+} from '@astro-console/v2-contracts'
+import {
+  cleanupProcessOrphans,
+  saveProcessOutputs,
+  type ProcessSaveStorage,
+} from '../services/process-save.ts'
+import type { DownloadGrantIssuer } from '../storage/r2-download-grant.ts'
+import { configuredDownloadGrantIssuer } from '../config/download-grant-config.ts'
+import {
+  originServerConfig,
+  type OriginServerConfig,
+} from '../config/environment-config.ts'
+import { runExecutable } from './executable.ts'
+import { OriginListener, originListenerLayer } from '../http/origin-listener.ts'
+import { WebHost, webHostLayer } from '../http/web-host.ts'
+import { openOriginDatabase } from '../persistence/database.ts'
+import type { RequestAdmission } from '../auth/identity.ts'
+import {
+  createJwksKeyResolver,
+  createLocalFixtureAdmission,
+  createMembershipBootstrapResolver,
+  createProductionAccessAdmission,
+} from '../auth/access-admission.ts'
+
+export {
+  createJwksKeyResolver,
+  createLocalFixtureAdmission,
+  createMembershipBootstrapResolver,
+  createProductionAccessAdmission,
+  type JwksFetcher,
+  type JwksKeyResolver,
+  type MembershipBootstrapResolver,
+} from '../auth/access-admission.ts'
+import { type Evidence } from '../services/domain-state.ts'
+import {
+  ProjectionPublication,
+  projectionPublicationLayer,
+} from '../services/projection-publication.ts'
+import { controlCommandFromEnvelope } from '../persistence/control-sqlite-repository.ts'
+import { installPublishedLibraryFixture } from '../persistence/library-sqlite-repository.ts'
+import { createOriginRouter } from '../http/origin-router.ts'
+import {
+  initializeRuntimeState,
+  installM27Fixture,
+} from '../services/runtime-bootstrap.ts'
+import {
+  StateSqliteRepository,
+  stateSqliteRepositoryLayer,
+  type StateSqliteRepositoryShape,
+} from '../persistence/state-sqlite-repository.ts'
+import {
+  RunSqliteRepository,
+  runSqliteRepositoryLayer,
+  type RunSqliteRepositoryShape,
+} from '../persistence/run-sqlite-repository.ts'
+import {
+  bootstrapPlanWorkspaceProjection,
+  observeWorkspaceProjection,
+} from '../services/workspace-projection-service.ts'
+import {
+  AdapterObservation,
+  BodyTooLarge,
+  body,
+  commandFailureStatuses,
+  downloadAsset,
+  json,
+  isOwner,
+  libraryDetail,
+  libraryPage,
+  observeCommandFromRequest,
+  observeInvalidResponse,
+  observeServiceResponse,
+  planCommandFromRequest,
+  planInvalidResponse,
+  planServiceResponse,
+  processWorkspace,
+  reject,
+  responseHeaders,
+  unauthenticated,
+  workspace,
+} from '../http/origin-handlers.ts'
+export type DownloadGrantConfig = {
+  readonly issuer: DownloadGrantIssuer
+  readonly now?: () => Date
+}
+export function createLocalWebService(
+  databasePath = ':memory:',
+  identityResolver: RequestAdmission = createLocalFixtureAdmission({
+    personId: 'owner-chicks',
+    clientId: 'desktop-owner',
+    capability: 'controlCapable',
+  }),
+  processSaveStorage?: ProcessSaveStorage,
+  downloadGrants?: DownloadGrantConfig,
+  options: {
+    readonly fixture?: 'm27' | 'plan-draft' | 'library-published'
+    readonly webDistPath?: string
+  } = {},
+) {
+  const database = openOriginDatabase(databasePath)
+  if (options.fixture !== undefined) {
+    installM27Fixture(database, options.fixture !== 'plan-draft')
+    if (options.fixture === 'library-published')
+      installPublishedLibraryFixture(database)
+  } else initializeRuntimeState(database)
+  const stateRepository: StateSqliteRepositoryShape = Effect.runSync(
+    StateSqliteRepository.pipe(
+      Effect.provide(
+        stateSqliteRepositoryLayer(database, {
+          plan: bootstrapPlanWorkspaceProjection,
+          observe: observeWorkspaceProjection,
+        }),
+      ),
+    ),
+  )
+  const runRepository: RunSqliteRepositoryShape = Effect.runSync(
+    RunSqliteRepository.pipe(
+      Effect.provide(
+        runSqliteRepositoryLayer(database, stateRepository, reject),
+      ),
+    ),
+  )
+  const webHost = Effect.runSync(
+    WebHost.pipe(
+      Effect.provide(webHostLayer(options.webDistPath ?? '../web/dist')),
+    ),
+  )
+  const originListener = Effect.runSync(
+    OriginListener.pipe(Effect.provide(originListenerLayer)),
+  )
+  const projectionPublication = Effect.runSync(
+    ProjectionPublication.pipe(
+      Effect.provide(
+        projectionPublicationLayer({
+          expire: () => stateRepository.expireReconnectGrace(),
+          currentCursor: () => stateRepository.state().eventCursor,
+          eventFor: (identity) => stateRepository.sseProjection(identity),
+          responseHeaders,
+        }),
+      ),
+    ),
+  )
+  let closed = false
+  const publish = (type: string, cursor: number) =>
+    Effect.runSync(projectionPublication.publish(type, cursor))
+
+  const handler = createOriginRouter({
+    identityResolver,
+    expireReconnectGrace: () => stateRepository.expireReconnectGrace(),
+    live: (response) => json(response, 200, { status: 'alive' }),
+    unauthenticated,
+    snapshot: (response, identity) =>
+      void Effect.runSync(
+        stateRepository.bootstrapSnapshot(identity).pipe(
+          Effect.flatMap((data) =>
+            Schema.decodeUnknownEffect(BootstrapHttpSuccessEnvelope)({
+              ok: true,
+              data,
+            }),
+          ),
+          Effect.map((body) => json(response, 200, body)),
+        ),
+      ),
+    ready: (response) => json(response, 200, stateRepository.readiness()),
+    operations: (response, identity) =>
+      isOwner(identity)
+        ? json(response, 200, stateRepository.operations())
+        : json(response, 403, reject('OwnerRequired').body),
+    events: (request, response, identity) =>
+      void Effect.runSync(
+        projectionPublication.stream(request, response, identity),
+      ),
+    control: (response, identity, request) =>
+      Effect.runPromise(
+        controlCommandFromEnvelope(
+          body(request),
+          BodyTooLarge,
+          database,
+          stateRepository,
+          identity,
+          publish,
+        ).pipe(
+          Effect.catchTags({
+            'Server.CommandInputInvalid': () =>
+              Schema.decodeUnknownEffect(CommandHttpFailureEnvelope)({
+                ok: false,
+                failure: {
+                  _tag: 'InvalidInput',
+                  summary: 'The service could not read that action.',
+                },
+              }).pipe(Effect.map((body) => ({ status: 400, body }))),
+            'Server.CommandRejected': ({ failure }) =>
+              Schema.decodeUnknownEffect(CommandHttpFailureEnvelope)({
+                ok: false,
+                failure: { _tag: 'CommandRejected', failure },
+              }).pipe(
+                Effect.map((body) => ({
+                  status: commandFailureStatuses[failure._tag],
+                  body,
+                })),
+              ),
+          }),
+        ),
+      ).then(({ status, body }) => json(response, status, body)),
+    planWorkspace: (response) => workspace(response, database, 'plan'),
+    processWorkspace: (response, url) =>
+      processWorkspace(response, database, url),
+    libraryPage: (response, url) => libraryPage(response, database, url),
+    libraryDownload: (response, url) =>
+      downloadAsset(response, database, url, downloadGrants),
+    libraryDetail: (response, encodedAssetId) =>
+      libraryDetail(response, database, encodedAssetId),
+    planCommand: (response, identity, request) =>
+      Effect.runPromise(
+        planCommandFromRequest(
+          body(request),
+          runRepository,
+          stateRepository,
+          identity,
+          publish,
+        ).pipe(
+          Effect.catchTags({
+            'Server.PlanCommandInputInvalid': () =>
+              planInvalidResponse(stateRepository, identity),
+            'Server.PlanServiceUnavailable': () =>
+              planServiceResponse(
+                'PlanServiceUnavailable',
+                'The Plan service is temporarily unavailable.',
+              ),
+          }),
+          Effect.map(({ status, body }) => json(response, status, body)),
+        ),
+      ),
+    observeCommand: (response, identity, request) =>
+      Effect.runPromise(
+        observeCommandFromRequest(
+          body(request),
+          runRepository,
+          stateRepository,
+          identity,
+          publish,
+        ).pipe(
+          Effect.catchTags({
+            'Server.ObserveCommandInputInvalid': () =>
+              observeInvalidResponse(stateRepository, identity),
+            'Server.ObserveServiceUnavailable': () =>
+              observeServiceResponse(
+                'ObserveServiceUnavailable',
+                'The Observe command service is temporarily unavailable.',
+              ),
+          }),
+          Effect.map(({ status, body }) => json(response, status, body)),
+        ),
+      ),
+    webAsset: (response, pathname) =>
+      Effect.runSync(webHost.asset(response, pathname, responseHeaders)),
+    webRoute: (response, pathname) =>
+      Effect.runSync(webHost.route(response, pathname, responseHeaders)),
+    apiNotFound: (response) => json(response, 404, reject('InvalidInput').body),
+    notFound: (response) =>
+      response
+        .writeHead(404, responseHeaders('text/plain; charset=utf-8'))
+        .end(),
+  })
+  const listen = async (port = 0, host = '127.0.0.1') => {
+    const scope = Effect.runSync(Scope.make())
+    const listener = await Effect.runPromise(
+      Scope.provide(
+        originListener.listen(port, host, (request, response) => {
+          void handler(request, response)
+        }),
+        scope,
+      ),
+    )
+    return {
+      ...listener,
+      close: () => Effect.runPromise(Scope.close(scope, Exit.void)),
+    }
+  }
+  const close = () => {
+    if (closed) return
+    closed = true
+    Effect.runSync(projectionPublication.close())
+    database.close()
+  }
+  const projectionIdentity = () => {
+    const identity = identityResolver()
+    return identity instanceof Promise
+      ? {
+          personId: 'system',
+          clientId: 'system',
+          capability: 'readOnly' as const,
+        }
+      : (identity ?? {
+          personId: 'system',
+          clientId: 'system',
+          capability: 'readOnly' as const,
+        })
+  }
+  const ingestObservation = (raw: unknown) => {
+    try {
+      const input = Schema.decodeUnknownSync(AdapterObservation)(raw)
+      const current = stateRepository.state()
+      const evidence: Evidence = {
+        ...current.evidence,
+        frameId: input.frameId,
+        capturedAt: input.capturedAt,
+        quality: input.quality,
+        desired: input.desired,
+        solved: input.solved,
+        uncertaintyArcsec: input.uncertaintyArcsec,
+        correction: {
+          state: input.correctionState,
+          evidence: input.correctionEvidence,
+          bound: input.correctionBound,
+          protection: input.protection,
+          action:
+            input.correctionState === 'automatic'
+              ? 'none'
+              : 'Review recovery in Observe before any new command.',
+        },
+      }
+      return stateRepository.persistEvidence(evidence, projectionIdentity)
+    } catch {
+      return undefined
+    }
+  }
+  const saveProcess = (raw: unknown, identity = projectionIdentity()) =>
+    processSaveStorage === undefined
+      ? { outcome: 'rejected' as const, reason: 'InvalidInput' as const }
+      : saveProcessOutputs(database, processSaveStorage, raw, identity)
+  const cleanupSavedOrphans = () =>
+    processSaveStorage === undefined
+      ? 0
+      : cleanupProcessOrphans(database, processSaveStorage)
+  const advanceFakeRun = () => {
+    const result = runRepository.advance(projectionIdentity())
+    if (result?.event !== undefined)
+      publish(result.event.type, result.event.cursor)
+    return result?.body
+  }
+  return {
+    database,
+    handler,
+    listen,
+    close,
+    ingestObservation,
+    saveProcess,
+    cleanupSavedOrphans,
+    advanceFakeRun,
+  }
+}
+
+export function createOriginAdmission(
+  config: OriginServerConfig,
+): RequestAdmission {
+  if (config.admission.mode === 'development') {
+    const client = config.admission.client
+    return createLocalFixtureAdmission({
+      personId: client === 'friend' ? 'friend-ada' : 'owner-chicks',
+      clientId:
+        client === 'phone'
+          ? 'phone-monitor'
+          : client === 'friend'
+            ? 'desktop-ada'
+            : 'desktop-owner',
+      capability: client === 'phone' ? 'readOnly' : 'controlCapable',
+    })
+  }
+  return createProductionAccessAdmission({
+    issuer: config.admission.issuer,
+    audience: config.admission.audience,
+    keyResolver: createJwksKeyResolver({
+      url: config.admission.jwksUrl,
+      cacheTtlMs: config.admission.cacheTtlMs,
+    }),
+    databasePath: config.runtime.databasePath,
+    clientContext: config.admission.clientContext,
+    bootstrapResolver: createMembershipBootstrapResolver({
+      path: config.admission.bootstrapPath,
+    }),
+  })
+}
+export const startOrigin = () =>
+  runExecutable('origin server', async () => {
+    const config = await Effect.runPromise(originServerConfig)
+    const admission = createOriginAdmission(config)
+    const issuer = configuredDownloadGrantIssuer(config.downloadGrant)
+    const service = createLocalWebService(
+      config.runtime.databasePath,
+      admission,
+      undefined,
+      issuer === undefined ? undefined : { issuer },
+      {
+        ...(config.fixture === undefined ? {} : { fixture: config.fixture }),
+        webDistPath: config.runtime.webDistPath,
+      },
+    )
+    await service
+      .listen(config.runtime.port, config.runtime.host)
+      .then(({ port }) =>
+        console.log(
+          `Astro Console ${config.runtime.release}: http://127.0.0.1:${port}`,
+        ),
+      )
+  })

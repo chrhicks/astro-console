@@ -12,7 +12,7 @@ import {
   LibraryPersistenceUnavailable,
   libraryPersistenceLayer,
   libraryServiceLayer,
-} from './library-service.ts'
+} from '../services/library-service.ts'
 
 type LibraryRole =
   | 'original'

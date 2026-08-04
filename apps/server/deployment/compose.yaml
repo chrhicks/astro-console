@@ -24,7 +24,11 @@ services:
     profiles: [download]
     image: ghcr.io/chicks/astro-console:REPLACE_WITH_PINNED_RELEASE
     command:
-      ['node', '--experimental-strip-types', 'src/download-grant-service.ts']
+      [
+        'node',
+        '--experimental-strip-types',
+        'src/workers/download-grant-service.ts',
+      ]
     env_file: ${ASTRO_DOWNLOAD_GRANT_ENV_FILE:?Set the host-managed signer environment file in the Compose environment file}
     environment:
       ASTRO_DOWNLOAD_GRANT_PORT: 8791

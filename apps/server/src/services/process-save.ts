@@ -11,7 +11,7 @@ import {
 import { basename, relative, resolve } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
-import type { LocalIdentity } from './identity.ts'
+import type { LocalIdentity } from '../auth/identity.ts'
 
 const SaveInput = Schema.Struct({
   sessionId: Schema.NonEmptyString,

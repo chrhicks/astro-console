@@ -3,7 +3,7 @@ import { createReadStream, statSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
-import type { ProcessSaveStorage } from './process-save.ts'
+import type { ProcessSaveStorage } from '../services/process-save.ts'
 
 const Work = Schema.Struct({ assetId: Schema.String, checksum: Schema.String })
 const Asset = Schema.Struct({

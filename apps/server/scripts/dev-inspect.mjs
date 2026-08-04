@@ -33,7 +33,7 @@ const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 mkdirSync(profile, { recursive: true })
 const server = spawn(
   process.execPath,
-  ['--experimental-strip-types', 'src/server.ts'],
+  ['--experimental-strip-types', './src/server.ts'],
   {
     cwd: appRoot,
     env: {

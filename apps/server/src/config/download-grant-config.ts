@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { Schema } from 'effect'
 import type { OriginServerConfig } from './environment-config.ts'
-import type { DownloadGrantIssuer } from './r2-download-grant.ts'
+import type { DownloadGrantIssuer } from '../storage/r2-download-grant.ts'
 
 const GrantResponse = Schema.Struct({ url: Schema.NonEmptyString })
 export function configuredDownloadGrantIssuer(

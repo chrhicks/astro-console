@@ -22,11 +22,12 @@ Previously completed and committed:
    15-second heartbeat), not `setInterval`; active timeouts clear on request or
    service close.
 
-Phase 2.5 is complete. `server.ts` is now a 2,054-line origin composition and
-transport module. Focused SQLite/domain services own runtime bootstrap, state
-and projection, Plan/fake Observe, Control, and Library. Production source
-files may not import `server.ts`. No provider, device, capture, browser, or
-persistence-model scope was added.
+Phase 2.5 is complete. A later structural cleanup reduced `server.ts` to an
+unexported three-line executable entrypoint. It only starts the origin; app,
+auth, config, HTTP, persistence, services, storage, and worker modules own the
+reusable behavior. The source check rejects exports from or imports of
+`server.ts`. No provider, device, capture, browser, or persistence-model scope
+was added.
 
 Final Phase 2.5 evidence: contracts **184/184**, server **62/62**, and web
 **57/57**.

@@ -1,12 +1,18 @@
 import { readFileSync, statSync } from 'node:fs'
 import { Schema } from 'effect'
 import { Effect } from 'effect'
-import { processorEnvironmentConfig } from './environment-config.ts'
-import { runExecutable } from './executable.ts'
-import { saveProcessOutputs, type ProcessSaveResult } from './process-save.ts'
-import { ingestSourceAsset, type SourceIngestResult } from './source-ingest.ts'
-import type { ProcessorConfig } from './processor-config.ts'
-import { openProcessorDatabase } from './database.ts'
+import { processorEnvironmentConfig } from '../config/environment-config.ts'
+import { runExecutable } from '../app/executable.ts'
+import {
+  saveProcessOutputs,
+  type ProcessSaveResult,
+} from '../services/process-save.ts'
+import {
+  ingestSourceAsset,
+  type SourceIngestResult,
+} from '../services/source-ingest.ts'
+import type { ProcessorConfig } from '../config/processor-config.ts'
+import { openProcessorDatabase } from '../persistence/database.ts'
 
 const Manifest = Schema.Struct({
   sessionId: Schema.NonEmptyString,
@@ -155,7 +161,7 @@ function sourceMapping(
   return Object.fromEntries(entries)
 }
 
-if (process.argv[1]?.endsWith('processor-service.ts'))
+if (process.argv[1]?.endsWith('./processor-service.ts'))
   runExecutable('processor', async () =>
     console.log(
       JSON.stringify(

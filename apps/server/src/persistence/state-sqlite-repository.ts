@@ -5,8 +5,8 @@ import {
   BootstrapSseEventEnvelope,
   PlanWorkspaceProjection,
 } from '@astro-console/v2-contracts'
-import type { Evidence, Snapshot } from './domain-state.ts'
-import type { LocalIdentity } from './identity.ts'
+import type { Evidence, Snapshot } from '../services/domain-state.ts'
+import type { LocalIdentity } from '../auth/identity.ts'
 
 const StoredEvidence = Schema.Struct({
   frameId: Schema.String,
