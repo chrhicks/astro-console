@@ -1,6 +1,6 @@
 # Astro Console V2 Delivery Plan
 
-Status: **durable V2 completion roadmap — Phases 0, 0.5, 1, 2, and 3 and Production Convergence complete; Phase 4 planning and contract boundary are accepted**
+Status: **durable V2 completion roadmap — Phases 0 through 5 and Production Convergence complete**
 
 ## Keep This Plan
 
@@ -191,10 +191,12 @@ the closeout evidence and remaining proof boundary are in the
 - Review decisions are durable and do not mutate original evidence.
 - Library stays usable with a large asset catalog.
 
-## Phase 5: Process Workspace
+## Phase 5: Process Workspace — Complete
 
-Implementation is prepared under Continuum Epic `tkt-wpkbh9tz`; see the
-[Phase 5 plan](phase-5-planning.md). It remains pending owner approval.
+Continuum Epic `tkt-wpkbh9tz` is complete. The durable Library-to-Process
+entry, deterministic Build, preview/Apply history, failed-stage Retry,
+save/switch/discard, and SQLite restart path are proven locally. The
+[Phase 5 plan](phase-5-planning.md) records the exact evidence and boundary.
 
 ### Outcomes
 

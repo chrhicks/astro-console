@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **Phases 0, 0.5, 1, 2, 3, and 4 are complete with deterministic local proof; Phase 5 planning is next**
+Status: **Phases 0, 0.5, 1, 2, 3, 4, and 5 are complete with deterministic local proof**
 
 This directory is organized to keep normal working context small. Do not read
 the entire V2 tree by default.
@@ -78,7 +78,8 @@ Acquire and Capture workflows persist server-owned evidence, actions, and
 recovery truth. A real rig has not yet been contacted. Phase 4 Library and
 Frame Review now provides immutable captured-frame intake, inspection, durable
 review, comparison, and Observe handoff with local deterministic proof. Phase 5
-Process Workspace is the next planning decision.
+Process Workspace implementation is authorized. Work begins with the durable
+Library-to-Process session entry slice.
 
 `apps/web` source, CSS, and accepted screenshot evidence are the production
 visual authority. `docs/v2-ui-final` and `prototype/v2-ui` are historical Gate

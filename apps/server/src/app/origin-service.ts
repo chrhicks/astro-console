@@ -6,6 +6,10 @@ import {
   RefreshPreflightResponse,
 } from '@astro-console/v2-contracts'
 import {
+  executeProcessCommand,
+  processSnapshot,
+} from '../services/process-workspace.ts'
+import {
   cleanupProcessOrphans,
   saveProcessOutputs,
   type ProcessSaveStorage,
@@ -516,12 +520,9 @@ export function createLocalWebService(
       ).then(({ status, body }) => json(response, status, body)),
     planWorkspace: (response) => workspace(response, database, 'plan'),
     processWorkspace: (response, url) =>
-      processWorkspace(
-        response,
-        database,
-        url,
-        () => stateRepository.state().snapshotVersion,
-      ),
+      url.searchParams.has('sourceAssetId')
+        ? processWorkspace(response, database, url, () => stateRepository.state().snapshotVersion)
+        : json(response, 200, processSnapshot(database)),
     libraryPage: (response, url) =>
       libraryPage(
         response,
@@ -602,6 +603,11 @@ export function createLocalWebService(
           Effect.map(({ status, body }) => json(response, status, body)),
         ),
       ),
+    processCommand: async (response, identity, request) => {
+      const result = executeProcessCommand(database, await body(request), identity)
+      if (result.outcome === 'accepted') publish('ProcessingProjected', stateRepository.state().eventCursor)
+      return json(response, result.outcome === 'accepted' ? 200 : 409, result)
+    },
     refreshPreflight: async (response, identity, request) => {
       if (identity.capability !== 'controlCapable')
         return json(

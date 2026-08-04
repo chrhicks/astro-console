@@ -355,7 +355,7 @@ test('process has a focusable screen heading', () => {
   )
   assert.match(
     markup,
-    /<h1 tabindex="-1">Interactive processing unavailable<\/h1>/,
+    /<h1 tabindex="-1">Open a Library source<\/h1>/,
   )
 })
 
@@ -386,7 +386,7 @@ test('Process source handoffs resolve only from the server without Process claim
   )
   assert.match(markup, /asset-source-1/)
   assert.match(markup, /original · fits · availableLocally/)
-  assert.match(markup, /Interactive processing is not installed\./)
+  assert.match(markup, /Open in Process/)
   assert.doesNotMatch(
     markup,
     /Build complete|Last valid image|evidence-image|group-1|Interactive processing is not available in this workspace/,

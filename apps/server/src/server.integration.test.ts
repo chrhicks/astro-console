@@ -70,6 +70,51 @@ async function bootstrapSnapshot(url: string, init?: RequestInit) {
   return Schema.decodeUnknownSync(BootstrapHttpSuccessEnvelope)(body).data
 }
 
+test('Process HTTP workflow durably builds, fails locally, retries, and resumes after restart', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-process-workspace-'))
+  const databasePath = join(root, 'state.sqlite')
+  const service = createFixtureService(databasePath)
+  let listener = await service.listen()
+  let base = `http://127.0.0.1:${listener.port}`
+  const command = async (value: object) => {
+    const response = await fetch(`${base}/api/process/commands`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ commandId: crypto.randomUUID(), command: value }),
+    })
+    assert.equal(response.status, 200)
+    return response.json()
+  }
+  const catalog = await fetch(`${base}/api/library?queryId=process-proof&pageSize=40`)
+  const assets = (await catalog.json()).results as Array<{ assetId: string; role: string }>
+  const source = assets.find((asset) => asset.role === 'original')
+  assert.ok(source)
+  await command({ _tag: 'StartProcessingSession', sourceAssetIds: [source.assetId], idempotencyKey: 'process-start' })
+  let workspace = await (await fetch(`${base}/api/workspaces/process`)).json() as { sessions: Array<{ sessionId: string; revision: number; phase: string; historyPosition: number; preview?: { previewId: string }; failedAttempt?: { attemptId: string; checkpointId: string } }> }
+  let session = workspace.sessions[0]
+  assert.equal(session?.phase, 'develop')
+  assert.ok(session)
+  await command({ _tag: 'SyncProcessingPreview', sessionId: session.sessionId, expectedProcessingRevision: session.revision, operation: 'stretch', toolId: 'deterministic-fail', parameters: [], baseHistoryPosition: session.historyPosition, clientPreviewSequence: 1 })
+  workspace = await (await fetch(`${base}/api/workspaces/process`)).json()
+  session = workspace.sessions[0]
+  assert.ok(session?.preview)
+  await command({ _tag: 'ApplyProcessingPreview', sessionId: session.sessionId, expectedProcessingRevision: session.revision, previewId: session.preview?.previewId, idempotencyKey: 'process-apply-fail' })
+  workspace = await (await fetch(`${base}/api/workspaces/process`)).json()
+  session = workspace.sessions[0]
+  assert.ok(session?.failedAttempt)
+  await command({ _tag: 'RetryProcessingStep', sessionId: session.sessionId, expectedProcessingRevision: session.revision, failedAttemptId: session.failedAttempt?.attemptId, checkpointId: session.failedAttempt?.checkpointId, idempotencyKey: 'process-retry' })
+  await listener.close()
+  service.close()
+  const resumed = createFixtureService(databasePath)
+  listener = await resumed.listen()
+  base = `http://127.0.0.1:${listener.port}`
+  const recovered = await (await fetch(`${base}/api/workspaces/process`)).json() as { sessions: Array<{ phase: string; history: unknown[]; failedAttempt?: unknown }> }
+  assert.equal(recovered.sessions[0]?.phase, 'develop')
+  assert.equal(recovered.sessions[0]?.history.length, 1)
+  assert.equal(recovered.sessions[0]?.failedAttempt, undefined)
+  await listener.close()
+  resumed.close()
+})
+
 test('materializes deterministic captured bytes as an immutable Library asset with restart, HTTP, and SSE projection', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'astro-captured-frame-'))
   const databasePath = join(root, 'state.sqlite')
@@ -3811,7 +3856,7 @@ test('authenticated workspace projections preserve future intent, bounded Librar
       .status,
     503,
   )
-  assert.equal((await fetch(`${base}/api/workspaces/process`)).status, 400)
+  assert.equal((await fetch(`${base}/api/workspaces/process`)).status, 200)
 })
 
 test('library-published fixture projects one durable Download Eligible M27 asset without work', async (t) => {

@@ -1,6 +1,6 @@
 # Phase 3 Closeout Handoff
 
-Status: **Phases 3 and 4 are complete with deterministic local proof; Phase 5 planning is next**
+Status: **Phases 3, 4, and 5 are complete with deterministic local proof**
 
 ## What Is Complete
 
@@ -40,13 +40,20 @@ Observe-to-Library handoff. Current validation is contracts **186/186**, server
 **79/79**, web **63/63**, production builds, and Designer PASS at wide,
 compact, and 390 px. It does not prove a provider, device, or physical capture.
 
+## Phase 5 Closeout
+
+Phase 5 Process Workspace is complete through Continuum Epic `tkt-wpkbh9tz`.
+It provides durable Library-to-Process entry, deterministic linear Build,
+preview/Apply/history, failed-stage Retry, save/switch/discard, and SQLite
+restart proof. Current validation passes contracts **186/186**, server
+**80/80**, web **63/63**, and production builds. It does not prove an external
+processing tool, provider, hardware, or physical-quality result.
+
 ## Next Action
 
-Phase 5 Process Workspace planning is recorded in
-[the Phase 5 plan](phase-5-planning.md), including Continuum Epic
-`tkt-wpkbh9tz`. It is prepared, not authorized for implementation. Do not
-extend deterministic adapters into real external processing tools, provider,
-or hardware behavior without a new approved boundary and proof plan.
+Choose the next approved V2 phase. Do not extend deterministic adapters into
+real external processing tools, provider, or hardware behavior without a new
+approved boundary and proof plan.
 
 ## Historical Record
 

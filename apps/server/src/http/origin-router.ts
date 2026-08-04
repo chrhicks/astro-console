@@ -59,6 +59,11 @@ export type OriginRouterDependencies = {
     identity: LocalIdentity,
     request: IncomingMessage,
   ) => RouteResult
+  readonly processCommand: (
+    response: ServerResponse,
+    identity: LocalIdentity,
+    request: IncomingMessage,
+  ) => RouteResult
   readonly refreshPreflight: (
     response: ServerResponse,
     identity: LocalIdentity,
@@ -136,6 +141,8 @@ export const createOriginRouter =
       return dependencies.planCommand(response, identity, request)
     if (request.method === 'POST' && url.pathname === '/api/observe/commands')
       return dependencies.observeCommand(response, identity, request)
+    if (request.method === 'POST' && url.pathname === '/api/process/commands')
+      return dependencies.processCommand(response, identity, request)
     if (request.method === 'POST' && url.pathname === '/api/observe/preflight')
       return dependencies.refreshPreflight(response, identity, request)
     if (request.method === 'POST' && url.pathname === '/api/acquire/commands')
