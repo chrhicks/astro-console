@@ -105,6 +105,9 @@
   background: var(--color-surface-current);
 }
 @media (max-width: 600px) {
+  .correction-revision {
+    display: none;
+  }
   .observe-image {
     height: 20rem;
     min-height: 20rem;

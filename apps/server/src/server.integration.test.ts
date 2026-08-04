@@ -312,6 +312,263 @@ test('lunar target acquisition publishes image evidence and survives restart', a
   service.close()
 })
 
+test('target correction fixture installs a durable large pending proposal without a provider call', async (t) => {
+  const service = createLocalWebService(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'target-correction' },
+  )
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(snapshot.observe?.acquire?.phase, 'awaitingApproval')
+  assert.equal(
+    snapshot.observe?.acquire?.pendingProposal?.correction.rightAscensionArcsec,
+    90,
+  )
+  assert.equal(snapshot.observe?.acquire?.correctionAttemptsRemaining, 2)
+})
+
+test('pointing correction keeps provider acknowledgement provisional until a fresh solved frame verifies it', async (t) => {
+  let captures = 0
+  let corrections = 0
+  const service = createLocalWebService(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      fixture: 'target-deep-sky',
+      targetAcquisitionProvider: {
+        capture: () => {
+          captures += 1
+          return Effect.succeed({
+            _tag: 'Captured' as const,
+            slewAcknowledgement: {
+              acknowledgedAtEpochMs: 1_722_729_600_000,
+              acknowledgementRef: 'fixture-slew',
+            },
+            evidence: {
+              sourceFrameAssetId: `fixture-correction-frame-${captures}`,
+              capturedAtEpochMs: 1_722_729_600_100 + captures,
+              solverId: 'fixture-plate-solver',
+              solverVersion: '1.0.0',
+              result: {
+                _tag: 'Solved' as const,
+                desiredCenter: {
+                  rightAscensionDegrees: 299.901,
+                  declinationDegrees: 22.721,
+                },
+                solvedCenter: {
+                  rightAscensionDegrees: 299.901,
+                  declinationDegrees: 22.721,
+                },
+                correction: {
+                  rightAscensionArcsec: captures === 1 ? 40 : 0,
+                  declinationArcsec: 0,
+                  convention: 'mountRaDec' as const,
+                },
+                uncertaintyArcsec: 4,
+              },
+            },
+          })
+        },
+        correct: () => {
+          corrections += 1
+          return Effect.succeed({
+            _tag: 'Accepted' as const,
+            acknowledgedAtEpochMs: 1_722_729_600_200,
+            acknowledgementRef: 'fixture-correction-acknowledgement',
+          })
+        },
+      },
+    },
+  )
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const first = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (first.activeRun._tag !== 'Active' || first.observe?.acquire === undefined)
+    throw new Error('Target fixture is unavailable')
+  const command = (snapshot: typeof first, key: string) => {
+    if (
+      snapshot.activeRun._tag !== 'Active' ||
+      snapshot.observe?.acquire === undefined
+    )
+      throw new Error('Target fixture is unavailable')
+    return submitPolar(base, {
+      _tag: 'CaptureTargetAcquisitionEvidence',
+      expectedLeaseRevision: snapshot.control.revision,
+      expectedRunRevision: snapshot.activeRun.run.revision,
+      expectedAcquireRevision: snapshot.observe.acquire.revision,
+      idempotencyKey: key,
+    })
+  }
+  const accepted = await command(first, 'pointing-correction-first')
+  assert.equal(accepted.response.status, 200)
+  assert.equal(corrections, 1)
+  const provisional = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(provisional.observe?.acquire?.phase, 'verifying')
+  assert.equal(provisional.observe?.acquire?.latestEvidence?._tag, 'Solved')
+  const verified = await command(provisional, 'pointing-correction-verify')
+  assert.equal(verified.response.status, 200)
+  const completed = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(completed.observe?.acquire?.phase, 'completed')
+  assert.equal(captures, 2)
+  const row = Schema.decodeUnknownSync(
+    Schema.Struct({ session: Schema.String }),
+  )(service.database.prepare('SELECT session FROM acquire_sessions').get())
+  assert.match(row.session, /CorrectionAccepted/)
+  assert.match(row.session, /verificationOfCorrectionAttemptId/)
+})
+
+test('pointing correction revision replays idempotently before approval and still requires fresh image verification', async (t) => {
+  let captures = 0
+  let corrections = 0
+  const service = createLocalWebService(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      fixture: 'target-deep-sky',
+      targetAcquisitionProvider: {
+        capture: () => {
+          captures += 1
+          return Effect.succeed({
+            _tag: 'Captured' as const,
+            slewAcknowledgement: {
+              acknowledgedAtEpochMs: 1_722_729_600_000,
+              acknowledgementRef: 'fixture-slew',
+            },
+            evidence: {
+              sourceFrameAssetId: `fixture-revision-frame-${captures}`,
+              capturedAtEpochMs: 1_722_729_600_100 + captures,
+              solverId: 'fixture-plate-solver',
+              solverVersion: '1.0.0',
+              result: {
+                _tag: 'Solved' as const,
+                desiredCenter: {
+                  rightAscensionDegrees: 299.901,
+                  declinationDegrees: 22.721,
+                },
+                solvedCenter: {
+                  rightAscensionDegrees: 299.901,
+                  declinationDegrees: 22.721,
+                },
+                correction: {
+                  rightAscensionArcsec: captures === 1 ? 90 : 0,
+                  declinationArcsec: 0,
+                  convention: 'mountRaDec' as const,
+                },
+                uncertaintyArcsec: 4,
+              },
+            },
+          })
+        },
+        correct: () => {
+          corrections += 1
+          return Effect.succeed({
+            _tag: 'Accepted' as const,
+            acknowledgedAtEpochMs: 1_722_729_600_200,
+            acknowledgementRef: 'fixture-revision-acknowledgement',
+          })
+        },
+      },
+    },
+  )
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (
+    initial.activeRun._tag !== 'Active' ||
+    initial.observe?.acquire === undefined
+  )
+    throw new Error('Target fixture is unavailable')
+  const capture = (snapshot: typeof initial, key: string) => {
+    if (
+      snapshot.activeRun._tag !== 'Active' ||
+      snapshot.observe?.acquire === undefined
+    )
+      throw new Error('Target fixture is unavailable')
+    return submitPolar(base, {
+      _tag: 'CaptureTargetAcquisitionEvidence',
+      expectedLeaseRevision: snapshot.control.revision,
+      expectedRunRevision: snapshot.activeRun.run.revision,
+      expectedAcquireRevision: snapshot.observe.acquire.revision,
+      idempotencyKey: key,
+    })
+  }
+  assert.equal(
+    (await capture(initial, 'revision-initial')).response.status,
+    200,
+  )
+  const proposed = await bootstrapSnapshot(`${base}/api/snapshot`)
+  const proposedAcquire = proposed.observe?.acquire
+  const proposal = proposedAcquire?.pendingProposal
+  if (
+    proposed.activeRun._tag !== 'Active' ||
+    proposedAcquire === undefined ||
+    proposal === undefined
+  )
+    throw new Error('Pointing correction proposal is unavailable')
+  const revisionIntent = {
+    _tag: 'RevisePointingCorrection' as const,
+    expectedLeaseRevision: proposed.control.revision,
+    expectedRunRevision: proposed.activeRun.run.revision,
+    expectedAcquireRevision: proposedAcquire.revision,
+    proposalId: proposal.proposalId,
+    correction: { rightAscensionArcsec: 70, declinationArcsec: 0 },
+    idempotencyKey: 'revision-replay',
+  }
+  const revised = await submitPolar(base, revisionIntent)
+  assert.equal(revised.response.status, 200)
+  assert.equal((await submitPolar(base, revisionIntent)).response.status, 200)
+  assert.equal(corrections, 0)
+  const revisedSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+  const revisedAcquire = revisedSnapshot.observe?.acquire
+  const revisedProposal = revisedAcquire?.pendingProposal
+  if (
+    revisedSnapshot.activeRun._tag !== 'Active' ||
+    revisedAcquire === undefined ||
+    revisedProposal === undefined
+  )
+    throw new Error('Revised pointing correction proposal is unavailable')
+  assert.notEqual(revisedProposal.proposalId, proposal.proposalId)
+  const approval = await submitPolar(base, {
+    _tag: 'ApprovePointingCorrection',
+    expectedLeaseRevision: revisedSnapshot.control.revision,
+    expectedRunRevision: revisedSnapshot.activeRun.run.revision,
+    expectedAcquireRevision: revisedAcquire.revision,
+    proposalId: revisedProposal.proposalId,
+    idempotencyKey: 'revision-approval',
+  })
+  assert.equal(approval.response.status, 200)
+  assert.equal(corrections, 1)
+  const verifying = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(verifying.observe?.acquire?.phase, 'verifying')
+  assert.equal(
+    (await capture(verifying, 'revision-verification')).response.status,
+    200,
+  )
+  const completed = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(completed.observe?.acquire?.phase, 'completed')
+  assert.equal(captures, 2)
+})
+
 test('read-only preflight persists configured provider facts, survives restart, and publishes SSE without work', async (t) => {
   const databasePath = join(
     mkdtempSync(join(tmpdir(), 'astro-preflight-')),

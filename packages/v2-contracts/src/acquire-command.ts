@@ -15,6 +15,24 @@ export const AcquireIntent = Schema.TaggedUnion({
     expectedAcquireRevision: AcquireRevision,
     idempotencyKey: IdempotencyKey,
   },
+  ApprovePointingCorrection: {
+    expectedLeaseRevision: LeaseRevision,
+    expectedRunRevision: RunRevision,
+    expectedAcquireRevision: AcquireRevision,
+    proposalId: Schema.NonEmptyString,
+    idempotencyKey: IdempotencyKey,
+  },
+  RevisePointingCorrection: {
+    expectedLeaseRevision: LeaseRevision,
+    expectedRunRevision: RunRevision,
+    expectedAcquireRevision: AcquireRevision,
+    proposalId: Schema.NonEmptyString,
+    correction: Schema.Struct({
+      rightAscensionArcsec: Schema.Finite,
+      declinationArcsec: Schema.Finite,
+    }),
+    idempotencyKey: IdempotencyKey,
+  },
   CapturePolarAlignmentMeasurement: {
     expectedLeaseRevision: LeaseRevision,
     expectedRunRevision: RunRevision,

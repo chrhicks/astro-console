@@ -102,6 +102,9 @@ import {
   AcquireCommandRequest,
   AcquireCommandResponse,
   AcquireIntent,
+  AssetId,
+  AttemptId,
+  recordSolveCompletion,
 } from '@astro-console/v2-contracts'
 export type DownloadGrantConfig = {
   readonly issuer: DownloadGrantIssuer
@@ -125,6 +128,7 @@ export function createLocalWebService(
       | 'polar'
       | 'target-deep-sky'
       | 'target-lunar'
+      | 'target-correction'
     readonly webDistPath?: string
     readonly preflightProvider?: ReadOnlyPreflightProviderShape
     readonly polarMeasurementProvider?: PolarMeasurementProviderShape
@@ -194,12 +198,11 @@ export function createLocalWebService(
   }
   if (
     options.fixture === 'target-deep-sky' ||
-    options.fixture === 'target-lunar'
+    options.fixture === 'target-lunar' ||
+    options.fixture === 'target-correction'
   ) {
     const acquisitionMethod =
-      options.fixture === 'target-deep-sky'
-        ? 'deepSkyPlateSolve'
-        : 'lunarDiskLimb'
+      options.fixture === 'target-lunar' ? 'lunarDiskLimb' : 'deepSkyPlateSolve'
     const run = {
       id: `run-${acquisitionMethod}-fixture`,
       revision: 1,
@@ -230,9 +233,40 @@ export function createLocalWebService(
       },
     }
     stateRepository.commit({ run })
-    acquireRepository.install(
-      targetAcquisitionSession(run.id, acquisitionMethod),
-    )
+    const session = targetAcquisitionSession(run.id, acquisitionMethod)
+    if (options.fixture === 'target-correction') {
+      const evidence = recordSolveCompletion(session, {
+        attemptId: AttemptId.make('deepSkyPlateSolve-initial-1'),
+        sourceFrameAssetId: AssetId.make('fixture-correction-proposal-frame'),
+        capturedAtEpochMs: 1_722_729_600_100,
+        solverId: 'fixture-plate-solver',
+        solverVersion: '1.0.0',
+        result: {
+          _tag: 'Solved',
+          desiredCenter: {
+            rightAscensionDegrees: 299.901,
+            declinationDegrees: 22.721,
+          },
+          solvedCenter: {
+            rightAscensionDegrees: 299.901,
+            declinationDegrees: 22.721,
+          },
+          correction: {
+            rightAscensionArcsec: 90,
+            declinationArcsec: 0,
+            convention: 'mountRaDec',
+          },
+          uncertaintyArcsec: 4,
+        },
+        nextAttemptId: AttemptId.make('fixture-correction-retry'),
+        correctionAttemptId: AttemptId.make('fixture-correction-apply'),
+        proposalId: 'fixture-correction-proposal',
+        proposalExpiresAtEpochMs: 1_722_729_660_000,
+      })
+      acquireRepository.install(
+        'session' in evidence ? evidence.session : session,
+      )
+    } else acquireRepository.install(session)
   }
   const webHost = Effect.runSync(
     WebHost.pipe(
@@ -476,7 +510,11 @@ export function createLocalWebService(
       const program = Effect.succeed(raw).pipe(
         Effect.flatMap((input) =>
           decoded !== undefined &&
-          AcquireIntent.guards.CaptureTargetAcquisitionEvidence(decoded.intent)
+          (AcquireIntent.guards.CaptureTargetAcquisitionEvidence(
+            decoded.intent,
+          ) ||
+            AcquireIntent.guards.ApprovePointingCorrection(decoded.intent) ||
+            AcquireIntent.guards.RevisePointingCorrection(decoded.intent))
             ? executeTargetAcquisitionCommand(input)
             : executePolarCommand(input),
         ),
@@ -688,6 +726,12 @@ const deterministicTargetAcquisitionProvider: TargetAcquisitionProviderShape = {
               },
               uncertaintyArcsec: 2,
             },
+    }),
+  correct: (correctionAttemptId) =>
+    Effect.succeed({
+      _tag: 'Accepted' as const,
+      acknowledgedAtEpochMs: 1_722_729_600_200,
+      acknowledgementRef: `fixture-${correctionAttemptId}-acknowledged`,
     }),
 }
 

@@ -6,7 +6,13 @@ import {
   AssetId,
   AttemptId,
   PointingSolveResult,
+  RecoverySeriesId,
   LunarDiskLimbCompletion,
+  CorrectionAcknowledgementDecision,
+  CorrectionCommandDecision,
+  approveCorrectionProposal,
+  recordCorrectionAcknowledgement,
+  reviseCorrectionProposal,
   recordLunarDiskLimbCompletion,
   recordSolveCompletion,
   recordTargetSlewAcknowledgement,
@@ -17,6 +23,14 @@ export interface TargetAcquisitionProviderShape {
   readonly capture: (
     method: 'deepSkyPlateSolve' | 'lunarDiskLimb',
     attemptId: string,
+  ) => Effect.Effect<unknown, unknown>
+  readonly correct: (
+    correctionAttemptId: string,
+    correction: {
+      readonly rightAscensionArcsec: number
+      readonly declinationArcsec: number
+      readonly convention: 'mountRaDec' | 'imageAxis'
+    },
   ) => Effect.Effect<unknown, unknown>
 }
 
@@ -33,6 +47,14 @@ const ProviderResult = Schema.TaggedUnion({
       acknowledgementRef: Schema.NonEmptyString,
     }),
     evidence: Schema.Unknown,
+  },
+})
+
+const CorrectionProviderResult = Schema.TaggedUnion({
+  Rejected: { acknowledgementRef: Schema.NonEmptyString },
+  Accepted: {
+    acknowledgedAtEpochMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    acknowledgementRef: Schema.NonEmptyString,
   },
 })
 
@@ -77,10 +99,7 @@ export const executeTargetAcquisitionCommand = Effect.fn(
   const input = yield* Schema.decodeUnknownEffect(AcquireCommandRequest)(
     raw,
   ).pipe(Effect.option)
-  if (
-    Option.isNone(input) ||
-    !AcquireIntent.guards.CaptureTargetAcquisitionEvidence(input.value.intent)
-  )
+  if (Option.isNone(input))
     return {
       _tag: 'Rejected' as const,
       summary: 'The target acquisition command is invalid.',
@@ -96,6 +115,54 @@ export const executeTargetAcquisitionCommand = Effect.fn(
     return {
       _tag: 'Rejected' as const,
       summary: 'Target evidence changed. Read the current Observe projection.',
+    }
+  const intent = input.value.intent
+  if (AcquireIntent.guards.ApprovePointingCorrection(intent)) {
+    const approved = approveCorrectionProposal(session, {
+      proposalId: intent.proposalId,
+      correctionAttemptId: AttemptId.make(`correction-${session.revision + 1}`),
+      nowEpochMs: 1_722_729_600_000,
+    })
+    if (!CorrectionCommandDecision.$is('Started')(approved))
+      return {
+        _tag: 'Rejected' as const,
+        summary: 'That pointing correction proposal is no longer available.',
+      }
+    return yield* acknowledgeCorrection(approved.session, persistence)
+  }
+  if (AcquireIntent.guards.RevisePointingCorrection(intent)) {
+    const proposal = session.pendingCorrectionProposal
+    if (proposal === null)
+      return {
+        _tag: 'Rejected' as const,
+        summary: 'That pointing correction proposal is no longer available.',
+      }
+    const revised = reviseCorrectionProposal(session, {
+      currentProposalId: intent.proposalId,
+      nextProposalId: `${intent.proposalId}-revision-${session.revision + 1}`,
+      correction: {
+        ...intent.correction,
+        convention: proposal.correction.convention,
+      },
+      nowEpochMs: 1_722_729_600_000,
+      expiresAtEpochMs: 1_722_729_660_000,
+    })
+    if (!CorrectionCommandDecision.$is('Revised')(revised))
+      return {
+        _tag: 'Rejected' as const,
+        summary:
+          'That revised pointing correction is outside the current bound.',
+      }
+    return {
+      _tag: 'Committed' as const,
+      cursor: persistence.commit(revised.session, 'PointingCorrectionRevised')
+        .cursor,
+    }
+  }
+  if (!AcquireIntent.guards.CaptureTargetAcquisitionEvidence(intent))
+    return {
+      _tag: 'Rejected' as const,
+      summary: 'The target acquisition command is invalid.',
     }
   if (!AcquireActiveWork.guards.SolveRequested(session.activeWork))
     return {
@@ -130,12 +197,16 @@ export const executeTargetAcquisitionCommand = Effect.fn(
       _tag: 'Aborted' as const,
       summary: providerResult.value.summary,
     }
-  const attempt = session.activeWork.attemptId
-  const acknowledged = recordTargetSlewAcknowledgement(session, {
-    attemptId: attempt,
-    acquisitionMethod: session.acquisitionMethod,
-    ...providerResult.value.slewAcknowledgement,
-  })
+  const work = session.activeWork
+  const attempt = work.attemptId
+  const acknowledged =
+    work.purpose === 'initial'
+      ? recordTargetSlewAcknowledgement(session, {
+          attemptId: attempt,
+          acquisitionMethod: session.acquisitionMethod,
+          ...providerResult.value.slewAcknowledgement,
+        })
+      : session
   const recorded =
     session.acquisitionMethod === 'deepSkyPlateSolve'
       ? yield* Schema.decodeUnknownEffect(DeepSkyEvidence)(
@@ -167,11 +238,80 @@ export const executeTargetAcquisitionCommand = Effect.fn(
       _tag: 'Unavailable' as const,
       summary: 'The target acquisition evidence could not be recorded.',
     }
+  if (AcquireActiveWork.guards.CorrectionRequested(recorded.session.activeWork))
+    return yield* acknowledgeCorrection(recorded.session, persistence)
   return {
     _tag: 'Committed' as const,
     cursor: persistence.commit(
       recorded.session,
       'TargetAcquisitionEvidenceRecorded',
+    ).cursor,
+  }
+})
+
+const acknowledgeCorrection = Effect.fn(
+  'TargetAcquisitionService.acknowledgeCorrection',
+)(function* (
+  session: typeof import('@astro-console/v2-contracts').AcquireSession.Type,
+  persistence: import('./polar-service.ts').AcquirePersistenceShape,
+) {
+  if (!AcquireActiveWork.guards.CorrectionRequested(session.activeWork))
+    return {
+      _tag: 'Rejected' as const,
+      summary: 'A pointing correction is not expected.',
+    }
+  const provider = yield* Effect.serviceOption(TargetAcquisitionProvider)
+  if (Option.isNone(provider))
+    return {
+      _tag: 'Unavailable' as const,
+      summary: 'No pointing correction provider is configured.',
+    }
+  const work = session.activeWork
+  const raw = yield* provider.value
+    .correct(work.correctionAttemptId, work.correction)
+    .pipe(Effect.option)
+  if (Option.isNone(raw))
+    return {
+      _tag: 'Unavailable' as const,
+      summary:
+        'The pointing correction provider did not acknowledge the request.',
+    }
+  const acknowledgement = yield* Schema.decodeUnknownEffect(
+    CorrectionProviderResult,
+  )(raw.value).pipe(Effect.option)
+  if (Option.isNone(acknowledgement))
+    return {
+      _tag: 'Unavailable' as const,
+      summary: 'The pointing correction acknowledgement is invalid.',
+    }
+  const result = recordCorrectionAcknowledgement(session, {
+    correctionAttemptId: work.correctionAttemptId,
+    accepted: CorrectionProviderResult.guards.Accepted(acknowledgement.value),
+    occurredAtEpochMs: CorrectionProviderResult.guards.Accepted(
+      acknowledgement.value,
+    )
+      ? acknowledgement.value.acknowledgedAtEpochMs
+      : 1_722_729_600_000,
+    acknowledgementRef: acknowledgement.value.acknowledgementRef,
+    verificationSeriesId: RecoverySeriesId.make(
+      `${work.correctionAttemptId}-verification`,
+    ),
+    verificationAttemptId: AttemptId.make(
+      `${work.correctionAttemptId}-verification-1`,
+    ),
+  })
+  if (CorrectionAcknowledgementDecision.$is('Rejected')(result))
+    return {
+      _tag: 'Rejected' as const,
+      summary: 'The pointing correction acknowledgement could not be recorded.',
+    }
+  return {
+    _tag: 'Committed' as const,
+    cursor: persistence.commit(
+      result.session,
+      CorrectionAcknowledgementDecision.$is('VerificationScheduled')(result)
+        ? 'PointingCorrectionAcknowledged'
+        : 'PointingCorrectionRejected',
     ).cursor,
   }
 })

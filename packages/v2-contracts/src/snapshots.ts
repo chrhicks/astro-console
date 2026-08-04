@@ -133,6 +133,7 @@ export const AcquireSnapshot = Schema.Struct({
   ]),
   recoverySeries: NonNegativeInt,
   attemptCount: NonNegativeInt,
+  correctionAttemptsRemaining: Schema.optionalKey(NonNegativeInt),
   activeAttemptId: Schema.optionalKey(AttemptId),
   pendingProposal: Schema.optionalKey(
     Schema.Struct({

@@ -19,6 +19,8 @@ export function ObserveView({
   refreshPreflight,
   polarCommand,
   targetAcquisitionCommand,
+  approvePointingCorrection,
+  revisePointingCorrection,
 }: {
   view: View
   submit?: (
@@ -31,6 +33,12 @@ export function ObserveView({
     attemptId?: string,
   ) => Promise<void>
   targetAcquisitionCommand?: () => Promise<void>
+  approvePointingCorrection?: (proposalId: string) => Promise<void>
+  revisePointingCorrection?: (
+    proposalId: string,
+    rightAscensionArcsec: number,
+    declinationArcsec: number,
+  ) => Promise<void>
 }) {
   const [result, setResult] = useState<{
     readonly runId: string
@@ -201,6 +209,21 @@ export function ObserveView({
       },
     )
   }
+  const approveCorrection = (proposalId: string) => {
+    if (approvePointingCorrection === undefined || current === undefined) return
+    setPending(true)
+    void approvePointingCorrection(proposalId).then(
+      () => setPending(false),
+      () => {
+        setPending(false)
+        setResult({
+          runId: current.runId,
+          revision: current.revision,
+          message: 'The pointing correction could not be approved.',
+        })
+      },
+    )
+  }
   return (
     <div className="workspace observe-workspace">
       <header className="workspace-heading">
@@ -246,6 +269,9 @@ export function ObserveView({
             pending={pending}
             targetAcquisitionCommand={targetAcquisitionCommand}
             acquireTarget={acquireTarget}
+            approvePointingCorrection={approvePointingCorrection}
+            approveCorrection={approveCorrection}
+            revisePointingCorrection={revisePointingCorrection}
           />
         )}
         {current?.phase === 'preflight' && (
@@ -378,6 +404,9 @@ function TargetAcquisition({
   pending,
   targetAcquisitionCommand,
   acquireTarget,
+  approvePointingCorrection,
+  approveCorrection,
+  revisePointingCorrection,
 }: {
   current: NonNullable<View['source']>
   pending: boolean
@@ -385,11 +414,33 @@ function TargetAcquisition({
     typeof ObserveView
   >[0]['targetAcquisitionCommand']
   acquireTarget: () => void
+  approvePointingCorrection: Parameters<
+    typeof ObserveView
+  >[0]['approvePointingCorrection']
+  approveCorrection: (proposalId: string) => void
+  revisePointingCorrection: Parameters<
+    typeof ObserveView
+  >[0]['revisePointingCorrection']
 }) {
   const acquire = current.acquire
   if (acquire?.acquisitionMethod === undefined) return null
   const lunar = acquire.acquisitionMethod === 'lunarDiskLimb'
   const evidence = acquire.latestEvidence
+  const proposal = acquire.pendingProposal
+  const [rightAscensionArcsec, setRightAscensionArcsec] = useState(
+    proposal?.correction.rightAscensionArcsec.toString() ?? '',
+  )
+  const [declinationArcsec, setDeclinationArcsec] = useState(
+    proposal?.correction.declinationArcsec.toString() ?? '',
+  )
+  useEffect(() => {
+    setRightAscensionArcsec(
+      proposal?.correction.rightAscensionArcsec.toString() ?? '',
+    )
+    setDeclinationArcsec(
+      proposal?.correction.declinationArcsec.toString() ?? '',
+    )
+  }, [proposal?.proposalId])
   return (
     <section className="preflight-checklist" aria-label="Target acquisition">
       <span>Target acquisition</span>
@@ -403,6 +454,81 @@ function TargetAcquisition({
               ? 'Measure the lunar disk and limb from a fresh frame. Star solving is not used.'
               : 'Capture and plate-solve a fresh deep-sky frame.'}
       </p>
+      {acquire.correctionAttemptsRemaining !== undefined && (
+        <p>
+          {acquire.correctionAttemptsRemaining} correction attempt
+          {acquire.correctionAttemptsRemaining === 1 ? '' : 's'} remain in this
+          acquisition bound.
+        </p>
+      )}
+      {proposal !== undefined && (
+        <>
+          <p>
+            Proposed correction: RA{' '}
+            {proposal.correction.rightAscensionArcsec.toFixed(1)} arcsec, Dec{' '}
+            {proposal.correction.declinationArcsec.toFixed(1)} arcsec. It
+            requires approval.
+          </p>
+          {approvePointingCorrection !== undefined &&
+            acquire.actions.length > 0 && (
+              <button
+                onClick={() => approveCorrection(proposal.proposalId)}
+                disabled={pending}
+              >
+                Approve pointing correction
+              </button>
+            )}
+          {revisePointingCorrection !== undefined &&
+            acquire.actions.length > 0 && (
+              <div className="correction-revision">
+                <label>
+                  RA arcsec
+                  <input
+                    value={rightAscensionArcsec}
+                    onChange={(event) =>
+                      setRightAscensionArcsec(event.target.value)
+                    }
+                    inputMode="decimal"
+                  />
+                </label>
+                <label>
+                  Dec arcsec
+                  <input
+                    value={declinationArcsec}
+                    onChange={(event) =>
+                      setDeclinationArcsec(event.target.value)
+                    }
+                    inputMode="decimal"
+                  />
+                </label>
+                <button
+                  onClick={() => {
+                    const rightAscension = Number(rightAscensionArcsec)
+                    const declination = Number(declinationArcsec)
+                    if (
+                      Number.isFinite(rightAscension) &&
+                      Number.isFinite(declination)
+                    )
+                      void revisePointingCorrection(
+                        proposal.proposalId,
+                        rightAscension,
+                        declination,
+                      )
+                  }}
+                  disabled={pending}
+                >
+                  Revise pointing correction
+                </button>
+              </div>
+            )}
+        </>
+      )}
+      {acquire.phase === 'verifying' && (
+        <p>
+          A provider acknowledgement is provisional. Verify it from a fresh
+          solved frame.
+        </p>
+      )}
       {targetAcquisitionCommand !== undefined && acquire.actions.length > 0 && (
         <button onClick={acquireTarget} disabled={pending}>
           {lunar ? 'Capture lunar measurement' : 'Capture and plate solve'}

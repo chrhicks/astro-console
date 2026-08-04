@@ -80,6 +80,17 @@ export function App() {
   const [targetAcquisitionCommand, setTargetAcquisitionCommand] = useState<
     (() => Promise<void>) | undefined
   >()
+  const [approvePointingCorrection, setApprovePointingCorrection] = useState<
+    ((proposalId: string) => Promise<void>) | undefined
+  >()
+  const [revisePointingCorrection, setRevisePointingCorrection] = useState<
+    | ((
+        proposalId: string,
+        rightAscensionArcsec: number,
+        declinationArcsec: number,
+      ) => Promise<void>)
+    | undefined
+  >()
   const workspace = routeWorkspace(route)
   const initialRoute = useRef(true)
   const [libraryQuery, setLibraryQuery] = useState<LibraryQuery>(() =>
@@ -302,6 +313,61 @@ export function App() {
       })
       if (!response.ok) throw new Error('Target acquisition command rejected')
     })
+    setApprovePointingCorrection(() => async (proposalId: string) => {
+      const observe = projectionRef.current.observe
+      if (
+        observe.source?.acquire === undefined ||
+        observe.leaseRevision === undefined
+      )
+        throw new Error('Pointing correction state unavailable')
+      const response = await fetch('/api/acquire/commands', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          intent: {
+            _tag: 'ApprovePointingCorrection',
+            expectedLeaseRevision: observe.leaseRevision,
+            expectedRunRevision: observe.source.revision,
+            expectedAcquireRevision: observe.source.acquire.revision,
+            proposalId,
+            idempotencyKey: crypto.randomUUID(),
+          },
+        }),
+      })
+      if (!response.ok) throw new Error('Pointing correction rejected')
+    })
+    setRevisePointingCorrection(
+      () =>
+        async (
+          proposalId: string,
+          rightAscensionArcsec: number,
+          declinationArcsec: number,
+        ) => {
+          const observe = projectionRef.current.observe
+          if (
+            observe.source?.acquire === undefined ||
+            observe.leaseRevision === undefined
+          )
+            throw new Error('Pointing correction state unavailable')
+          const response = await fetch('/api/acquire/commands', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              intent: {
+                _tag: 'RevisePointingCorrection',
+                expectedLeaseRevision: observe.leaseRevision,
+                expectedRunRevision: observe.source.revision,
+                expectedAcquireRevision: observe.source.acquire.revision,
+                proposalId,
+                correction: { rightAscensionArcsec, declinationArcsec },
+                idempotencyKey: crypto.randomUUID(),
+              },
+            }),
+          })
+          if (!response.ok)
+            throw new Error('Pointing correction revision rejected')
+        },
+    )
     const fiber = runtime.runFork(
       Effect.gen(function* () {
         const client = yield* BootstrapClient
@@ -318,6 +384,8 @@ export function App() {
       setRefreshPreflight(undefined)
       setPolarCommand(undefined)
       setTargetAcquisitionCommand(undefined)
+      setApprovePointingCorrection(undefined)
+      setRevisePointingCorrection(undefined)
       void runtime
         .runPromise(Fiber.interrupt(fiber))
         .then(() => runtime.dispose())
@@ -386,6 +454,13 @@ export function App() {
         {...(targetAcquisitionCommand === undefined || projection.shell.readOnly
           ? {}
           : { targetAcquisitionCommand })}
+        {...(approvePointingCorrection === undefined ||
+        projection.shell.readOnly
+          ? {}
+          : { approvePointingCorrection })}
+        {...(revisePointingCorrection === undefined || projection.shell.readOnly
+          ? {}
+          : { revisePointingCorrection })}
       />
     ) : workspace === 'library' ? (
       <LibraryView

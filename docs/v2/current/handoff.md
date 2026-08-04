@@ -19,6 +19,15 @@ panel makes this distinction clear, and phone remains read-only. The proof
 covers durable SQLite state, typed HTTP command, idempotency, SSE, and restart.
 It does not claim a real provider call, mount movement, or physical image.
 
+The pointing-correction child is complete as deterministic server-backed
+behavior. An in-bound correction may start automatically; a larger one is an
+exact proposal the operator can revise or approve. Provider acknowledgement
+only schedules verification. A second solved frame decides whether centering
+completed. SQLite, typed HTTP, idempotency, SSE, restart, and responsive
+Observe proof are present. The correction fixture makes no provider call or
+physical-pointing claim; later verification-state behavior is proven by the
+HTTP integration test, not browser capture.
+
 ## Completed Phase 2.5: Server Boundary Extraction
 
 Phase 2.5 is authorized before Phase 3. It is an internal cleanup only: no

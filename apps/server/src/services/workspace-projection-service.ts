@@ -181,7 +181,12 @@ function acquireSnapshot(
   session: typeof AcquireSession.Type,
   writable: boolean,
 ) {
-  const latest = session.evidence.at(-1)
+  const latest = session.evidence.findLast(
+    (evidence) =>
+      AcquireEvidence.guards.SolveAttempt(evidence) ||
+      AcquireEvidence.guards.PolarMeasurement(evidence) ||
+      AcquireEvidence.guards.LunarDiskLimbMeasurement(evidence),
+  )
   let latestEvidence: (typeof AcquireSnapshot.Type)['latestEvidence']
   if (latest !== undefined && AcquireEvidence.guards.SolveAttempt(latest)) {
     latestEvidence = PointingSolveResult.guards.Solved(latest.result)
@@ -242,6 +247,16 @@ function acquireSnapshot(
     phase: session.phase,
     recoverySeries: 0,
     attemptCount: session.evidence.length,
+    ...(session.acquisitionMethod === undefined
+      ? {}
+      : {
+          correctionAttemptsRemaining: Math.max(
+            0,
+            session.policy.maxCorrectionAttempts -
+              session.evidence.filter(AcquireEvidence.guards.CorrectionAccepted)
+                .length,
+          ),
+        }),
     ...(session.activeWork === null
       ? {}
       : AcquireActiveWork.match(session.activeWork, {
@@ -271,6 +286,23 @@ function acquireSnapshot(
               : 'Capture a fresh lunar frame and measure its disk and limb.',
         }
       : {}),
+    ...(session.pendingCorrectionProposal !== null
+      ? {
+          pendingProposal: {
+            proposalId: session.pendingCorrectionProposal.proposalId,
+            correction: session.pendingCorrectionProposal.correction,
+            expiresAtEpochMs:
+              session.pendingCorrectionProposal.expiresAtEpochMs,
+          },
+          attention:
+            'Review and approve the exact pointing correction before it is sent.',
+        }
+      : session.phase === 'verifying'
+        ? {
+            attention:
+              'The provider acknowledgement is provisional. Capture a fresh solved frame to verify pointing.',
+          }
+        : {}),
     actions:
       writable && session.mode === 'polar' && session.phase === 'polarGuidance'
         ? [
@@ -291,7 +323,17 @@ function acquireSnapshot(
                 action: 'CaptureTargetAcquisitionEvidence' as const,
               },
             ]
-          : [],
+          : writable &&
+              session.acquisitionMethod !== undefined &&
+              session.phase === 'awaitingApproval' &&
+              session.pendingCorrectionProposal !== null
+            ? [
+                {
+                  _tag: 'Available' as const,
+                  action: 'ApprovePointingCorrection' as const,
+                },
+              ]
+            : [],
   }
 }
 
