@@ -48,6 +48,7 @@ export type OriginServerConfig = {
     | 'target-lunar'
     | 'target-correction'
     | 'live-frame'
+    | 'managed-capture'
     | 'plan-draft'
     | 'library-published'
     | undefined
@@ -115,6 +116,7 @@ export const originServerConfig = Config.all({
         input.fixture.value !== 'target-lunar' &&
         input.fixture.value !== 'target-correction' &&
         input.fixture.value !== 'live-frame' &&
+        input.fixture.value !== 'managed-capture' &&
         input.fixture.value !== 'plan-draft' &&
         input.fixture.value !== 'library-published'
       )
@@ -175,6 +177,7 @@ function originServer(input: {
         input.fixture.value === 'target-lunar' ||
         input.fixture.value === 'target-correction' ||
         input.fixture.value === 'live-frame' ||
+        input.fixture.value === 'managed-capture' ||
         input.fixture.value === 'plan-draft' ||
         input.fixture.value === 'library-published')
         ? input.fixture.value

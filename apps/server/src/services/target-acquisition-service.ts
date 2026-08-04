@@ -1,8 +1,10 @@
 import { Context, Effect, Layer, Option, Schema } from 'effect'
 import {
   AcquireActiveWork,
+  AcquireEvidence,
   AcquireCommandRequest,
   AcquireIntent,
+  CaptureMetric,
   AssetId,
   AttemptId,
   PointingSolveResult,
@@ -15,6 +17,7 @@ import {
   reviseCorrectionProposal,
   recordLunarDiskLimbCompletion,
   LiveFrameEvidence,
+  recordManagedCapture,
   recordLiveFrameEvidence,
   recordSolveCompletion,
   recordTargetSlewAcknowledgement,
@@ -197,6 +200,13 @@ export const executeTargetAcquisitionCommand = Effect.fn(
       ).cursor,
     }
   }
+  if (
+    AcquireIntent.guards.StartManagedCapture(intent) ||
+    AcquireIntent.guards.PauseManagedCapture(intent) ||
+    AcquireIntent.guards.StopManagedCapture(intent) ||
+    AcquireIntent.guards.RecenterManagedCapture(intent)
+  )
+    return yield* managedCaptureCommand(session, intent, persistence)
   if (!AcquireIntent.guards.CaptureTargetAcquisitionEvidence(intent))
     return {
       _tag: 'Rejected' as const,
@@ -284,6 +294,113 @@ export const executeTargetAcquisitionCommand = Effect.fn(
       recorded.session,
       'TargetAcquisitionEvidenceRecorded',
     ).cursor,
+  }
+})
+
+const managedCaptureCommand = Effect.fn(
+  'TargetAcquisitionService.managedCaptureCommand',
+)(function* (
+  session: typeof import('@astro-console/v2-contracts').AcquireSession.Type,
+  intent: typeof AcquireIntent.Type,
+  persistence: import('./polar-service.ts').AcquirePersistenceShape,
+) {
+  const frame = session.evidence.findLast(AcquireEvidence.guards.LiveFrame)
+  const quality =
+    frame === undefined
+      ? 'unknown'
+      : frame.disposition === 'accepted' &&
+          frame.targetFraming === 'inFrame' &&
+          frame.clipping === 'clear' &&
+          frame.exposure === 'usable'
+        ? 'good'
+        : 'attention'
+  const current = session.managedCapture
+  if (AcquireIntent.guards.StartManagedCapture(intent)) {
+    if (
+      session.phase !== 'completed' ||
+      frame === undefined ||
+      current !== undefined
+    )
+      return {
+        _tag: 'Rejected' as const,
+        summary:
+          'Managed capture requires completed acquisition and current frame evidence.',
+      }
+    const storageReserveMb = CaptureMetric.match(frame.storageForecastMb, {
+      Known: ({ value }) => value,
+      Unknown: () => 0,
+    })
+    return {
+      _tag: 'Committed' as const,
+      cursor: persistence.commit(
+        recordManagedCapture(session, {
+          state: 'active',
+          exposureCount: 1,
+          stackCount: frame.acceptedFrameCount,
+          totalExposureCount: 24,
+          elapsedSeconds: 180,
+          remainingSeconds: 4_140,
+          stopCondition: '24 usable 180-second exposures',
+          storageReserveMb,
+          resourceProtection:
+            storageReserveMb >= 512 ? 'available' : 'protected',
+          quality,
+        }),
+        'ManagedCaptureStarted',
+      ).cursor,
+    }
+  }
+  if (current === undefined)
+    return {
+      _tag: 'Rejected' as const,
+      summary: 'Managed capture is not active.',
+    }
+  if (AcquireIntent.guards.PauseManagedCapture(intent)) {
+    if (current.state !== 'active')
+      return {
+        _tag: 'Rejected' as const,
+        summary: 'Managed capture cannot pause in its current state.',
+      }
+    return {
+      _tag: 'Committed' as const,
+      cursor: persistence.commit(
+        recordManagedCapture(session, { ...current, state: 'paused' }),
+        'ManagedCapturePaused',
+      ).cursor,
+    }
+  }
+  if (AcquireIntent.guards.StopManagedCapture(intent)) {
+    if (current.state !== 'active' && current.state !== 'paused')
+      return {
+        _tag: 'Rejected' as const,
+        summary: 'Managed capture cannot stop in its current state.',
+      }
+    return {
+      _tag: 'Committed' as const,
+      cursor: persistence.commit(
+        recordManagedCapture(session, { ...current, state: 'stopped' }),
+        'ManagedCaptureStopped',
+      ).cursor,
+    }
+  }
+  if (AcquireIntent.guards.RecenterManagedCapture(intent)) {
+    if (current.state !== 'active' || current.quality !== 'attention')
+      return {
+        _tag: 'Rejected' as const,
+        summary:
+          'Recenter is available only for active capture that needs attention.',
+      }
+    return {
+      _tag: 'Committed' as const,
+      cursor: persistence.commit(
+        recordManagedCapture(session, { ...current, quality: 'good' }),
+        'ManagedCaptureRecenterRequested',
+      ).cursor,
+    }
+  }
+  return {
+    _tag: 'Rejected' as const,
+    summary: 'The managed capture command is invalid.',
   }
 })
 

@@ -83,6 +83,16 @@ export function App() {
   const [recordLiveFrameEvidence, setRecordLiveFrameEvidence] = useState<
     (() => Promise<void>) | undefined
   >()
+  const [managedCaptureCommand, setManagedCaptureCommand] = useState<
+    | ((
+        action:
+          | 'StartManagedCapture'
+          | 'PauseManagedCapture'
+          | 'StopManagedCapture'
+          | 'RecenterManagedCapture',
+      ) => Promise<void>)
+    | undefined
+  >()
   const [approvePointingCorrection, setApprovePointingCorrection] = useState<
     ((proposalId: string) => Promise<void>) | undefined
   >()
@@ -338,6 +348,37 @@ export function App() {
       })
       if (!response.ok) throw new Error('Live frame evidence command rejected')
     })
+    setManagedCaptureCommand(
+      () =>
+        async (
+          action:
+            | 'StartManagedCapture'
+            | 'PauseManagedCapture'
+            | 'StopManagedCapture'
+            | 'RecenterManagedCapture',
+        ) => {
+          const observe = projectionRef.current.observe
+          if (
+            observe.source?.acquire === undefined ||
+            observe.leaseRevision === undefined
+          )
+            throw new Error('Managed capture state unavailable')
+          const response = await fetch('/api/acquire/commands', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              intent: {
+                _tag: action,
+                expectedLeaseRevision: observe.leaseRevision,
+                expectedRunRevision: observe.source.revision,
+                expectedAcquireRevision: observe.source.acquire.revision,
+                idempotencyKey: crypto.randomUUID(),
+              },
+            }),
+          })
+          if (!response.ok) throw new Error('Managed capture command rejected')
+        },
+    )
     setApprovePointingCorrection(() => async (proposalId: string) => {
       const observe = projectionRef.current.observe
       if (
@@ -410,6 +451,7 @@ export function App() {
       setPolarCommand(undefined)
       setTargetAcquisitionCommand(undefined)
       setRecordLiveFrameEvidence(undefined)
+      setManagedCaptureCommand(undefined)
       setApprovePointingCorrection(undefined)
       setRevisePointingCorrection(undefined)
       void runtime
@@ -483,6 +525,9 @@ export function App() {
         {...(recordLiveFrameEvidence === undefined || projection.shell.readOnly
           ? {}
           : { recordLiveFrameEvidence })}
+        {...(managedCaptureCommand === undefined || projection.shell.readOnly
+          ? {}
+          : { managedCaptureCommand })}
         {...(approvePointingCorrection === undefined ||
         projection.shell.readOnly
           ? {}

@@ -396,6 +396,117 @@ test('live frame evidence is durable, idempotent, published over SSE, and stays 
   service.close()
 })
 
+test('managed capture persists guarded progress actions, replay, SSE, restart, and phone read-only state', async () => {
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-managed-capture-')),
+    'state.sqlite',
+  )
+  const admission = (request?: Pick<IncomingMessage, 'headers'>) =>
+    request?.headers.authorization === 'Bearer phone'
+      ? {
+          personId: 'owner-chicks',
+          clientId: 'phone-owner',
+          role: 'owner' as const,
+          capability: 'readOnly' as const,
+        }
+      : {
+          personId: 'owner-chicks',
+          clientId: 'desktop-owner',
+          role: 'owner' as const,
+          capability: 'controlCapable' as const,
+        }
+  let service = createLocalWebService(
+    databasePath,
+    admission,
+    undefined,
+    undefined,
+    { fixture: 'managed-capture' },
+  )
+  let listener = await service.listen()
+  let base = `http://127.0.0.1:${listener.port}`
+  const phone = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: { authorization: 'Bearer phone' },
+  })
+  assert.deepEqual(phone.observe?.acquire?.actions, [])
+  const initialFixture = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(initialFixture.activeRun._tag, 'Active')
+  assert.equal(
+    initialFixture.activeRun._tag === 'Active'
+      ? initialFixture.activeRun.run.phase
+      : undefined,
+    'capture',
+  )
+  assert.equal(initialFixture.observe?.acquire?.managedCapture?.state, 'active')
+  assert.equal(
+    initialFixture.observe?.acquire?.managedCapture?.exposureCount,
+    8,
+  )
+  assert.deepEqual(initialFixture.observe?.acquire?.actions, [
+    { _tag: 'Available', action: 'PauseManagedCapture' },
+    { _tag: 'Available', action: 'StopManagedCapture' },
+  ])
+  const command = async (
+    _tag: 'StartManagedCapture' | 'PauseManagedCapture' | 'StopManagedCapture',
+    idempotencyKey: string,
+  ) => {
+    const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+    if (
+      snapshot.activeRun._tag !== 'Active' ||
+      snapshot.observe?.acquire === undefined
+    )
+      throw new Error('Managed capture fixture is unavailable')
+    return submitPolar(base, {
+      _tag,
+      expectedLeaseRevision: snapshot.control.revision,
+      expectedRunRevision: snapshot.activeRun.run.revision,
+      expectedAcquireRevision: snapshot.observe.acquire.revision,
+      idempotencyKey,
+    })
+  }
+  assert.equal(
+    (await command('PauseManagedCapture', 'capture-pause')).response.status,
+    200,
+  )
+  assert.equal(
+    (await command('PauseManagedCapture', 'capture-pause')).response.status,
+    200,
+  )
+  const active = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(active.observe?.acquire?.managedCapture?.state, 'paused')
+  assert.equal(active.observe?.acquire?.managedCapture?.exposureCount, 8)
+  assert.equal(
+    active.observe?.acquire?.managedCapture?.resourceProtection,
+    'available',
+  )
+  assert.equal(
+    (await command('StopManagedCapture', 'capture-stop')).response.status,
+    200,
+  )
+  const stopped = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(stopped.observe?.acquire?.managedCapture?.state, 'stopped')
+  const stale = await submitPolar(base, {
+    _tag: 'StartManagedCapture',
+    expectedLeaseRevision: stopped.control.revision,
+    expectedRunRevision:
+      stopped.activeRun._tag === 'Active' ? stopped.activeRun.run.revision : 0,
+    expectedAcquireRevision: 0,
+    idempotencyKey: 'capture-stale',
+  })
+  assert.equal(stale.response.status, 409)
+  await listener.close()
+  service.close()
+  service = createLocalWebService(databasePath, admission)
+  listener = await service.listen()
+  base = `http://127.0.0.1:${listener.port}`
+  assert.equal(
+    (await bootstrapSnapshot(`${base}/api/snapshot`)).observe?.acquire
+      ?.managedCapture?.state,
+    'stopped',
+  )
+  await listener.close()
+  service.close()
+})
+
 test('target correction fixture installs a durable large pending proposal without a provider call', async (t) => {
   const service = createLocalWebService(
     undefined,

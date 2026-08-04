@@ -104,6 +104,8 @@ import {
   AcquireIntent,
   AssetId,
   AttemptId,
+  recordManagedCapture,
+  recordLiveFrameEvidence,
   recordSolveCompletion,
 } from '@astro-console/v2-contracts'
 export type DownloadGrantConfig = {
@@ -130,6 +132,7 @@ export function createLocalWebService(
       | 'target-lunar'
       | 'target-correction'
       | 'live-frame'
+      | 'managed-capture'
     readonly webDistPath?: string
     readonly preflightProvider?: ReadOnlyPreflightProviderShape
     readonly polarMeasurementProvider?: PolarMeasurementProviderShape
@@ -201,7 +204,8 @@ export function createLocalWebService(
     options.fixture === 'target-deep-sky' ||
     options.fixture === 'target-lunar' ||
     options.fixture === 'target-correction' ||
-    options.fixture === 'live-frame'
+    options.fixture === 'live-frame' ||
+    options.fixture === 'managed-capture'
   ) {
     const acquisitionMethod =
       options.fixture === 'target-lunar' ? 'lunarDiskLimb' : 'deepSkyPlateSolve'
@@ -209,7 +213,8 @@ export function createLocalWebService(
       id: `run-${acquisitionMethod}-fixture`,
       revision: 1,
       phase:
-        options.fixture === 'live-frame'
+        options.fixture === 'live-frame' ||
+        options.fixture === 'managed-capture'
           ? ('capture' as const)
           : ('acquire' as const),
       target:
@@ -241,7 +246,8 @@ export function createLocalWebService(
     const session = targetAcquisitionSession(run.id, acquisitionMethod)
     if (
       options.fixture === 'target-correction' ||
-      options.fixture === 'live-frame'
+      options.fixture === 'live-frame' ||
+      options.fixture === 'managed-capture'
     ) {
       const evidence = recordSolveCompletion(session, {
         attemptId: AttemptId.make('deepSkyPlateSolve-initial-1'),
@@ -260,7 +266,11 @@ export function createLocalWebService(
             declinationDegrees: 22.721,
           },
           correction: {
-            rightAscensionArcsec: options.fixture === 'live-frame' ? 0 : 90,
+            rightAscensionArcsec:
+              options.fixture === 'live-frame' ||
+              options.fixture === 'managed-capture'
+                ? 0
+                : 90,
             declinationArcsec: 0,
             convention: 'mountRaDec',
           },
@@ -271,8 +281,40 @@ export function createLocalWebService(
         proposalId: 'fixture-correction-proposal',
         proposalExpiresAtEpochMs: 1_722_729_660_000,
       })
+      const acquired = 'session' in evidence ? evidence.session : session
       acquireRepository.install(
-        'session' in evidence ? evidence.session : session,
+        options.fixture === 'managed-capture'
+          ? recordManagedCapture(
+              recordLiveFrameEvidence(acquired, {
+                sourceFrameAssetId: AssetId.make(
+                  'fixture-managed-capture-frame',
+                ),
+                capturedAtEpochMs: 1_722_729_600_300,
+                disposition: 'accepted',
+                acceptedFrameCount: 1,
+                rejectedFrameCount: 0,
+                targetFraming: 'inFrame',
+                driftArcsec: { _tag: 'Known', value: 3 },
+                clipping: 'clear',
+                exposure: 'usable',
+                focus: { _tag: 'Known', value: 1 },
+                shape: { _tag: 'Known', value: 1 },
+                storageForecastMb: { _tag: 'Known', value: 2_048 },
+              }),
+              {
+                state: 'active',
+                exposureCount: 8,
+                stackCount: 8,
+                totalExposureCount: 24,
+                elapsedSeconds: 1_440,
+                remainingSeconds: 2_880,
+                stopCondition: '24 usable 180-second exposures',
+                storageReserveMb: 2_048,
+                resourceProtection: 'available',
+                quality: 'good',
+              },
+            )
+          : acquired,
       )
     } else acquireRepository.install(session)
   }
@@ -303,7 +345,8 @@ export function createLocalWebService(
     options.targetAcquisitionProvider ??
     (options.fixture === 'target-deep-sky' ||
     options.fixture === 'target-lunar' ||
-    options.fixture === 'live-frame'
+    options.fixture === 'live-frame' ||
+    options.fixture === 'managed-capture'
       ? deterministicTargetAcquisitionProvider
       : undefined)
 
@@ -524,6 +567,10 @@ export function createLocalWebService(
             decoded.intent,
           ) ||
             AcquireIntent.guards.RecordLiveFrameEvidence(decoded.intent) ||
+            AcquireIntent.guards.StartManagedCapture(decoded.intent) ||
+            AcquireIntent.guards.PauseManagedCapture(decoded.intent) ||
+            AcquireIntent.guards.StopManagedCapture(decoded.intent) ||
+            AcquireIntent.guards.RecenterManagedCapture(decoded.intent) ||
             AcquireIntent.guards.ApprovePointingCorrection(decoded.intent) ||
             AcquireIntent.guards.RevisePointingCorrection(decoded.intent))
             ? executeTargetAcquisitionCommand(input)

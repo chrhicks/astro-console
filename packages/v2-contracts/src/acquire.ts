@@ -107,6 +107,23 @@ export const CaptureMetric = Schema.TaggedUnion({
 
 export type CaptureMetric = typeof CaptureMetric.Type
 
+export const ManagedCapture = Schema.Struct({
+  state: Schema.Literals(['active', 'paused', 'stopped', 'completed']),
+  exposureCount: NonNegativeInt,
+  stackCount: NonNegativeInt,
+  totalExposureCount: PositiveInt,
+  elapsedSeconds: NonNegativeInt,
+  remainingSeconds: NonNegativeInt,
+  stopCondition: Schema.NonEmptyString,
+  storageReserveMb: NonNegativeNumber,
+  resourceProtection: Schema.Literals(['available', 'protected']),
+  quality: Schema.Literals(['good', 'attention', 'unknown']),
+})
+
+export interface ManagedCapture extends Schema.Schema.Type<
+  typeof ManagedCapture
+> {}
+
 export const LiveFrameEvidence = Schema.Struct({
   sourceFrameAssetId: AssetId,
   capturedAtEpochMs: NonNegativeInt,
@@ -268,11 +285,22 @@ export const AcquireSession = Schema.Struct({
   pendingCorrectionProposal: Schema.NullOr(CorrectionProposal),
   latestPolarMeasurementAttemptId: Schema.NullOr(AttemptId),
   acceptedPolarMeasurementAttemptId: Schema.NullOr(AttemptId),
+  managedCapture: Schema.optionalKey(ManagedCapture),
 }).check(Schema.makeFilter((session) => validateAcquireSession(session)))
 
 export interface AcquireSession extends Schema.Schema.Type<
   typeof AcquireSession
 > {}
+
+export const recordManagedCapture = (
+  session: AcquireSession,
+  managedCapture: ManagedCapture,
+): AcquireSession =>
+  AcquireSession.make({
+    ...session,
+    revision: AcquireRevision.make(session.revision + 1),
+    managedCapture,
+  })
 
 export const SolveCompletion = Schema.Struct({
   attemptId: AttemptId,

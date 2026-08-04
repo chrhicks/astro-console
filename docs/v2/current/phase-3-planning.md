@@ -1,6 +1,6 @@
 # Phase 3 Implementation Planning
 
-Status: **one ordered Epic; read-only preflight, guided polar alignment, target acquisition, pointing-correction verification, and live frame evidence are complete; managed capture is next**
+Status: **one ordered Epic; read-only preflight, guided polar alignment, target acquisition, pointing-correction verification, live frame evidence, and managed capture are complete; recovery and rollback is next**
 
 This is the execution plan for Phase 3 in the durable
 [V2 delivery plan](delivery-plan.md). It turns the six Phase 3 outcomes into
@@ -28,7 +28,7 @@ order and proof gates.
 | 3 | `tkt-gj8btl1l` — Acquire targets with deep-sky and lunar paths | **Complete.** Deep-sky plate-solve and lunar disk/limb paths persist a provisional slew acknowledgement before method-specific image evidence; deterministic SSE and restart proof cover both paths. | 1, 2 |
 | 4 | `tkt-gwl6lc30` — Verify pointing corrections from successive images | **Complete.** Automatic and approved/revised bounded corrections record only a provisional provider acknowledgement; a fresh solved frame verifies or rejects centering. | 3 |
 | 5 | `tkt-dqmkymd7` — Project live frame evidence and quality | **Complete.** Current frame identity, bounded quality/framing/drift facts, accepted/rejected counts, and storage forecast persist as known or unknown evidence; full Library review remains Phase 4. | 4 |
-| 6 | `tkt-0g6q3wl7` — Run managed capture with visible progress and actions | Run approved sequences with progress, stop conditions, storage reserve, and server-owned actions. | 5 |
+| 6 | `tkt-0g6q3wl7` — Run managed capture with visible progress and actions | **Complete.** A server-owned Capture projection persists progress, stop condition, storage reserve, quality, and guarded Pause/Stop actions. Deterministic HTTP, idempotency, SSE, restart, and responsive proof cover it; no provider or physical-capture claim is made. | 5 |
 | 7 | `tkt-1ozfsam5` — Add bounded Acquire recovery and rollback | Keep failure, remaining budget, recovery choice, rollback/reconciliation, and abort visible. | 4, 5, 6 |
 | 8 | `tkt-wnhdp696` — Prove Phase 3 exit criteria end to end | Verify every outcome and responsive projection through deterministic adapters and the configured provider boundary. | 1–7 |
 

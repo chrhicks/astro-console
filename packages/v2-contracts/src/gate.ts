@@ -95,6 +95,10 @@ export const commandPolicies = {
     authority: 'controller',
     requiresDesktop: true,
   },
+  StartManagedCapture: { authority: 'controller', requiresDesktop: true },
+  PauseManagedCapture: { authority: 'controller', requiresDesktop: true },
+  StopManagedCapture: { authority: 'controller', requiresDesktop: true },
+  RecenterManagedCapture: { authority: 'controller', requiresDesktop: true },
   CapturePolarAlignmentMeasurement: {
     authority: 'controller',
     requiresDesktop: true,

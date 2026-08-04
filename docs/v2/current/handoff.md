@@ -36,6 +36,14 @@ explicitly unknown facts. SQLite, typed HTTP, idempotency, SSE, restart, and
 responsive Observe proof are present. This does not create a Library asset,
 start managed capture, contact a provider, or claim physical capture.
 
+The managed-capture child is complete as deterministic server-backed behavior.
+An active Capture run now persists its exposure and stack progress,
+elapsed/remaining time, stop condition, storage reserve, and quality state.
+Pause and Stop are typed, revision-guarded server actions; the browser never
+replays them, and phone remains read-only. SQLite, typed HTTP, idempotency,
+SSE, restart, and responsive Observe proof are present. This does not contact
+a camera or provider, collect physical data, or create a Library asset.
+
 ## Completed Phase 2.5: Server Boundary Extraction
 
 Phase 2.5 is authorized before Phase 3. It is an internal cleanup only: no

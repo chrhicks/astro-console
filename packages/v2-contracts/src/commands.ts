@@ -156,6 +156,10 @@ export const acceptedCommandTags = [
   'RevisePointingCorrection',
   'CaptureTargetAcquisitionEvidence',
   'RecordLiveFrameEvidence',
+  'StartManagedCapture',
+  'PauseManagedCapture',
+  'StopManagedCapture',
+  'RecenterManagedCapture',
   'CapturePolarAlignmentMeasurement',
   'AcceptPolarAlignmentEvidence',
   'StartProcessingSession',
@@ -260,6 +264,22 @@ export const Command = Schema.TaggedUnion({
     ...DurableMutation,
   },
   RecordLiveFrameEvidence: {
+    ...AcquireCommandFreshness,
+    ...DurableMutation,
+  },
+  StartManagedCapture: {
+    ...AcquireCommandFreshness,
+    ...DurableMutation,
+  },
+  PauseManagedCapture: {
+    ...AcquireCommandFreshness,
+    ...DurableMutation,
+  },
+  StopManagedCapture: {
+    ...AcquireCommandFreshness,
+    ...DurableMutation,
+  },
+  RecenterManagedCapture: {
     ...AcquireCommandFreshness,
     ...DurableMutation,
   },

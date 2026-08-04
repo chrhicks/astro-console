@@ -286,6 +286,9 @@ function acquireSnapshot(
             storageForecastMb: liveFrame.storageForecastMb,
           },
         }),
+    ...(session.managedCapture === undefined
+      ? {}
+      : { managedCapture: session.managedCapture }),
     ...(session.phase === 'polarGuidance'
       ? {
           attention:
@@ -356,10 +359,48 @@ function acquireSnapshot(
                 session.acquisitionMethod !== undefined &&
                 session.phase === 'completed'
               ? [
-                  {
-                    _tag: 'Available' as const,
-                    action: 'RecordLiveFrameEvidence' as const,
-                  },
+                  ...(session.managedCapture === undefined
+                    ? [
+                        {
+                          _tag: 'Available' as const,
+                          action: 'RecordLiveFrameEvidence' as const,
+                        },
+                        ...(liveFrame === undefined
+                          ? []
+                          : [
+                              {
+                                _tag: 'Available' as const,
+                                action: 'StartManagedCapture' as const,
+                              },
+                            ]),
+                      ]
+                    : session.managedCapture.state === 'active'
+                      ? [
+                          {
+                            _tag: 'Available' as const,
+                            action: 'PauseManagedCapture' as const,
+                          },
+                          {
+                            _tag: 'Available' as const,
+                            action: 'StopManagedCapture' as const,
+                          },
+                          ...(session.managedCapture.quality === 'attention'
+                            ? [
+                                {
+                                  _tag: 'Available' as const,
+                                  action: 'RecenterManagedCapture' as const,
+                                },
+                              ]
+                            : []),
+                        ]
+                      : session.managedCapture.state === 'paused'
+                        ? [
+                            {
+                              _tag: 'Available' as const,
+                              action: 'StopManagedCapture' as const,
+                            },
+                          ]
+                        : []),
                 ]
               : [],
   }

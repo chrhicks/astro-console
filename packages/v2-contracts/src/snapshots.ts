@@ -27,6 +27,7 @@ import {
   LibraryQueryId,
   MembershipRole,
   NonNegativeInt,
+  NonNegativeNumber,
   ObservedAt,
   ObservatoryId,
   OperationId,
@@ -180,6 +181,20 @@ export const AcquireSnapshot = Schema.Struct({
           Schema.isGreaterThanOrEqualTo(0),
         ),
       },
+    }),
+  ),
+  managedCapture: Schema.optionalKey(
+    Schema.Struct({
+      state: Schema.Literals(['active', 'paused', 'stopped', 'completed']),
+      exposureCount: NonNegativeInt,
+      stackCount: NonNegativeInt,
+      totalExposureCount: PositiveInt,
+      elapsedSeconds: NonNegativeInt,
+      remainingSeconds: NonNegativeInt,
+      stopCondition: Schema.NonEmptyString,
+      storageReserveMb: NonNegativeNumber,
+      resourceProtection: Schema.Literals(['available', 'protected']),
+      quality: Schema.Literals(['good', 'attention', 'unknown']),
     }),
   ),
   liveFrame: Schema.optionalKey(

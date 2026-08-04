@@ -20,6 +20,7 @@ export function ObserveView({
   polarCommand,
   targetAcquisitionCommand,
   recordLiveFrameEvidence,
+  managedCaptureCommand,
   approvePointingCorrection,
   revisePointingCorrection,
 }: {
@@ -35,6 +36,13 @@ export function ObserveView({
   ) => Promise<void>
   targetAcquisitionCommand?: () => Promise<void>
   recordLiveFrameEvidence?: () => Promise<void>
+  managedCaptureCommand?: (
+    action:
+      | 'StartManagedCapture'
+      | 'PauseManagedCapture'
+      | 'StopManagedCapture'
+      | 'RecenterManagedCapture',
+  ) => Promise<void>
   approvePointingCorrection?: (proposalId: string) => Promise<void>
   revisePointingCorrection?: (
     proposalId: string,
@@ -286,6 +294,7 @@ export function ObserveView({
             pending={pending}
             targetAcquisitionCommand={targetAcquisitionCommand}
             recordLiveFrameEvidence={recordLiveFrameEvidence}
+            managedCaptureCommand={managedCaptureCommand}
             acquireTarget={acquireTarget}
             recordFrame={recordFrame}
             approvePointingCorrection={approvePointingCorrection}
@@ -423,6 +432,7 @@ function TargetAcquisition({
   pending,
   targetAcquisitionCommand,
   recordLiveFrameEvidence,
+  managedCaptureCommand,
   acquireTarget,
   recordFrame,
   approvePointingCorrection,
@@ -437,6 +447,9 @@ function TargetAcquisition({
   recordLiveFrameEvidence: Parameters<
     typeof ObserveView
   >[0]['recordLiveFrameEvidence']
+  managedCaptureCommand: Parameters<
+    typeof ObserveView
+  >[0]['managedCaptureCommand']
   acquireTarget: () => void
   recordFrame: () => void
   approvePointingCorrection: Parameters<
@@ -458,6 +471,16 @@ function TargetAcquisition({
   const [declinationArcsec, setDeclinationArcsec] = useState(
     proposal?.correction.declinationArcsec.toString() ?? '',
   )
+  const manageCapture = (
+    action:
+      | 'StartManagedCapture'
+      | 'PauseManagedCapture'
+      | 'StopManagedCapture'
+      | 'RecenterManagedCapture',
+  ) => {
+    if (managedCaptureCommand === undefined) return
+    void managedCaptureCommand(action)
+  }
   useEffect(() => {
     setRightAscensionArcsec(
       proposal?.correction.rightAscensionArcsec.toString() ?? '',
@@ -557,6 +580,9 @@ function TargetAcquisition({
       {acquire.liveFrame !== undefined && (
         <LiveFrameEvidence frame={acquire.liveFrame} />
       )}
+      {acquire.managedCapture !== undefined && (
+        <ManagedCapture capture={acquire.managedCapture} />
+      )}
       {targetAcquisitionCommand !== undefined &&
         acquire.actions.length > 0 &&
         acquire.phase === 'solving' && (
@@ -571,6 +597,93 @@ function TargetAcquisition({
             Record current frame evidence
           </button>
         )}
+      {managedCaptureCommand !== undefined &&
+        acquire.actions.some(
+          ({ action }) => action === 'StartManagedCapture',
+        ) && (
+          <button
+            onClick={() => manageCapture('StartManagedCapture')}
+            disabled={pending}
+          >
+            Start managed capture
+          </button>
+        )}
+      {managedCaptureCommand !== undefined &&
+        acquire.actions.some(
+          ({ action }) => action === 'PauseManagedCapture',
+        ) && (
+          <button
+            onClick={() => manageCapture('PauseManagedCapture')}
+            disabled={pending}
+          >
+            Pause capture
+          </button>
+        )}
+      {managedCaptureCommand !== undefined &&
+        acquire.actions.some(
+          ({ action }) => action === 'RecenterManagedCapture',
+        ) && (
+          <button
+            onClick={() => manageCapture('RecenterManagedCapture')}
+            disabled={pending}
+          >
+            Recenter capture
+          </button>
+        )}
+      {managedCaptureCommand !== undefined &&
+        acquire.actions.some(
+          ({ action }) => action === 'StopManagedCapture',
+        ) && (
+          <button
+            onClick={() => manageCapture('StopManagedCapture')}
+            disabled={pending}
+          >
+            Stop capture
+          </button>
+        )}
+    </section>
+  )
+}
+
+function ManagedCapture({
+  capture,
+}: {
+  capture: NonNullable<
+    NonNullable<NonNullable<View['source']>['acquire']>['managedCapture']
+  >
+}) {
+  return (
+    <section className="live-frame-evidence" aria-label="Managed capture">
+      <span>Managed capture</span>
+      <h3>
+        {capture.state === 'active'
+          ? 'Capture is accumulating evidence'
+          : `Capture ${capture.state}`}
+      </h3>
+      <p>
+        Exposure {capture.exposureCount} of {capture.totalExposureCount}; stack{' '}
+        {capture.stackCount}. {capture.remainingSeconds}s remain.
+      </p>
+      <dl>
+        <div>
+          <dt>Stop condition</dt>
+          <dd>{capture.stopCondition}</dd>
+        </div>
+        <div>
+          <dt>Elapsed</dt>
+          <dd>{capture.elapsedSeconds}s</dd>
+        </div>
+        <div>
+          <dt>Storage reserve</dt>
+          <dd>
+            {capture.storageReserveMb} MB ({capture.resourceProtection})
+          </dd>
+        </div>
+        <div>
+          <dt>Current quality</dt>
+          <dd>{capture.quality}</dd>
+        </div>
+      </dl>
     </section>
   )
 }

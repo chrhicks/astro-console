@@ -21,6 +21,30 @@ export const AcquireIntent = Schema.TaggedUnion({
     expectedAcquireRevision: AcquireRevision,
     idempotencyKey: IdempotencyKey,
   },
+  StartManagedCapture: {
+    expectedLeaseRevision: LeaseRevision,
+    expectedRunRevision: RunRevision,
+    expectedAcquireRevision: AcquireRevision,
+    idempotencyKey: IdempotencyKey,
+  },
+  PauseManagedCapture: {
+    expectedLeaseRevision: LeaseRevision,
+    expectedRunRevision: RunRevision,
+    expectedAcquireRevision: AcquireRevision,
+    idempotencyKey: IdempotencyKey,
+  },
+  StopManagedCapture: {
+    expectedLeaseRevision: LeaseRevision,
+    expectedRunRevision: RunRevision,
+    expectedAcquireRevision: AcquireRevision,
+    idempotencyKey: IdempotencyKey,
+  },
+  RecenterManagedCapture: {
+    expectedLeaseRevision: LeaseRevision,
+    expectedRunRevision: RunRevision,
+    expectedAcquireRevision: AcquireRevision,
+    idempotencyKey: IdempotencyKey,
+  },
   ApprovePointingCorrection: {
     expectedLeaseRevision: LeaseRevision,
     expectedRunRevision: RunRevision,
