@@ -91,6 +91,10 @@ export const commandPolicies = {
     authority: 'controller',
     requiresDesktop: true,
   },
+  RecordLiveFrameEvidence: {
+    authority: 'controller',
+    requiresDesktop: true,
+  },
   CapturePolarAlignmentMeasurement: {
     authority: 'controller',
     requiresDesktop: true,

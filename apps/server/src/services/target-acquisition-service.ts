@@ -14,6 +14,8 @@ import {
   recordCorrectionAcknowledgement,
   reviseCorrectionProposal,
   recordLunarDiskLimbCompletion,
+  LiveFrameEvidence,
+  recordLiveFrameEvidence,
   recordSolveCompletion,
   recordTargetSlewAcknowledgement,
 } from '@astro-console/v2-contracts'
@@ -32,6 +34,7 @@ export interface TargetAcquisitionProviderShape {
       readonly convention: 'mountRaDec' | 'imageAxis'
     },
   ) => Effect.Effect<unknown, unknown>
+  readonly frame?: () => Effect.Effect<unknown, unknown>
 }
 
 export class TargetAcquisitionProvider extends Context.Service<
@@ -157,6 +160,41 @@ export const executeTargetAcquisitionCommand = Effect.fn(
       _tag: 'Committed' as const,
       cursor: persistence.commit(revised.session, 'PointingCorrectionRevised')
         .cursor,
+    }
+  }
+  if (AcquireIntent.guards.RecordLiveFrameEvidence(intent)) {
+    if (session.phase !== 'completed')
+      return {
+        _tag: 'Rejected' as const,
+        summary:
+          'Live frame evidence starts after target acquisition completes.',
+      }
+    const provider = yield* Effect.serviceOption(TargetAcquisitionProvider)
+    if (Option.isNone(provider) || provider.value.frame === undefined)
+      return {
+        _tag: 'Unavailable' as const,
+        summary: 'No live frame evidence provider is configured.',
+      }
+    const rawFrame = yield* provider.value.frame().pipe(Effect.option)
+    if (Option.isNone(rawFrame))
+      return {
+        _tag: 'Unavailable' as const,
+        summary: 'The live frame evidence provider did not return a frame.',
+      }
+    const frame = yield* Schema.decodeUnknownEffect(LiveFrameEvidence)(
+      rawFrame.value,
+    ).pipe(Effect.option)
+    if (Option.isNone(frame))
+      return {
+        _tag: 'Unavailable' as const,
+        summary: 'The live frame evidence is invalid.',
+      }
+    return {
+      _tag: 'Committed' as const,
+      cursor: persistence.commit(
+        recordLiveFrameEvidence(session, frame.value),
+        'LiveFrameEvidenceRecorded',
+      ).cursor,
     }
   }
   if (!AcquireIntent.guards.CaptureTargetAcquisitionEvidence(intent))

@@ -15,6 +15,7 @@ import { generateKeyPairSync, sign } from 'node:crypto'
 import { ConfigProvider, Effect, Schema } from 'effect'
 import {
   AcquireSnapshot,
+  AcquireSession,
   AcquireCommandResponse,
   BootstrapHttpSuccessEnvelope,
   BootstrapSseEventEnvelope,
@@ -307,6 +308,89 @@ test('lunar target acquisition publishes image evidence and survives restart', a
   assert.equal(
     restarted.observe?.acquire?.latestEvidence?._tag,
     'LunarDiskLimbMeasurement',
+  )
+  await listener.close()
+  service.close()
+})
+
+test('live frame evidence is durable, idempotent, published over SSE, and stays read-only on phone', async () => {
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-live-frame-')),
+    'state.sqlite',
+  )
+  let service = createLocalWebService(
+    databasePath,
+    (request) =>
+      request?.headers.authorization === 'Bearer phone'
+        ? {
+            personId: 'owner-chicks',
+            clientId: 'phone-owner',
+            role: 'owner' as const,
+            capability: 'readOnly' as const,
+          }
+        : {
+            personId: 'owner-chicks',
+            clientId: 'desktop-owner',
+            role: 'owner' as const,
+            capability: 'controlCapable' as const,
+          },
+    undefined,
+    undefined,
+    { fixture: 'live-frame' },
+  )
+  let listener = await service.listen()
+  let base = `http://127.0.0.1:${listener.port}`
+  const phone = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: { authorization: 'Bearer phone' },
+  })
+  assert.deepEqual(phone.observe?.acquire?.actions, [])
+  const stream = await fetch(`${base}/api/events`)
+  const reader = stream.body?.getReader()
+  await reader?.read()
+  const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (
+    initial.activeRun._tag !== 'Active' ||
+    initial.observe?.acquire === undefined
+  )
+    throw new Error('Live frame fixture is unavailable')
+  const intent = {
+    _tag: 'RecordLiveFrameEvidence' as const,
+    expectedLeaseRevision: initial.control.revision,
+    expectedRunRevision: initial.activeRun.run.revision,
+    expectedAcquireRevision: initial.observe.acquire.revision,
+    idempotencyKey: 'live-frame-replay',
+  }
+  assert.equal((await submitPolar(base, intent)).response.status, 200)
+  assert.match(await nextEvent(reader), /liveFrame/)
+  assert.equal((await submitPolar(base, intent)).response.status, 200)
+  const recorded = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(
+    recorded.observe?.acquire?.liveFrame?.sourceFrameAssetId,
+    'fixture-live-frame-001',
+  )
+  assert.equal(recorded.observe?.acquire?.liveFrame?.acceptedFrameCount, 1)
+  assert.equal(recorded.observe?.acquire?.liveFrame?.focus._tag, 'Unknown')
+  const stored = Schema.decodeUnknownSync(
+    Schema.Struct({ session: Schema.String }),
+  )(service.database.prepare('SELECT session FROM acquire_sessions').get())
+  assert.equal(
+    Schema.decodeUnknownSync(AcquireSession)(
+      JSON.parse(stored.session),
+    ).evidence.filter((evidence) => evidence._tag === 'LiveFrame').length,
+    1,
+  )
+  await reader?.cancel()
+  await listener.close()
+  service.close()
+
+  service = createLocalWebService(databasePath)
+  listener = await service.listen()
+  base = `http://127.0.0.1:${listener.port}`
+  const restarted = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(restarted.observe?.acquire?.liveFrame?.targetFraming, 'inFrame')
+  assert.equal(
+    restarted.observe?.acquire?.liveFrame?.storageForecastMb._tag,
+    'Known',
   )
   await listener.close()
   service.close()

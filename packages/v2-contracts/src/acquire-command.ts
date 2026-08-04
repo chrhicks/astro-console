@@ -15,6 +15,12 @@ export const AcquireIntent = Schema.TaggedUnion({
     expectedAcquireRevision: AcquireRevision,
     idempotencyKey: IdempotencyKey,
   },
+  RecordLiveFrameEvidence: {
+    expectedLeaseRevision: LeaseRevision,
+    expectedRunRevision: RunRevision,
+    expectedAcquireRevision: AcquireRevision,
+    idempotencyKey: IdempotencyKey,
+  },
   ApprovePointingCorrection: {
     expectedLeaseRevision: LeaseRevision,
     expectedRunRevision: RunRevision,

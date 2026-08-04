@@ -100,6 +100,37 @@ export const PointingSolveResult = Schema.TaggedUnion({
 
 export type PointingSolveResult = typeof PointingSolveResult.Type
 
+export const CaptureMetric = Schema.TaggedUnion({
+  Known: { value: NonNegativeNumber },
+  Unknown: { reason: Schema.NonEmptyString },
+})
+
+export type CaptureMetric = typeof CaptureMetric.Type
+
+export const LiveFrameEvidence = Schema.Struct({
+  sourceFrameAssetId: AssetId,
+  capturedAtEpochMs: NonNegativeInt,
+  disposition: Schema.Literals(['accepted', 'rejected']),
+  acceptedFrameCount: NonNegativeInt,
+  rejectedFrameCount: NonNegativeInt,
+  targetFraming: Schema.Literals(['inFrame', 'nearEdge', 'outside', 'unknown']),
+  driftArcsec: CaptureMetric,
+  clipping: Schema.Literals(['clear', 'clipped', 'unknown']),
+  exposure: Schema.Literals([
+    'usable',
+    'underexposed',
+    'overexposed',
+    'unknown',
+  ]),
+  focus: CaptureMetric,
+  shape: CaptureMetric,
+  storageForecastMb: CaptureMetric,
+})
+
+export interface LiveFrameEvidence extends Schema.Schema.Type<
+  typeof LiveFrameEvidence
+> {}
+
 export const AcquireEvidence = Schema.TaggedUnion({
   TargetSlewAcknowledged: {
     attemptId: AttemptId,
@@ -159,9 +190,23 @@ export const AcquireEvidence = Schema.TaggedUnion({
     correction: PointingVector,
     uncertaintyArcsec: NonNegativeNumber,
   },
+  LiveFrame: LiveFrameEvidence.fields,
 })
 
 export type AcquireEvidence = typeof AcquireEvidence.Type
+
+export const recordLiveFrameEvidence = (
+  session: AcquireSession,
+  evidence: LiveFrameEvidence,
+): AcquireSession =>
+  AcquireSession.make({
+    ...session,
+    revision: AcquireRevision.make(session.revision + 1),
+    evidence: [
+      ...session.evidence,
+      AcquireEvidence.cases.LiveFrame.make(evidence),
+    ],
+  })
 
 export const AcquireActiveWork = Schema.TaggedUnion({
   SolveRequested: {
@@ -1059,6 +1104,7 @@ function validateAcquireSession(session: {
         `correction:${correctionAttemptId}`,
       PolarMeasurement: ({ attemptId }) => `polar:${attemptId}`,
       LunarDiskLimbMeasurement: ({ attemptId }) => `lunar:${attemptId}`,
+      LiveFrame: ({ sourceFrameAssetId }) => `frame:${sourceFrameAssetId}`,
     }),
   )
   if (new Set(evidenceIds).size !== evidenceIds.length) {

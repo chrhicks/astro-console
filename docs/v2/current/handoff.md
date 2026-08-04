@@ -28,6 +28,14 @@ Observe proof are present. The correction fixture makes no provider call or
 physical-pointing claim; later verification-state behavior is proven by the
 HTTP integration test, not browser capture.
 
+The live-frame-evidence child is complete as deterministic server-backed
+behavior. A controller can record one bounded current-frame observation after
+Acquire completes. Frame identity, disposition counts, framing, drift,
+clipping, exposure, focus, shape, and storage forecast persist as known or
+explicitly unknown facts. SQLite, typed HTTP, idempotency, SSE, restart, and
+responsive Observe proof are present. This does not create a Library asset,
+start managed capture, contact a provider, or claim physical capture.
+
 ## Completed Phase 2.5: Server Boundary Extraction
 
 Phase 2.5 is authorized before Phase 3. It is an internal cleanup only: no

@@ -19,6 +19,7 @@ export function ObserveView({
   refreshPreflight,
   polarCommand,
   targetAcquisitionCommand,
+  recordLiveFrameEvidence,
   approvePointingCorrection,
   revisePointingCorrection,
 }: {
@@ -33,6 +34,7 @@ export function ObserveView({
     attemptId?: string,
   ) => Promise<void>
   targetAcquisitionCommand?: () => Promise<void>
+  recordLiveFrameEvidence?: () => Promise<void>
   approvePointingCorrection?: (proposalId: string) => Promise<void>
   revisePointingCorrection?: (
     proposalId: string,
@@ -209,6 +211,21 @@ export function ObserveView({
       },
     )
   }
+  const recordFrame = () => {
+    if (recordLiveFrameEvidence === undefined || current === undefined) return
+    setPending(true)
+    void recordLiveFrameEvidence().then(
+      () => setPending(false),
+      () => {
+        setPending(false)
+        setResult({
+          runId: current.runId,
+          revision: current.revision,
+          message: 'The current frame evidence could not be recorded.',
+        })
+      },
+    )
+  }
   const approveCorrection = (proposalId: string) => {
     if (approvePointingCorrection === undefined || current === undefined) return
     setPending(true)
@@ -268,7 +285,9 @@ export function ObserveView({
             current={current}
             pending={pending}
             targetAcquisitionCommand={targetAcquisitionCommand}
+            recordLiveFrameEvidence={recordLiveFrameEvidence}
             acquireTarget={acquireTarget}
+            recordFrame={recordFrame}
             approvePointingCorrection={approvePointingCorrection}
             approveCorrection={approveCorrection}
             revisePointingCorrection={revisePointingCorrection}
@@ -403,7 +422,9 @@ function TargetAcquisition({
   current,
   pending,
   targetAcquisitionCommand,
+  recordLiveFrameEvidence,
   acquireTarget,
+  recordFrame,
   approvePointingCorrection,
   approveCorrection,
   revisePointingCorrection,
@@ -413,7 +434,11 @@ function TargetAcquisition({
   targetAcquisitionCommand: Parameters<
     typeof ObserveView
   >[0]['targetAcquisitionCommand']
+  recordLiveFrameEvidence: Parameters<
+    typeof ObserveView
+  >[0]['recordLiveFrameEvidence']
   acquireTarget: () => void
+  recordFrame: () => void
   approvePointingCorrection: Parameters<
     typeof ObserveView
   >[0]['approvePointingCorrection']
@@ -529,13 +554,89 @@ function TargetAcquisition({
           solved frame.
         </p>
       )}
-      {targetAcquisitionCommand !== undefined && acquire.actions.length > 0 && (
-        <button onClick={acquireTarget} disabled={pending}>
-          {lunar ? 'Capture lunar measurement' : 'Capture and plate solve'}
-        </button>
+      {acquire.liveFrame !== undefined && (
+        <LiveFrameEvidence frame={acquire.liveFrame} />
       )}
+      {targetAcquisitionCommand !== undefined &&
+        acquire.actions.length > 0 &&
+        acquire.phase === 'solving' && (
+          <button onClick={acquireTarget} disabled={pending}>
+            {lunar ? 'Capture lunar measurement' : 'Capture and plate solve'}
+          </button>
+        )}
+      {recordLiveFrameEvidence !== undefined &&
+        acquire.actions.length > 0 &&
+        acquire.phase === 'completed' && (
+          <button onClick={recordFrame} disabled={pending}>
+            Record current frame evidence
+          </button>
+        )}
     </section>
   )
+}
+
+function LiveFrameEvidence({
+  frame,
+}: {
+  frame: NonNullable<
+    NonNullable<NonNullable<View['source']>['acquire']>['liveFrame']
+  >
+}) {
+  return (
+    <section
+      className="live-frame-evidence"
+      aria-label="Current frame evidence"
+    >
+      <span>Current capture frame</span>
+      <h3>{frame.sourceFrameAssetId}</h3>
+      <p>
+        {frame.disposition === 'accepted' ? 'Accepted' : 'Rejected'} frame.{' '}
+        {frame.acceptedFrameCount} accepted; {frame.rejectedFrameCount}{' '}
+        rejected.
+      </p>
+      <dl>
+        <div>
+          <dt>Target framing</dt>
+          <dd>{frame.targetFraming}</dd>
+        </div>
+        <div>
+          <dt>Drift</dt>
+          <dd>{metric(frame.driftArcsec, 'arcsec')}</dd>
+        </div>
+        <div>
+          <dt>Clipping</dt>
+          <dd>{frame.clipping}</dd>
+        </div>
+        <div>
+          <dt>Exposure</dt>
+          <dd>{frame.exposure}</dd>
+        </div>
+        <div>
+          <dt>Focus</dt>
+          <dd>{metric(frame.focus, 'metric')}</dd>
+        </div>
+        <div>
+          <dt>Shape</dt>
+          <dd>{metric(frame.shape, 'metric')}</dd>
+        </div>
+        <div>
+          <dt>Storage forecast</dt>
+          <dd>{metric(frame.storageForecastMb, 'MB')}</dd>
+        </div>
+      </dl>
+    </section>
+  )
+}
+
+function metric(
+  value: NonNullable<
+    NonNullable<NonNullable<View['source']>['acquire']>['liveFrame']
+  >['driftArcsec'],
+  unit: string,
+) {
+  return value._tag === 'Known'
+    ? `${value.value} ${unit}`
+    : `Unknown: ${value.reason}`
 }
 
 function preflightVerdict(verdict: string) {

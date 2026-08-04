@@ -187,6 +187,7 @@ function acquireSnapshot(
       AcquireEvidence.guards.PolarMeasurement(evidence) ||
       AcquireEvidence.guards.LunarDiskLimbMeasurement(evidence),
   )
+  const liveFrame = session.evidence.findLast(AcquireEvidence.guards.LiveFrame)
   let latestEvidence: (typeof AcquireSnapshot.Type)['latestEvidence']
   if (latest !== undefined && AcquireEvidence.guards.SolveAttempt(latest)) {
     latestEvidence = PointingSolveResult.guards.Solved(latest.result)
@@ -267,6 +268,24 @@ function acquireSnapshot(
           }),
         })),
     ...(latestEvidence === undefined ? {} : { latestEvidence }),
+    ...(liveFrame === undefined
+      ? {}
+      : {
+          liveFrame: {
+            sourceFrameAssetId: liveFrame.sourceFrameAssetId,
+            capturedAtEpochMs: liveFrame.capturedAtEpochMs,
+            disposition: liveFrame.disposition,
+            acceptedFrameCount: liveFrame.acceptedFrameCount,
+            rejectedFrameCount: liveFrame.rejectedFrameCount,
+            targetFraming: liveFrame.targetFraming,
+            driftArcsec: liveFrame.driftArcsec,
+            clipping: liveFrame.clipping,
+            exposure: liveFrame.exposure,
+            focus: liveFrame.focus,
+            shape: liveFrame.shape,
+            storageForecastMb: liveFrame.storageForecastMb,
+          },
+        }),
     ...(session.phase === 'polarGuidance'
       ? {
           attention:
@@ -333,7 +352,16 @@ function acquireSnapshot(
                   action: 'ApprovePointingCorrection' as const,
                 },
               ]
-            : [],
+            : writable &&
+                session.acquisitionMethod !== undefined &&
+                session.phase === 'completed'
+              ? [
+                  {
+                    _tag: 'Available' as const,
+                    action: 'RecordLiveFrameEvidence' as const,
+                  },
+                ]
+              : [],
   }
 }
 

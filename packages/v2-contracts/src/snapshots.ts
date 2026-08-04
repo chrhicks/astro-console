@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
 import { CommandTag } from './commands.js'
-import { PointingVector } from './acquire.js'
+import { CaptureMetric, PointingVector } from './acquire.js'
 import { DeliveryRepresentation, LibraryAsset } from './asset-domain.js'
 import {
   AssistantFinding,
@@ -180,6 +180,32 @@ export const AcquireSnapshot = Schema.Struct({
           Schema.isGreaterThanOrEqualTo(0),
         ),
       },
+    }),
+  ),
+  liveFrame: Schema.optionalKey(
+    Schema.Struct({
+      sourceFrameAssetId: AssetId,
+      capturedAtEpochMs: NonNegativeInt,
+      disposition: Schema.Literals(['accepted', 'rejected']),
+      acceptedFrameCount: NonNegativeInt,
+      rejectedFrameCount: NonNegativeInt,
+      targetFraming: Schema.Literals([
+        'inFrame',
+        'nearEdge',
+        'outside',
+        'unknown',
+      ]),
+      driftArcsec: CaptureMetric,
+      clipping: Schema.Literals(['clear', 'clipped', 'unknown']),
+      exposure: Schema.Literals([
+        'usable',
+        'underexposed',
+        'overexposed',
+        'unknown',
+      ]),
+      focus: CaptureMetric,
+      shape: CaptureMetric,
+      storageForecastMb: CaptureMetric,
     }),
   ),
   attention: Schema.optionalKey(Schema.NonEmptyString),

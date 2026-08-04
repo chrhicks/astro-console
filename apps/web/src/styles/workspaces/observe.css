@@ -79,6 +79,35 @@
 .preflight-checklist li[data-state='unavailable'] {
   color: var(--color-attention);
 }
+.live-frame-evidence {
+  display: grid;
+  gap: var(--space-8);
+  margin-top: var(--space-16);
+  padding-top: var(--space-16);
+  border-top: 1px solid var(--color-border-strong);
+}
+.live-frame-evidence h3,
+.live-frame-evidence p {
+  margin: 0;
+}
+.live-frame-evidence dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-8);
+  margin: 0;
+}
+.live-frame-evidence dl div {
+  display: grid;
+  gap: var(--space-2);
+}
+.live-frame-evidence dt {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+.live-frame-evidence dd {
+  max-width: none;
+  margin: 0;
+}
 .lifecycle {
   display: flex;
   align-items: center;
@@ -107,6 +136,9 @@
 @media (max-width: 600px) {
   .correction-revision {
     display: none;
+  }
+  .live-frame-evidence dl {
+    grid-template-columns: 1fr;
   }
   .observe-image {
     height: 20rem;

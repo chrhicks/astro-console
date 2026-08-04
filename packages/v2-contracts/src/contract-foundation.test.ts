@@ -135,6 +135,11 @@ const commandFixtures: ReadonlyArray<unknown> = [
     idempotencyKey: 'i-24',
   },
   {
+    _tag: 'RecordLiveFrameEvidence',
+    ...acquireFreshness,
+    idempotencyKey: 'i-25',
+  },
+  {
     _tag: 'CapturePolarAlignmentMeasurement',
     ...acquireFreshness,
     idempotencyKey: 'i-14',
@@ -236,7 +241,7 @@ const commandFixtures: ReadonlyArray<unknown> = [
 
 describe('Gate 5 contract foundation', () => {
   it('keeps the accepted command vocabulary closed', () => {
-    assert.equal(commandTags.length, 34)
+    assert.equal(commandTags.length, 35)
     assert.deepEqual(commandTags, acceptedCommandTags)
     assert.deepEqual(
       commandTags,

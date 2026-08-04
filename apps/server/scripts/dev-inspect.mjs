@@ -25,12 +25,13 @@ if (
     'target-deep-sky',
     'target-lunar',
     'target-correction',
+    'live-frame',
     'plan-draft',
     'library-published',
   ].includes(scenario)
 )
   throw new Error(
-    '--scenario must be m27, polar, target-deep-sky, target-lunar, target-correction, plan-draft, or library-published',
+    '--scenario must be m27, polar, target-deep-sky, target-lunar, target-correction, live-frame, plan-draft, or library-published',
   )
 const scenarioSuffix = scenario === 'm27' ? '' : `-${scenario}`
 const profile = resolve(

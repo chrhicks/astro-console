@@ -80,6 +80,9 @@ export function App() {
   const [targetAcquisitionCommand, setTargetAcquisitionCommand] = useState<
     (() => Promise<void>) | undefined
   >()
+  const [recordLiveFrameEvidence, setRecordLiveFrameEvidence] = useState<
+    (() => Promise<void>) | undefined
+  >()
   const [approvePointingCorrection, setApprovePointingCorrection] = useState<
     ((proposalId: string) => Promise<void>) | undefined
   >()
@@ -313,6 +316,28 @@ export function App() {
       })
       if (!response.ok) throw new Error('Target acquisition command rejected')
     })
+    setRecordLiveFrameEvidence(() => async () => {
+      const observe = projectionRef.current.observe
+      if (
+        observe.source?.acquire === undefined ||
+        observe.leaseRevision === undefined
+      )
+        throw new Error('Live frame evidence state unavailable')
+      const response = await fetch('/api/acquire/commands', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          intent: {
+            _tag: 'RecordLiveFrameEvidence',
+            expectedLeaseRevision: observe.leaseRevision,
+            expectedRunRevision: observe.source.revision,
+            expectedAcquireRevision: observe.source.acquire.revision,
+            idempotencyKey: crypto.randomUUID(),
+          },
+        }),
+      })
+      if (!response.ok) throw new Error('Live frame evidence command rejected')
+    })
     setApprovePointingCorrection(() => async (proposalId: string) => {
       const observe = projectionRef.current.observe
       if (
@@ -384,6 +409,7 @@ export function App() {
       setRefreshPreflight(undefined)
       setPolarCommand(undefined)
       setTargetAcquisitionCommand(undefined)
+      setRecordLiveFrameEvidence(undefined)
       setApprovePointingCorrection(undefined)
       setRevisePointingCorrection(undefined)
       void runtime
@@ -454,6 +480,9 @@ export function App() {
         {...(targetAcquisitionCommand === undefined || projection.shell.readOnly
           ? {}
           : { targetAcquisitionCommand })}
+        {...(recordLiveFrameEvidence === undefined || projection.shell.readOnly
+          ? {}
+          : { recordLiveFrameEvidence })}
         {...(approvePointingCorrection === undefined ||
         projection.shell.readOnly
           ? {}

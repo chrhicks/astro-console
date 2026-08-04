@@ -155,6 +155,7 @@ export const acceptedCommandTags = [
   'ApprovePointingCorrection',
   'RevisePointingCorrection',
   'CaptureTargetAcquisitionEvidence',
+  'RecordLiveFrameEvidence',
   'CapturePolarAlignmentMeasurement',
   'AcceptPolarAlignmentEvidence',
   'StartProcessingSession',
@@ -255,6 +256,10 @@ export const Command = Schema.TaggedUnion({
     parameters: CorrectionRevision,
   },
   CaptureTargetAcquisitionEvidence: {
+    ...AcquireCommandFreshness,
+    ...DurableMutation,
+  },
+  RecordLiveFrameEvidence: {
     ...AcquireCommandFreshness,
     ...DurableMutation,
   },

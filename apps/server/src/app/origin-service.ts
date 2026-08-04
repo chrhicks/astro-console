@@ -129,6 +129,7 @@ export function createLocalWebService(
       | 'target-deep-sky'
       | 'target-lunar'
       | 'target-correction'
+      | 'live-frame'
     readonly webDistPath?: string
     readonly preflightProvider?: ReadOnlyPreflightProviderShape
     readonly polarMeasurementProvider?: PolarMeasurementProviderShape
@@ -199,14 +200,18 @@ export function createLocalWebService(
   if (
     options.fixture === 'target-deep-sky' ||
     options.fixture === 'target-lunar' ||
-    options.fixture === 'target-correction'
+    options.fixture === 'target-correction' ||
+    options.fixture === 'live-frame'
   ) {
     const acquisitionMethod =
       options.fixture === 'target-lunar' ? 'lunarDiskLimb' : 'deepSkyPlateSolve'
     const run = {
       id: `run-${acquisitionMethod}-fixture`,
       revision: 1,
-      phase: 'acquire' as const,
+      phase:
+        options.fixture === 'live-frame'
+          ? ('capture' as const)
+          : ('acquire' as const),
       target:
         acquisitionMethod === 'deepSkyPlateSolve'
           ? 'M27 Dumbbell Nebula'
@@ -234,7 +239,10 @@ export function createLocalWebService(
     }
     stateRepository.commit({ run })
     const session = targetAcquisitionSession(run.id, acquisitionMethod)
-    if (options.fixture === 'target-correction') {
+    if (
+      options.fixture === 'target-correction' ||
+      options.fixture === 'live-frame'
+    ) {
       const evidence = recordSolveCompletion(session, {
         attemptId: AttemptId.make('deepSkyPlateSolve-initial-1'),
         sourceFrameAssetId: AssetId.make('fixture-correction-proposal-frame'),
@@ -252,7 +260,7 @@ export function createLocalWebService(
             declinationDegrees: 22.721,
           },
           correction: {
-            rightAscensionArcsec: 90,
+            rightAscensionArcsec: options.fixture === 'live-frame' ? 0 : 90,
             declinationArcsec: 0,
             convention: 'mountRaDec',
           },
@@ -293,7 +301,9 @@ export function createLocalWebService(
     Effect.runSync(projectionPublication.publish(type, cursor))
   const targetAcquisitionProvider =
     options.targetAcquisitionProvider ??
-    (options.fixture === 'target-deep-sky' || options.fixture === 'target-lunar'
+    (options.fixture === 'target-deep-sky' ||
+    options.fixture === 'target-lunar' ||
+    options.fixture === 'live-frame'
       ? deterministicTargetAcquisitionProvider
       : undefined)
 
@@ -513,6 +523,7 @@ export function createLocalWebService(
           (AcquireIntent.guards.CaptureTargetAcquisitionEvidence(
             decoded.intent,
           ) ||
+            AcquireIntent.guards.RecordLiveFrameEvidence(decoded.intent) ||
             AcquireIntent.guards.ApprovePointingCorrection(decoded.intent) ||
             AcquireIntent.guards.RevisePointingCorrection(decoded.intent))
             ? executeTargetAcquisitionCommand(input)
@@ -732,6 +743,24 @@ const deterministicTargetAcquisitionProvider: TargetAcquisitionProviderShape = {
       _tag: 'Accepted' as const,
       acknowledgedAtEpochMs: 1_722_729_600_200,
       acknowledgementRef: `fixture-${correctionAttemptId}-acknowledged`,
+    }),
+  frame: () =>
+    Effect.succeed({
+      sourceFrameAssetId: 'fixture-live-frame-001',
+      capturedAtEpochMs: 1_722_729_600_300,
+      disposition: 'accepted' as const,
+      acceptedFrameCount: 1,
+      rejectedFrameCount: 0,
+      targetFraming: 'inFrame' as const,
+      driftArcsec: { _tag: 'Known' as const, value: 1.2 },
+      clipping: 'clear' as const,
+      exposure: 'usable' as const,
+      focus: {
+        _tag: 'Unknown' as const,
+        reason: 'Focus metric is unavailable.',
+      },
+      shape: { _tag: 'Known' as const, value: 1.8 },
+      storageForecastMb: { _tag: 'Known' as const, value: 1730 },
     }),
 }
 
