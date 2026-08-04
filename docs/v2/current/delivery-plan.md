@@ -1,6 +1,6 @@
 # Astro Console V2 Delivery Plan
 
-Status: **durable V2 completion roadmap — Phases 0, 0.5, 1, and 2 and Production Convergence complete; Phase 3 preflight is prepared, not accepted or implemented**
+Status: **durable V2 completion roadmap — Phases 0, 0.5, 1, and 2 and Production Convergence complete; Phase 3 preflight is complete with deterministic adapter proof**
 
 ## Keep This Plan
 
@@ -138,9 +138,9 @@ The typed control request/grant/decline/release/take seam remains preserved,
 but user-facing presence and control UI is deferred to Phase 6; reconnect and
 presence lifecycle are not claimed. Interactive Process is deferred to Phase 5.
 Phase 3 is organized as the ordered Continuum Epic `tkt-2xpkp65f`. Its
-preflight child is accepted and has a deterministic provider-boundary proof;
-the real read-only adapter and every later child require their own owner
-authorization before implementation.
+preflight child is complete: the opt-in Alpaca adapter makes only declared GET
+reads and has deterministic boundary proof. No real rig call is claimed. The
+remaining children proceed in their documented dependency order.
 
 ## Phase 3: Observe, Acquire, and Capture — After Production Convergence
 

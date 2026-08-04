@@ -23,6 +23,7 @@ import {
   ObserveCommandResponse,
   PlanCommandResponse,
   ProcessSourceHandoff,
+  PreflightSnapshot,
   RefreshPreflightResponse,
   RunSnapshot,
 } from '@astro-console/v2-contracts'
@@ -41,6 +42,7 @@ import {
 } from './persistence/database.ts'
 import { createPublisherWorker } from './workers/publisher-worker.ts'
 import { originServerConfig } from './config/environment-config.ts'
+import { alpacaPreflightProvider } from './providers/alpaca-preflight-provider.ts'
 
 function createFixtureService(
   databasePath?: Parameters<typeof createLocalWebService>[0],
@@ -168,6 +170,52 @@ test('Plan command transport decodes one closed request boundary and projects pe
   assert.equal(
     Schema.decodeUnknownSync(PlanCommandResponse)(await started.json())._tag,
     'Accepted',
+  )
+})
+
+test('Alpaca preflight adapter emits only GET reads and derives a blocked mount verdict', async () => {
+  const requests: Array<{ readonly url: string; readonly method: string }> = []
+  const request: typeof fetch = async (input, init) => {
+    const url = String(input)
+    requests.push({ url, method: init?.method ?? 'GET' })
+    const value = url.endsWith('/connected')
+      ? true
+      : url.endsWith('/atpark')
+        ? true
+        : url.endsWith('/slewing')
+          ? false
+          : true
+    return Response.json({ Value: value, ErrorNumber: 0 })
+  }
+  const provider = alpacaPreflightProvider(
+    {
+      kind: 'alpaca',
+      host: '192.168.4.63',
+      port: 32323,
+      telescopeDeviceNumber: 0,
+    },
+    request,
+  )
+
+  const snapshot = Schema.decodeUnknownSync(PreflightSnapshot)(
+    await Effect.runPromise(provider.observe()),
+  )
+
+  assert.equal(snapshot.verdict, 'blocked')
+  assert.equal(snapshot.checks[1]?.key, 'mount-parked')
+  assert.equal(snapshot.checks[1]?.state, 'blocked')
+  assert.deepEqual(
+    requests.map((entry) => entry.method),
+    ['GET', 'GET', 'GET', 'GET'],
+  )
+  assert.deepEqual(
+    requests.map((entry) => entry.url),
+    [
+      'http://192.168.4.63:32323/api/v1/telescope/0/connected',
+      'http://192.168.4.63:32323/api/v1/telescope/0/atpark',
+      'http://192.168.4.63:32323/api/v1/telescope/0/slewing',
+      'http://192.168.4.63:32323/api/v1/telescope/0/tracking',
+    ],
   )
 })
 
@@ -1222,6 +1270,39 @@ test('origin admission factory consumes decoded configuration', async (t) => {
     service.close()
   })
   assert.ok(listener.port > 0)
+})
+
+test('origin configuration enables the real preflight adapter only with complete Alpaca values', async () => {
+  const config = await Effect.runPromise(
+    originServerConfig.pipe(
+      Effect.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromUnknown({
+            ASTRO_PREFLIGHT_PROVIDER: 'alpaca',
+            ASTRO_PREFLIGHT_ALPACA_HOST: '192.168.4.63',
+            ASTRO_PREFLIGHT_ALPACA_PORT: '32323',
+            ASTRO_PREFLIGHT_ALPACA_TELESCOPE_DEVICE_NUMBER: '0',
+          }),
+        ),
+      ),
+    ),
+  )
+  assert.deepEqual(config.preflightProvider, {
+    kind: 'alpaca',
+    host: '192.168.4.63',
+    port: 32323,
+    telescopeDeviceNumber: 0,
+  })
+  const incomplete = await Effect.runPromiseExit(
+    originServerConfig.pipe(
+      Effect.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromUnknown({ ASTRO_PREFLIGHT_PROVIDER: 'alpaca' }),
+        ),
+      ),
+    ),
+  )
+  assert.equal(incomplete._tag, 'Failure')
 })
 
 test('operational endpoints expose bounded admitted health without internal detail', async (t) => {

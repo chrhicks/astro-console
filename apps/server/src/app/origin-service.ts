@@ -78,6 +78,7 @@ import {
   refreshPreflight,
   type ReadOnlyPreflightProviderShape,
 } from '../services/preflight-service.ts'
+import { alpacaPreflightProvider } from '../providers/alpaca-preflight-provider.ts'
 export type DownloadGrantConfig = {
   readonly issuer: DownloadGrantIssuer
   readonly now?: () => Date
@@ -463,6 +464,13 @@ export const startOrigin = () =>
       issuer === undefined ? undefined : { issuer },
       {
         ...(config.fixture === undefined ? {} : { fixture: config.fixture }),
+        ...(config.preflightProvider === undefined
+          ? {}
+          : {
+              preflightProvider: alpacaPreflightProvider(
+                config.preflightProvider,
+              ),
+            }),
         webDistPath: config.runtime.webDistPath,
       },
     )

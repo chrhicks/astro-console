@@ -1,6 +1,6 @@
 # Phase 3 Implementation Planning
 
-Status: **one ordered Epic; only its preflight child has owner authorization**
+Status: **one ordered Epic; read-only preflight is complete, guided polar alignment is next**
 
 This is the execution plan for Phase 3 in the durable
 [V2 delivery plan](delivery-plan.md). It turns the six Phase 3 outcomes into
@@ -18,12 +18,12 @@ Continuum Epic `tkt-2xpkp65f` — **Phase 3: Observe, Acquire, and Capture** —
 owns the complete phase. Each child has its own implementation detail,
 acceptance gate, and proof. A child starts only after its blockers are complete;
 the owner must explicitly authorize it before implementation. The existing
-preflight child is the one exception: it is already authorized and partly
-implemented.
+preflight child is complete. The remaining children retain their documented
+order and proof gates.
 
 | Order | Child task | Delivery responsibility | Depends on |
 | --- | --- | --- | --- |
-| 1 | `tkt-2e396ziz` — Complete real read-only preflight adapter | Read and decode rig, plan, and safety facts into a timestamped `PreflightSnapshot`. Normal runtime remains `unavailable` until a provider is proven read-only. | — |
+| 1 | `tkt-2e396ziz` — Complete real read-only preflight adapter | **Complete.** An opt-in Alpaca adapter reads four mount facts using GET only. It has deterministic boundary proof; no real rig call is claimed. | — |
 | 2 | `tkt-ue2yl172` — Guide polar alignment from solved frames | Capture/solve a polar measurement, show manual Alt/Az overlay guidance, and require explicit acceptance of current in-tolerance evidence. | 1 |
 | 3 | `tkt-gj8btl1l` — Acquire targets with deep-sky and lunar paths | Use plate solve for deep-sky slew/center and a separate disk/limb path for lunar acquisition. | 1, 2 |
 | 4 | `tkt-gwl6lc30` — Verify pointing corrections from successive images | Persist the correction proposal and bound; verify the physical result from a new solved image. | 3 |
@@ -39,13 +39,12 @@ revision, acquire revision, idempotency, SQLite, HTTP, and SSE seams. The
 server owns policy and transitions; the browser renders the current projection.
 Phone remains read-only.
 
-1. **Preflight.** The existing typed boundary, SQLite/HTTP/SSE persistence,
-   unavailable behavior, and Observe panel are complete with a deterministic
-   provider. The remaining work is a real provider adapter that can prove it
-   performs reads only. Existing SDK connection and authentication calls cannot
-   be used until this is true. It must produce `ready`, `blocked`,
-   `unavailable`, or `unknown` facts without device commands, capture, outbox
-   work, or Solar behavior.
+1. **Preflight.** Complete. The typed boundary, SQLite/HTTP/SSE persistence,
+unavailable behavior, and Observe panel use an opt-in Alpaca adapter that
+makes only four declared GET reads: connection, parked, slewing, and tracking.
+Existing SDK connection and authentication calls remain excluded because they
+can write. The deterministic proof covers blocked and configuration failure;
+no real rig call is claimed.
 2. **Polar.** Implement accepted `ACQ-06` and `ACQ-07`:
    `CapturePolarAlignmentMeasurement` and `AcceptPolarAlignmentEvidence`.
    The operator makes the physical adjustment. The service records a solved

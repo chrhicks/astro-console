@@ -1,6 +1,6 @@
 # Production Convergence Complete Handoff
 
-Status: **Phases 1, 2, and 2.5 closed — the unrelated Solar test slice is retired; Phase 3 preflight provider boundary and projection are implemented, while a real provider adapter remains pending**
+Status: **Phases 1, 2, and 2.5 closed — the unrelated Solar test slice is retired; the Phase 3 read-only preflight child is complete with deterministic Alpaca adapter proof**
 
 ## Completed Phase 2.5: Server Boundary Extraction
 
@@ -38,8 +38,10 @@ Both remaining Compose files render with inert absolute placeholders; unset real
 host-secret paths correctly refuse to render. The owner accepted the bounded
 Phase 3 preflight slice. Its typed boundary, persistence, endpoint, SSE
 publication, unavailable behavior, and Observe presentation are implemented.
-A real provider adapter remains deliberately pending: existing SDK connection
-and authentication paths are not proven read-only.
+An opt-in Alpaca provider now reads `connected`, `atpark`, `slewing`, and
+`tracking` using GET only. Its deterministic tests prove those methods and no
+provider write; no real rig call has been made. Existing SDK connection and
+authentication paths remain excluded because they are not proven read-only.
 
 ### Solar Test Slice Retired
 
@@ -246,10 +248,11 @@ same-host resilience. Off-host recovery is not current Phase 1 scope.
   Phase 2 managed-run semantics with no provider call, device command, outbox
   work, capture evidence, or Solar activity; browser phone projection remains
   read-only.
-- Phase 3 has a verified read-only provider boundary, typed preflight
-  projection, SQLite/HTTP/SSE proof, and bounded Observe presentation.
-  Normal runtime returns unavailable. A real provider adapter is pending because
-  current SDK connection/authentication paths are not proven read-only.
+- Phase 3 read-only preflight is complete with a typed provider boundary,
+  SQLite/HTTP/SSE proof, bounded Observe presentation, and an opt-in Alpaca
+  GET-only adapter. Normal runtime remains unavailable without its explicit
+  configuration. This is deterministic adapter proof, not a real-rig claim;
+  existing SDK connection/authentication paths remain excluded.
 - Process Save is a service API only: app-owned source IDs resolve under
   configured roots, selected bytes are checksummed and atomically promoted,
   and Asset/provenance/receipt/`PublishAsset` records commit together. Recorded

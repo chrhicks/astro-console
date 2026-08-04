@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **Phases 0, 0.5, 1, and 2 and all five Production Convergence Epics complete; Phase 3 read-only preflight is next, pending owner acceptance**
+Status: **Phases 0, 0.5, 1, 2, and the Phase 3 read-only preflight child complete; guided polar alignment is next**
 
 This directory is organized to keep normal working context small. Do not read
 the entire V2 tree by default.
@@ -72,8 +72,9 @@ version-matched web bundle from the rig-local server origin and has migrated
 the Plan, fake managed-run Observe, Library delivery, and current Process
 handoff boundaries while retiring experimental runtime paths.
 Phase 3 (Observe, Acquire, and Capture) follows convergence. Its read-only
-decision-grade preflight packet is prepared but still requires owner acceptance
-before implementation; later slices remain separately accepted bounded work.
+decision-grade preflight child is complete with an opt-in Alpaca GET-only
+adapter and deterministic proof. A real rig has not yet been contacted.
+Later slices remain ordered bounded work.
 
 `apps/web` source, CSS, and accepted screenshot evidence are the production
 visual authority. `docs/v2-ui-final` and `prototype/v2-ui` are historical Gate

@@ -44,6 +44,14 @@ export type OriginServerConfig = {
   readonly fixture: 'm27' | 'plan-draft' | 'library-published' | undefined
   readonly downloadGrant:
     { readonly url: string; readonly secretPath: string } | undefined
+  readonly preflightProvider: PreflightProviderConfig | undefined
+}
+
+export type PreflightProviderConfig = {
+  readonly kind: 'alpaca'
+  readonly host: string
+  readonly port: number
+  readonly telescopeDeviceNumber: number
 }
 
 export const originServerConfig = Config.all({
@@ -71,6 +79,12 @@ export const originServerConfig = Config.all({
   webDistPath: text('ASTRO_WEB_DIST', '../web/dist'),
   downloadGrantUrl: optional('ASTRO_DOWNLOAD_GRANT_URL'),
   downloadGrantSecretPath: optional('ASTRO_DOWNLOAD_GRANT_SHARED_SECRET_PATH'),
+  preflightProvider: text('ASTRO_PREFLIGHT_PROVIDER', 'disabled'),
+  preflightHost: optional('ASTRO_PREFLIGHT_ALPACA_HOST'),
+  preflightPort: optional('ASTRO_PREFLIGHT_ALPACA_PORT'),
+  preflightTelescopeDeviceNumber: optional(
+    'ASTRO_PREFLIGHT_ALPACA_TELESCOPE_DEVICE_NUMBER',
+  ),
 }).pipe(
   Config.mapOrFail(
     (input): Effect.Effect<OriginServerConfig, Config.ConfigError> => {
@@ -133,6 +147,10 @@ function originServer(input: {
   readonly webDistPath: string
   readonly downloadGrantUrl: Option.Option<string>
   readonly downloadGrantSecretPath: Option.Option<string>
+  readonly preflightProvider: string
+  readonly preflightHost: Option.Option<string>
+  readonly preflightPort: Option.Option<string>
+  readonly preflightTelescopeDeviceNumber: Option.Option<string>
 }) {
   return Effect.gen(function* () {
     const fixture =
@@ -154,6 +172,7 @@ function originServer(input: {
       input.webDistPath,
       'Runtime configuration contains an invalid non-secret value',
     )
+    const preflightProvider = yield* configuredPreflightProvider(input)
     if (input.admissionMode === 'development') {
       if (input.bind !== '127.0.0.1')
         return yield* configFailure(
@@ -177,6 +196,7 @@ function originServer(input: {
                 secretPath: input.downloadGrantSecretPath.value,
               }
             : undefined,
+        preflightProvider,
       })
     }
     if (input.admissionMode !== 'production')
@@ -239,7 +259,44 @@ function originServer(input: {
               secretPath: input.downloadGrantSecretPath.value,
             }
           : undefined,
+      preflightProvider,
     })
+  })
+}
+
+function configuredPreflightProvider(input: {
+  readonly preflightProvider: string
+  readonly preflightHost: Option.Option<string>
+  readonly preflightPort: Option.Option<string>
+  readonly preflightTelescopeDeviceNumber: Option.Option<string>
+}) {
+  if (input.preflightProvider === 'disabled') return Effect.succeed(undefined)
+  if (input.preflightProvider !== 'alpaca')
+    return configFailure('ASTRO_PREFLIGHT_PROVIDER must be disabled or alpaca')
+  const host = Option.getOrUndefined(input.preflightHost)
+  const port = Option.getOrUndefined(input.preflightPort)
+  const telescopeDeviceNumber = Option.getOrUndefined(
+    input.preflightTelescopeDeviceNumber,
+  )
+  if (
+    host === undefined ||
+    port === undefined ||
+    telescopeDeviceNumber === undefined ||
+    !/^\d+$/.test(port) ||
+    Number(port) > 65_535 ||
+    !/^\d+$/.test(telescopeDeviceNumber)
+  )
+    return configFailure(
+      'Alpaca preflight requires host, port, and telescope device number.',
+    )
+  return Effect.gen(function* () {
+    const validHost = yield* validText(host, 'Alpaca preflight host is invalid')
+    return {
+      kind: 'alpaca' as const,
+      host: validHost,
+      port: Number(port),
+      telescopeDeviceNumber: Number(telescopeDeviceNumber),
+    }
   })
 }
 
