@@ -1,6 +1,38 @@
 # Production Convergence Complete Handoff
 
-Status: **Phases 1 and 2 closed — all five Production Convergence Epics complete; Phase 3 read-only preflight remains prepared, not accepted or implemented**
+Status: **Phases 1, 2, and 2.5 closed — all five Production Convergence Epics complete; Phase 3 read-only preflight remains prepared, not accepted or implemented**
+
+## Completed Phase 2.5: Server Boundary Extraction
+
+Phase 2.5 is authorized before Phase 3. It is an internal cleanup only: no
+Phase 3 provider reads, device commands, Solar work, capture, browser changes,
+or new persistence model are authorized. The owner explicitly removed any
+unshipped backward-compatibility requirement: fresh SQLite initialization is
+the authority and obsolete migrations, legacy conversions, and retired runtime
+paths may be deleted.
+
+Previously completed and committed:
+
+1. `0746d3c refactor(server): extract identity and database foundation` moves
+   shared identity and fresh current-schema SQLite ownership out of `server.ts`.
+   `DatabasePathNotAppOwned` is a tagged schema error.
+2. `1593f66 refactor(server): extract projection and domain state` adds the
+   Effect-owned projection publication service and shared domain state module.
+   SSE publication uses self-scheduling `setTimeout` loops (250 ms cursor poll,
+   15-second heartbeat), not `setInterval`; active timeouts clear on request or
+   service close.
+
+Phase 2.5 is now complete. Plan, Control, Observe, and Library command/read
+boundaries own their HTTP decoding and response shaping through explicit
+SQLite-backed persistence, snapshot, and SSE publication ports. The origin
+router owns route selection and imports only HTTP and identity types;
+`server.ts` composes the existing handlers and real ports. No extracted module
+imports `server.ts`, and no persistence schema or browser, provider, device,
+Solar, or capture behavior changed.
+
+Current evidence: `apps/server` `npm run check` passes format, lint,
+typecheck, source checks, and **62/62** integration tests. Phase 3 remains
+unimplemented and requires separate owner acceptance.
 
 ## Production Convergence Complete
 

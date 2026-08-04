@@ -9,24 +9,20 @@ import {
   type KeyObject,
 } from 'node:crypto'
 import { readFileSync, statSync } from 'node:fs'
-import { Context, Effect, Exit, Layer, Option, Schema, Scope } from 'effect'
+import { Effect, Exit, Layer, Option, Schema, Scope } from 'effect'
 import {
   BootstrapHttpFailureEnvelope,
   BootstrapHttpSuccessEnvelope,
   BootstrapSseEventEnvelope,
   BootstrapSnapshot,
   Command,
-  CommandEnvelope,
   CommandFailure,
   CommandHttpFailureEnvelope,
   CommandHttpSuccessEnvelope,
   DomainEvent,
-  ObserveCommandRequest,
-  ObserveCommandResult,
   ObserveCommandResponse,
   ObserveIntent,
   ObserveWorkspaceProjection,
-  PlanCommandRequest,
   PlanCommandResponse,
   PlanIntent,
   PlanWorkspaceProjection,
@@ -71,6 +67,30 @@ import {
   ProjectionPublication,
   projectionPublicationLayer,
 } from './projection-publication.ts'
+import {
+  executePlanRequest,
+  planPersistenceLayer,
+} from './plan-command-service.ts'
+import {
+  CommandRejected,
+  controlEnvelopeCommand,
+  controlPersistenceLayer,
+  executeControlRequest,
+} from './control-command-service.ts'
+import {
+  executeObserveRequest,
+  observePersistenceLayer,
+} from './observe-command-service.ts'
+import {
+  LibraryAssetNotFound,
+  LibraryAssetUnavailable,
+  LibraryInputInvalid,
+  LibraryPersistenceUnavailable,
+  LibraryService,
+  libraryPersistenceLayer,
+  libraryServiceLayer,
+} from './library-service.ts'
+import { createOriginRouter } from './origin-router.ts'
 type StartRun = Extract<
   typeof PlanIntent.Type,
   { readonly _tag: 'StartAcceptedRun' }
@@ -478,121 +498,6 @@ export const createLocalFixtureAdmission =
       identity.role ??
       (identity.personId === 'owner-chicks' ? 'owner' : 'viewer'),
   })
-class CommandRejected extends Schema.TaggedErrorClass<CommandRejected>()(
-  'Server.CommandRejected',
-  { failure: CommandFailure },
-) {}
-class CommandInputInvalid extends Schema.TaggedErrorClass<CommandInputInvalid>()(
-  'Server.CommandInputInvalid',
-  {},
-) {}
-class PlanCommandInputInvalid extends Schema.TaggedErrorClass<PlanCommandInputInvalid>()(
-  'Server.PlanCommandInputInvalid',
-  {},
-) {}
-class PlanServiceUnavailable extends Schema.TaggedErrorClass<PlanServiceUnavailable>()(
-  'Server.PlanServiceUnavailable',
-  {},
-) {}
-class ObserveCommandInputInvalid extends Schema.TaggedErrorClass<ObserveCommandInputInvalid>()(
-  'Server.ObserveCommandInputInvalid',
-  {},
-) {}
-class ObserveServiceUnavailable extends Schema.TaggedErrorClass<ObserveServiceUnavailable>()(
-  'Server.ObserveServiceUnavailable',
-  {},
-) {}
-class LibraryInputInvalid extends Schema.TaggedErrorClass<LibraryInputInvalid>()(
-  'Server.LibraryInputInvalid',
-  {},
-) {}
-class LibraryAssetNotFound extends Schema.TaggedErrorClass<LibraryAssetNotFound>()(
-  'Server.LibraryAssetNotFound',
-  {},
-) {}
-class LibraryAssetUnavailable extends Schema.TaggedErrorClass<LibraryAssetUnavailable>()(
-  'Server.LibraryAssetUnavailable',
-  { reason: Schema.Literals(['AssetUnavailable', 'PublicationUnavailable']) },
-) {}
-class LibraryPersistenceUnavailable extends Schema.TaggedErrorClass<LibraryPersistenceUnavailable>()(
-  'Server.LibraryPersistenceUnavailable',
-  {},
-) {}
-interface LibraryServiceShape {
-  readonly page: (
-    query: typeof LibraryQuery.Type,
-  ) => Effect.Effect<typeof LibraryPage.Type, LibraryPersistenceUnavailable>
-  readonly detail: (
-    assetId: string,
-  ) => Effect.Effect<
-    typeof LibraryAssetDetail.Type,
-    LibraryInputInvalid | LibraryAssetNotFound | LibraryPersistenceUnavailable
-  >
-  readonly processSource: (
-    assetId: string,
-  ) => Effect.Effect<
-    typeof ProcessSourceHandoff.Type,
-    | LibraryInputInvalid
-    | LibraryAssetNotFound
-    | LibraryAssetUnavailable
-    | LibraryPersistenceUnavailable
-  >
-  readonly download: (
-    assetId: string,
-  ) => Effect.Effect<
-    { readonly objectKey: string },
-    | LibraryInputInvalid
-    | LibraryAssetNotFound
-    | LibraryAssetUnavailable
-    | LibraryPersistenceUnavailable
-  >
-}
-class LibraryService extends Context.Service<
-  LibraryService,
-  LibraryServiceShape
->()('Server.LibraryService') {}
-interface PlanCommandServiceShape {
-  readonly execute: (intent: typeof PlanIntent.Type) => Effect.Effect<
-    {
-      readonly status: number
-      readonly body: typeof PlanCommandResponse.Type
-    },
-    Schema.SchemaError | PlanServiceUnavailable
-  >
-}
-class PlanCommandService extends Context.Service<
-  PlanCommandService,
-  PlanCommandServiceShape
->()('Server.PlanCommandService') {}
-interface ObserveCommandServiceShape {
-  readonly execute: (intent: typeof ObserveIntent.Type) => Effect.Effect<
-    {
-      readonly status: number
-      readonly body: typeof ObserveCommandResponse.Type
-    },
-    ObserveServiceUnavailable
-  >
-}
-class ObserveCommandService extends Context.Service<
-  ObserveCommandService,
-  ObserveCommandServiceShape
->()('Server.ObserveCommandService') {}
-interface ControlCommandServiceShape {
-  readonly execute: (
-    commandId: string,
-    command: typeof controlEnvelopeCommand.Type,
-  ) => Effect.Effect<
-    {
-      readonly status: number
-      readonly body: typeof CommandHttpSuccessEnvelope.Type
-    },
-    CommandRejected | Schema.SchemaError
-  >
-}
-class ControlCommandService extends Context.Service<
-  ControlCommandService,
-  ControlCommandServiceShape
->()('Server.ControlCommandService') {}
 type LibraryRole =
   | 'original'
   | 'linearMaster'
@@ -1047,19 +952,13 @@ export function createLocalWebService(
   const publish = (type: string, cursor: number) =>
     Effect.runSync(projectionPublication.publish(type, cursor))
 
-  const handler = async (
-    request: IncomingMessage,
-    response: ServerResponse,
-  ) => {
-    const url = new URL(request.url ?? '/', 'http://local')
-    if (request.method === 'GET' && url.pathname === '/health/live')
-      return json(response, 200, { status: 'alive' })
-    expireReconnectGrace(database)
-    const identity = await identityResolver(request)
-    if (identity === undefined)
-      return unauthenticated(response, request.method, url.pathname)
-    if (request.method === 'GET' && url.pathname === '/api/snapshot')
-      return void Effect.runSync(
+  const handler = createOriginRouter({
+    identityResolver,
+    expireReconnectGrace: () => expireReconnectGrace(database),
+    live: (response) => json(response, 200, { status: 'alive' }),
+    unauthenticated,
+    snapshot: (response, identity) =>
+      void Effect.runSync(
         bootstrapSnapshot(database, identity).pipe(
           Effect.flatMap((data) =>
             Schema.decodeUnknownEffect(BootstrapHttpSuccessEnvelope)({
@@ -1069,20 +968,18 @@ export function createLocalWebService(
           ),
           Effect.map((body) => json(response, 200, body)),
         ),
-      )
-    if (request.method === 'GET' && url.pathname === '/api/health/ready')
-      return json(response, 200, readiness(database))
-    if (request.method === 'GET' && url.pathname === '/api/health/operations')
-      return isOwner(identity)
+      ),
+    ready: (response) => json(response, 200, readiness(database)),
+    operations: (response, identity) =>
+      isOwner(identity)
         ? json(response, 200, operations(database))
-        : json(response, 403, reject('OwnerRequired').body)
-    if (request.method === 'GET' && url.pathname === '/api/events') {
-      return Effect.runSync(
+        : json(response, 403, reject('OwnerRequired').body),
+    events: (request, response, identity) =>
+      void Effect.runSync(
         projectionPublication.stream(request, response, identity),
-      )
-    }
-    if (request.method === 'POST' && url.pathname === '/api/commands/control')
-      return Effect.runPromise(
+      ),
+    control: (response, identity, request) =>
+      Effect.runPromise(
         controlCommandFromEnvelope(
           body(request),
           database,
@@ -1110,30 +1007,17 @@ export function createLocalWebService(
               ),
           }),
         ),
-      ).then(({ status, body }) => json(response, status, body))
-    if (request.method === 'GET' && url.pathname === '/api/workspaces/plan')
-      return workspace(response, database, 'plan')
-    if (request.method === 'GET' && url.pathname === '/api/workspaces/process')
-      return processWorkspace(response, database, url)
-    if (request.method === 'GET' && url.pathname === '/api/library')
-      return libraryPage(response, database, url)
-    if (
-      request.method === 'GET' &&
-      url.pathname.startsWith('/api/library/assets/') &&
-      url.pathname.endsWith('/download')
-    )
-      return downloadAsset(response, database, url, downloadGrants)
-    if (
-      request.method === 'GET' &&
-      url.pathname.startsWith('/api/library/assets/')
-    )
-      return libraryDetail(
-        response,
-        database,
-        url.pathname.slice('/api/library/assets/'.length),
-      )
-    if (request.method === 'POST' && url.pathname === '/api/plan/commands')
-      return Effect.runPromise(
+      ).then(({ status, body }) => json(response, status, body)),
+    planWorkspace: (response) => workspace(response, database, 'plan'),
+    processWorkspace: (response, url) =>
+      processWorkspace(response, database, url),
+    libraryPage: (response, url) => libraryPage(response, database, url),
+    libraryDownload: (response, url) =>
+      downloadAsset(response, database, url, downloadGrants),
+    libraryDetail: (response, encodedAssetId) =>
+      libraryDetail(response, database, encodedAssetId),
+    planCommand: (response, identity, request) =>
+      Effect.runPromise(
         planCommandFromRequest(body(request), database, identity, publish).pipe(
           Effect.catchTags({
             'Server.PlanCommandInputInvalid': () =>
@@ -1146,9 +1030,9 @@ export function createLocalWebService(
           }),
           Effect.map(({ status, body }) => json(response, status, body)),
         ),
-      )
-    if (request.method === 'POST' && url.pathname === '/api/observe/commands')
-      return Effect.runPromise(
+      ),
+    observeCommand: (response, identity, request) =>
+      Effect.runPromise(
         observeCommandFromRequest(
           body(request),
           database,
@@ -1166,21 +1050,17 @@ export function createLocalWebService(
           }),
           Effect.map(({ status, body }) => json(response, status, body)),
         ),
-      )
-    if (
-      request.method === 'GET' &&
-      Effect.runSync(webHost.asset(response, url.pathname, responseHeaders))
-    )
-      return
-    if (
-      request.method === 'GET' &&
-      Effect.runSync(webHost.route(response, url.pathname, responseHeaders))
-    )
-      return
-    if (url.pathname.startsWith('/api/'))
-      return json(response, 404, reject('InvalidInput').body)
-    response.writeHead(404, responseHeaders('text/plain; charset=utf-8')).end()
-  }
+      ),
+    webAsset: (response, pathname) =>
+      Effect.runSync(webHost.asset(response, pathname, responseHeaders)),
+    webRoute: (response, pathname) =>
+      Effect.runSync(webHost.route(response, pathname, responseHeaders)),
+    apiNotFound: (response) => json(response, 404, reject('InvalidInput').body),
+    notFound: (response) =>
+      response
+        .writeHead(404, responseHeaders('text/plain; charset=utf-8'))
+        .end(),
+  })
   const listen = async (port = 0, host = '127.0.0.1') => {
     const scope = Effect.runSync(Scope.make())
     const listener = await Effect.runPromise(
@@ -2129,7 +2009,7 @@ async function processWorkspace(
           'Server.LibraryPersistenceUnavailable': () =>
             Effect.succeed({ status: 503, reason: 'LibraryUnavailable' }),
         }),
-        Effect.provide(libraryServiceLayer(db)),
+        Effect.provide(sqliteLibraryServiceLayer(db)),
       ),
     )
     if ('reason' in result)
@@ -2164,7 +2044,7 @@ async function libraryPage(
         'Server.LibraryPersistenceUnavailable': () =>
           Effect.succeed({ status: 503, body: libraryUnavailableBody }),
       }),
-      Effect.provide(libraryServiceLayer(db)),
+      Effect.provide(sqliteLibraryServiceLayer(db)),
     ),
   )
   return json(response, result.status, result.body)
@@ -2207,7 +2087,7 @@ async function libraryDetail(
         'Server.LibraryPersistenceUnavailable': () =>
           Effect.succeed({ status: 503, body: libraryUnavailableBody }),
       }),
-      Effect.provide(libraryServiceLayer(db)),
+      Effect.provide(sqliteLibraryServiceLayer(db)),
     ),
   )
   return json(response, result.status, result.body)
@@ -2229,112 +2109,115 @@ const libraryUnavailableBody = {
   outcome: 'rejected',
   reason: 'LibraryUnavailable',
 }
-const libraryServiceLayer = (db: DatabaseSync) =>
-  Layer.succeed(
-    LibraryService,
-    LibraryService.of({
-      page: Effect.fn('Server.LibraryService.page')(function* (query) {
-        const order = {
-          capturedAtDescending: 'captured_at DESC, asset_id ASC',
-          sharpestFirst: 'sharpness DESC, asset_id ASC',
-          recentlyUpdated: 'updated_at DESC, asset_id ASC',
-        } satisfies Record<LibrarySort, string>
-        const cursor = Number(query.cursor ?? '0')
-        const filter = query.role === undefined ? '' : 'WHERE role=?'
-        const bindings =
-          query.role === undefined
-            ? [query.pageSize + 1, cursor]
-            : [query.role, query.pageSize + 1, cursor]
-        const rowsRaw = yield* Effect.try({
-          try: () =>
-            db
-              .prepare(
-                `SELECT asset_id,revision,role,format,availability,comparison_group_id,detail FROM library_assets ${filter} ORDER BY ${order[query.sort]} LIMIT ? OFFSET ?`,
-              )
-              .all(...bindings),
-          catch: () => new LibraryPersistenceUnavailable(),
-        })
-        const rows = yield* Schema.decodeUnknownEffect(
-          Schema.Array(LibraryAssetRow),
-        )(rowsRaw).pipe(
-          Effect.mapError(() => new LibraryPersistenceUnavailable()),
-        )
-        const snapshotVersion = yield* Effect.try({
-          try: () => state(db).snapshotVersion,
-          catch: () => new LibraryPersistenceUnavailable(),
-        })
-        return yield* Schema.decodeUnknownEffect(LibraryPage)({
-          queryId: query.queryId,
-          querySnapshotVersion: snapshotVersion,
-          results: rows.slice(0, query.pageSize).map((asset) => ({
-            assetId: asset.asset_id,
-            revision: asset.revision,
-            role: asset.role,
-            format: asset.format,
-            availability: asset.availability,
-            comparisonGroupId: asset.comparison_group_id,
-          })),
-          ...(rows.length > query.pageSize
-            ? { nextCursor: String(cursor + query.pageSize) }
-            : {}),
-          catalogChanged: false,
-        }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
-      }),
-      detail: Effect.fn('Server.LibraryService.detail')(function* (assetId) {
-        const detail = yield* libraryStoredDetail(db, assetId)
-        const publication = yield* libraryPublication(db, assetId)
-        return yield* Schema.decodeUnknownEffect(LibraryAssetDetail)({
-          ...detail,
-          actions: libraryActions(detail.availability, publication),
-        }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
-      }),
-      processSource: Effect.fn('Server.LibraryService.processSource')(
-        function* (assetId) {
-          const detail = yield* libraryStoredDetail(db, assetId, false)
-          if (detail.availability !== 'availableLocally')
-            return yield* Effect.fail(
-              new LibraryAssetUnavailable({ reason: 'AssetUnavailable' }),
-            )
-          return yield* Schema.decodeUnknownEffect(ProcessSourceHandoff)({
-            sourceAssetId: detail.assetId,
-            revision: detail.revision,
-            role: detail.role,
-            format: detail.format,
-            availability: detail.availability,
-            comparisonGroupId: detail.comparisonGroupId,
-            lineage: detail.lineage,
-            processing: {
-              availability: 'unavailable',
-              currentFixtureFacts: [
-                'Interactive processing is not available in this workspace.',
-              ],
-            },
-          }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
-        },
-      ),
-      download: Effect.fn('Server.LibraryService.download')(
-        function* (assetId) {
-          yield* libraryAssetId(assetId)
-          const publication = yield* libraryPublication(db, assetId)
-          if (publication === undefined) {
-            const known = yield* libraryKnownAsset(db, assetId)
-            if (!known) return yield* Effect.fail(new LibraryAssetNotFound())
-            return yield* Effect.fail(
-              new LibraryAssetUnavailable({ reason: 'PublicationUnavailable' }),
-            )
-          }
-          if (
-            publication.availability !== 'published' ||
-            publication.state !== 'published' ||
-            publication.object_key === ''
+const sqliteLibraryServiceLayer = (db: DatabaseSync) =>
+  libraryServiceLayer.pipe(
+    Layer.provide(
+      libraryPersistenceLayer({
+        page: Effect.fn('Server.LibraryService.page')(function* (query) {
+          const order = {
+            capturedAtDescending: 'captured_at DESC, asset_id ASC',
+            sharpestFirst: 'sharpness DESC, asset_id ASC',
+            recentlyUpdated: 'updated_at DESC, asset_id ASC',
+          } satisfies Record<LibrarySort, string>
+          const cursor = Number(query.cursor ?? '0')
+          const filter = query.role === undefined ? '' : 'WHERE role=?'
+          const bindings =
+            query.role === undefined
+              ? [query.pageSize + 1, cursor]
+              : [query.role, query.pageSize + 1, cursor]
+          const rowsRaw = yield* Effect.try({
+            try: () =>
+              db
+                .prepare(
+                  `SELECT asset_id,revision,role,format,availability,comparison_group_id,detail FROM library_assets ${filter} ORDER BY ${order[query.sort]} LIMIT ? OFFSET ?`,
+                )
+                .all(...bindings),
+            catch: () => new LibraryPersistenceUnavailable(),
+          })
+          const rows = yield* Schema.decodeUnknownEffect(
+            Schema.Array(LibraryAssetRow),
+          )(rowsRaw).pipe(
+            Effect.mapError(() => new LibraryPersistenceUnavailable()),
           )
-            return yield* Effect.fail(
-              new LibraryAssetUnavailable({ reason: 'AssetUnavailable' }),
+          const snapshotVersion = yield* Effect.try({
+            try: () => state(db).snapshotVersion,
+            catch: () => new LibraryPersistenceUnavailable(),
+          })
+          return yield* Schema.decodeUnknownEffect(LibraryPage)({
+            queryId: query.queryId,
+            querySnapshotVersion: snapshotVersion,
+            results: rows.slice(0, query.pageSize).map((asset) => ({
+              assetId: asset.asset_id,
+              revision: asset.revision,
+              role: asset.role,
+              format: asset.format,
+              availability: asset.availability,
+              comparisonGroupId: asset.comparison_group_id,
+            })),
+            ...(rows.length > query.pageSize
+              ? { nextCursor: String(cursor + query.pageSize) }
+              : {}),
+            catalogChanged: false,
+          }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
+        }),
+        detail: Effect.fn('Server.LibraryService.detail')(function* (assetId) {
+          const detail = yield* libraryStoredDetail(db, assetId)
+          const publication = yield* libraryPublication(db, assetId)
+          return yield* Schema.decodeUnknownEffect(LibraryAssetDetail)({
+            ...detail,
+            actions: libraryActions(detail.availability, publication),
+          }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
+        }),
+        processSource: Effect.fn('Server.LibraryService.processSource')(
+          function* (assetId) {
+            const detail = yield* libraryStoredDetail(db, assetId, false)
+            if (detail.availability !== 'availableLocally')
+              return yield* Effect.fail(
+                new LibraryAssetUnavailable({ reason: 'AssetUnavailable' }),
+              )
+            return yield* Schema.decodeUnknownEffect(ProcessSourceHandoff)({
+              sourceAssetId: detail.assetId,
+              revision: detail.revision,
+              role: detail.role,
+              format: detail.format,
+              availability: detail.availability,
+              comparisonGroupId: detail.comparisonGroupId,
+              lineage: detail.lineage,
+              processing: {
+                availability: 'unavailable',
+                currentFixtureFacts: [
+                  'Interactive processing is not available in this workspace.',
+                ],
+              },
+            }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
+          },
+        ),
+        download: Effect.fn('Server.LibraryService.download')(
+          function* (assetId) {
+            yield* libraryAssetId(assetId)
+            const publication = yield* libraryPublication(db, assetId)
+            if (publication === undefined) {
+              const known = yield* libraryKnownAsset(db, assetId)
+              if (!known) return yield* Effect.fail(new LibraryAssetNotFound())
+              return yield* Effect.fail(
+                new LibraryAssetUnavailable({
+                  reason: 'PublicationUnavailable',
+                }),
+              )
+            }
+            if (
+              publication.availability !== 'published' ||
+              publication.state !== 'published' ||
+              publication.object_key === ''
             )
-          return { objectKey: publication.object_key }
-        },
-      ),
-    }),
+              return yield* Effect.fail(
+                new LibraryAssetUnavailable({ reason: 'AssetUnavailable' }),
+              )
+            return { objectKey: publication.object_key }
+          },
+        ),
+      }),
+    ),
   )
 const libraryAssetId = (assetId: string, requireStableId = true) =>
   Schema.decodeUnknownEffect(LibraryAssetDetail.fields.assetId)(assetId).pipe(
@@ -2466,7 +2349,7 @@ async function downloadAsset(
             reason: 'DownloadUnavailable',
           }),
       }),
-      Effect.provide(libraryServiceLayer(db)),
+      Effect.provide(sqliteLibraryServiceLayer(db)),
     ),
   )
   if ('reason' in asset)
@@ -4498,13 +4381,6 @@ function acceptRunDefinition(
     throw error
   }
 }
-const controlEnvelopeCommand = Schema.Union([
-  Command.cases.RequestControl,
-  Command.cases.GrantControl,
-  Command.cases.DeclineControl,
-  Command.cases.ReleaseControl,
-  Command.cases.TakeControl,
-])
 const commandFailureStatuses = {
   AuthenticationFailure: 401,
   AuthorizationFailure: 403,
@@ -4516,31 +4392,31 @@ const commandFailureStatuses = {
   ResourceProtected: 409,
   IdempotencyConflict: 409,
 } satisfies Record<CommandFailure['_tag'], number>
-const controlCommandLayer = (
+const sqliteControlPersistenceLayer = (
   db: DatabaseSync,
-  identity: LocalIdentity,
   publish: (type: string, cursor: number) => void,
 ) =>
-  Layer.succeed(
-    ControlCommandService,
-    ControlCommandService.of({
-      execute: Effect.fn('Server.ControlCommandService.execute')(function* (
-        commandId: string,
-        command: typeof controlEnvelopeCommand.Type,
-      ) {
-        const result = acceptControl(db, command, identity)
-        if (!('ok' in result.body))
-          return yield* Effect.fail(
-            new CommandRejected({
-              failure: commandFailure(commandId, result.body),
-            }),
-          )
-        if ('event' in result && result.event !== undefined)
-          publish(result.event.type, result.event.cursor)
-        return { status: result.status, body: result.body }
-      }),
-    }),
-  )
+  controlPersistenceLayer({
+    execute: (commandId, command, identity) =>
+      Effect.sync(() => acceptControl(db, command, identity)).pipe(
+        Effect.flatMap((result) => {
+          if (!('ok' in result.body))
+            return Effect.fail(
+              new CommandRejected({
+                failure: commandFailure(commandId, result.body),
+              }),
+            )
+          return Effect.succeed({
+            status: result.status,
+            body: result.body,
+            ...('event' in result && result.event !== undefined
+              ? { event: result.event }
+              : {}),
+          })
+        }),
+      ),
+    publish: (type, cursor) => Effect.sync(() => publish(type, cursor)),
+  })
 const controlCommandFromEnvelope = Effect.fn(
   'Server.controlCommandFromEnvelope',
 )(
@@ -4553,56 +4429,28 @@ const controlCommandFromEnvelope = Effect.fn(
     void db
     void identity
     void publish
-    const raw = yield* Effect.promise(() => request)
-    if (raw === undefined || raw === BodyTooLarge)
-      return yield* Effect.fail(new CommandInputInvalid())
-    const envelope = yield* Schema.decodeUnknownEffect(CommandEnvelope)(
-      raw,
-    ).pipe(Effect.mapError(() => new CommandInputInvalid()))
-    const command = yield* Schema.decodeUnknownEffect(controlEnvelopeCommand)(
-      envelope.command,
-    ).pipe(Effect.mapError(() => new CommandInputInvalid()))
-    const service = yield* ControlCommandService
-    return yield* service.execute(envelope.commandId, command)
+    return yield* executeControlRequest(request, BodyTooLarge, identity)
   },
   (effect, _request, db, identity, publish) =>
-    effect.pipe(Effect.provide(controlCommandLayer(db, identity, publish))),
+    effect.pipe(Effect.provide(sqliteControlPersistenceLayer(db, publish))),
 )
-const planCommandLayer = (
+const sqlitePlanPersistenceLayer = (
   db: DatabaseSync,
-  identity: LocalIdentity,
   publish: (type: string, cursor: number) => void,
 ) =>
-  Layer.succeed(
-    PlanCommandService,
-    PlanCommandService.of({
-      execute: Effect.fn('Server.PlanCommandService.execute')(function* (
-        intent: typeof PlanIntent.Type,
-      ) {
-        const response = yield* Effect.try({
-          try: () => planIntentResponse(db, intent, identity),
-          catch: () => new PlanServiceUnavailable(),
-        })
-        const event = yield* Effect.try({
-          try: () =>
-            Schema.decodeUnknownSync(
-              Schema.optional(
-                Schema.Struct({ type: Schema.String, cursor: Schema.Int }),
-              ),
-            )('event' in response ? response.event : undefined),
-          catch: () => new PlanServiceUnavailable(),
-        })
-        if (event !== undefined) publish(event.type, event.cursor)
-        const body = yield* planCommandResponse(
-          intent,
-          response.body,
-          db,
-          identity,
-        ).pipe(Effect.mapError(() => new PlanServiceUnavailable()))
-        return { status: response.status, body }
+  planPersistenceLayer({
+    execute: (intent, identity) =>
+      Effect.try({
+        try: () => planIntentResponse(db, intent, identity),
+        catch: (cause) => cause,
       }),
-    }),
-  )
+    snapshot: (identity) => bootstrapSnapshot(db, identity),
+    publish: (type, cursor) =>
+      Effect.try({
+        try: () => publish(type, cursor),
+        catch: (cause) => cause,
+      }),
+  })
 function planIntentResponse(
   db: DatabaseSync,
   intent: typeof PlanIntent.Type,
@@ -4635,60 +4483,28 @@ const planCommandFromRequest = Effect.fn('Server.planCommandFromRequest')(
     void db
     void identity
     void publish
-    const raw = yield* Effect.promise(() => request)
-    if (raw === undefined || raw === BodyTooLarge)
-      return yield* Effect.fail(new PlanCommandInputInvalid())
-    const requestBody = yield* Schema.decodeUnknownEffect(PlanCommandRequest)(
-      raw,
-    ).pipe(Effect.mapError(() => new PlanCommandInputInvalid()))
-    const service = yield* PlanCommandService
-    return yield* service.execute(requestBody.intent)
+    return yield* executePlanRequest(request, BodyTooLarge, identity)
   },
   (effect, _request, db, identity, publish) =>
-    effect.pipe(Effect.provide(planCommandLayer(db, identity, publish))),
+    effect.pipe(Effect.provide(sqlitePlanPersistenceLayer(db, publish))),
 )
-const observeCommandLayer = (
+const sqliteObservePersistenceLayer = (
   db: DatabaseSync,
-  identity: LocalIdentity,
   publish: (type: string, cursor: number) => void,
 ) =>
-  Layer.succeed(
-    ObserveCommandService,
-    ObserveCommandService.of({
-      execute: Effect.fn('Server.ObserveCommandService.execute')(function* (
-        intent: typeof ObserveIntent.Type,
-      ) {
-        const response = yield* Effect.try({
-          try: () => observeIntentResponse(db, intent, identity),
-          catch: () => new ObserveServiceUnavailable(),
-        })
-        if (response.body.outcome === 'rejected') {
-          const snapshot = yield* bootstrapSnapshot(db, identity).pipe(
-            Effect.mapError(() => new ObserveServiceUnavailable()),
-          )
-          const body = yield* Schema.decodeUnknownEffect(
-            ObserveCommandResponse,
-          )({
-            _tag: 'Rejected',
-            failure: {
-              _tag: 'Rejected',
-              reason: response.body.reason,
-              summary: response.body.message,
-            },
-            snapshot,
-          }).pipe(Effect.mapError(() => new ObserveServiceUnavailable()))
-          return { status: response.status, body }
-        }
-        if ('event' in response && response.event !== undefined)
-          publish(response.event.type, response.event.cursor)
-        const body = yield* Schema.decodeUnknownEffect(ObserveCommandResponse)({
-          _tag: 'Accepted',
-          result: observeCommandResult(intent),
-        }).pipe(Effect.mapError(() => new ObserveServiceUnavailable()))
-        return { status: response.status, body }
+  observePersistenceLayer({
+    execute: (intent, identity) =>
+      Effect.try({
+        try: () => observeIntentResponse(db, intent, identity),
+        catch: (cause) => cause,
       }),
-    }),
-  )
+    snapshot: (identity) => bootstrapSnapshot(db, identity),
+    publish: (type, cursor) =>
+      Effect.try({
+        try: () => publish(type, cursor),
+        catch: (cause) => cause,
+      }),
+  })
 function observeIntentResponse(
   db: DatabaseSync,
   intent: typeof ObserveIntent.Type,
@@ -4707,21 +4523,6 @@ function observeIntentResponse(
         : 'park'
   return acceptFakePolicy(db, intent, path, identity)
 }
-function observeCommandResult(
-  intent: typeof ObserveIntent.Type,
-): typeof ObserveCommandResult.Type {
-  const result = {
-    PauseRun: 'PauseAccepted',
-    ResumeRun: 'ResumeAccepted',
-    StopRun: 'StopAccepted',
-    SkipSequence: 'SequenceSkipped',
-    RetryPhase: 'PhaseRetryAccepted',
-    RequestPark: 'ParkRequested',
-  } satisfies Record<typeof intent._tag, string>
-  return Schema.decodeUnknownSync(ObserveCommandResult)({
-    _tag: result[intent._tag],
-  })
-}
 const observeCommandFromRequest = Effect.fn('Server.observeCommandFromRequest')(
   function* (
     request: Promise<unknown | undefined | typeof BodyTooLarge>,
@@ -4732,17 +4533,10 @@ const observeCommandFromRequest = Effect.fn('Server.observeCommandFromRequest')(
     void db
     void identity
     void publish
-    const raw = yield* Effect.promise(() => request)
-    if (raw === undefined || raw === BodyTooLarge)
-      return yield* Effect.fail(new ObserveCommandInputInvalid())
-    const requestBody = yield* Schema.decodeUnknownEffect(
-      ObserveCommandRequest,
-    )(raw).pipe(Effect.mapError(() => new ObserveCommandInputInvalid()))
-    const service = yield* ObserveCommandService
-    return yield* service.execute(requestBody.intent)
+    return yield* executeObserveRequest(request, BodyTooLarge, identity)
   },
   (effect, _request, db, identity, publish) =>
-    effect.pipe(Effect.provide(observeCommandLayer(db, identity, publish))),
+    effect.pipe(Effect.provide(sqliteObservePersistenceLayer(db, publish))),
 )
 const observeServiceResponse = Effect.fn('Server.observeServiceResponse')(
   function* (_failure: 'ObserveServiceUnavailable', summary: string) {
@@ -4792,75 +4586,6 @@ const planInvalidResponse = Effect.fn('Server.planInvalidResponse')(function* (
   })
   return { status: 400, body }
 })
-const planCommandResponse = Effect.fn('Server.planCommandResponse')(function* (
-  intent: typeof PlanIntent.Type,
-  raw: unknown,
-  db: DatabaseSync,
-  identity: LocalIdentity,
-) {
-  const rejected = Schema.decodeUnknownOption(
-    Schema.Struct({
-      outcome: Schema.Literal('rejected'),
-      reason: Schema.NonEmptyString,
-      message: Schema.NonEmptyString,
-    }),
-  )(raw)
-  const snapshot = yield* bootstrapSnapshot(db, identity)
-  return yield* Option.match(rejected, {
-    onNone: () =>
-      Schema.decodeUnknownEffect(PlanCommandResponse)({
-        _tag: 'Accepted',
-        result: planCommandResult(intent, raw),
-        snapshot,
-      }),
-    onSome: (failure) =>
-      Schema.decodeUnknownEffect(PlanCommandResponse)({
-        _tag: 'Rejected',
-        failure: {
-          _tag: 'Rejected',
-          reason: failure.reason,
-          summary: failure.message,
-        },
-        snapshot,
-      }),
-  })
-})
-function planCommandResult(intent: typeof PlanIntent.Type, raw: unknown) {
-  if (PlanIntent.guards.SaveDraft(intent))
-    return { _tag: 'DraftSaved' as const }
-  if (PlanIntent.guards.AcceptRunDefinition(intent))
-    return { _tag: 'RunDefinitionAccepted' as const }
-  if (PlanIntent.guards.StartAcceptedRun(intent))
-    return { _tag: 'RunStarted' as const }
-  if (PlanIntent.guards.ApplyRunMutation(intent))
-    return { _tag: 'RunMutationApplied' as const }
-  if (PlanIntent.guards.ApproveDisruptiveRunMutation(intent))
-    return { _tag: 'RunMutationApplied' as const }
-  const preview = Schema.decodeUnknownSync(
-    Schema.Struct({
-      outcome: Schema.Literal('accepted'),
-      preview: Schema.Struct({
-        previewId: Schema.NonEmptyString,
-        classification: Schema.Literals([
-          'nonDisruptive',
-          'notice',
-          'disruptive',
-        ]),
-        consequences: Schema.NonEmptyString,
-        expiresAt: Schema.NonEmptyString,
-        approvalRequired: Schema.Boolean,
-      }),
-      approvalToken: Schema.optionalKey(Schema.NonEmptyString),
-    }),
-  )(raw)
-  return {
-    _tag: 'RunMutationPreviewed' as const,
-    ...preview.preview,
-    ...(preview.approvalToken === undefined
-      ? {}
-      : { approvalToken: preview.approvalToken }),
-  }
-}
 function commandFailure(
   commandId: string,
   rejected: Extract<CommandResult, { readonly outcome: 'rejected' }>,
