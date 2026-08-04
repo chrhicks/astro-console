@@ -18,7 +18,6 @@ import {
   PlanWorkspaceProjection,
   LibraryQuery,
 } from '@astro-console/v2-contracts'
-import { decodeSeestarPushEvent } from 'seestar-sdk'
 import {
   cleanupProcessOrphans,
   saveProcessOutputs,
@@ -81,11 +80,6 @@ import {
   bootstrapPlanWorkspaceProjection,
   observeWorkspaceProjection,
 } from './workspace-projection-service.ts'
-import {
-  createSolarWorkService,
-  type SolarTestIntentResult,
-} from './solar-work-service.ts'
-export type { SolarTestIntentResult } from './solar-work-service.ts'
 export type DownloadGrantConfig = {
   readonly issuer: DownloadGrantIssuer
   readonly now?: () => Date
@@ -596,7 +590,6 @@ export function createLocalWebService(
   } = {},
 ) {
   const database = openOriginDatabase(databasePath)
-  const solarWork = createSolarWorkService(database)
   if (options.fixture !== undefined) {
     installM27Fixture(database, options.fixture !== 'plan-draft')
     if (options.fixture === 'library-published')
@@ -824,55 +817,6 @@ export function createLocalWebService(
       return undefined
     }
   }
-  const ingestSeestarStackPush = (raw: unknown, receivedAt: string) => {
-    const event = decodeSeestarPushEvent(raw)
-    if (
-      event?.Event !== 'Stack' ||
-      !Number.isFinite(event.stacked_frame ?? event.stacked_frames)
-    )
-      return undefined
-    const current = stateRepository.state()
-    const failed =
-      event.state?.toLowerCase() === 'fail' ||
-      event.state?.toLowerCase() === 'cancel' ||
-      (event.code !== undefined && event.code !== 0)
-    const evidence: Evidence = {
-      ...current.evidence,
-      stack: {
-        availability: failed ? 'unavailable' : 'available',
-        observedAt: receivedAt,
-        frameCount: event.stacked_frame ?? event.stacked_frames ?? 0,
-        message: failed
-          ? (event.error ??
-            'Stack source unavailable; accepted run state is unchanged.')
-          : 'Stack event received.',
-      },
-      quality: failed ? 'warning' : current.evidence.quality,
-    }
-    return stateRepository.persistEvidence(evidence, projectionIdentity)
-  }
-  const dispatchSolarTestOutbox = (
-    adapter: Parameters<typeof solarWork.dispatchStart>[0],
-    workerId = 'rig-worker',
-  ) => Effect.runPromise(solarWork.dispatchStart(adapter, workerId))
-  const requestSolarTestStop = (intentId: string) =>
-    Effect.runSync(solarWork.requestStop(intentId))
-  const dispatchSolarTestStopOutbox = (
-    adapter: Parameters<typeof solarWork.dispatchStop>[0],
-    workerId = 'rig-worker',
-  ) => Effect.runPromise(solarWork.dispatchStop(adapter, workerId))
-  const recordSolarStackEvidence = (
-    intentId: string,
-    raw: unknown,
-    observedAt: string,
-  ) => Effect.runSync(solarWork.recordStackEvidence(intentId, raw, observedAt))
-  const resolveSolarTestCliIdentity = (externalSubject: string) =>
-    Effect.runSync(solarWork.resolveCliIdentity(externalSubject))
-  const submitSolarTestIntent = (
-    raw: unknown,
-    identity: LocalIdentity,
-  ): SolarTestIntentResult =>
-    Effect.runSync(solarWork.submitIntent(raw, identity))
   const saveProcess = (raw: unknown, identity = projectionIdentity()) =>
     processSaveStorage === undefined
       ? { outcome: 'rejected' as const, reason: 'InvalidInput' as const }
@@ -893,13 +837,6 @@ export function createLocalWebService(
     listen,
     close,
     ingestObservation,
-    ingestSeestarStackPush,
-    dispatchSolarTestOutbox,
-    requestSolarTestStop,
-    dispatchSolarTestStopOutbox,
-    recordSolarStackEvidence,
-    resolveSolarTestCliIdentity,
-    submitSolarTestIntent,
     saveProcess,
     cleanupSavedOrphans,
     advanceFakeRun,

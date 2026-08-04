@@ -1,11 +1,11 @@
 # Production Convergence Complete Handoff
 
-Status: **Phases 1, 2, and 2.5 closed — Phase 3 read-only preflight remains prepared, not accepted or implemented**
+Status: **Phases 1, 2, and 2.5 closed — the unrelated Solar test slice is retired; Phase 3 read-only preflight remains prepared, not accepted or implemented**
 
 ## Completed Phase 2.5: Server Boundary Extraction
 
 Phase 2.5 is authorized before Phase 3. It is an internal cleanup only: no
-Phase 3 provider reads, device commands, Solar work, capture, browser changes,
+Phase 3 provider reads, device commands, capture, browser changes,
 or new persistence model are authorized. The owner explicitly removed any
 unshipped backward-compatibility requirement: fresh SQLite initialization is
 the authority and obsolete migrations, legacy conversions, and retired runtime
@@ -24,15 +24,24 @@ Previously completed and committed:
 
 Phase 2.5 is complete. `server.ts` is now a 2,054-line origin composition and
 transport module. Focused SQLite/domain services own runtime bootstrap, state
-and projection, Plan/fake Observe, Control, Library, and Solar work. Rig worker
-and Solar CLI use SolarWorkService and SQLite directly; production source files
-may not import `server.ts`. No provider, device, Solar behavior, capture,
-browser, or persistence-model scope was added.
+and projection, Plan/fake Observe, Control, and Library. Production source
+files may not import `server.ts`. No provider, device, capture, browser, or
+persistence-model scope was added.
 
-Final evidence: contracts **184/184**, server **62/62**, and web **57/57**.
-All three Compose files render with inert absolute placeholders; unset real
+Final Phase 2.5 evidence: contracts **184/184**, server **62/62**, and web
+**57/57**.
+Both remaining Compose files render with inert absolute placeholders; unset real
 host-secret paths correctly refuse to render. Phase 3 remains unimplemented
 and requires separate owner acceptance.
+
+### Solar Test Slice Retired
+
+The owner confirmed that Solar testing is not a product capability. The Solar
+CLI, work service, rig worker, Seestar adapter, Stack-push bridge, Solar SQLite
+tables, rig deployment profile, and their tests are removed. Generic SQLite,
+outbox, publisher, processor, Plan, and fake-run behavior remain. This is a
+deletion cleanup after Phase 2.5; it does not authorize Phase 3 provider or
+device work.
 
 ## Production Convergence Complete
 
@@ -76,9 +85,8 @@ then downloaded successfully through a fresh five-minute private-R2 link. The
 browser saved the FITS instead of rendering its raw bytes. The signed bearer
 URL exists only in the redirect, never in a browser JSON projection.
 
-Corrected download deployment, current rig-worker liveness, and scheduled SSD
-backup with restore drill are all verified. No Solar capture or device command
-was issued during this bundle.
+Corrected download deployment and scheduled SSD backup with restore drill are
+verified. No device command was issued during this bundle.
 
 ## Phase 1 Closeout
 
@@ -196,8 +204,8 @@ same-host resilience. Off-host recovery is not current Phase 1 scope.
   integration suite pass **62/62**. The suite covers the retained local-web
   foundation, Process Save/publisher boundary, and the deliberately installed
   deterministic M27 fixture without creating generic hardware work. Normal
-  origin, rig-worker, Solar CLI, publisher, and processor database opening
-  runs migrations without seeding that fixture's Plan, Library, or Process data.
+  origin, publisher, and processor database opening runs migrations without
+  seeding that fixture's Plan, Library, or Process data.
   A fresh origin instead reports a truthful `unavailable` plan projection until
   an authorized workflow installs real state. `apps/server` is the active
   production implementation target; “local-web” remains only where it names
@@ -229,9 +237,7 @@ same-host resilience. Off-host recovery is not current Phase 1 scope.
   work, capture evidence, or Solar activity; browser phone projection remains
   read-only.
 - Phase 3 has no implementation evidence yet. Its prepared first slice is
-  read-only decision-grade preflight against current provider facts. Rig-worker
-  `alive` / `ready` remains liveness only and does not make preflight, capture,
-  or physical safety claims.
+  read-only decision-grade preflight against current provider facts.
 - Process Save is a service API only: app-owned source IDs resolve under
   configured roots, selected bytes are checksummed and atomically promoted,
   and Asset/provenance/receipt/`PublishAsset` records commit together. Recorded
@@ -248,10 +254,9 @@ same-host resilience. Off-host recovery is not current Phase 1 scope.
   one five-minute private-R2 redirect, whose attachment metadata made the
   owner's M13 browser request download rather than render the FITS. The signed
   URL is not projected or persisted.
-- The schema-compatible rig worker durably reports `alive` / `ready`, with no
-  Solar work pending. The enabled backup timer has one checksum-backed SSD run
-  and disposable restore drill. These prove liveness and same-host resilience,
-  never physical capture or off-host recovery.
+- The enabled backup timer has one checksum-backed SSD run and disposable
+  restore drill. This proves same-host resilience, never physical capture or
+  off-host recovery.
 
 The [host-verification record](../archive/handoffs/phase-1-host-verification-2026-07-29.md)
 preserves the completed chronology and detailed test evidence. It is historical;
@@ -265,7 +270,6 @@ this handoff is the active authority.
 | Publication worker and private R2       | M13 linear master real PUT plus provider HEAD checksum/byte verification observed; durable projection is `published`                                                               | Controlled recovery drill under normal load.                                                                    |
 | Downloads                               | Streamlined origin and publisher from `eceab25` are deployed. The M13 object has verified attachment metadata and its fresh private-R2 URL downloaded successfully in the browser. | No further Phase 1 proof. Future outputs receive attachment metadata at publication.                            |
 | Storage health and cleanup              | Process Save containment and recorded-orphan cleanup are locally proven; operations disk is `unknown`                                                                              | Authorize a separate storage-health workflow before adding thresholds, capture admission, or scratch cleanup.   |
-| Rig-worker liveness                     | Schema-compatible worker is running and durably `alive` / `ready`; no Solar work was pending.                                                                                      | No further Phase 1 proof. This remains liveness only, never capture proof.                                      |
 | Same-host resilience                    | Enabled SSD backup timer has a successful 2026-07-29 run with checksum and disposable restore-drill evidence.                                                                      | No further Phase 1 proof. This is the accepted current resilience scope.                                        |
 | Off-host recovery                       | Not current scope                                                                                                                                                                  | Revisit only if the user changes the current NVMe-plus-SSD resilience decision.                                 |
 | Device/session presence                 | Person-to-client fixture                                                                                                                                                           | Stable production client/session authority before treating a person's browsers as distinct presence clients.    |
@@ -275,7 +279,6 @@ this handoff is the active authority.
 
 - The accepted V2 UX, run authority, and service-owned truth remain frozen.
   This packet changes no workspace semantics.
-- Rig-worker liveness is not an active Solar or physical-run instruction.
 - Cloudflare Access remains identity admission. The service still owns durable
   membership, capability, lease, revision, idempotency, safety, and artifact
   authorization checks.

@@ -42,8 +42,8 @@ screenshot evidence.
 ## Phase 1: Local Web Foundation — Complete
 
 The local service/web foundation, durable SQLite state, snapshot-first SSE,
-workspace projections, Process Save, private artifact delivery, same-host
-backup/restore evidence, and rig-worker liveness are complete. The detailed
+workspace projections, Process Save, private artifact delivery, and same-host
+backup/restore evidence are complete. The detailed
 evidence and explicit proof boundaries are in the [current handoff](handoff.md).
 
 ## Phase 2: Plan and Managed Runs — Complete

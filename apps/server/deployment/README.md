@@ -87,7 +87,7 @@ host-managed publisher values are available. M13 publisher PUT and provider
 HEAD checksum/byte verification have been observed; this structure does not
 claim a general processing workflow or a new publication run.
 It alone receives a host-managed bucket-only object read/write credential;
-origin, rig worker, cloudflared, and browsers do not receive it. It has only
+origin, cloudflared, and browsers do not receive it. It has only
 the state volume, read-only promoted-output bind, and read-only secret bind,
 with a read-only root, dropped capabilities, and CPU/memory limits. The
 private Standard bucket is `astro-console-artifacts` in ENAM. Authenticated
@@ -129,9 +129,9 @@ stored attachment metadata. Keep the two host-managed service files outside
 the repository: an origin `config.env` copied from `config.example` and a
 signer `download-grant.env` copied from `download-grant.config.example`.
 Copy `compose.env.example` as the base Compose interpolation file; it contains
-only origin/download values. Optional rig and publisher values live in
-`compose.rig.env.example` and `compose.publisher.env.example` and are required
-only with `compose.rig.yaml` and `compose.publisher.yaml`. Compose resolves
+only origin/download values. Optional publisher values live in
+`compose.publisher.env.example` and are required only with
+`compose.publisher.yaml`. Compose resolves
 interpolation before reading service `env_file`, so do not duplicate bind
 values in service files.
 
@@ -148,11 +148,8 @@ services with:
 
 `docker compose --env-file /secure/astro-console/compose.env --profile download up -d origin download-grant`
 
-For the supervised rig worker, use both `--env-file
+For the private publisher, use both `--env-file
 /secure/astro-console/compose.env --env-file
-/secure/astro-console/compose.rig.env -f compose.rig.yaml --profile rig`; it
-requires `ASTRO_SEESTAR_PEM_HOST_PATH`. For the private publisher, use both
-`--env-file /secure/astro-console/compose.env --env-file
 /secure/astro-console/compose.publisher.env -f compose.publisher.yaml
 --profile publisher`; it requires
 `ASTRO_PUBLISHER_ENV_FILE`, `ASTRO_PUBLISHER_OUTPUTS_HOST_PATH`, and

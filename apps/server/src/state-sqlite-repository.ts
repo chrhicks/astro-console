@@ -94,12 +94,6 @@ const ObservingPlanRow = Schema.Struct({
   projection: Schema.String,
   run_eligible: Schema.Int,
 })
-const WorkerStatusRow = Schema.Struct({
-  worker_id: Schema.String,
-  state: Schema.Literals(['alive', 'stopped']),
-  adapter_state: Schema.Literals(['ready', 'unconfigured']),
-  last_heartbeat: Schema.String,
-})
 
 export type StateProjection = (
   db: DatabaseSync,
@@ -389,7 +383,7 @@ export const stateSqliteRepositoryLayer = (
       return `id: ${event.id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`
     }
     const readiness = () => projectReadiness(state())
-    const operations = () => projectOperations(db, state())
+    const operations = () => projectOperations(state())
     const persistEvidence = (
       evidence: Evidence,
       identity: () => LocalIdentity,
@@ -454,40 +448,22 @@ const projectReadiness = (
             : 'Service and local database are ready; accepted run state is retained while rig and tunnel remain unknown.',
       }
 const projectOperations = (
-  db: DatabaseSync,
   current: Omit<Snapshot, 'generatedAt' | 'identity' | 'connection'>,
-) => {
-  const worker = Schema.decodeUnknownSync(Schema.optional(WorkerStatusRow))(
-    db
-      .prepare(
-        "SELECT worker_id,state,adapter_state,last_heartbeat FROM worker_status WHERE worker_id='rig-worker'",
-      )
-      .get(),
-  )
-  return {
-    release: 'server',
-    schemaVersion: 'current',
-    sqlite: { journalMode: 'wal', checkpoint: 'unknown' as const },
-    snapshot: {
-      version: current.snapshotVersion,
-      eventCursor: current.eventCursor,
-      activeRun: current.run === null ? ('none' as const) : current.run.phase,
-      lease: current.control.state,
-    },
-    worker:
-      worker === undefined
-        ? { status: 'unknown' as const }
-        : {
-            status: worker.state,
-            adapter: worker.adapter_state,
-            lastHeartbeat: worker.last_heartbeat,
-          },
-    disk: 'unknown' as const,
-    config:
-      current.plan.readiness === 'unavailable'
-        ? ('uninitialized' as const)
-        : ('fixture' as const),
-    rig: 'unknown' as const,
-    tunnel: 'unknown' as const,
-  }
-}
+) => ({
+  release: 'server',
+  schemaVersion: 'current',
+  sqlite: { journalMode: 'wal', checkpoint: 'unknown' as const },
+  snapshot: {
+    version: current.snapshotVersion,
+    eventCursor: current.eventCursor,
+    activeRun: current.run === null ? ('none' as const) : current.run.phase,
+    lease: current.control.state,
+  },
+  disk: 'unknown' as const,
+  config:
+    current.plan.readiness === 'unavailable'
+      ? ('uninitialized' as const)
+      : ('fixture' as const),
+  rig: 'unknown' as const,
+  tunnel: 'unknown' as const,
+})

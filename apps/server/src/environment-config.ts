@@ -1,7 +1,6 @@
 import { Config, ConfigProvider, Effect, Option } from 'effect'
 import type { ProcessorConfig } from './processor-config.ts'
 import type { R2PublisherConfig } from './publisher-config.ts'
-import type { RigWorkerConfig } from './rig-worker-config.ts'
 
 const optional = (name: string) => Config.option(Config.string(name))
 const text = (name: string, fallback?: string) =>
@@ -244,46 +243,6 @@ function originServer(input: {
   })
 }
 
-export const rigWorkerEnvironmentConfig = Config.all({
-  databasePath: migratedText('ASTRO_SERVER_DB', 'ASTRO_LOCAL_WEB_DB'),
-  host: optional('ASTRO_SEESTAR_HOST'),
-  mode: text('ASTRO_RIG_WORKER_MODE', 'disabled'),
-  pemPath: optional('ASTRO_SEESTAR_PEM_PATH'),
-}).pipe(
-  Config.mapOrFail(
-    (input): Effect.Effect<RigWorkerConfig, Config.ConfigError> => {
-      if (!input.databasePath || /[\r\n]/.test(input.databasePath))
-        return configFailure('Rig worker requires ASTRO_SERVER_DB')
-      if (input.mode === 'disabled')
-        return Effect.succeed({
-          mode: 'disabled',
-          databasePath: input.databasePath,
-        })
-      if (input.mode !== 'seestar')
-        return configFailure(
-          'ASTRO_RIG_WORKER_MODE must be disabled or seestar',
-        )
-      if (Option.isNone(input.host) || input.host.value !== '192.168.4.63')
-        return configFailure(
-          'Seestar worker requires ASTRO_SEESTAR_HOST=192.168.4.63',
-        )
-      if (
-        Option.isNone(input.pemPath) ||
-        !input.pemPath.value ||
-        /[\r\n]/.test(input.pemPath.value)
-      )
-        return configFailure('Seestar worker requires ASTRO_SEESTAR_PEM_PATH')
-      return Effect.succeed({
-        mode: 'seestar',
-        databasePath: input.databasePath,
-        rigId: 'seestar-s30',
-        host: input.host.value,
-        pemPath: input.pemPath.value,
-      })
-    },
-  ),
-)
-
 export const publisherEnvironmentConfig = Config.all({
   accountId: text('R2_ACCOUNT_ID'),
   bucket: text('R2_BUCKET'),
@@ -413,73 +372,4 @@ export const downloadGrantSignerConfig = Config.all({
       )
     return Effect.succeed({ ...input, port: Number(input.port) })
   }),
-)
-
-export type SolarCliConfig = {
-  readonly databasePath: string
-  readonly subject: string
-  readonly command:
-    | { readonly action: 'stop'; readonly intentId: string }
-    | {
-        readonly action: 'submit'
-        readonly name: string
-        readonly idempotencyKey: string
-      }
-}
-
-export const solarCliConfig = Config.all({
-  action: text('ASTRO_SOLAR_TEST_ACTION', 'submit'),
-  confirm: text('ASTRO_SOLAR_TEST_CONFIRM'),
-  databasePath: migratedText(
-    'ASTRO_SERVER_DB',
-    'ASTRO_LOCAL_WEB_DB',
-    './.astro-server/state.sqlite',
-  ),
-  idempotencyKey: optional('ASTRO_SOLAR_TEST_IDEMPOTENCY_KEY'),
-  intentId: optional('ASTRO_SOLAR_TEST_INTENT_ID'),
-  name: optional('ASTRO_SOLAR_TEST_NAME'),
-  subject: text('ASTRO_SOLAR_TEST_SUBJECT'),
-}).pipe(
-  Config.mapOrFail(
-    (input): Effect.Effect<SolarCliConfig, Config.ConfigError> => {
-      if (input.confirm !== 'submit-solar-test')
-        return configFailure(
-          'Solar test intent requires ASTRO_SOLAR_TEST_CONFIRM=submit-solar-test',
-        )
-      if (input.action !== 'submit' && input.action !== 'stop')
-        return configFailure('ASTRO_SOLAR_TEST_ACTION must be submit or stop')
-      const required = input.action === 'stop' ? input.intentId : input.name
-      if (
-        Option.isNone(required) ||
-        !required.value ||
-        /[\r\n]/.test(required.value)
-      )
-        return configFailure(
-          `Solar test intent requires ${input.action === 'stop' ? 'ASTRO_SOLAR_TEST_INTENT_ID' : 'ASTRO_SOLAR_TEST_NAME'}`,
-        )
-      if (input.action === 'stop')
-        return Effect.succeed({
-          databasePath: input.databasePath,
-          subject: input.subject,
-          command: { action: 'stop' as const, intentId: required.value },
-        })
-      if (
-        Option.isNone(input.idempotencyKey) ||
-        !input.idempotencyKey.value ||
-        /[\r\n]/.test(input.idempotencyKey.value)
-      )
-        return configFailure(
-          'Solar test intent requires ASTRO_SOLAR_TEST_IDEMPOTENCY_KEY',
-        )
-      return Effect.succeed({
-        databasePath: input.databasePath,
-        subject: input.subject,
-        command: {
-          action: 'submit' as const,
-          name: required.value,
-          idempotencyKey: input.idempotencyKey.value,
-        },
-      })
-    },
-  ),
 )

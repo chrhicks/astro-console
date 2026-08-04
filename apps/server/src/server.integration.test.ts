@@ -37,9 +37,6 @@ import {
   createLocalWebService,
 } from './server.ts'
 import { DatabasePathNotAppOwned, openAppOwnedDatabase } from './database.ts'
-import { createRigWorkerService, runRigWorker } from './rig-worker.ts'
-import { runSolarTestIntent } from './solar-test.ts'
-import { createSeestarSolarAdapter } from './seestar-solar-adapter.ts'
 import { createPublisherWorker } from './publisher-worker.ts'
 import {
   assertSeparateFilesystems,
@@ -58,8 +55,6 @@ import {
   originServerConfig,
   processorEnvironmentConfig,
   publisherEnvironmentConfig,
-  rigWorkerEnvironmentConfig,
-  solarCliConfig,
 } from './environment-config.ts'
 
 function createFixtureService(
@@ -1035,22 +1030,6 @@ const SourceOrphanRow = Schema.Struct({
   path: Schema.String,
   checksum: Schema.String,
 })
-const SolarIntentRow = Schema.Struct({
-  name: Schema.String,
-  owner_person_id: Schema.String,
-  owner_client_id: Schema.String,
-  state: Schema.String,
-})
-const SolarEvidenceRow = Schema.Struct({
-  state: Schema.String,
-  message: Schema.String,
-})
-const OutboxRow = Schema.Struct({
-  kind: Schema.String,
-  payload: Schema.String,
-  state: Schema.String,
-  attempts: Schema.Int,
-})
 const ClaimedOutboxRow = Schema.Struct({
   state: Schema.String,
   claim_token: Schema.NullOr(Schema.String),
@@ -1059,14 +1038,6 @@ const ClaimedOutboxRow = Schema.Struct({
 })
 const OutboxAttemptRow = Schema.Struct({
   state: Schema.String,
-  attempts: Schema.Int,
-})
-
-const DispatchedOutboxRow = Schema.Struct({
-  id: Schema.String,
-  state: Schema.String,
-  claim_token: Schema.NullOr(Schema.String),
-  ack_at: Schema.NullOr(Schema.String),
   attempts: Schema.Int,
 })
 
@@ -1209,27 +1180,6 @@ test('focused executable configurations decode defaults and conditional branches
       secretPath: '/run/secrets/grant',
     },
   )
-  assert.deepEqual(
-    await read(rigWorkerEnvironmentConfig, {
-      ASTRO_SERVER_DB: '/state.sqlite',
-    }),
-    { mode: 'disabled', databasePath: '/state.sqlite' },
-  )
-  assert.deepEqual(
-    await read(rigWorkerEnvironmentConfig, {
-      ASTRO_SERVER_DB: '/state.sqlite',
-      ASTRO_RIG_WORKER_MODE: 'seestar',
-      ASTRO_SEESTAR_HOST: '192.168.4.63',
-      ASTRO_SEESTAR_PEM_PATH: '/run/secrets/seestar.pem',
-    }),
-    {
-      mode: 'seestar',
-      databasePath: '/state.sqlite',
-      rigId: 'seestar-s30',
-      host: '192.168.4.63',
-      pemPath: '/run/secrets/seestar.pem',
-    },
-  )
   assert.equal((await read(processorEnvironmentConfig, {})).mode, 'disabled')
   assert.equal(
     (
@@ -1244,28 +1194,6 @@ test('focused executable configurations decode defaults and conditional branches
       })
     ).mode,
     'manifest',
-  )
-  assert.equal(
-    (
-      await read(solarCliConfig, {
-        ASTRO_SOLAR_TEST_CONFIRM: 'submit-solar-test',
-        ASTRO_SOLAR_TEST_SUBJECT: 'owner',
-        ASTRO_SOLAR_TEST_NAME: 'M27',
-        ASTRO_SOLAR_TEST_IDEMPOTENCY_KEY: 'solar-1',
-      })
-    ).command.action,
-    'submit',
-  )
-  assert.deepEqual(
-    (
-      await read(solarCliConfig, {
-        ASTRO_SOLAR_TEST_CONFIRM: 'submit-solar-test',
-        ASTRO_SOLAR_TEST_SUBJECT: 'owner',
-        ASTRO_SOLAR_TEST_ACTION: 'stop',
-        ASTRO_SOLAR_TEST_INTENT_ID: 'solar-1',
-      })
-    ).command,
-    { action: 'stop', intentId: 'solar-1' },
   )
   assert.equal(
     (
@@ -1293,18 +1221,6 @@ test('focused executable configurations decode defaults and conditional branches
     read(originServerConfig, {
       ASTRO_ADMISSION_MODE: 'development',
       ASTRO_SERVER_BIND: '0.0.0.0',
-    }),
-  )
-  await assert.rejects(
-    read(rigWorkerEnvironmentConfig, {
-      ASTRO_SERVER_DB: '/state.sqlite',
-      ASTRO_RIG_WORKER_MODE: 'wrong',
-    }),
-  )
-  await assert.rejects(
-    read(rigWorkerEnvironmentConfig, {
-      ASTRO_SERVER_DB: '/state.sqlite',
-      ASTRO_RIG_WORKER_MODE: 'seestar',
     }),
   )
   await assert.rejects(
@@ -1358,19 +1274,6 @@ test('focused executable configurations decode defaults and conditional branches
       ASTRO_DOWNLOAD_GRANT_SHARED_SECRET_PATH: '/run/secrets/grant',
     }),
   )
-  await assert.rejects(
-    read(solarCliConfig, {
-      ASTRO_SOLAR_TEST_CONFIRM: 'submit-solar-test',
-      ASTRO_SOLAR_TEST_SUBJECT: 'owner',
-    }),
-  )
-  await assert.rejects(
-    read(solarCliConfig, {
-      ASTRO_SOLAR_TEST_CONFIRM: 'submit-solar-test',
-      ASTRO_SOLAR_TEST_SUBJECT: 'owner',
-      ASTRO_SOLAR_TEST_ACTION: 'stop',
-    }),
-  )
 })
 
 function publisherFixture(idempotencyKey: string) {
@@ -1421,24 +1324,24 @@ test('manifest processor is disabled by default and only saves bounded configure
     ownerPersonId: 'owner',
   }
   const manifest = {
-    sessionId: 'solar-process-001',
+    sessionId: 'm27-process-001',
     expectedRevision: 1,
     idempotencyKey: 'processor-save',
     outputs: [{ sourceId: 'final', representation: 'final' }],
     sources: { original: 'original.tiff', final: 'final.tiff' },
     metadata: {
-      comparisonGroupId: 'solar-001',
-      sourceAssetIds: ['asset-source-solar-001'],
-      runId: 'solar-run-001',
-      solveAttemptId: 'solar-solve-001',
+      comparisonGroupId: 'm27-001',
+      sourceAssetIds: ['asset-source-m27-001'],
+      runId: 'm27-run-001',
+      solveAttemptId: 'm27-solve-001',
     },
     sourceIngest: {
-      assetId: 'asset-source-solar-001',
+      assetId: 'asset-source-m27-001',
       sourceId: 'original',
       format: 'tiff',
       capturedAt: '2026-07-28T00:00:00.000Z',
-      comparisonGroupId: 'solar-001',
-      lineage: { runId: 'solar-run-001', solveAttemptId: 'solar-solve-001' },
+      comparisonGroupId: 'm27-001',
+      lineage: { runId: 'm27-run-001', solveAttemptId: 'm27-solve-001' },
       idempotencyKey: 'source-ingest-001',
     },
   }
@@ -1496,13 +1399,13 @@ test('manifest processor is disabled by default and only saves bounded configure
       CountRow,
       inspected.database
         .prepare(
-          "SELECT count(*) AS count FROM source_ingest_events WHERE asset_id='asset-source-solar-001'",
+          "SELECT count(*) AS count FROM source_ingest_events WHERE asset_id='asset-source-m27-001'",
         )
         .get(),
     ).count,
     1,
   )
-  assert.equal(existsSync(join(originals, 'asset-source-solar-001.tiff')), true)
+  assert.equal(existsSync(join(originals, 'asset-source-m27-001.tiff')), true)
   const savedDetail = JSON.parse(
     databaseRow(
       AssetDetailRow,
@@ -1514,9 +1417,9 @@ test('manifest processor is disabled by default and only saves bounded configure
     ).detail,
   )
   assert.deepEqual(savedDetail.lineage, {
-    sourceAssetIds: ['asset-source-solar-001'],
-    runId: 'solar-run-001',
-    solveAttemptId: 'solar-solve-001',
+    sourceAssetIds: ['asset-source-m27-001'],
+    runId: 'm27-run-001',
+    solveAttemptId: 'm27-solve-001',
   })
   const before = databaseRow(
     CountRow,
@@ -1535,7 +1438,7 @@ test('manifest processor is disabled by default and only saves bounded configure
       sourceIngest: undefined,
       metadata: {
         ...manifest.metadata,
-        solveAttemptId: 'solar-solve-mismatch',
+        solveAttemptId: 'm27-solve-mismatch',
       },
     }),
   )
@@ -1659,8 +1562,8 @@ test('source ingest records transaction-failure originals as checksum-backed orp
       sourceId: 'original',
       format: 'fits',
       capturedAt: '2026-07-28T00:00:00.000Z',
-      comparisonGroupId: 'solar-orphan-001',
-      lineage: { runId: 'solar-run-001', solveAttemptId: 'solar-solve-001' },
+      comparisonGroupId: 'm27-orphan-001',
+      lineage: { runId: 'm27-run-001', solveAttemptId: 'm27-solve-001' },
       idempotencyKey: 'source-orphan-001',
     },
     {
@@ -2790,313 +2693,6 @@ test('origin admission factory consumes decoded configuration', async (t) => {
   assert.ok(listener.port > 0)
 })
 
-test('disabled rig worker exits without creating or mutating its database', async () => {
-  const databasePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-worker-disabled-')),
-    'state.sqlite',
-  )
-  const worker = createRigWorkerService(
-    { mode: 'disabled', databasePath },
-    undefined,
-  )
-  assert.equal(await worker.runOnce(), 'disabled')
-  assert.deepEqual(await worker.run(), {
-    passes: 0,
-    health: { mode: 'disabled', status: 'disabled', databasePath },
-  })
-  assert.deepEqual(await runRigWorker({ mode: 'disabled', databasePath }), {
-    passes: 0,
-    health: { mode: 'disabled', status: 'disabled', databasePath },
-  })
-  assert.equal(existsSync(databasePath), false)
-})
-
-test('owner-only Solar test intent persists separate pending work and Stack-evidence boundary', () => {
-  const databasePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-solar-intent-')),
-    'state.sqlite',
-  )
-  const service = createFixtureService(databasePath)
-  const input = {
-    name: 'Solar filter verification',
-    idempotencyKey: 'solar-test-001',
-  }
-  assert.deepEqual(
-    service.submitSolarTestIntent(input, {
-      personId: 'viewer',
-      clientId: 'viewer',
-      role: 'viewer',
-      capability: 'controlCapable',
-    }),
-    { outcome: 'rejected', reason: 'OwnerRequired' },
-  )
-  assert.deepEqual(
-    service.submitSolarTestIntent(input, {
-      personId: 'owner',
-      clientId: 'phone',
-      role: 'owner',
-      capability: 'readOnly',
-    }),
-    { outcome: 'rejected', reason: 'ClientReadOnly' },
-  )
-  assert.deepEqual(
-    service.submitSolarTestIntent(
-      { name: 'x', idempotencyKey: 'bad' },
-      {
-        personId: 'owner',
-        clientId: 'desktop',
-        role: 'owner',
-        capability: 'controlCapable',
-      },
-    ),
-    { outcome: 'rejected', reason: 'InvalidInput' },
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare('SELECT count(*) AS count FROM solar_test_intents')
-        .get(),
-    ).count,
-    0,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
-    ).count,
-    0,
-  )
-  const accepted = service.submitSolarTestIntent(input, {
-    personId: 'owner',
-    clientId: 'desktop',
-    role: 'owner',
-    capability: 'controlCapable',
-  })
-  assert.equal(accepted.outcome, 'accepted')
-  if (accepted.outcome !== 'accepted')
-    throw new Error('Expected Solar test intent acceptance')
-  assert.equal(accepted.state, 'awaitingAdapter')
-  assert.equal(accepted.evidence, 'awaitingStackEvidence')
-  const intent = databaseRow(
-    SolarIntentRow,
-    service.database
-      .prepare(
-        'SELECT name,owner_person_id,owner_client_id,state FROM solar_test_intents WHERE intent_id=?',
-      )
-      .get(accepted.intentId),
-  )
-  assert.equal(intent.name, input.name)
-  assert.equal(intent.owner_person_id, 'owner')
-  assert.equal(intent.owner_client_id, 'desktop')
-  assert.equal(intent.state, 'awaitingAdapter')
-  const evidence = databaseRow(
-    SolarEvidenceRow,
-    service.database
-      .prepare(
-        'SELECT state,message FROM solar_test_evidence WHERE intent_id=?',
-      )
-      .get(accepted.intentId),
-  )
-  assert.equal(evidence.state, 'awaitingStackEvidence')
-  assert.match(evidence.message, /Stack evidence/)
-  const outbox = databaseRow(
-    OutboxRow,
-    service.database
-      .prepare(
-        "SELECT kind,payload,state,attempts FROM outbox WHERE kind='StartSolarTestObservation'",
-      )
-      .get(),
-  )
-  assert.equal(outbox.kind, 'StartSolarTestObservation')
-  assert.equal(outbox.state, 'pending')
-  assert.equal(outbox.attempts, 0)
-  assert.deepEqual(JSON.parse(outbox.payload), {
-    intentId: accepted.intentId,
-    name: input.name,
-    target: 'Sun',
-    requiredEvidence: 'Stack',
-  })
-  assert.deepEqual(
-    service.submitSolarTestIntent(input, {
-      personId: 'owner',
-      clientId: 'desktop',
-      role: 'owner',
-      capability: 'controlCapable',
-    }),
-    accepted,
-  )
-  assert.deepEqual(
-    service.submitSolarTestIntent(
-      {
-        name: 'Solar filter verification retry changed',
-        idempotencyKey: input.idempotencyKey,
-      },
-      {
-        personId: 'owner',
-        clientId: 'desktop',
-        role: 'owner',
-        capability: 'controlCapable',
-      },
-    ),
-    { outcome: 'rejected', reason: 'InvalidInput' },
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare(
-          "SELECT count(*) AS count FROM outbox WHERE kind='StartSolarTestObservation'",
-        )
-        .get(),
-    ).count,
-    1,
-  )
-  assert.deepEqual(
-    service.submitSolarTestIntent(
-      { name: 'Second Solar test', idempotencyKey: 'solar-test-002' },
-      {
-        personId: 'owner',
-        clientId: 'desktop',
-        role: 'owner',
-        capability: 'controlCapable',
-      },
-    ),
-    { outcome: 'rejected', reason: 'SolarTestPending' },
-  )
-  service.close()
-  const recovered = createFixtureService(databasePath)
-  assert.deepEqual(
-    recovered.submitSolarTestIntent(input, {
-      personId: 'owner',
-      clientId: 'desktop',
-      role: 'owner',
-      capability: 'controlCapable',
-    }),
-    accepted,
-  )
-  const recoveredOutbox = databaseRow(
-    OutboxAttemptRow,
-    recovered.database
-      .prepare(
-        "SELECT state,attempts FROM outbox WHERE kind='StartSolarTestObservation'",
-      )
-      .get(),
-  )
-  assert.equal(recoveredOutbox.state, 'pending')
-  assert.equal(recoveredOutbox.attempts, 0)
-  recovered.close()
-})
-
-test('Solar test CLI runner consumes decoded configuration', () => {
-  const databasePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-solar-cli-')),
-    'state.sqlite',
-  )
-  assert.equal(existsSync(databasePath), false)
-  const seeded = createFixtureService(databasePath)
-  seeded.database
-    .prepare('INSERT INTO memberships VALUES (?,?,?)')
-    .run('solar-owner-subject', 'owner', 'owner')
-  seeded.database
-    .prepare('INSERT INTO memberships VALUES (?,?,?)')
-    .run('solar-viewer-subject', 'viewer', 'viewer')
-  seeded.close()
-  const base = {
-    databasePath,
-    command: {
-      action: 'submit' as const,
-      name: 'Solar filter verification',
-      idempotencyKey: 'solar-cli-001',
-    },
-  }
-  assert.deepEqual(
-    runSolarTestIntent({ ...base, subject: 'unknown-subject' }),
-    { outcome: 'rejected', reason: 'OwnerRequired' },
-  )
-  assert.deepEqual(
-    runSolarTestIntent({ ...base, subject: 'solar-viewer-subject' }),
-    { outcome: 'rejected', reason: 'OwnerRequired' },
-  )
-  const result = runSolarTestIntent({ ...base, subject: 'solar-owner-subject' })
-  assert.equal(result.outcome, 'accepted')
-  if (result.outcome !== 'accepted' || !('intentId' in result))
-    throw new Error('Expected Solar CLI acceptance')
-  const stopped = runSolarTestIntent({
-    databasePath,
-    subject: 'solar-owner-subject',
-    command: { action: 'stop', intentId: result.intentId },
-  })
-  assert.deepEqual(stopped, { outcome: 'accepted' })
-  const inspected = createFixtureService(databasePath)
-  assert.equal(
-    databaseRow(
-      StatusRow,
-      inspected.database
-        .prepare('SELECT state FROM solar_test_intents WHERE intent_id=?')
-        .get(result.intentId),
-    ).state,
-    'stopping',
-  )
-  assert.equal(
-    databaseRow(
-      StatusRow,
-      inspected.database
-        .prepare(
-          "SELECT state FROM outbox WHERE kind='StopSolarTestObservation'",
-        )
-        .get(),
-    ).state,
-    'pending',
-  )
-  inspected.close()
-})
-
-test('Solar adapter stop closes Stack before the Solar view', async () => {
-  const calls: string[] = []
-  const adapter = createSeestarSolarAdapter(
-    {
-      mode: 'seestar',
-      databasePath: '/state.sqlite',
-      rigId: 'seestar-s30',
-      host: '192.168.4.63',
-      pemPath: '/run/secrets/seestar.pem',
-    },
-    {
-      onStack: () => undefined,
-      deviceFactory: () => ({
-        connectAndAuth: async () => true,
-        disconnect: () => undefined,
-        preflightCheck: async () => ({
-          host: '192.168.4.63',
-          raw: {
-            deviceState: null,
-            viewState: null,
-            setting: null,
-            diskVolume: null,
-            piInfo: null,
-            time: null,
-          },
-          warnings: [],
-        }),
-        startStack: async () => true,
-        startView: async () => true,
-        stopStack: async () => {
-          calls.push('stack')
-          return true
-        },
-        stopView: async () => {
-          calls.push('view')
-          return true
-        },
-        rawClient: { subscribeToPushEvents: () => () => undefined },
-      }),
-    },
-  )
-  assert.equal(await adapter.stopSolarTestObservation('solar-intent'), true)
-  assert.deepEqual(calls, ['stack', 'view'])
-})
-
 test('operational endpoints expose bounded admitted health without internal detail', async (t) => {
   const service = createFixtureService()
   const listener = await service.listen()
@@ -3419,179 +3015,7 @@ test('production Access JWKS admission refreshes by kid, bounds cache use, and f
   assert.equal(calls, 5)
 })
 
-test('a rig worker dispatches only a Solar test and records provider acknowledgement separately from Stack evidence', async (t) => {
-  const databasePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-rig-worker-')),
-    'state.sqlite',
-  )
-  const service = createFixtureService(databasePath)
-  const listener = await service.listen()
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  const intent = service.submitSolarTestIntent(
-    { name: 'Solar worker test', idempotencyKey: 'rig-worker-solar' },
-    {
-      personId: 'owner',
-      clientId: 'desktop',
-      role: 'owner',
-      capability: 'controlCapable',
-    },
-  )
-  if (intent.outcome !== 'accepted') throw new Error('Expected Solar intent')
-  let calls = 0
-  const config = {
-    mode: 'seestar' as const,
-    databasePath,
-    rigId: 'seestar-s30' as const,
-    host: '192.168.4.63',
-    pemPath: '/run/secrets/seestar.pem',
-  }
-  const worker = createRigWorkerService(config, {
-    startSolarTestObservation: async (work) => {
-      calls += 1
-      assert.equal(work.intentId, intent.intentId)
-      return 'providerAcknowledged'
-    },
-    stopSolarTestObservation: async () => true,
-    close: () => undefined,
-  })
-  assert.deepEqual(await Promise.all([worker.runOnce(), worker.runOnce()]), [
-    'providerAcknowledged',
-    'none',
-  ])
-  assert.equal(calls, 1)
-  const row = databaseRow(
-    DispatchedOutboxRow,
-    service.database
-      .prepare(
-        "SELECT id,state,claim_token,ack_at,attempts FROM outbox WHERE kind='StartSolarTestObservation'",
-      )
-      .get(),
-  )
-  assert.equal(row.state, 'dispatched')
-  assert.equal(row.claim_token, null)
-  assert.notEqual(row.ack_at, null)
-  assert.equal(row.attempts, 1)
-  assert.equal(
-    databaseRow(
-      StatusRow,
-      service.database
-        .prepare('SELECT state FROM solar_test_intents WHERE intent_id=?')
-        .get(intent.intentId),
-    ).state,
-    'providerAcknowledged',
-  )
-  assert.equal(
-    service.recordSolarStackEvidence(
-      intent.intentId,
-      { Event: 'Stack', stacked_frame: 1 },
-      '2026-07-27T12:00:00.000Z',
-    ),
-    true,
-  )
-  assert.equal(
-    databaseRow(
-      StatusRow,
-      service.database
-        .prepare('SELECT state FROM solar_test_intents WHERE intent_id=?')
-        .get(intent.intentId),
-    ).state,
-    'stackObserved',
-  )
-  assert.equal(calls, 1)
-  assert.equal(row.state, 'dispatched')
-  assert.equal(row.claim_token, null)
-  assert.notEqual(row.ack_at, null)
-  assert.equal(row.attempts, 1)
-  const uncertainIntent = service.submitSolarTestIntent(
-    {
-      name: 'Solar uncertain worker test',
-      idempotencyKey: 'rig-worker-solar-uncertain',
-    },
-    {
-      personId: 'owner',
-      clientId: 'desktop',
-      role: 'owner',
-      capability: 'controlCapable',
-    },
-  )
-  if (uncertainIntent.outcome !== 'accepted')
-    throw new Error('Expected Solar uncertain intent')
-  const uncertainWorker = createRigWorkerService(
-    config,
-    {
-      startSolarTestObservation: async () => 'uncertain',
-      stopSolarTestObservation: async () => true,
-      close: () => undefined,
-    },
-    { workerId: 'uncertain-worker' },
-  )
-  assert.equal(await uncertainWorker.runOnce(), 'uncertain')
-  assert.equal(
-    databaseRow(
-      StatusRow,
-      service.database
-        .prepare('SELECT state FROM solar_test_intents WHERE intent_id=?')
-        .get(uncertainIntent.intentId),
-    ).state,
-    'manualRecovery',
-  )
-  assert.equal(
-    databaseRow(
-      StatusRow,
-      service.database
-        .prepare(
-          "SELECT state FROM outbox WHERE kind='StartSolarTestObservation' AND state='uncertain'",
-        )
-        .get(),
-    ).state,
-    'uncertain',
-  )
-  uncertainWorker.close()
-  const expiredIntent = service.submitSolarTestIntent(
-    {
-      name: 'Solar expired lease test',
-      idempotencyKey: 'rig-worker-solar-expired',
-    },
-    {
-      personId: 'owner',
-      clientId: 'desktop',
-      role: 'owner',
-      capability: 'controlCapable',
-    },
-  )
-  if (expiredIntent.outcome !== 'accepted')
-    throw new Error('Expected Solar expired intent')
-  service.database
-    .prepare(
-      "UPDATE outbox SET state='claimed',claim_token='expired',claim_until=? WHERE kind='StartSolarTestObservation' AND state='pending'",
-    )
-    .run('2000-01-01T00:00:00.000Z')
-  assert.equal(await worker.runOnce(), 'none')
-  assert.equal(
-    databaseRow(
-      StatusRow,
-      service.database
-        .prepare('SELECT state FROM solar_test_intents WHERE intent_id=?')
-        .get(expiredIntent.intentId),
-    ).state,
-    'manualRecovery',
-  )
-  assert.equal(
-    databaseRow(
-      StatusRow,
-      service.database
-        .prepare('SELECT state FROM solar_test_recovery WHERE intent_id=?')
-        .get(expiredIntent.intentId),
-    ).state,
-    'manualRecovery',
-  )
-  worker.close()
-})
-
-test('rig outbox dispatch leaves a claimed PublishAsset for its publisher', async () => {
+test('publisher recovers a claimed PublishAsset without touching its claim owner', async () => {
   const root = mkdtempSync(join(tmpdir(), 'astro-outbox-isolation-'))
   const sources = join(root, 'sources')
   const outputs = join(root, 'outputs')
@@ -3616,19 +3040,6 @@ test('rig outbox dispatch leaves a claimed PublishAsset for its publisher', asyn
       "UPDATE outbox SET state='claimed',claim_token='publisher-token',claimed_by='publisher-worker',claim_until=? WHERE kind='PublishAsset'",
     )
     .run('2000-01-01T00:00:00.000Z')
-  const config = {
-    mode: 'seestar' as const,
-    databasePath,
-    rigId: 'seestar-s30' as const,
-    host: '192.168.4.63',
-    pemPath: '/run/secrets/seestar.pem',
-  }
-  const rig = createRigWorkerService(config, {
-    startSolarTestObservation: async () => 'providerAcknowledged',
-    stopSolarTestObservation: async () => true,
-    close: () => undefined,
-  })
-  assert.equal(await rig.runOnce(), 'none')
   const isolated = databaseRow(
     ClaimedOutboxRow,
     service.database
@@ -3674,7 +3085,6 @@ test('rig outbox dispatch leaves a claimed PublishAsset for its publisher', asyn
     ).state,
     'dispatched',
   )
-  rig.close()
   service.close()
 })
 
@@ -3792,57 +3202,6 @@ test('decoded adapter observation updates service evidence and malformed input f
     true,
   )
   assert.equal(before.includes('frame-adapter-001'), true)
-  service.close()
-})
-
-test('Seestar Stack push adapter decodes SDK events, projects availability, and fails closed', async (t) => {
-  const service = createFixtureService()
-  const listener = await service.listen()
-  const base = `http://127.0.0.1:${listener.port}`
-  t.after(async () => {
-    await listener.close()
-    service.close()
-  })
-  const stream = await fetch(`${base}/api/events`)
-  const reader = stream.body?.getReader()
-  await reader?.read()
-  const accepted = service.ingestSeestarStackPush(
-    { Event: 'Stack', stacked_frame: '43', percent: '62' },
-    '2026-07-24T02:10:00.000Z',
-  )
-  assert.equal(accepted?.evidence.stack?.availability, 'available')
-  assert.equal(accepted?.evidence.stack?.frameCount, 43)
-  const projected = await nextEvent(reader)
-  assert.match(projected, /event: ProjectionChanged/)
-  const before = accepted?.evidence.frameId
-  assert.equal(
-    service.ingestSeestarStackPush(
-      { Event: 'PlateSolve', stacked_frame: 44 },
-      '2026-07-24T02:11:00.000Z',
-    ),
-    undefined,
-  )
-  const failed = service.ingestSeestarStackPush(
-    {
-      Event: 'Stack',
-      stacked_frame: 43,
-      state: 'fail',
-      error: 'camera transport lost',
-    },
-    '2026-07-24T02:12:00.000Z',
-  )
-  assert.equal(failed?.evidence.frameId, before)
-  assert.equal(failed?.evidence.stack?.availability, 'unavailable')
-  assert.match(failed?.evidence.stack.message ?? '', /camera transport lost/)
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
-    ).count,
-    0,
-  )
-  await reader?.cancel()
-  await listener.close()
   service.close()
 })
 
@@ -4371,15 +3730,6 @@ test('plan-draft fixture preserves UI-created fake definitions without run or ha
     databaseRow(
       CountRow,
       recovered.database.prepare('SELECT count(*) AS count FROM outbox').get(),
-    ).count,
-    0,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      recovered.database
-        .prepare('SELECT count(*) AS count FROM solar_test_intents')
-        .get(),
     ).count,
     0,
   )
