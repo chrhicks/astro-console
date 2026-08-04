@@ -11,12 +11,10 @@ Read these in order when starting or resuming V2 work:
 
 1. [UX and design guidance](ux-design-guidance.md) — durable product and design
    rules accepted through Gate 4.
-2. [Current handoff](current/handoff.md) — completed evidence and honest
-   deferred boundaries.
+2. [Current handoff](current/handoff.md) — current V2 status, proof boundary,
+   and next owner action.
 3. [V2 delivery plan](current/delivery-plan.md) — durable end-to-end V2.0
    scope and phase exit criteria.
-4. [Phase 5 planning](current/phase-5-planning.md) — prepared delivery order
-   and Process proof boundary.
 
 That is the complete default context. Load another document only when the task
 requires its specific detail.
@@ -33,7 +31,7 @@ requires its specific detail.
 | Executable Effect Schema candidates and fixtures         | [V2 contracts package](../../packages/v2-contracts/README.md)                                                                                                                                                                                    |
 | End-to-end V2.0 scope, phases, and exit criteria         | [V2 delivery plan](current/delivery-plan.md)                                                                                                                                                                                                     |
 | Completed Phase 2 execution history                      | [Phase 2 implementation plan archive](archive/plans/phase-2-implementation-plan-2026-08-04.md)                                                                                                                                                  |
-| Completed Phase 3 execution history                      | [Phase 3 archive](archive/phase-3/README.md)                                                                                                                                                                                                      |
+| Completed Phase 3–5 execution history                    | [Phase 3 archive](archive/phase-3/README.md), [Phase 4 plan](archive/phase-4/implementation-plan-2026-08-04.md), and [Phase 5 plan](archive/phase-5/implementation-plan-2026-08-04.md)                                                       |
 | Ideas outside V2.0                                       | [Post-V2.0 notes](current/v2-post-v2.0-notes.md)                                                                                                                                                                                                 |
 | Production UI visual implementation                      | `apps/web` source and CSS, the owner-corrected [visual style guide](current/visual-style-guide.md), [UI component library](current/ui-component-library.md), [UI build contract](current/ui-build-contract.md), and accepted screenshot evidence |
 | Why Phase 0.5 made a specific visual decision            | [Phase 0.5 design-system archive](archive/phase-0.5/README.md) — historical only; do not use for active implementation authority                                                                                                                 |
@@ -78,8 +76,9 @@ Acquire and Capture workflows persist server-owned evidence, actions, and
 recovery truth. A real rig has not yet been contacted. Phase 4 Library and
 Frame Review now provides immutable captured-frame intake, inspection, durable
 review, comparison, and Observe handoff with local deterministic proof. Phase 5
-Process Workspace implementation is authorized. Work begins with the durable
-Library-to-Process session entry slice.
+Process Workspace is also complete with durable session, deterministic Build,
+history, recovery, and restart proof. The next V2 phase requires owner
+approval.
 
 `apps/web` source, CSS, and accepted screenshot evidence are the production
 visual authority. `docs/v2-ui-final` and `prototype/v2-ui` are historical Gate

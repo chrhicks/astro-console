@@ -27,6 +27,12 @@ to override `docs/v2/current/`, accepted gate records, or the UX guidance.
   convergence planning, walkthrough, and solve-geometry evidence.
 - [Phase 3 archive](phase-3/README.md) — completed Observe, Acquire, and
   Capture execution history; use the current handoff for the active boundary.
+- [Phase 3–5 closeout record](handoffs/phase-3-to-5-closeout-2026-08-04.md)
+  — superseded closeout narrative; use the current handoff for current status.
+- [Phase 4 implementation plan](phase-4/implementation-plan-2026-08-04.md)
+  — completed Library and Frame Review delivery record.
+- [Phase 5 implementation plan](phase-5/implementation-plan-2026-08-04.md)
+  — completed Process Workspace delivery record.
 - [Phase 2 implementation plan](plans/phase-2-implementation-plan-2026-08-04.md)
   — completed fake-run execution plan retained for historical lookup.
 - [Phase 1 delivery record](phase-1-foundation/delivery-plan-2026-07-29.md)

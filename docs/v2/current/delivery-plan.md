@@ -168,12 +168,9 @@ current counts and proof limits are in the [current handoff](handoff.md).
 
 ## Phase 4: Library and Frame Review — Complete
 
-Implementation is organized under Continuum Epic `tkt-jnzkma5n`. The prepared
-[Phase 4 plan](phase-4-planning.md) identifies a required capture-to-asset,
-inspection, and durable-review contract addition. The owner accepted this
-boundary on 2026-08-04. The Epic is complete with deterministic local proof;
-the closeout evidence and remaining proof boundary are in the
-[Phase 4 plan](phase-4-planning.md).
+Continuum Epic `tkt-jnzkma5n` is complete with deterministic local proof. The
+historical [Phase 4 plan](../archive/phase-4/implementation-plan-2026-08-04.md)
+records its accepted capture-to-asset, inspection, and durable-review boundary.
 
 ### Outcomes
 
@@ -196,7 +193,8 @@ the closeout evidence and remaining proof boundary are in the
 Continuum Epic `tkt-wpkbh9tz` is complete. The durable Library-to-Process
 entry, deterministic Build, preview/Apply history, failed-stage Retry,
 save/switch/discard, and SQLite restart path are proven locally. The
-[Phase 5 plan](phase-5-planning.md) records the exact evidence and boundary.
+historical [Phase 5 plan](../archive/phase-5/implementation-plan-2026-08-04.md)
+records the exact evidence and boundary.
 
 ### Outcomes
 
