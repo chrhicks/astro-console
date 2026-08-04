@@ -13,11 +13,6 @@ const sourceFiles = (directory) =>
         : []
     })
 
-const serverImports = new Map([
-  ['src/rig-worker.ts', ['createLocalWebService']],
-  ['src/solar-test.ts', ['createLocalWebService']],
-])
-
 const importedServerNames = (source) =>
   [
     ...source.matchAll(
@@ -32,18 +27,9 @@ const importedServerNames = (source) =>
 const assertCurrentServerImportBoundary = () => {
   for (const source of sourceFiles('src')) {
     const names = importedServerNames(readFileSync(source, 'utf8'))
-    const expected = serverImports.get(source)
-    if (expected === undefined && names.length > 0)
+    if (names.length > 0)
       throw new Error(
         `${source} must not import server.ts; add an owned boundary instead`,
-      )
-    if (
-      expected !== undefined &&
-      (names.length !== expected.length ||
-        names.some((name, index) => name !== expected[index]))
-    )
-      throw new Error(
-        `${source} server.ts imports changed; move the dependency to its owned boundary`,
       )
   }
 }

@@ -22,8 +22,34 @@ export type ObserveTransition = {
   readonly event?: { readonly type: string; readonly cursor: number }
 }
 export interface ObservePersistenceShape {
-  readonly execute: (
-    intent: typeof ObserveIntent.Type,
+  readonly pause: (
+    intent: Extract<typeof ObserveIntent.Type, { readonly _tag: 'PauseRun' }>,
+    identity: LocalIdentity,
+  ) => Effect.Effect<ObserveTransition, unknown>
+  readonly resume: (
+    intent: Extract<typeof ObserveIntent.Type, { readonly _tag: 'ResumeRun' }>,
+    identity: LocalIdentity,
+  ) => Effect.Effect<ObserveTransition, unknown>
+  readonly stop: (
+    intent: Extract<typeof ObserveIntent.Type, { readonly _tag: 'StopRun' }>,
+    identity: LocalIdentity,
+  ) => Effect.Effect<ObserveTransition, unknown>
+  readonly skip: (
+    intent: Extract<
+      typeof ObserveIntent.Type,
+      { readonly _tag: 'SkipSequence' }
+    >,
+    identity: LocalIdentity,
+  ) => Effect.Effect<ObserveTransition, unknown>
+  readonly retry: (
+    intent: Extract<typeof ObserveIntent.Type, { readonly _tag: 'RetryPhase' }>,
+    identity: LocalIdentity,
+  ) => Effect.Effect<ObserveTransition, unknown>
+  readonly park: (
+    intent: Extract<
+      typeof ObserveIntent.Type,
+      { readonly _tag: 'RequestPark' }
+    >,
     identity: LocalIdentity,
   ) => Effect.Effect<ObserveTransition, unknown>
   readonly snapshot: (
@@ -42,6 +68,39 @@ export const observePersistenceLayer = (
   implementation: ObservePersistenceShape,
 ) => Layer.succeed(ObservePersistence, ObservePersistence.of(implementation))
 
+export class ObserveService extends Context.Service<
+  ObserveService,
+  {
+    readonly execute: (
+      intent: typeof ObserveIntent.Type,
+      identity: LocalIdentity,
+    ) => Effect.Effect<ObserveTransition, unknown>
+  }
+>()('@astro-console/server/ObserveService') {}
+export const observeServiceLayer = Layer.effect(
+  ObserveService,
+  Effect.gen(function* () {
+    const persistence = yield* ObservePersistence
+    return ObserveService.of({
+      execute: Effect.fn('ObserveService.execute')(
+        function* (intent, identity) {
+          if (ObserveIntent.guards.PauseRun(intent))
+            return yield* persistence.pause(intent, identity)
+          if (ObserveIntent.guards.ResumeRun(intent))
+            return yield* persistence.resume(intent, identity)
+          if (ObserveIntent.guards.StopRun(intent))
+            return yield* persistence.stop(intent, identity)
+          if (ObserveIntent.guards.SkipSequence(intent))
+            return yield* persistence.skip(intent, identity)
+          if (ObserveIntent.guards.RetryPhase(intent))
+            return yield* persistence.retry(intent, identity)
+          return yield* persistence.park(intent, identity)
+        },
+      ),
+    })
+  }),
+)
+
 export const executeObserveRequest = Effect.fn(
   'ObserveCommandService.executeRequest',
 )(function* (
@@ -56,7 +115,8 @@ export const executeObserveRequest = Effect.fn(
     raw,
   ).pipe(Effect.mapError(() => new ObserveCommandInputInvalid()))
   const persistence = yield* ObservePersistence
-  const transition = yield* persistence
+  const service = yield* ObserveService
+  const transition = yield* service
     .execute(decoded.intent, identity)
     .pipe(Effect.mapError(() => new ObserveServiceUnavailable()))
   if (isRejected(transition.body)) {

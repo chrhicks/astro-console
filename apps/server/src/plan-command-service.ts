@@ -22,8 +22,37 @@ export type PlanTransition = {
   readonly event?: { readonly type: string; readonly cursor: number }
 }
 export interface PlanPersistenceShape {
-  readonly execute: (
-    intent: typeof PlanIntent.Type,
+  readonly saveDraft: (
+    intent: Extract<typeof PlanIntent.Type, { readonly _tag: 'SaveDraft' }>,
+    identity: LocalIdentity,
+  ) => Effect.Effect<PlanTransition, unknown>
+  readonly acceptRunDefinition: (
+    intent: Extract<
+      typeof PlanIntent.Type,
+      { readonly _tag: 'AcceptRunDefinition' }
+    >,
+    identity: LocalIdentity,
+  ) => Effect.Effect<PlanTransition, unknown>
+  readonly startAcceptedRun: (
+    intent: Extract<
+      typeof PlanIntent.Type,
+      { readonly _tag: 'StartAcceptedRun' }
+    >,
+    identity: LocalIdentity,
+  ) => Effect.Effect<PlanTransition, unknown>
+  readonly previewRunMutation: (
+    intent: Extract<
+      typeof PlanIntent.Type,
+      { readonly _tag: 'PreviewRunMutation' }
+    >,
+    identity: LocalIdentity,
+  ) => Effect.Effect<PlanTransition, unknown>
+  readonly applyRunMutation: (
+    intent: Extract<
+      typeof PlanIntent.Type,
+      | { readonly _tag: 'ApplyRunMutation' }
+      | { readonly _tag: 'ApproveDisruptiveRunMutation' }
+    >,
     identity: LocalIdentity,
   ) => Effect.Effect<PlanTransition, unknown>
   readonly snapshot: (
@@ -41,6 +70,35 @@ export class PlanPersistence extends Context.Service<
 export const planPersistenceLayer = (implementation: PlanPersistenceShape) =>
   Layer.succeed(PlanPersistence, PlanPersistence.of(implementation))
 
+export class PlanService extends Context.Service<
+  PlanService,
+  {
+    readonly execute: (
+      intent: typeof PlanIntent.Type,
+      identity: LocalIdentity,
+    ) => Effect.Effect<PlanTransition, unknown>
+  }
+>()('@astro-console/server/PlanService') {}
+export const planServiceLayer = Layer.effect(
+  PlanService,
+  Effect.gen(function* () {
+    const persistence = yield* PlanPersistence
+    return PlanService.of({
+      execute: Effect.fn('PlanService.execute')(function* (intent, identity) {
+        if (PlanIntent.guards.SaveDraft(intent))
+          return yield* persistence.saveDraft(intent, identity)
+        if (PlanIntent.guards.AcceptRunDefinition(intent))
+          return yield* persistence.acceptRunDefinition(intent, identity)
+        if (PlanIntent.guards.StartAcceptedRun(intent))
+          return yield* persistence.startAcceptedRun(intent, identity)
+        if (PlanIntent.guards.PreviewRunMutation(intent))
+          return yield* persistence.previewRunMutation(intent, identity)
+        return yield* persistence.applyRunMutation(intent, identity)
+      }),
+    })
+  }),
+)
+
 export const executePlanRequest = Effect.fn(
   'PlanCommandService.executeRequest',
 )(function* (
@@ -54,8 +112,9 @@ export const executePlanRequest = Effect.fn(
   const decoded = yield* Schema.decodeUnknownEffect(PlanCommandRequest)(
     raw,
   ).pipe(Effect.mapError(() => new PlanCommandInputInvalid()))
+  const service = yield* PlanService
   const persistence = yield* PlanPersistence
-  const transition = yield* persistence
+  const transition = yield* service
     .execute(decoded.intent, identity)
     .pipe(Effect.mapError(() => new PlanServiceUnavailable()))
   if (transition.event !== undefined)

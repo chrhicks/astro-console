@@ -1,23 +1,25 @@
 import { Effect } from 'effect'
-import { createLocalWebService } from './server.ts'
+import { openOriginDatabase } from './database.ts'
 import { solarCliConfig, type SolarCliConfig } from './environment-config.ts'
 import { runExecutable } from './executable.ts'
+import { createSolarWorkService } from './solar-work-service.ts'
 
 export function runSolarTestIntent(config: SolarCliConfig) {
-  const service = createLocalWebService(config.databasePath)
+  const database = openOriginDatabase(config.databasePath)
+  const service = createSolarWorkService(database)
   try {
-    const identity = service.resolveSolarTestCliIdentity(config.subject)
+    const identity = Effect.runSync(service.resolveCliIdentity(config.subject))
     if (identity === undefined)
       return { outcome: 'rejected' as const, reason: 'OwnerRequired' as const }
     if (config.command.action === 'stop')
       return {
-        outcome: service.requestSolarTestStop(config.command.intentId)
+        outcome: Effect.runSync(service.requestStop(config.command.intentId))
           ? ('accepted' as const)
           : ('rejected' as const),
       }
-    return service.submitSolarTestIntent(config.command, identity)
+    return Effect.runSync(service.submitIntent(config.command, identity))
   } finally {
-    service.close()
+    database.close()
   }
 }
 

@@ -1,35 +1,22 @@
 import { type IncomingMessage, type ServerResponse } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import {
-  randomUUID,
-  createHash,
   createPublicKey,
   createVerify,
   X509Certificate,
   type KeyObject,
 } from 'node:crypto'
 import { readFileSync, statSync } from 'node:fs'
-import { Effect, Exit, Layer, Option, Schema, Scope } from 'effect'
+import { Effect, Exit, Layer, Schema, Scope } from 'effect'
 import {
   BootstrapHttpFailureEnvelope,
   BootstrapHttpSuccessEnvelope,
-  BootstrapSseEventEnvelope,
-  BootstrapSnapshot,
-  Command,
   CommandFailure,
   CommandHttpFailureEnvelope,
-  CommandHttpSuccessEnvelope,
-  DomainEvent,
   ObserveCommandResponse,
-  ObserveIntent,
-  ObserveWorkspaceProjection,
   PlanCommandResponse,
-  PlanIntent,
   PlanWorkspaceProjection,
-  LibraryAssetDetail,
-  LibraryPage,
   LibraryQuery,
-  ProcessSourceHandoff,
 } from '@astro-console/v2-contracts'
 import { decodeSeestarPushEvent } from 'seestar-sdk'
 import {
@@ -49,18 +36,9 @@ import { WebHost, webHostLayer } from './web-host.ts'
 import { openOriginDatabase } from './database.ts'
 import type { LocalIdentity, RequestAdmission } from './identity.ts'
 import {
-  resumableRunPhase,
-  type AcceptRunDefinitionResult,
-  type CommandResult,
   type ControlEvent,
-  type DraftSequence,
   type Evidence,
   type FailureReason,
-  type PlanProjection,
-  type PlanReadiness,
-  type Run,
-  type RunDefinition,
-  type SavePlanDraftResult,
   type Snapshot,
 } from './domain-state.ts'
 import {
@@ -70,86 +48,44 @@ import {
 import {
   executePlanRequest,
   planPersistenceLayer,
+  planServiceLayer,
 } from './plan-command-service.ts'
-import {
-  CommandRejected,
-  controlEnvelopeCommand,
-  controlPersistenceLayer,
-  executeControlRequest,
-} from './control-command-service.ts'
+import { controlCommandFromEnvelope } from './control-sqlite-repository.ts'
 import {
   executeObserveRequest,
   observePersistenceLayer,
+  observeServiceLayer,
 } from './observe-command-service.ts'
+import { LibraryInputInvalid, LibraryService } from './library-service.ts'
 import {
-  LibraryAssetNotFound,
-  LibraryAssetUnavailable,
-  LibraryInputInvalid,
-  LibraryPersistenceUnavailable,
-  LibraryService,
-  libraryPersistenceLayer,
-  libraryServiceLayer,
-} from './library-service.ts'
+  installPublishedLibraryFixture,
+  sqliteLibraryServiceLayer,
+} from './library-sqlite-repository.ts'
 import { createOriginRouter } from './origin-router.ts'
-type StartRun = Extract<
-  typeof PlanIntent.Type,
-  { readonly _tag: 'StartAcceptedRun' }
->
-type AcceptRunDefinition = Extract<
-  typeof PlanIntent.Type,
-  { readonly _tag: 'AcceptRunDefinition' }
->
-type PauseRun = Extract<
-  typeof ObserveIntent.Type,
-  { readonly _tag: 'PauseRun' }
->
-type ResumeRun = Extract<
-  typeof ObserveIntent.Type,
-  { readonly _tag: 'ResumeRun' }
->
-type FakePolicy = Extract<
-  typeof ObserveIntent.Type,
-  | { readonly _tag: 'StopRun' }
-  | { readonly _tag: 'SkipSequence' }
-  | { readonly _tag: 'RetryPhase' }
-  | { readonly _tag: 'RequestPark' }
->
-type PreviewRunMutation = Extract<
-  typeof PlanIntent.Type,
-  { readonly _tag: 'PreviewRunMutation' }
->
-type ApplyRunMutation = Extract<
-  typeof PlanIntent.Type,
-  { readonly _tag: 'ApplyRunMutation' }
->
-type ApproveDisruptiveRunMutation = Extract<
-  typeof PlanIntent.Type,
-  { readonly _tag: 'ApproveDisruptiveRunMutation' }
->
-type SavePlanDraft = Extract<
-  typeof PlanIntent.Type,
-  { readonly _tag: 'SaveDraft' }
->
-const SolarTestIntentInput = Schema.Struct({
-  name: Schema.NonEmptyString.check(
-    Schema.isMinLength(3),
-    Schema.isMaxLength(120),
-  ),
-  idempotencyKey: Schema.NonEmptyString.check(Schema.isMaxLength(128)),
-})
-export type SolarTestIntentResult =
-  | {
-      readonly outcome: 'accepted'
-      readonly intentId: string
-      readonly name: string
-      readonly state: 'awaitingAdapter'
-      readonly evidence: 'awaitingStackEvidence'
-    }
-  | {
-      readonly outcome: 'rejected'
-      readonly reason:
-        'OwnerRequired' | 'ClientReadOnly' | 'InvalidInput' | 'SolarTestPending'
-    }
+import {
+  initializeRuntimeState,
+  installM27Fixture,
+  planWorkspaceProjection,
+} from './runtime-bootstrap.ts'
+import {
+  StateSqliteRepository,
+  stateSqliteRepositoryLayer,
+  type StateSqliteRepositoryShape,
+} from './state-sqlite-repository.ts'
+import {
+  RunSqliteRepository,
+  runSqliteRepositoryLayer,
+  type RunSqliteRepositoryShape,
+} from './run-sqlite-repository.ts'
+import {
+  bootstrapPlanWorkspaceProjection,
+  observeWorkspaceProjection,
+} from './workspace-projection-service.ts'
+import {
+  createSolarWorkService,
+  type SolarTestIntentResult,
+} from './solar-work-service.ts'
+export type { SolarTestIntentResult } from './solar-work-service.ts'
 export type DownloadGrantConfig = {
   readonly issuer: DownloadGrantIssuer
   readonly now?: () => Date
@@ -498,15 +434,6 @@ export const createLocalFixtureAdmission =
       identity.role ??
       (identity.personId === 'owner-chicks' ? 'owner' : 'viewer'),
   })
-type LibraryRole =
-  | 'original'
-  | 'linearMaster'
-  | 'intermediate'
-  | 'final'
-  | 'preview'
-  | 'diagnostic'
-type LibrarySort = 'capturedAtDescending' | 'sharpestFirst' | 'recentlyUpdated'
-
 const StoredEvidence = Schema.Struct({
   frameId: Schema.String,
   capturedAt: Schema.String,
@@ -596,267 +523,14 @@ const StoredRequest = Schema.Struct({
   expires_at: Schema.String,
   target_control_capable: Schema.Int,
 })
-const ControlRequestRow = Schema.Struct({
-  request_id: Schema.String,
-  client_id: Schema.String,
-  target_control_capable: Schema.Int,
-})
 const StoredRow = Schema.Struct({ value: Schema.String })
-const LatestCursorRow = Schema.Struct({ cursor: Schema.Int })
-const WorkerStatusRow = Schema.Struct({
-  worker_id: Schema.String,
-  state: Schema.Literals(['alive', 'stopped']),
-  adapter_state: Schema.Literals(['ready', 'unconfigured']),
-  last_heartbeat: Schema.String,
-})
-const OutboxClaimRow = Schema.Struct({
-  id: Schema.String,
-  payload: Schema.String,
-})
-const CountRow = Schema.Struct({ count: Schema.Int })
-const LifecycleEventRow = Schema.Struct({
-  type: Schema.String,
-  snapshot: Schema.String,
-})
-const LifecycleEventPayload = Schema.Struct({
-  run: Schema.Struct({ id: Schema.String }),
-})
-const SolarTestIntentRow = Schema.Struct({
-  intent_id: Schema.String,
-  name: Schema.String,
-  owner_person_id: Schema.String,
-  semantic_key: Schema.String,
-  state: Schema.Literal('awaitingAdapter'),
-  evidence_state: Schema.Literal('awaitingStackEvidence'),
-})
-const SolarTestWork = Schema.Struct({
-  intentId: Schema.NonEmptyString,
-  name: Schema.NonEmptyString,
-  target: Schema.Literal('Sun'),
-  requiredEvidence: Schema.Literal('Stack'),
-})
-const LibraryRole = Schema.Literals([
-  'original',
-  'linearMaster',
-  'intermediate',
-  'final',
-  'preview',
-  'diagnostic',
-])
-const LibrarySort = Schema.Literals([
-  'capturedAtDescending',
-  'sharpestFirst',
-  'recentlyUpdated',
-])
-const LibraryAssetRow = Schema.Struct({
-  asset_id: Schema.String,
-  revision: Schema.Int,
-  role: LibraryRole,
-  format: Schema.Literals(['cameraRaw', 'fits', 'tiff', 'png', 'jpeg']),
-  availability: Schema.Literals([
-    'availableLocally',
-    'preparing',
-    'published',
-    'expiring',
-    'expired',
-    'republishing',
-    'temporarilyUnavailable',
-    'failedPublication',
-  ]),
-  comparison_group_id: Schema.String,
-  detail: Schema.String,
-})
-const LibraryDetail = Schema.Struct({
-  assetId: Schema.String,
-  revision: Schema.Int,
-  role: LibraryRole,
-  format: Schema.Literals(['cameraRaw', 'fits', 'tiff', 'png', 'jpeg']),
-  availability: Schema.Literals([
-    'availableLocally',
-    'preparing',
-    'published',
-    'expiring',
-    'expired',
-    'republishing',
-    'temporarilyUnavailable',
-    'failedPublication',
-  ]),
-  capturedAt: Schema.String,
-  comparisonGroupId: Schema.String,
-  lineage: Schema.Struct({
-    sourceAssetIds: Schema.Array(Schema.String),
-    runId: Schema.String,
-    solveAttemptId: Schema.String,
-  }),
-  representations: Schema.Array(
-    Schema.Struct({ label: Schema.String, state: Schema.String }),
-  ),
-})
-const DownloadAssetRow = Schema.Struct({
-  asset_id: Schema.String,
-  role: LibraryRole,
-  format: Schema.Literals(['cameraRaw', 'fits', 'tiff', 'png', 'jpeg']),
-  availability: Schema.Literals([
-    'availableLocally',
-    'preparing',
-    'published',
-    'expiring',
-    'expired',
-    'republishing',
-    'temporarilyUnavailable',
-    'failedPublication',
-  ]),
-  state: Schema.String,
-  object_key: Schema.String,
-})
 const PlanWorkspace = PlanWorkspaceProjection
-const StoredRunDefinition = Schema.Struct({
-  id: Schema.String,
-  sourcePlanId: Schema.String,
-  sourcePlanRevision: Schema.Int,
-  acceptedAt: Schema.String,
-  executor: Schema.Literals(['fake', 'fixture']),
-  plan: PlanWorkspace,
-})
 const ObservingPlanRow = Schema.Struct({
   plan_id: Schema.String,
   revision: Schema.Int,
   projection: Schema.String,
   run_eligible: Schema.Int,
 })
-const PlanReceiptRow = Schema.Struct({ response: Schema.String })
-const RunDefinitionRow = Schema.Struct({
-  run_definition_id: Schema.String,
-  source_plan_id: Schema.String,
-  source_plan_revision: Schema.Int,
-  definition: Schema.String,
-  accepted_at: Schema.String,
-})
-const RunDefinitionReceiptRow = Schema.Struct({ response: Schema.String })
-const ReceiptRow = Schema.Struct({ response: Schema.String })
-const InterventionReceiptRow = Schema.Struct({
-  semantic_key: Schema.String,
-  response: Schema.String,
-})
-const StoredIdentity = Schema.Struct({
-  personId: Schema.String,
-  clientId: Schema.String,
-  capability: Schema.Literals(['controlCapable', 'readOnly']),
-  role: Schema.optionalKey(Schema.Literals(['owner', 'viewer'])),
-})
-const StoredRun = Schema.Struct({
-  id: Schema.String,
-  revision: Schema.Int,
-  phase: Schema.Literals([
-    'preflight',
-    'acquire',
-    'capture',
-    'verify',
-    'completed',
-    'paused',
-    'stopped',
-    'parkRequested',
-  ]),
-  target: Schema.String,
-  progress: Schema.Number,
-  sourceDefinitionId: Schema.optionalKey(Schema.String),
-  activeSequenceIndex: Schema.optionalKey(Schema.Int),
-  completedSequenceCount: Schema.optionalKey(Schema.Int),
-  resumablePhase: Schema.optionalKey(
-    Schema.Literals(['preflight', 'acquire', 'capture', 'verify']),
-  ),
-  retryPhase: Schema.optionalKey(
-    Schema.Literals(['preflight', 'acquire', 'capture', 'verify']),
-  ),
-  appliedMutations: Schema.optionalKey(Schema.Array(RunMutationSchema)),
-})
-const StoredSnapshot = Schema.Struct({
-  snapshotVersion: Schema.Int,
-  eventCursor: Schema.Int,
-  generatedAt: Schema.String,
-  identity: StoredIdentity,
-  plan: Schema.Struct({
-    id: Schema.String,
-    revision: Schema.Int,
-    target: Schema.String,
-    readiness: Schema.Literals(['ready', 'unavailable']),
-    runEligible: Schema.Boolean,
-  }),
-  control: Schema.Struct({
-    holderClientId: Schema.NullOr(Schema.String),
-    revision: Schema.Int,
-    state: Schema.Literals(['held', 'reconnecting', 'unheld']),
-    reconnectGraceUntil: Schema.optionalKey(Schema.String),
-    pendingRequests: Schema.Array(
-      Schema.Struct({
-        requestId: Schema.String,
-        clientId: Schema.String,
-        personId: Schema.String,
-      }),
-    ),
-  }),
-  run: Schema.NullOr(StoredRun),
-  dispatch: Schema.Literals([
-    'none',
-    'pending',
-    'dispatched',
-    'unavailable',
-    'failed',
-  ]),
-  dispatchAction: Schema.Literals(['none', 'pause', 'resume', 'stop']),
-  evidence: StoredEvidence,
-  connection: Schema.Literal('current'),
-})
-const CommandResultSchema = Schema.Union([
-  Schema.Struct({
-    outcome: Schema.Literal('accepted'),
-    eventType: Schema.optionalKey(
-      Schema.Literals([
-        'ControlRequested',
-        'ControlGranted',
-        'ControlDeclined',
-        'ControlReleased',
-        'OwnerTookControl',
-        'ControlLeaseExpired',
-        'RunPaused',
-        'RunResumed',
-        'RunStopped',
-        'FakeSequenceSkipped',
-        'FakePhaseRetried',
-        'FakeParkRequested',
-        'RunMutationApplied',
-      ]),
-    ),
-    message: Schema.optionalKey(Schema.String),
-    run: Schema.optionalKey(StoredRun),
-    snapshot: StoredSnapshot,
-  }),
-  Schema.Struct({
-    outcome: Schema.Literal('rejected'),
-    reason: Schema.Literals([
-      'Unauthenticated',
-      'FreshnessConflict',
-      'PlanUnavailable',
-      'PlanNotReady',
-      'RunDefinitionAlreadyAccepted',
-      'ClientReadOnly',
-      'ControlLeaseLost',
-      'AlreadyController',
-      'ControlRequestAlreadyPending',
-      'OwnerRequired',
-      'ControlRequestUnavailable',
-      'ActiveRunConflict',
-      'RunRevisionConflict',
-      'AlreadyPaused',
-      'AlreadyTerminal',
-      'NotPaused',
-      'ResumePhaseUnavailable',
-      'IdempotencyConflict',
-      'InvalidInput',
-    ]),
-    message: Schema.String,
-  }),
-])
 const operatorMessages = {
   Unauthenticated: 'A verified member identity is required.',
   FreshnessConflict:
@@ -907,7 +581,6 @@ const operatorMessages = {
   RetryExhausted: 'The fake phase has already retried once.',
   PolicyUnavailable: 'This fake-run policy is unavailable.',
 } satisfies Record<FailureReason | ControlEvent, string>
-
 export function createLocalWebService(
   databasePath = ':memory:',
   identityResolver: RequestAdmission = createLocalFixtureAdmission({
@@ -923,11 +596,29 @@ export function createLocalWebService(
   } = {},
 ) {
   const database = openOriginDatabase(databasePath)
+  const solarWork = createSolarWorkService(database)
   if (options.fixture !== undefined) {
     installM27Fixture(database, options.fixture !== 'plan-draft')
     if (options.fixture === 'library-published')
       installPublishedLibraryFixture(database)
   } else initializeRuntimeState(database)
+  const stateRepository: StateSqliteRepositoryShape = Effect.runSync(
+    StateSqliteRepository.pipe(
+      Effect.provide(
+        stateSqliteRepositoryLayer(database, {
+          plan: bootstrapPlanWorkspaceProjection,
+          observe: observeWorkspaceProjection,
+        }),
+      ),
+    ),
+  )
+  const runRepository: RunSqliteRepositoryShape = Effect.runSync(
+    RunSqliteRepository.pipe(
+      Effect.provide(
+        runSqliteRepositoryLayer(database, stateRepository, reject),
+      ),
+    ),
+  )
   const webHost = Effect.runSync(
     WebHost.pipe(
       Effect.provide(webHostLayer(options.webDistPath ?? '../web/dist')),
@@ -940,9 +631,9 @@ export function createLocalWebService(
     ProjectionPublication.pipe(
       Effect.provide(
         projectionPublicationLayer({
-          expire: () => expireReconnectGrace(database),
-          currentCursor: () => state(database).eventCursor,
-          eventFor: (identity) => sseProjection(database, identity),
+          expire: () => stateRepository.expireReconnectGrace(),
+          currentCursor: () => stateRepository.state().eventCursor,
+          eventFor: (identity) => stateRepository.sseProjection(identity),
           responseHeaders,
         }),
       ),
@@ -954,12 +645,12 @@ export function createLocalWebService(
 
   const handler = createOriginRouter({
     identityResolver,
-    expireReconnectGrace: () => expireReconnectGrace(database),
+    expireReconnectGrace: () => stateRepository.expireReconnectGrace(),
     live: (response) => json(response, 200, { status: 'alive' }),
     unauthenticated,
     snapshot: (response, identity) =>
       void Effect.runSync(
-        bootstrapSnapshot(database, identity).pipe(
+        stateRepository.bootstrapSnapshot(identity).pipe(
           Effect.flatMap((data) =>
             Schema.decodeUnknownEffect(BootstrapHttpSuccessEnvelope)({
               ok: true,
@@ -969,10 +660,10 @@ export function createLocalWebService(
           Effect.map((body) => json(response, 200, body)),
         ),
       ),
-    ready: (response) => json(response, 200, readiness(database)),
+    ready: (response) => json(response, 200, stateRepository.readiness()),
     operations: (response, identity) =>
       isOwner(identity)
-        ? json(response, 200, operations(database))
+        ? json(response, 200, stateRepository.operations())
         : json(response, 403, reject('OwnerRequired').body),
     events: (request, response, identity) =>
       void Effect.runSync(
@@ -982,7 +673,9 @@ export function createLocalWebService(
       Effect.runPromise(
         controlCommandFromEnvelope(
           body(request),
+          BodyTooLarge,
           database,
+          stateRepository,
           identity,
           publish,
         ).pipe(
@@ -1018,10 +711,16 @@ export function createLocalWebService(
       libraryDetail(response, database, encodedAssetId),
     planCommand: (response, identity, request) =>
       Effect.runPromise(
-        planCommandFromRequest(body(request), database, identity, publish).pipe(
+        planCommandFromRequest(
+          body(request),
+          runRepository,
+          stateRepository,
+          identity,
+          publish,
+        ).pipe(
           Effect.catchTags({
             'Server.PlanCommandInputInvalid': () =>
-              planInvalidResponse(database, identity),
+              planInvalidResponse(stateRepository, identity),
             'Server.PlanServiceUnavailable': () =>
               planServiceResponse(
                 'PlanServiceUnavailable',
@@ -1035,13 +734,14 @@ export function createLocalWebService(
       Effect.runPromise(
         observeCommandFromRequest(
           body(request),
-          database,
+          runRepository,
+          stateRepository,
           identity,
           publish,
         ).pipe(
           Effect.catchTags({
             'Server.ObserveCommandInputInvalid': () =>
-              observeInvalidResponse(database, identity),
+              observeInvalidResponse(stateRepository, identity),
             'Server.ObserveServiceUnavailable': () =>
               observeServiceResponse(
                 'ObserveServiceUnavailable',
@@ -1099,7 +799,7 @@ export function createLocalWebService(
   const ingestObservation = (raw: unknown) => {
     try {
       const input = Schema.decodeUnknownSync(AdapterObservation)(raw)
-      const current = state(database)
+      const current = stateRepository.state()
       const evidence: Evidence = {
         ...current.evidence,
         frameId: input.frameId,
@@ -1119,7 +819,7 @@ export function createLocalWebService(
               : 'Review recovery in Observe before any new command.',
         },
       }
-      return persistEvidence(database, evidence, projectionIdentity)
+      return stateRepository.persistEvidence(evidence, projectionIdentity)
     } catch {
       return undefined
     }
@@ -1131,7 +831,7 @@ export function createLocalWebService(
       !Number.isFinite(event.stacked_frame ?? event.stacked_frames)
     )
       return undefined
-    const current = state(database)
+    const current = stateRepository.state()
     const failed =
       event.state?.toLowerCase() === 'fail' ||
       event.state?.toLowerCase() === 'cancel' ||
@@ -1149,458 +849,30 @@ export function createLocalWebService(
       },
       quality: failed ? 'warning' : current.evidence.quality,
     }
-    return persistEvidence(database, evidence, projectionIdentity)
+    return stateRepository.persistEvidence(evidence, projectionIdentity)
   }
-  const dispatch = async (
-    kind: 'StopSolarTestObservation',
-    workerId: string,
-    invoke: ((payload: unknown) => Promise<unknown>) | undefined,
-  ) => {
-    const token = randomUUID()
-    database.exec('BEGIN IMMEDIATE')
-    try {
-      database
-        .prepare(
-          "UPDATE outbox SET state='failed',claim_token=NULL,claimed_by=NULL,claim_until=NULL,last_error='claim expired',retry_after=? WHERE kind=? AND state='claimed' AND claim_until<=?",
-        )
-        .run(new Date().toISOString(), kind, new Date().toISOString())
-      const raw: unknown = database
-        .prepare(
-          "SELECT id,payload FROM outbox WHERE kind=? AND state IN ('pending','failed') AND (retry_after IS NULL OR retry_after<=?) ORDER BY CASE state WHEN 'pending' THEN 0 ELSE 1 END,rowid LIMIT 1",
-        )
-        .get(kind, new Date().toISOString())
-      const row = Schema.decodeUnknownSync(Schema.optional(OutboxClaimRow))(raw)
-      if (row === undefined) {
-        database.exec('COMMIT')
-        return 'none' as const
-      }
-      const claimed = database
-        .prepare(
-          "UPDATE outbox SET state='claimed',claim_token=?,claimed_by=?,claim_until=?,attempts=attempts+1 WHERE id=? AND state IN ('pending','failed')",
-        )
-        .run(
-          token,
-          workerId,
-          new Date(Date.now() + 30_000).toISOString(),
-          row.id,
-        )
-      if (claimed.changes !== 1) {
-        database.exec('COMMIT')
-        return 'none' as const
-      }
-      database.exec('COMMIT')
-      try {
-        const accepted =
-          invoke === undefined
-            ? false
-            : Schema.decodeUnknownSync(Schema.Boolean)(
-                await invoke(JSON.parse(row.payload)),
-              )
-        database.exec('BEGIN IMMEDIATE')
-        const acknowledged = database
-          .prepare(
-            "UPDATE outbox SET state=?,ack_at=?,claim_token=NULL,claimed_by=NULL,claim_until=NULL,last_error=? WHERE id=? AND state='claimed' AND claim_token=?",
-          )
-          .run(
-            accepted ? 'dispatched' : 'failed',
-            accepted ? new Date().toISOString() : null,
-            accepted ? null : 'adapter rejected work',
-            row.id,
-            token,
-          )
-        database.exec('COMMIT')
-        return acknowledged.changes === 1
-          ? accepted
-            ? ('dispatched' as const)
-            : ('failed' as const)
-          : ('superseded' as const)
-      } catch {
-        database.exec('BEGIN IMMEDIATE')
-        const failed = database
-          .prepare(
-            "UPDATE outbox SET state='failed',claim_token=NULL,claimed_by=NULL,claim_until=NULL,last_error=?,retry_after=? WHERE id=? AND state='claimed' AND claim_token=?",
-          )
-          .run('adapter failed', new Date().toISOString(), row.id, token)
-        database.exec('COMMIT')
-        return failed.changes === 1
-          ? ('failed' as const)
-          : ('superseded' as const)
-      }
-    } catch (error) {
-      database.exec('ROLLBACK')
-      throw error
-    }
-  }
-  const dispatchSolarTestOutbox = async (
-    adapter:
-      | {
-          readonly startSolarTestObservation: (
-            work: typeof SolarTestWork.Type,
-          ) => Promise<'providerAcknowledged' | 'uncertain'>
-        }
-      | undefined,
+  const dispatchSolarTestOutbox = (
+    adapter: Parameters<typeof solarWork.dispatchStart>[0],
     workerId = 'rig-worker',
-  ) => {
-    if (adapter === undefined) return 'unavailable' as const
-    const token = randomUUID()
-    const now = new Date().toISOString()
-    database.exec('BEGIN IMMEDIATE')
-    try {
-      const expiredRaw: unknown = database
-        .prepare(
-          "SELECT payload FROM outbox WHERE kind='StartSolarTestObservation' AND state='claimed' AND claim_until<=? ORDER BY rowid LIMIT 1",
-        )
-        .get(now)
-      const expired = Schema.decodeUnknownSync(
-        Schema.optional(Schema.Struct({ payload: Schema.String })),
-      )(expiredRaw)
-      if (expired !== undefined) {
-        const expiredWork = Schema.decodeUnknownSync(SolarTestWork)(
-          JSON.parse(expired.payload),
-        )
-        database
-          .prepare(
-            "UPDATE outbox SET state='uncertain',claim_token=NULL,claimed_by=NULL,claim_until=NULL,last_error='worker lease expired during a Solar start',retry_after=NULL WHERE kind='StartSolarTestObservation' AND state='claimed' AND claim_until<=?",
-          )
-          .run(now)
-        database
-          .prepare(
-            "UPDATE solar_test_intents SET state='manualRecovery' WHERE intent_id=?",
-          )
-          .run(expiredWork.intentId)
-        database
-          .prepare('INSERT OR REPLACE INTO solar_test_recovery VALUES (?,?,?)')
-          .run(expiredWork.intentId, 'manualRecovery', now)
-        database
-          .prepare(
-            "UPDATE solar_test_evidence SET state='uncertain',message=?,observed_at=? WHERE intent_id=?",
-          )
-          .run(
-            'Solar worker lease expired after a provider call may have started. Do not retry automatically; inspect the physical rig and recover manually.',
-            now,
-            expiredWork.intentId,
-          )
-      }
-      const raw: unknown = database
-        .prepare(
-          "SELECT id,payload FROM outbox WHERE kind='StartSolarTestObservation' AND state='pending' ORDER BY rowid LIMIT 1",
-        )
-        .get()
-      const row = Schema.decodeUnknownSync(Schema.optional(OutboxClaimRow))(raw)
-      if (row === undefined) {
-        database.exec('COMMIT')
-        return 'none' as const
-      }
-      const claimed = database
-        .prepare(
-          "UPDATE outbox SET state='claimed',claim_token=?,claimed_by=?,claim_until=?,attempts=attempts+1 WHERE id=? AND state='pending'",
-        )
-        .run(
-          token,
-          workerId,
-          new Date(Date.now() + 30_000).toISOString(),
-          row.id,
-        )
-      if (claimed.changes !== 1) {
-        database.exec('COMMIT')
-        return 'none' as const
-      }
-      database.exec('COMMIT')
-      const work = Schema.decodeUnknownSync(SolarTestWork)(
-        JSON.parse(row.payload),
-      )
-      let outcome: 'providerAcknowledged' | 'uncertain'
-      try {
-        outcome = await adapter.startSolarTestObservation(work)
-      } catch {
-        outcome = 'uncertain'
-      }
-      database.exec('BEGIN IMMEDIATE')
-      if (outcome === 'providerAcknowledged') {
-        const acknowledged = database
-          .prepare(
-            "UPDATE outbox SET state='dispatched',ack_at=?,claim_token=NULL,claimed_by=NULL,claim_until=NULL,last_error=NULL WHERE id=? AND state='claimed' AND claim_token=?",
-          )
-          .run(new Date().toISOString(), row.id, token)
-        if (acknowledged.changes === 1) {
-          const acknowledgedAt = new Date().toISOString()
-          database
-            .prepare(
-              "UPDATE solar_test_intents SET state='providerAcknowledged' WHERE intent_id=? AND state='awaitingAdapter'",
-            )
-            .run(work.intentId)
-          database
-            .prepare(
-              'INSERT OR REPLACE INTO solar_test_provider_ack VALUES (?,?)',
-            )
-            .run(work.intentId, acknowledgedAt)
-          database
-            .prepare(
-              "UPDATE solar_test_evidence SET state='awaitingStackEvidence',message=?,observed_at=? WHERE intent_id=?",
-            )
-            .run(
-              'Provider acknowledged Solar view and bounded acquisition. Capture remains unconfirmed until a Stack event is observed.',
-              acknowledgedAt,
-              work.intentId,
-            )
-        }
-        database.exec('COMMIT')
-        return acknowledged.changes === 1
-          ? ('providerAcknowledged' as const)
-          : ('superseded' as const)
-      }
-      const uncertainAt = new Date().toISOString()
-      const uncertain = database
-        .prepare(
-          "UPDATE outbox SET state='uncertain',claim_token=NULL,claimed_by=NULL,claim_until=NULL,last_error='Solar start outcome is uncertain; manual recovery required',retry_after=NULL WHERE id=? AND state='claimed' AND claim_token=?",
-        )
-        .run(row.id, token)
-      if (uncertain.changes === 1) {
-        database
-          .prepare(
-            "UPDATE solar_test_intents SET state='manualRecovery' WHERE intent_id=?",
-          )
-          .run(work.intentId)
-        database
-          .prepare('INSERT OR REPLACE INTO solar_test_recovery VALUES (?,?,?)')
-          .run(work.intentId, 'manualRecovery', uncertainAt)
-        database
-          .prepare(
-            "UPDATE solar_test_evidence SET state='uncertain',message=?,observed_at=? WHERE intent_id=?",
-          )
-          .run(
-            'Solar start timed out or failed after dispatch. Do not retry automatically; inspect the physical rig and recover manually.',
-            uncertainAt,
-            work.intentId,
-          )
-      }
-      database.exec('COMMIT')
-      return uncertain.changes === 1
-        ? ('uncertain' as const)
-        : ('superseded' as const)
-    } catch (error) {
-      database.exec('ROLLBACK')
-      throw error
-    }
-  }
-  const requestSolarTestStop = (intentId: string) => {
-    database.exec('BEGIN IMMEDIATE')
-    try {
-      const changed = database
-        .prepare(
-          "UPDATE solar_test_intents SET state='stopping' WHERE intent_id=? AND state IN ('awaitingAdapter','providerAcknowledged','stackObserved')",
-        )
-        .run(intentId)
-      if (changed.changes === 1) {
-        database
-          .prepare(
-            "UPDATE outbox SET state='cancelled',last_error='Solar stop requested before adapter dispatch' WHERE kind='StartSolarTestObservation' AND state='pending' AND payload LIKE ?",
-          )
-          .run(`%${intentId}%`)
-        database
-          .prepare(
-            'INSERT INTO outbox (id,kind,payload,state) VALUES (?,?,?,?)',
-          )
-          .run(
-            randomUUID(),
-            'StopSolarTestObservation',
-            JSON.stringify({ intentId }),
-            'pending',
-          )
-      }
-      database.exec('COMMIT')
-      return changed.changes === 1
-    } catch (error) {
-      database.exec('ROLLBACK')
-      throw error
-    }
-  }
-  const dispatchSolarTestStopOutbox = async (
-    adapter:
-      | {
-          readonly stopSolarTestObservation: (
-            intentId: string,
-          ) => Promise<boolean>
-        }
-      | undefined,
+  ) => Effect.runPromise(solarWork.dispatchStart(adapter, workerId))
+  const requestSolarTestStop = (intentId: string) =>
+    Effect.runSync(solarWork.requestStop(intentId))
+  const dispatchSolarTestStopOutbox = (
+    adapter: Parameters<typeof solarWork.dispatchStop>[0],
     workerId = 'rig-worker',
-  ) => {
-    const outcome = await dispatch(
-      'StopSolarTestObservation',
-      workerId,
-      adapter === undefined
-        ? undefined
-        : async (payload) =>
-            adapter.stopSolarTestObservation(
-              Schema.decodeUnknownSync(
-                Schema.Struct({ intentId: Schema.NonEmptyString }),
-              )(payload).intentId,
-            ),
-    )
-    if (outcome === 'dispatched')
-      database
-        .prepare(
-          "UPDATE solar_test_intents SET state='stopped' WHERE state='stopping'",
-        )
-        .run()
-    return outcome
-  }
+  ) => Effect.runPromise(solarWork.dispatchStop(adapter, workerId))
   const recordSolarStackEvidence = (
     intentId: string,
     raw: unknown,
     observedAt: string,
-  ) => {
-    const event = decodeSeestarPushEvent(raw)
-    if (
-      event?.Event !== 'Stack' ||
-      !Number.isFinite(event.stacked_frame ?? event.stacked_frames) ||
-      (event.code !== undefined && event.code !== 0)
-    )
-      return false
-    database.exec('BEGIN IMMEDIATE')
-    try {
-      const updated = database
-        .prepare(
-          "UPDATE solar_test_intents SET state='stackObserved' WHERE intent_id=? AND state='providerAcknowledged'",
-        )
-        .run(intentId)
-      if (updated.changes === 1)
-        database
-          .prepare(
-            "UPDATE solar_test_evidence SET state='stackObserved',message=?,observed_at=? WHERE intent_id=?",
-          )
-          .run(
-            `Stack evidence observed (${event.stacked_frame ?? event.stacked_frames} frames).`,
-            observedAt,
-            intentId,
-          )
-      database.exec('COMMIT')
-      return updated.changes === 1
-    } catch (error) {
-      database.exec('ROLLBACK')
-      throw error
-    }
-  }
-  const resolveSolarTestCliIdentity = (
-    externalSubject: string,
-  ): LocalIdentity | undefined => {
-    const raw: unknown = database
-      .prepare(
-        'SELECT person_id,role FROM memberships WHERE external_subject=?',
-      )
-      .get(externalSubject)
-    const membership = Schema.decodeUnknownSync(Schema.optional(MembershipRow))(
-      raw,
-    )
-    if (membership?.role !== 'owner') return undefined
-    return {
-      personId: membership.person_id,
-      clientId: 'solar-test-cli',
-      role: 'owner',
-      capability: 'controlCapable',
-    }
-  }
+  ) => Effect.runSync(solarWork.recordStackEvidence(intentId, raw, observedAt))
+  const resolveSolarTestCliIdentity = (externalSubject: string) =>
+    Effect.runSync(solarWork.resolveCliIdentity(externalSubject))
   const submitSolarTestIntent = (
     raw: unknown,
     identity: LocalIdentity,
-  ): SolarTestIntentResult => {
-    if (!isOwner(identity))
-      return { outcome: 'rejected', reason: 'OwnerRequired' }
-    if (identity.capability !== 'controlCapable')
-      return { outcome: 'rejected', reason: 'ClientReadOnly' }
-    let input: typeof SolarTestIntentInput.Type
-    try {
-      input = Schema.decodeUnknownSync(SolarTestIntentInput)(raw)
-    } catch {
-      return { outcome: 'rejected', reason: 'InvalidInput' }
-    }
-    const semanticKey = createHash('sha256')
-      .update(
-        JSON.stringify({
-          version: 1,
-          name: input.name,
-          ownerPersonId: identity.personId,
-        }),
-      )
-      .digest('hex')
-    const existingRaw: unknown = database
-      .prepare(
-        'SELECT intents.intent_id,intents.name,intents.owner_person_id,intents.semantic_key,intents.state,evidence.state AS evidence_state FROM solar_test_intents AS intents JOIN solar_test_evidence AS evidence ON evidence.intent_id=intents.intent_id WHERE intents.idempotency_key=? AND intents.owner_person_id=?',
-      )
-      .get(input.idempotencyKey, identity.personId)
-    const existing = Schema.decodeUnknownSync(
-      Schema.optional(SolarTestIntentRow),
-    )(existingRaw)
-    if (existing !== undefined)
-      return existing.semantic_key === semanticKey
-        ? {
-            outcome: 'accepted',
-            intentId: existing.intent_id,
-            name: existing.name,
-            state: existing.state,
-            evidence: existing.evidence_state,
-          }
-        : { outcome: 'rejected', reason: 'InvalidInput' }
-    database.exec('BEGIN IMMEDIATE')
-    try {
-      const pendingRaw: unknown = database
-        .prepare(
-          "SELECT count(*) AS count FROM solar_test_intents WHERE state='awaitingAdapter'",
-        )
-        .get()
-      const pending = Schema.decodeUnknownSync(CountRow)(pendingRaw)
-      if (pending.count !== 0) {
-        database.exec('ROLLBACK')
-        return { outcome: 'rejected', reason: 'SolarTestPending' }
-      }
-      const intentId = randomUUID()
-      const acceptedAt = new Date().toISOString()
-      database
-        .prepare('INSERT INTO solar_test_intents VALUES (?,?,?,?,?,?,?,?)')
-        .run(
-          intentId,
-          input.idempotencyKey,
-          input.name,
-          identity.personId,
-          identity.clientId,
-          semanticKey,
-          'awaitingAdapter',
-          acceptedAt,
-        )
-      database
-        .prepare('INSERT INTO solar_test_evidence VALUES (?,?,?,?)')
-        .run(
-          intentId,
-          'awaitingStackEvidence',
-          'Solar intent accepted. A future Seestar adapter must observe Stack evidence before capture is presented active.',
-          acceptedAt,
-        )
-      database
-        .prepare('INSERT INTO outbox (id,kind,payload,state) VALUES (?,?,?,?)')
-        .run(
-          randomUUID(),
-          'StartSolarTestObservation',
-          JSON.stringify({
-            intentId,
-            name: input.name,
-            target: 'Sun',
-            requiredEvidence: 'Stack',
-          }),
-          'pending',
-        )
-      database.exec('COMMIT')
-      return {
-        outcome: 'accepted',
-        intentId,
-        name: input.name,
-        state: 'awaitingAdapter',
-        evidence: 'awaitingStackEvidence',
-      }
-    } catch (error) {
-      database.exec('ROLLBACK')
-      throw error
-    }
-  }
+  ): SolarTestIntentResult =>
+    Effect.runSync(solarWork.submitIntent(raw, identity))
   const saveProcess = (raw: unknown, identity = projectionIdentity()) =>
     processSaveStorage === undefined
       ? { outcome: 'rejected' as const, reason: 'InvalidInput' as const }
@@ -1610,7 +882,7 @@ export function createLocalWebService(
       ? 0
       : cleanupProcessOrphans(database, processSaveStorage)
   const advanceFakeRun = () => {
-    const result = advanceFakeRunState(database, projectionIdentity())
+    const result = runRepository.advance(projectionIdentity())
     if (result?.event !== undefined)
       publish(result.event.type, result.event.cursor)
     return result?.body
@@ -1634,360 +906,11 @@ export function createLocalWebService(
   }
 }
 
-export function installM27Fixture(
-  database: DatabaseSync,
-  includeFixtureDefinition = true,
-) {
-  migrateState(database)
-  seedLibrary(database)
-  seedWorkspaces(database)
-  ensureM27FixturePlan(database, includeFixtureDefinition)
-}
-function installPublishedLibraryFixture(database: DatabaseSync) {
-  const assetId = 'asset-m27-001'
-  const raw: unknown = database
-    .prepare('SELECT detail FROM library_assets WHERE asset_id=?')
-    .get(assetId)
-  const detail = Schema.decodeUnknownSync(
-    Schema.Struct({ detail: Schema.String }),
-  )(raw)
-  const libraryDetail = Schema.decodeUnknownSync(LibraryDetail)(
-    JSON.parse(detail.detail),
-  )
-  database
-    .prepare(
-      'UPDATE library_assets SET availability=?,detail=? WHERE asset_id=?',
-    )
-    .run(
-      'published',
-      JSON.stringify({
-        ...libraryDetail,
-        availability: 'published',
-        representations: [
-          ...libraryDetail.representations,
-          { label: 'Published delivery available', state: 'published' },
-        ],
-      }),
-      assetId,
-    )
-  database
-    .prepare(
-      'INSERT OR IGNORE INTO asset_publications (asset_id,checksum,state,updated_at,object_key) VALUES (?,?,?,?,?)',
-    )
-    .run(
-      assetId,
-      'fixture-m27-001',
-      'published',
-      '2026-07-25T00:00:00.000Z',
-      'published/run-m27-001/previews/asset-m27-001-fixture.fits',
-    )
-}
 const isOwner = (identity: LocalIdentity) => identity.role === 'owner'
-function ensureM27FixturePlan(
-  db: DatabaseSync,
-  includeFixtureDefinition: boolean,
-) {
-  const raw: unknown = db
-    .prepare("SELECT value FROM workspace_projections WHERE name='plan'")
-    .get()
-  try {
-    const row = Schema.decodeUnknownSync(StoredRow)(raw)
-    const plan = Schema.decodeUnknownSync(PlanWorkspace)(JSON.parse(row.value))
-    if (plan.planId !== 'plan-m27') return
-    db.prepare(
-      'INSERT OR IGNORE INTO observing_plans (plan_id,revision,projection) VALUES (?,?,?)',
-    ).run(plan.planId, plan.revision, JSON.stringify(plan))
-    db.prepare(
-      'UPDATE observing_plans SET run_eligible=1 WHERE plan_id=? AND revision=3',
-    ).run(plan.planId)
-    if (!includeFixtureDefinition) return
-    const definition: RunDefinition = {
-      id: 'run-definition-m27-fixture',
-      sourcePlanId: plan.planId,
-      sourcePlanRevision: plan.revision,
-      acceptedAt: '2026-07-25T00:00:00.000Z',
-      executor: 'fixture',
-      plan,
-    }
-    db.prepare('INSERT OR IGNORE INTO run_definitions VALUES (?,?,?,?,?)').run(
-      definition.id,
-      definition.sourcePlanId,
-      definition.sourcePlanRevision,
-      JSON.stringify(definition),
-      definition.acceptedAt,
-    )
-  } catch {}
-}
-function initializeRuntimeState(db: DatabaseSync) {
-  const latestRaw: unknown = db
-    .prepare('SELECT COALESCE(MAX(cursor), 0) AS cursor FROM events')
-    .get()
-  const latest = Schema.decodeUnknownSync(LatestCursorRow)(latestRaw)
-  const insert = db.prepare('INSERT OR IGNORE INTO state VALUES (?,?)')
-  for (const [key, value] of Object.entries({
-    snapshotVersion: Math.max(1, latest.cursor),
-    eventCursor: latest.cursor,
-    planRevision: 0,
-    leaseRevision: 0,
-    leaseHolder: null,
-    leaseState: 'unheld',
-    reconnectGraceUntil: null,
-    run: null,
-    evidence: {
-      frameId: 'uninitialized',
-      capturedAt: '',
-      quality: 'warning',
-      desired: 'No observation plan is installed.',
-      solved: 'No fixture or live observation evidence is installed.',
-      uncertaintyArcsec: 0,
-      stack: {
-        availability: 'unavailable',
-        observedAt: '',
-        frameCount: 0,
-        message: 'No Stack evidence is installed.',
-      },
-      correction: {
-        state: 'exhausted',
-        evidence: 'No active acquisition is installed.',
-        bound: 'No correction budget is active.',
-        protection:
-          'Install an authorized plan and observation workflow before issuing commands.',
-        action: 'none',
-      },
-    },
-  }))
-    insert.run(key, JSON.stringify(value))
-}
-function migrateState(db: DatabaseSync) {
-  const latestRaw: unknown = db
-    .prepare('SELECT COALESCE(MAX(cursor), 0) AS cursor FROM events')
-    .get()
-  const latest = Schema.decodeUnknownSync(LatestCursorRow)(latestRaw)
-  const insert = db.prepare('INSERT OR IGNORE INTO state VALUES (?,?)')
-  for (const [key, value] of Object.entries({
-    snapshotVersion: Math.max(1, latest.cursor),
-    eventCursor: latest.cursor,
-    planRevision: 3,
-    leaseRevision: 1,
-    leaseHolder: 'desktop-owner',
-    leaseState: 'held',
-    reconnectGraceUntil: null,
-    run: null,
-    evidence: {
-      frameId: 'frame-m27-042',
-      capturedAt: '2026-07-23T03:12:00.000Z',
-      quality: 'verified',
-      desired: 'M27 center',
-      solved: 'M27 center + 18 arcsec',
-      uncertaintyArcsec: 4.2,
-      stack: {
-        availability: 'available',
-        observedAt: '2026-07-23T03:12:00.000Z',
-        frameCount: 42,
-        message: 'Stack event received.',
-      },
-      correction: {
-        state: 'automatic',
-        evidence: 'Latest solve confirms the target remains in frame.',
-        bound:
-          'Correction budget 1 of 3; 18 arcsec is within the 30 arcsec bound.',
-        protection: 'No operator action required; accepted capture continues.',
-        action: 'none',
-      },
-    },
-  }))
-    insert.run(key, JSON.stringify(value))
-}
-function seedLibrary(db: DatabaseSync) {
-  const insert = db.prepare(
-    'INSERT OR IGNORE INTO library_assets VALUES (?,?,?,?,?,?,?,?,?,?)',
-  )
-  const roles: ReadonlyArray<LibraryRole> = [
-    'original',
-    'preview',
-    'intermediate',
-    'linearMaster',
-    'final',
-    'diagnostic',
-  ]
-  for (let index = 1; index <= 144; index += 1) {
-    const role = roles[index % roles.length] ?? 'original'
-    const assetId = `asset-m27-${String(index).padStart(3, '0')}`
-    const capturedAt = new Date(
-      Date.UTC(2026, 6, 23, 3, 0, 0) - index * 180_000,
-    ).toISOString()
-    const availability =
-      index % 13 === 0 ? 'temporarilyUnavailable' : 'availableLocally'
-    const detail = {
-      assetId,
-      revision: 1,
-      role,
-      format:
-        role === 'original' ? 'cameraRaw' : role === 'final' ? 'tiff' : 'fits',
-      availability,
-      capturedAt,
-      comparisonGroupId: `m27-stack-${Math.ceil(index / 12)}`,
-      lineage: {
-        sourceAssetIds:
-          index === 1
-            ? [assetId]
-            : [`asset-m27-${String(Math.max(1, index - 1)).padStart(3, '0')}`],
-        runId: 'run-m27-001',
-        solveAttemptId: 'solve-m27-001',
-      },
-      representations: [
-        {
-          label:
-            availability === 'availableLocally'
-              ? 'Local original retained'
-              : 'Local original temporarily unavailable',
-          state:
-            availability === 'availableLocally'
-              ? 'available'
-              : 'temporarilyUnavailable',
-        },
-      ],
-    }
-    insert.run(
-      assetId,
-      1,
-      role,
-      detail.format,
-      availability,
-      detail.comparisonGroupId,
-      capturedAt,
-      new Date(Date.parse(capturedAt) + 60_000).toISOString(),
-      1000 - index,
-      JSON.stringify(detail),
-    )
-  }
-}
-function seedWorkspaces(db: DatabaseSync) {
-  const insert = db.prepare(
-    'INSERT OR IGNORE INTO workspace_projections VALUES (?,?)',
-  )
-  const plan = evaluatePlan({
-    planId: 'plan-m27',
-    revision: 3,
-    sequences: [
-      {
-        sequenceId: 'sequence-m27-luminance',
-        target: 'M27 · Dumbbell Nebula',
-        capture: '24 × 180s · L',
-        acquisition: 'Solve, center, focus, then start capture.',
-        stopCondition: 'Stop at 24 verified frames or 01:02 local.',
-        window: {
-          startsAt: '2026-07-25T03:18:00.000Z',
-          endsAt: '2026-07-25T05:02:00.000Z',
-          usableMinutes: 104,
-          peakAltitudeDeg: 62,
-          horizonClearanceDeg: 28,
-        },
-        estimatedMinutes: 72,
-        storageForecastMb: 1800,
-        horizon: 'clear',
-        storage: 'available',
-      },
-      {
-        sequenceId: 'sequence-m27-color',
-        target: 'M27 · Dumbbell Nebula',
-        capture: '18 × 180s · RGB',
-        acquisition: 'Continue after luminance with the same solved center.',
-        stopCondition: 'Stop at 18 verified frames or window end.',
-        window: {
-          startsAt: '2026-07-25T03:18:00.000Z',
-          endsAt: '2026-07-25T05:02:00.000Z',
-          usableMinutes: 104,
-          peakAltitudeDeg: 62,
-          horizonClearanceDeg: 28,
-        },
-        estimatedMinutes: 54,
-        storageForecastMb: 1350,
-        horizon: 'clear',
-        storage: 'available',
-      },
-    ],
-  })
-  db.prepare(
-    'INSERT OR IGNORE INTO observing_plans (plan_id,revision,projection) VALUES (?,?,?)',
-  ).run(plan.planId, plan.revision, JSON.stringify(plan))
-  db.prepare(
-    'UPDATE observing_plans SET run_eligible=1 WHERE plan_id=? AND revision=?',
-  ).run(plan.planId, plan.revision)
-  insert.run('plan', JSON.stringify(plan))
-}
 function workspace(response: ServerResponse, db: DatabaseSync, name: 'plan') {
   return json(response, 200, planWorkspaceProjection(db, name))
 }
 
-function planWorkspaceProjection(db: DatabaseSync, name: 'plan') {
-  const raw: unknown = db
-    .prepare('SELECT value FROM workspace_projections WHERE name=?')
-    .get(name)
-  const row = Schema.decodeUnknownSync(StoredRow)(raw)
-  return Schema.decodeUnknownSync(PlanWorkspace)(JSON.parse(row.value))
-}
-function evaluatePlan(input: {
-  readonly planId: string
-  readonly revision: number
-  readonly sequences: ReadonlyArray<DraftSequence>
-}): PlanProjection {
-  const limitations: string[] = []
-  const sequences = input.sequences.map((sequence) => {
-    const prefix = `${sequence.sequenceId}: `
-    if (sequence.horizon === 'missing')
-      limitations.push(`${prefix}horizon fact is missing.`)
-    if (sequence.horizon === 'blocked')
-      limitations.push(`${prefix}horizon clearance is blocked.`)
-    if (sequence.storage === 'missing')
-      limitations.push(`${prefix}storage forecast is missing.`)
-    if (sequence.storage === 'blocked')
-      limitations.push(`${prefix}storage forecast is blocked.`)
-    if (sequence.window.usableMinutes < sequence.estimatedMinutes)
-      limitations.push(
-        `${prefix}usable window is shorter than the estimated capture.`,
-      )
-    if (sequence.horizon === 'limited')
-      limitations.push(`${prefix}horizon clearance is limited.`)
-    if (sequence.storage === 'limited')
-      limitations.push(`${prefix}storage forecast is limited.`)
-    const blocked =
-      sequence.horizon === 'missing' ||
-      sequence.horizon === 'blocked' ||
-      sequence.storage === 'missing' ||
-      sequence.storage === 'blocked' ||
-      sequence.window.usableMinutes < sequence.estimatedMinutes
-    return {
-      ...sequence,
-      viability: blocked
-        ? ('blocked' as const)
-        : sequence.horizon === 'limited' || sequence.storage === 'limited'
-          ? ('limited' as const)
-          : ('viable' as const),
-    }
-  })
-  const readiness: PlanReadiness = sequences.some(
-    (sequence) => sequence.viability === 'blocked',
-  )
-    ? 'blocked'
-    : sequences.some((sequence) => sequence.viability === 'limited')
-      ? 'readyWithLimitations'
-      : 'ready'
-  const readinessSummary =
-    readiness === 'ready'
-      ? 'All supplied deterministic planning facts are viable.'
-      : readiness === 'readyWithLimitations'
-        ? 'The plan is usable with the named deterministic limitations.'
-        : 'The plan is blocked by the named deterministic planning facts.'
-  return {
-    planId: input.planId,
-    revision: input.revision,
-    readiness,
-    readinessSummary,
-    limitations,
-    sequences,
-  }
-}
 async function processWorkspace(
   response: ServerResponse,
   db: DatabaseSync,
@@ -2009,7 +932,9 @@ async function processWorkspace(
           'Server.LibraryPersistenceUnavailable': () =>
             Effect.succeed({ status: 503, reason: 'LibraryUnavailable' }),
         }),
-        Effect.provide(sqliteLibraryServiceLayer(db)),
+        Effect.provide(
+          sqliteLibraryServiceLayer(db, () => state(db).snapshotVersion),
+        ),
       ),
     )
     if ('reason' in result)
@@ -2044,7 +969,9 @@ async function libraryPage(
         'Server.LibraryPersistenceUnavailable': () =>
           Effect.succeed({ status: 503, body: libraryUnavailableBody }),
       }),
-      Effect.provide(sqliteLibraryServiceLayer(db)),
+      Effect.provide(
+        sqliteLibraryServiceLayer(db, () => state(db).snapshotVersion),
+      ),
     ),
   )
   return json(response, result.status, result.body)
@@ -2087,7 +1014,9 @@ async function libraryDetail(
         'Server.LibraryPersistenceUnavailable': () =>
           Effect.succeed({ status: 503, body: libraryUnavailableBody }),
       }),
-      Effect.provide(sqliteLibraryServiceLayer(db)),
+      Effect.provide(
+        sqliteLibraryServiceLayer(db, () => state(db).snapshotVersion),
+      ),
     ),
   )
   return json(response, result.status, result.body)
@@ -2109,211 +1038,6 @@ const libraryUnavailableBody = {
   outcome: 'rejected',
   reason: 'LibraryUnavailable',
 }
-const sqliteLibraryServiceLayer = (db: DatabaseSync) =>
-  libraryServiceLayer.pipe(
-    Layer.provide(
-      libraryPersistenceLayer({
-        page: Effect.fn('Server.LibraryService.page')(function* (query) {
-          const order = {
-            capturedAtDescending: 'captured_at DESC, asset_id ASC',
-            sharpestFirst: 'sharpness DESC, asset_id ASC',
-            recentlyUpdated: 'updated_at DESC, asset_id ASC',
-          } satisfies Record<LibrarySort, string>
-          const cursor = Number(query.cursor ?? '0')
-          const filter = query.role === undefined ? '' : 'WHERE role=?'
-          const bindings =
-            query.role === undefined
-              ? [query.pageSize + 1, cursor]
-              : [query.role, query.pageSize + 1, cursor]
-          const rowsRaw = yield* Effect.try({
-            try: () =>
-              db
-                .prepare(
-                  `SELECT asset_id,revision,role,format,availability,comparison_group_id,detail FROM library_assets ${filter} ORDER BY ${order[query.sort]} LIMIT ? OFFSET ?`,
-                )
-                .all(...bindings),
-            catch: () => new LibraryPersistenceUnavailable(),
-          })
-          const rows = yield* Schema.decodeUnknownEffect(
-            Schema.Array(LibraryAssetRow),
-          )(rowsRaw).pipe(
-            Effect.mapError(() => new LibraryPersistenceUnavailable()),
-          )
-          const snapshotVersion = yield* Effect.try({
-            try: () => state(db).snapshotVersion,
-            catch: () => new LibraryPersistenceUnavailable(),
-          })
-          return yield* Schema.decodeUnknownEffect(LibraryPage)({
-            queryId: query.queryId,
-            querySnapshotVersion: snapshotVersion,
-            results: rows.slice(0, query.pageSize).map((asset) => ({
-              assetId: asset.asset_id,
-              revision: asset.revision,
-              role: asset.role,
-              format: asset.format,
-              availability: asset.availability,
-              comparisonGroupId: asset.comparison_group_id,
-            })),
-            ...(rows.length > query.pageSize
-              ? { nextCursor: String(cursor + query.pageSize) }
-              : {}),
-            catalogChanged: false,
-          }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
-        }),
-        detail: Effect.fn('Server.LibraryService.detail')(function* (assetId) {
-          const detail = yield* libraryStoredDetail(db, assetId)
-          const publication = yield* libraryPublication(db, assetId)
-          return yield* Schema.decodeUnknownEffect(LibraryAssetDetail)({
-            ...detail,
-            actions: libraryActions(detail.availability, publication),
-          }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
-        }),
-        processSource: Effect.fn('Server.LibraryService.processSource')(
-          function* (assetId) {
-            const detail = yield* libraryStoredDetail(db, assetId, false)
-            if (detail.availability !== 'availableLocally')
-              return yield* Effect.fail(
-                new LibraryAssetUnavailable({ reason: 'AssetUnavailable' }),
-              )
-            return yield* Schema.decodeUnknownEffect(ProcessSourceHandoff)({
-              sourceAssetId: detail.assetId,
-              revision: detail.revision,
-              role: detail.role,
-              format: detail.format,
-              availability: detail.availability,
-              comparisonGroupId: detail.comparisonGroupId,
-              lineage: detail.lineage,
-              processing: {
-                availability: 'unavailable',
-                currentFixtureFacts: [
-                  'Interactive processing is not available in this workspace.',
-                ],
-              },
-            }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
-          },
-        ),
-        download: Effect.fn('Server.LibraryService.download')(
-          function* (assetId) {
-            yield* libraryAssetId(assetId)
-            const publication = yield* libraryPublication(db, assetId)
-            if (publication === undefined) {
-              const known = yield* libraryKnownAsset(db, assetId)
-              if (!known) return yield* Effect.fail(new LibraryAssetNotFound())
-              return yield* Effect.fail(
-                new LibraryAssetUnavailable({
-                  reason: 'PublicationUnavailable',
-                }),
-              )
-            }
-            if (
-              publication.availability !== 'published' ||
-              publication.state !== 'published' ||
-              publication.object_key === ''
-            )
-              return yield* Effect.fail(
-                new LibraryAssetUnavailable({ reason: 'AssetUnavailable' }),
-              )
-            return { objectKey: publication.object_key }
-          },
-        ),
-      }),
-    ),
-  )
-const libraryAssetId = (assetId: string, requireStableId = true) =>
-  Schema.decodeUnknownEffect(LibraryAssetDetail.fields.assetId)(assetId).pipe(
-    Effect.flatMap((id) =>
-      !requireStableId ||
-      /^asset-(?:m27-\d{3}|process-[0-9a-f-]+|source-[a-z0-9-]+)$/.test(id)
-        ? Effect.succeed(id)
-        : Effect.fail(new LibraryInputInvalid()),
-    ),
-    Effect.mapError(() => new LibraryInputInvalid()),
-  )
-const libraryStoredDetail = (
-  db: DatabaseSync,
-  assetId: string,
-  requireStableId = true,
-) =>
-  Effect.gen(function* () {
-    yield* libraryAssetId(assetId, requireStableId)
-    const raw = yield* Effect.try({
-      try: () =>
-        db
-          .prepare(
-            'SELECT asset_id,detail FROM library_assets WHERE asset_id=?',
-          )
-          .get(assetId),
-      catch: () => new LibraryPersistenceUnavailable(),
-    })
-    const row = yield* Schema.decodeUnknownEffect(
-      Schema.optional(
-        Schema.Struct({ asset_id: Schema.String, detail: Schema.String }),
-      ),
-    )(raw).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
-    if (row === undefined) return yield* Effect.fail(new LibraryAssetNotFound())
-    const parsed = yield* Effect.try({
-      try: () => JSON.parse(row.detail),
-      catch: () => new LibraryPersistenceUnavailable(),
-    })
-    return yield* Schema.decodeUnknownEffect(LibraryDetail)(parsed).pipe(
-      Effect.mapError(() => new LibraryPersistenceUnavailable()),
-    )
-  })
-const libraryPublication = (db: DatabaseSync, assetId: string) =>
-  Effect.try({
-    try: () =>
-      db
-        .prepare(
-          'SELECT library_assets.asset_id,library_assets.role,library_assets.format,library_assets.availability,asset_publications.state,asset_publications.object_key FROM library_assets JOIN asset_publications ON asset_publications.asset_id=library_assets.asset_id WHERE library_assets.asset_id=?',
-        )
-        .get(assetId),
-    catch: () => new LibraryPersistenceUnavailable(),
-  }).pipe(
-    Effect.flatMap(
-      Schema.decodeUnknownEffect(Schema.optional(DownloadAssetRow)),
-    ),
-    Effect.mapError(() => new LibraryPersistenceUnavailable()),
-  )
-const libraryKnownAsset = (db: DatabaseSync, assetId: string) =>
-  Effect.try({
-    try: () =>
-      db
-        .prepare('SELECT asset_id FROM library_assets WHERE asset_id=?')
-        .get(assetId),
-    catch: () => new LibraryPersistenceUnavailable(),
-  }).pipe(
-    Effect.flatMap(
-      Schema.decodeUnknownEffect(
-        Schema.optional(Schema.Struct({ asset_id: Schema.String })),
-      ),
-    ),
-    Effect.map((asset) => asset !== undefined),
-    Effect.mapError(() => new LibraryPersistenceUnavailable()),
-  )
-const libraryActions = (
-  availability: (typeof LibraryDetail.Type)['availability'],
-  publication: typeof DownloadAssetRow.Type | undefined,
-) => [
-  publication?.state === 'published' &&
-  publication.object_key !== '' &&
-  availability === 'published'
-    ? { _tag: 'Eligible' as const, action: 'download' as const }
-    : {
-        _tag: 'Unavailable' as const,
-        action: 'download' as const,
-        reason:
-          publication === undefined
-            ? 'PublicationUnavailable'
-            : 'AssetNotPublished',
-      },
-  availability === 'availableLocally'
-    ? { _tag: 'Eligible' as const, action: 'openInProcess' as const }
-    : {
-        _tag: 'Unavailable' as const,
-        action: 'openInProcess' as const,
-        reason: 'AssetNotAvailableLocally' as const,
-      },
-]
 async function downloadAsset(
   response: ServerResponse,
   db: DatabaseSync,
@@ -2349,7 +1073,9 @@ async function downloadAsset(
             reason: 'DownloadUnavailable',
           }),
       }),
-      Effect.provide(sqliteLibraryServiceLayer(db)),
+      Effect.provide(
+        sqliteLibraryServiceLayer(db, () => state(db).snapshotVersion),
+      ),
     ),
   )
   if ('reason' in asset)
@@ -2377,69 +1103,6 @@ async function downloadAsset(
       location: signedUrl,
     })
     .end()
-}
-function readiness(db: DatabaseSync) {
-  const current = state(db)
-  if (current.plan.readiness === 'unavailable')
-    return {
-      status: 'unavailable' as const,
-      service: 'ready' as const,
-      database: 'ready' as const,
-      rig: 'unknown' as const,
-      tunnel: 'unknown' as const,
-      activeRun: 'none' as const,
-      message:
-        'Service and local database are ready, but no observation plan or fixture is installed.',
-    }
-  return {
-    status: 'ready' as const,
-    service: 'ready' as const,
-    database: 'ready' as const,
-    rig: 'unknown' as const,
-    tunnel: 'unknown' as const,
-    activeRun: current.run === null ? ('none' as const) : current.run.phase,
-    message:
-      current.run === null
-        ? 'Service and local database are ready; rig and tunnel are not connected in this fixture.'
-        : 'Service and local database are ready; accepted run state is retained while rig and tunnel remain unknown.',
-  }
-}
-function operations(db: DatabaseSync) {
-  const current = state(db)
-  const workerRaw: unknown = db
-    .prepare(
-      "SELECT worker_id,state,adapter_state,last_heartbeat FROM worker_status WHERE worker_id='rig-worker'",
-    )
-    .get()
-  const worker = Schema.decodeUnknownSync(Schema.optional(WorkerStatusRow))(
-    workerRaw,
-  )
-  return {
-    release: 'server',
-    schemaVersion: 'current',
-    sqlite: { journalMode: 'wal', checkpoint: 'unknown' as const },
-    snapshot: {
-      version: current.snapshotVersion,
-      eventCursor: current.eventCursor,
-      activeRun: current.run === null ? ('none' as const) : current.run.phase,
-      lease: current.control.state,
-    },
-    worker:
-      worker === undefined
-        ? { status: 'unknown' as const }
-        : {
-            status: worker.state,
-            adapter: worker.adapter_state,
-            lastHeartbeat: worker.last_heartbeat,
-          },
-    disk: 'unknown' as const,
-    config:
-      current.plan.readiness === 'unavailable'
-        ? ('uninitialized' as const)
-        : ('fixture' as const),
-    rig: 'unknown' as const,
-    tunnel: 'unknown' as const,
-  }
 }
 function storedValue(db: DatabaseSync, key: string): unknown {
   const raw: unknown = db
@@ -2540,1588 +1203,6 @@ function state(
     },
   }
 }
-function expireReconnectGrace(db: DatabaseSync) {
-  const grace = storedValue(db, 'reconnectGraceUntil')
-  const leaseState = storedValue(db, 'leaseState')
-  if (
-    typeof grace !== 'string' ||
-    leaseState !== 'reconnecting' ||
-    Date.parse(grace) > Date.now()
-  )
-    return
-  db.exec('BEGIN IMMEDIATE')
-  try {
-    const currentGrace = storedValue(db, 'reconnectGraceUntil')
-    const currentState = storedValue(db, 'leaseState')
-    const previousHolder = storedValue(db, 'leaseHolder')
-    if (
-      typeof currentGrace !== 'string' ||
-      currentState !== 'reconnecting' ||
-      Date.parse(currentGrace) > Date.now()
-    ) {
-      db.exec('COMMIT')
-      return
-    }
-    if (typeof previousHolder !== 'string') {
-      db.exec('ROLLBACK')
-      return
-    }
-    const cursor = Number(storedValue(db, 'eventCursor')) + 1
-    commit(db, {
-      snapshotVersion: Number(storedValue(db, 'snapshotVersion')) + 1,
-      eventCursor: cursor,
-      leaseRevision: Number(storedValue(db, 'leaseRevision')) + 1,
-      leaseHolder: null,
-      leaseState: 'unheld',
-      reconnectGraceUntil: null,
-    })
-    db.prepare('INSERT INTO events VALUES (?,?,?)').run(
-      cursor,
-      'ControlLeaseExpired',
-      JSON.stringify(
-        domainEvent({
-          _tag: 'ControlLeaseExpired',
-          previousHolderClientId: previousHolder,
-        }),
-      ),
-    )
-    db.exec('COMMIT')
-  } catch (error) {
-    db.exec('ROLLBACK')
-    throw error
-  }
-}
-function snapshot(db: DatabaseSync, identity: LocalIdentity): Snapshot {
-  return {
-    ...state(db),
-    generatedAt: new Date().toISOString(),
-    identity,
-    connection: 'current',
-  }
-}
-function bootstrapSnapshot(db: DatabaseSync, identity: LocalIdentity) {
-  const current = snapshot(db, identity)
-  const observedAt = current.generatedAt
-  const plan =
-    current.plan.readiness === 'unavailable'
-      ? undefined
-      : bootstrapPlanWorkspaceProjection(db, identity, current)
-  const observe =
-    current.run === null
-      ? undefined
-      : observeWorkspaceProjection(db, identity, current)
-  return Schema.decodeUnknownEffect(BootstrapSnapshot)({
-    snapshotVersion: current.snapshotVersion,
-    eventCursor: current.eventCursor,
-    generatedAt: current.generatedAt,
-    membership: {
-      personId: identity.personId,
-      role: identity.role ?? 'viewer',
-      clientId: identity.clientId,
-      capability: identity.capability,
-    },
-    control: {
-      revision: current.control.revision,
-      state: current.control.state,
-      ...(current.control.holderClientId === null
-        ? {}
-        : { holderClientId: current.control.holderClientId }),
-      ...(current.control.reconnectGraceUntil === undefined
-        ? {}
-        : { reconnectGraceUntil: current.control.reconnectGraceUntil }),
-      pendingRequests: current.control.pendingRequests,
-    },
-    ...(plan === undefined ? {} : { plan }),
-    ...(observe === undefined ? {} : { observe }),
-    activeRun:
-      current.run === null
-        ? { _tag: 'None' }
-        : {
-            _tag: 'Active',
-            run: {
-              runId: current.run.id,
-              revision: current.run.revision,
-              phase: current.run.phase,
-              target: current.run.target,
-              progress: current.run.progress,
-              completedSequenceCount: current.run.completedSequenceCount ?? 0,
-            },
-          },
-    health: {
-      service: { state: 'healthy', observedAt },
-      rig: {
-        state: 'unknown',
-        observedAt,
-        reason: 'No rig observation is connected.',
-      },
-      tunnel: {
-        state: 'unknown',
-        observedAt,
-        reason: 'No tunnel observation is connected.',
-      },
-      processing: {
-        state: 'unknown',
-        observedAt,
-        reason: 'Processing availability has not been observed.',
-      },
-      publication: {
-        state: 'unknown',
-        observedAt,
-        reason: 'Publication availability has not been observed.',
-      },
-      storage: {
-        state: 'unknown',
-        observedAt,
-        reason: 'Storage health has not been observed.',
-      },
-    },
-  })
-}
-function observeWorkspaceProjection(
-  db: DatabaseSync,
-  identity: LocalIdentity,
-  current: Snapshot,
-) {
-  const run = current.run
-  if (run === null || run.sourceDefinitionId === undefined) return undefined
-  const definitionRow = Schema.decodeUnknownSync(
-    Schema.optional(Schema.Struct({ definition: Schema.String })),
-  )(
-    db
-      .prepare(
-        'SELECT definition FROM run_definitions WHERE run_definition_id=?',
-      )
-      .get(run.sourceDefinitionId),
-  )
-  if (definitionRow === undefined) return undefined
-  const definition = Schema.decodeUnknownSync(StoredRunDefinition)(
-    JSON.parse(definitionRow.definition),
-  )
-  const controller = current.control.holderClientId === identity.clientId
-  const writable = identity.capability === 'controlCapable'
-  const terminal =
-    run.phase === 'completed' ||
-    run.phase === 'stopped' ||
-    run.phase === 'parkRequested'
-  const eligible = (
-    value: boolean,
-    reason:
-      | 'readOnlyClient'
-      | 'controlRequired'
-      | 'activeRunRequired'
-      | 'pausedRunRequired'
-      | 'terminalRun'
-      | 'retryUsed'
-      | 'policyUnavailable',
-  ) =>
-    value
-      ? { _tag: 'Eligible' as const }
-      : { _tag: 'Ineligible' as const, reason }
-  const baseReason = !writable
-    ? 'readOnlyClient'
-    : !controller
-      ? 'controlRequired'
-      : terminal
-        ? 'terminalRun'
-        : 'activeRunRequired'
-  const active = writable && controller && !terminal && run.phase !== 'paused'
-  const pausedRecovery = writable && controller && run.phase === 'paused'
-  const events = Schema.decodeUnknownSync(Schema.Array(LifecycleEventRow))(
-    db
-      .prepare(
-        "SELECT type,snapshot FROM events WHERE type IN ('RunStarted','RunPaused','RunResumed','RunStopped','FakeSequenceSkipped','FakePhaseRetried','FakeParkRequested','RunCompleted') ORDER BY cursor",
-      )
-      .all(),
-  )
-    .filter(({ snapshot }) => lifecycleEventRunId(snapshot) === run.id)
-    .map(({ type }) => `Fake/fixture lifecycle fact: ${type}.`)
-  return Schema.decodeUnknownSync(ObserveWorkspaceProjection)({
-    runId: run.id,
-    revision: run.revision,
-    executor: definition.executor,
-    phase: run.phase,
-    ...(terminal ? { terminalOutcome: run.phase } : {}),
-    target: run.target,
-    currentSequence: run.activeSequenceIndex ?? 0,
-    completedSequences: run.completedSequenceCount ?? 0,
-    totalSequences: definition.plan.sequences.length,
-    ...(run.resumablePhase === undefined
-      ? {}
-      : { resumablePhase: run.resumablePhase }),
-    retryUsed: run.retryPhase !== undefined,
-    lifecycleFacts:
-      events.length === 0 ? ['Fake/fixture lifecycle started.'] : events,
-    attemptFacts: [
-      'All lifecycle and attempt evidence is fake/fixture only; no physical capture is claimed.',
-      ...(run.retryPhase === undefined
-        ? ['No fake/fixture phase retry has been used.']
-        : [`Fake/fixture retry used for ${run.retryPhase}.`]),
-      ...(run.phase === 'parkRequested'
-        ? ['Park is policy only; no mount moved.']
-        : []),
-    ],
-    actions: {
-      pause: eligible(active, baseReason),
-      resume: eligible(
-        writable &&
-          controller &&
-          run.phase === 'paused' &&
-          run.resumablePhase !== undefined,
-        run.phase !== 'paused' ? 'pausedRunRequired' : baseReason,
-      ),
-      stop: eligible(active || pausedRecovery, baseReason),
-      skip: eligible(
-        active,
-        run.phase === 'paused' ? 'policyUnavailable' : baseReason,
-      ),
-      retry: eligible(
-        active && run.retryPhase === undefined,
-        terminal || run.phase === 'paused'
-          ? run.phase === 'paused'
-            ? 'policyUnavailable'
-            : baseReason
-          : run.retryPhase === undefined
-            ? baseReason
-            : 'retryUsed',
-      ),
-      park: eligible(active || pausedRecovery, baseReason),
-    },
-  })
-}
-function lifecycleEventRunId(snapshot: string) {
-  try {
-    const payload: unknown = JSON.parse(snapshot)
-    return Schema.is(LifecycleEventPayload)(payload)
-      ? payload.run.id
-      : undefined
-  } catch {
-    return undefined
-  }
-}
-function bootstrapPlanWorkspaceProjection(
-  db: DatabaseSync,
-  identity: LocalIdentity,
-  current: Snapshot,
-) {
-  const plan = planWorkspaceProjection(db, 'plan')
-  const currentDefinitionRaw: unknown = db
-    .prepare(
-      'SELECT definition FROM run_definitions WHERE source_plan_id=? AND source_plan_revision=?',
-    )
-    .get(plan.planId, plan.revision)
-  const currentDefinition = Schema.decodeUnknownSync(
-    Schema.optional(Schema.Struct({ definition: Schema.String })),
-  )(currentDefinitionRaw)
-  const acceptedForCurrentRevision =
-    currentDefinition === undefined
-      ? undefined
-      : Schema.decodeUnknownSync(StoredRunDefinition)(
-          JSON.parse(currentDefinition.definition),
-        )
-  const acceptedRaw: unknown = db
-    .prepare(
-      'SELECT definition FROM run_definitions WHERE source_plan_id=? ORDER BY accepted_at DESC LIMIT 1',
-    )
-    .get(plan.planId)
-  const acceptedDefinition = Schema.decodeUnknownSync(
-    Schema.optional(Schema.Struct({ definition: Schema.String })),
-  )(acceptedRaw)
-  const accepted =
-    acceptedDefinition === undefined
-      ? undefined
-      : Schema.decodeUnknownSync(StoredRunDefinition)(
-          JSON.parse(acceptedDefinition.definition),
-        )
-  const owner = isOwner(identity)
-  const controller = current.control.holderClientId === identity.clientId
-  const writable = identity.capability === 'controlCapable'
-  const reason = <Unavailable>(eligible: boolean, unavailable: Unavailable) =>
-    eligible ? { _tag: 'Eligible' as const } : unavailable
-  const ownerWrite = owner && writable
-  const activeFake = current.run !== null && hasFakeExecutor(db)
-  const paused = current.run?.phase === 'paused'
-  const advanced = (current.run?.activeSequenceIndex ?? 0) !== 0
-  const terminal =
-    current.run?.phase === 'completed' ||
-    current.run?.phase === 'stopped' ||
-    current.run?.phase === 'parkRequested'
-  const previewRaw: unknown =
-    current.run === null
-      ? undefined
-      : db
-          .prepare(
-            'SELECT preview_id,run_id,run_revision,owner_person_id,mutation,consequences,classification,expires_at,applied_at FROM run_mutation_previews WHERE run_id=? AND run_revision=? AND applied_at IS NULL AND expires_at>? ORDER BY expires_at DESC LIMIT 1',
-          )
-          .get(current.run.id, current.run.revision, new Date().toISOString())
-  const preview = Schema.decodeUnknownSync(
-    Schema.optional(StoredMutationPreview),
-  )(previewRaw)
-  const previewVisible =
-    preview !== undefined &&
-    owner &&
-    writable &&
-    (controller || preview.owner_person_id === identity.personId)
-  return {
-    ...plan,
-    ...(accepted === undefined
-      ? {}
-      : {
-          acceptedRunDefinition: {
-            id: accepted.id,
-            sourcePlanRevision: accepted.sourcePlanRevision,
-            acceptedAt: accepted.acceptedAt,
-            executor: 'fake' as const,
-          },
-        }),
-    ...(previewVisible
-      ? {
-          runMutationPreview: {
-            previewId: preview.preview_id,
-            classification: preview.classification,
-            consequences: preview.consequences,
-            expiresAt: preview.expires_at,
-            approvalRequired: preview.classification === 'disruptive',
-            ...(preview.classification === 'disruptive' && controller
-              ? {
-                  approvalToken: createHash('sha256')
-                    .update(`${preview.preview_id}:${preview.consequences}`)
-                    .digest('hex'),
-                }
-              : {}),
-          },
-        }
-      : {}),
-    actions: {
-      saveDraft: reason(
-        ownerWrite && current.run === null,
-        !owner
-          ? { _tag: 'Ineligible' as const, reason: 'ownerRequired' }
-          : !writable
-            ? { _tag: 'Ineligible' as const, reason: 'readOnlyClient' }
-            : { _tag: 'Ineligible' as const, reason: 'activeRunPresent' },
-      ),
-      acceptRunDefinition: reason(
-        ownerWrite &&
-          current.run === null &&
-          plan.readiness === 'ready' &&
-          acceptedForCurrentRevision === undefined,
-        !owner
-          ? { _tag: 'Ineligible' as const, reason: 'ownerRequired' }
-          : !writable
-            ? { _tag: 'Ineligible' as const, reason: 'readOnlyClient' }
-            : plan.readiness !== 'ready'
-              ? { _tag: 'Ineligible' as const, reason: 'planNotReady' }
-              : current.run !== null
-                ? { _tag: 'Ineligible' as const, reason: 'activeRunPresent' }
-                : {
-                    _tag: 'Ineligible' as const,
-                    reason: 'definitionAlreadyAccepted',
-                  },
-      ),
-      startAcceptedRun: reason(
-        writable &&
-          controller &&
-          current.run === null &&
-          acceptedForCurrentRevision !== undefined,
-        !writable
-          ? { _tag: 'Ineligible' as const, reason: 'readOnlyClient' }
-          : !controller
-            ? { _tag: 'Ineligible' as const, reason: 'controlRequired' }
-            : current.run !== null
-              ? { _tag: 'Ineligible' as const, reason: 'activeRunPresent' }
-              : {
-                  _tag: 'Ineligible' as const,
-                  reason: 'acceptedDefinitionRequired',
-                },
-      ),
-      previewRunMutation: reason(
-        activeFake && !terminal && !paused && !advanced && ownerWrite,
-        !owner
-          ? { _tag: 'Ineligible' as const, reason: 'ownerRequired' }
-          : !writable
-            ? { _tag: 'Ineligible' as const, reason: 'readOnlyClient' }
-            : terminal
-              ? { _tag: 'Ineligible' as const, reason: 'terminalRun' }
-              : paused
-                ? { _tag: 'Ineligible' as const, reason: 'pausedRun' }
-                : advanced
-                  ? { _tag: 'Ineligible' as const, reason: 'runAdvanced' }
-                  : {
-                      _tag: 'Ineligible' as const,
-                      reason: 'activeRunRequired',
-                    },
-      ),
-      applyRunMutation: reason(
-        activeFake &&
-          !terminal &&
-          !paused &&
-          !advanced &&
-          writable &&
-          owner &&
-          controller &&
-          previewVisible &&
-          preview.classification !== 'disruptive',
-        !writable
-          ? { _tag: 'Ineligible' as const, reason: 'readOnlyClient' }
-          : !controller
-            ? { _tag: 'Ineligible' as const, reason: 'controlRequired' }
-            : terminal
-              ? { _tag: 'Ineligible' as const, reason: 'terminalRun' }
-              : paused
-                ? { _tag: 'Ineligible' as const, reason: 'pausedRun' }
-                : advanced
-                  ? { _tag: 'Ineligible' as const, reason: 'runAdvanced' }
-                  : activeFake
-                    ? { _tag: 'Ineligible' as const, reason: 'previewRequired' }
-                    : {
-                        _tag: 'Ineligible' as const,
-                        reason: 'activeRunRequired',
-                      },
-      ),
-      approveDisruptiveRunMutation: reason(
-        activeFake &&
-          !terminal &&
-          !paused &&
-          !advanced &&
-          writable &&
-          owner &&
-          controller &&
-          previewVisible &&
-          preview.classification === 'disruptive',
-        !writable
-          ? { _tag: 'Ineligible' as const, reason: 'readOnlyClient' }
-          : !controller
-            ? { _tag: 'Ineligible' as const, reason: 'controlRequired' }
-            : terminal
-              ? { _tag: 'Ineligible' as const, reason: 'terminalRun' }
-              : paused
-                ? { _tag: 'Ineligible' as const, reason: 'pausedRun' }
-                : advanced
-                  ? { _tag: 'Ineligible' as const, reason: 'runAdvanced' }
-                  : activeFake
-                    ? { _tag: 'Ineligible' as const, reason: 'previewRequired' }
-                    : {
-                        _tag: 'Ineligible' as const,
-                        reason: 'activeRunRequired',
-                      },
-      ),
-    },
-  }
-}
-function sseProjection(db: DatabaseSync, identity: LocalIdentity) {
-  const event = Effect.runSync(
-    bootstrapSnapshot(db, identity).pipe(
-      Effect.flatMap((data) =>
-        Schema.decodeUnknownEffect(BootstrapSseEventEnvelope)({
-          id: data.eventCursor,
-          event: 'ProjectionChanged',
-          data,
-        }),
-      ),
-    ),
-  )
-  return `id: ${event.id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`
-}
-function acceptRun(db: DatabaseSync, input: StartRun, identity: LocalIdentity) {
-  if (identity.capability === 'readOnly') return reject('ClientReadOnly')
-  const semanticKey = createHash('sha256')
-    .update(
-      JSON.stringify({
-        version: 1,
-        planId: input.planId,
-        expectedPlanRevision: input.expectedPlanRevision,
-        expectedLeaseRevision: input.expectedLeaseRevision,
-      }),
-    )
-    .digest('hex')
-  const receiptRaw: unknown = db
-    .prepare(
-      'SELECT semantic_key,response FROM run_start_receipts WHERE idempotency_key=? AND owner_person_id=?',
-    )
-    .get(input.idempotencyKey, identity.personId)
-  const existing = Schema.decodeUnknownSync(
-    Schema.optional(
-      Schema.Struct({ semantic_key: Schema.String, response: Schema.String }),
-    ),
-  )(receiptRaw)
-  if (existing !== undefined)
-    return existing.semantic_key === semanticKey
-      ? {
-          status: 200,
-          body: Schema.decodeUnknownSync(CommandResultSchema)(
-            JSON.parse(existing.response),
-          ),
-        }
-      : reject('IdempotencyConflict')
-  const definitionRaw: unknown = db
-    .prepare(
-      'SELECT definition FROM run_definitions WHERE source_plan_id=? AND source_plan_revision=?',
-    )
-    .get(input.planId, input.expectedPlanRevision)
-  const definitionRow = Schema.decodeUnknownSync(
-    Schema.optional(Schema.Struct({ definition: Schema.String })),
-  )(definitionRaw)
-  const definition =
-    definitionRow === undefined
-      ? undefined
-      : Schema.decodeUnknownSync(StoredRunDefinition)(
-          JSON.parse(definitionRow.definition),
-        )
-  const legacy =
-    definition === undefined
-      ? legacyStartReplay(db, input, identity)
-      : legacyStartReplay(db, input, identity, definition)
-  if (legacy !== undefined) return legacy
-  const current = state(db)
-  if (current.plan.readiness !== 'ready' || !current.plan.runEligible)
-    return reject('PlanUnavailable')
-  if (
-    input.planId !== current.plan.id ||
-    input.expectedPlanRevision !== current.plan.revision ||
-    input.expectedLeaseRevision !== current.control.revision
-  )
-    return reject('FreshnessConflict')
-  if (current.control.holderClientId !== identity.clientId)
-    return reject('ControlLeaseLost')
-  if (definition === undefined) return reject('PlanUnavailable')
-  if (current.run !== null) return reject('ActiveRunConflict')
-  db.exec('BEGIN IMMEDIATE')
-  try {
-    const fixture = definition.executor === 'fixture'
-    const run: Run = fixture
-      ? {
-          id: 'run-m27-001',
-          revision: 1,
-          phase: 'capture',
-          target: definition.plan.sequences[0]?.target ?? current.plan.target,
-          progress: 0,
-          sourceDefinitionId: definition.id,
-          activeSequenceIndex: 0,
-          completedSequenceCount: 0,
-        }
-      : {
-          id: `run-${definition.id}`,
-          revision: 1,
-          phase: 'preflight',
-          target: definition.plan.sequences[0]?.target ?? current.plan.target,
-          progress: 0,
-          sourceDefinitionId: definition.id,
-          activeSequenceIndex: 0,
-          completedSequenceCount: 0,
-        }
-    const next = {
-      ...current,
-      snapshotVersion: current.snapshotVersion + 1,
-      eventCursor: current.eventCursor + 1,
-      run,
-    }
-    commit(db, {
-      snapshotVersion: next.snapshotVersion,
-      eventCursor: next.eventCursor,
-      run: next.run,
-    })
-    const result: CommandResult = {
-      outcome: 'accepted',
-      run: next.run,
-      snapshot: snapshot(db, identity),
-    }
-    db.prepare('INSERT INTO run_start_receipts VALUES (?,?,?,?)').run(
-      input.idempotencyKey,
-      identity.personId,
-      semanticKey,
-      JSON.stringify(result),
-    )
-    db.prepare('INSERT INTO events VALUES (?,?,?)').run(
-      next.eventCursor,
-      'RunStarted',
-      JSON.stringify(result),
-    )
-    db.exec('COMMIT')
-    return {
-      status: 202,
-      body: result,
-      event: { type: 'RunStarted', cursor: next.eventCursor },
-    }
-  } catch (error) {
-    db.exec('ROLLBACK')
-    throw error
-  }
-}
-function legacyStartReplay(
-  db: DatabaseSync,
-  input: StartRun,
-  identity: LocalIdentity,
-  definition?: typeof StoredRunDefinition.Type,
-) {
-  const raw: unknown = db
-    .prepare('SELECT response FROM receipts WHERE idempotency_key=?')
-    .get(input.idempotencyKey)
-  const receipt = Schema.decodeUnknownSync(Schema.optional(ReceiptRow))(raw)
-  if (receipt === undefined) return undefined
-  const result = Schema.decodeUnknownOption(CommandResultSchema)(
-    JSON.parse(receipt.response),
-  )
-  return Option.match(result, {
-    onNone: () => reject('IdempotencyConflict'),
-    onSome: (stored) =>
-      stored.outcome === 'accepted' &&
-      stored.snapshot.identity.personId === identity.personId &&
-      stored.snapshot.identity.clientId === identity.clientId &&
-      stored.snapshot.plan.id === input.planId &&
-      stored.snapshot.plan.revision === input.expectedPlanRevision &&
-      stored.snapshot.control.revision === input.expectedLeaseRevision &&
-      definition !== undefined &&
-      definition.sourcePlanId === input.planId &&
-      definition.sourcePlanRevision === input.expectedPlanRevision &&
-      stored.run?.sourceDefinitionId === definition.id
-        ? { status: 200, body: stored }
-        : reject('IdempotencyConflict'),
-  })
-}
-function advanceFakeRunState(db: DatabaseSync, identity: LocalIdentity) {
-  const current = state(db)
-  if (
-    current.run?.sourceDefinitionId === undefined ||
-    current.run.activeSequenceIndex === undefined ||
-    current.run.completedSequenceCount === undefined
-  )
-    return undefined
-  const definitionRaw: unknown = db
-    .prepare('SELECT definition FROM run_definitions WHERE run_definition_id=?')
-    .get(current.run.sourceDefinitionId)
-  const definitionRow = Schema.decodeUnknownSync(
-    Schema.optional(Schema.Struct({ definition: Schema.String })),
-  )(definitionRaw)
-  if (definitionRow === undefined) return undefined
-  const definition = Schema.decodeUnknownSync(StoredRunDefinition)(
-    JSON.parse(definitionRow.definition),
-  )
-  if (definition.executor !== 'fake') return undefined
-  const transition = nextFakeRunTransition(current.run, definition)
-  if (transition === undefined) return undefined
-  db.exec('BEGIN IMMEDIATE')
-  try {
-    const cursor = current.eventCursor + 1
-    commit(db, {
-      snapshotVersion: current.snapshotVersion + 1,
-      eventCursor: cursor,
-      run: transition.run,
-    })
-    const body = {
-      outcome: 'accepted' as const,
-      run: transition.run,
-      snapshot: snapshot(db, identity),
-    }
-    db.prepare('INSERT INTO events VALUES (?,?,?)').run(
-      cursor,
-      transition.eventType,
-      JSON.stringify(body),
-    )
-    db.exec('COMMIT')
-    return { body, event: { type: transition.eventType, cursor } }
-  } catch (error) {
-    db.exec('ROLLBACK')
-    throw error
-  }
-}
-function nextFakeRunTransition(
-  run: Run,
-  definition: typeof StoredRunDefinition.Type,
-) {
-  if (run.phase === 'preflight')
-    return {
-      eventType: 'RunPreflightCompleted',
-      run: {
-        ...run,
-        revision: run.revision + 1,
-        phase: 'acquire' as const,
-        progress: 10,
-      },
-    }
-  if (run.phase === 'acquire')
-    return {
-      eventType: 'RunAcquireCompleted',
-      run: {
-        ...run,
-        revision: run.revision + 1,
-        phase: 'capture' as const,
-        progress: 25,
-      },
-    }
-  if (run.phase === 'capture')
-    return {
-      eventType: 'RunCaptureCompleted',
-      run: {
-        ...run,
-        revision: run.revision + 1,
-        phase: 'verify' as const,
-        progress: 75,
-      },
-    }
-  if (run.phase !== 'verify') return undefined
-  const completedSequenceCount = run.completedSequenceCount
-  const activeSequenceIndex = run.activeSequenceIndex
-  if (completedSequenceCount === undefined || activeSequenceIndex === undefined)
-    return undefined
-  const completed = completedSequenceCount + 1
-  const next = definition.plan.sequences[activeSequenceIndex + 1]
-  if (next === undefined)
-    return {
-      eventType: 'RunCompleted',
-      run: {
-        ...run,
-        revision: run.revision + 1,
-        phase: 'completed' as const,
-        progress: 100,
-        completedSequenceCount: completed,
-      },
-    }
-  return {
-    eventType: 'RunSequenceVerified',
-    run: {
-      ...run,
-      revision: run.revision + 1,
-      phase: 'preflight' as const,
-      target: next.target,
-      progress: Math.floor(
-        (completed / definition.plan.sequences.length) * 100,
-      ),
-      activeSequenceIndex: activeSequenceIndex + 1,
-      completedSequenceCount: completed,
-    },
-  }
-}
-
-function hasFakeRunDefinition(db: DatabaseSync) {
-  const run = state(db).run
-  if (run?.sourceDefinitionId === undefined) return false
-  const raw: unknown = db
-    .prepare('SELECT definition FROM run_definitions WHERE run_definition_id=?')
-    .get(run.sourceDefinitionId)
-  const row = Schema.decodeUnknownSync(
-    Schema.optional(Schema.Struct({ definition: Schema.String })),
-  )(raw)
-  if (row === undefined) return false
-  const definition = Schema.decodeUnknownSync(StoredRunDefinition)(
-    JSON.parse(row.definition),
-  )
-  return definition.executor === 'fake' || definition.executor === 'fixture'
-}
-function hasFakeExecutor(db: DatabaseSync) {
-  const run = state(db).run
-  if (run?.sourceDefinitionId === undefined) return false
-  const raw: unknown = db
-    .prepare('SELECT definition FROM run_definitions WHERE run_definition_id=?')
-    .get(run.sourceDefinitionId)
-  const row = Schema.decodeUnknownSync(
-    Schema.optional(Schema.Struct({ definition: Schema.String })),
-  )(raw)
-  if (row === undefined) return false
-  return (
-    Schema.decodeUnknownSync(StoredRunDefinition)(JSON.parse(row.definition))
-      .executor === 'fake'
-  )
-}
-
-function acceptRunIntervention(
-  db: DatabaseSync,
-  input: PauseRun | ResumeRun,
-  intent: 'pause' | 'resume',
-  identity: LocalIdentity,
-) {
-  if (identity.capability === 'readOnly') return reject('ClientReadOnly')
-  if (!hasFakeRunDefinition(db)) return reject('RunRevisionConflict')
-  expireReconnectGrace(db)
-  const current = state(db)
-  if (input.expectedLeaseRevision !== current.control.revision)
-    return reject('ControlLeaseLost')
-  if (current.control.holderClientId !== identity.clientId)
-    return reject('ControlLeaseLost')
-  const semanticKey = createHash('sha256')
-    .update(
-      JSON.stringify({
-        version: 1,
-        intent,
-        expectedLeaseRevision: input.expectedLeaseRevision,
-        expectedRunRevision: input.expectedRunRevision,
-      }),
-    )
-    .digest('hex')
-  const receiptRaw: unknown = db
-    .prepare(
-      'SELECT semantic_key,response FROM run_intervention_receipts WHERE idempotency_key=? AND owner_person_id=?',
-    )
-    .get(input.idempotencyKey, identity.personId)
-  const existing = Schema.decodeUnknownSync(
-    Schema.optional(
-      Schema.Struct({ semantic_key: Schema.String, response: Schema.String }),
-    ),
-  )(receiptRaw)
-  if (existing !== undefined)
-    return existing.semantic_key === semanticKey
-      ? {
-          status: 200,
-          body: Schema.decodeUnknownSync(CommandResultSchema)(
-            JSON.parse(existing.response),
-          ),
-        }
-      : reject('IdempotencyConflict')
-  if (current.run === null) return reject('RunRevisionConflict')
-  if (
-    current.run.phase === 'completed' ||
-    current.run.phase === 'stopped' ||
-    current.run.phase === 'parkRequested'
-  )
-    return reject('AlreadyTerminal')
-  if (intent === 'pause') {
-    if (input.expectedRunRevision !== current.run.revision)
-      return reject('RunRevisionConflict')
-    if (current.run.phase === 'paused') return reject('AlreadyPaused')
-  }
-  if (intent === 'resume') {
-    if (current.run.phase !== 'paused') return reject('NotPaused')
-    if (input.expectedRunRevision !== current.run.revision)
-      return reject('RunRevisionConflict')
-    if (current.run.resumablePhase === undefined)
-      return reject('ResumePhaseUnavailable')
-  }
-  const run = current.run
-  if (run === null) return reject('RunRevisionConflict')
-  let nextRun: Run
-  if (intent === 'pause') {
-    const resumablePhase = resumableRunPhase(run.phase)
-    if (resumablePhase === undefined) return reject('AlreadyTerminal')
-    nextRun = {
-      ...run,
-      revision: run.revision + 1,
-      phase: 'paused',
-      resumablePhase,
-    }
-  } else {
-    const { resumablePhase, ...resumed } = run
-    if (resumablePhase === undefined) return reject('ResumePhaseUnavailable')
-    nextRun = {
-      ...resumed,
-      revision: run.revision + 1,
-      phase: resumablePhase,
-    }
-  }
-  const eventType: ControlEvent =
-    intent === 'pause' ? 'RunPaused' : 'RunResumed'
-  db.exec('BEGIN IMMEDIATE')
-  try {
-    const cursor = current.eventCursor + 1
-    commit(db, {
-      snapshotVersion: current.snapshotVersion + 1,
-      eventCursor: cursor,
-      run: nextRun,
-    })
-    const result: CommandResult = {
-      outcome: 'accepted',
-      eventType,
-      message: operatorMessages[eventType],
-      run: nextRun,
-      snapshot: snapshot(db, identity),
-    }
-    db.prepare('INSERT INTO run_intervention_receipts VALUES (?,?,?,?)').run(
-      input.idempotencyKey,
-      identity.personId,
-      semanticKey,
-      JSON.stringify(result),
-    )
-    db.prepare('INSERT INTO events VALUES (?,?,?)').run(
-      cursor,
-      eventType,
-      JSON.stringify(result),
-    )
-    db.exec('COMMIT')
-    return { status: 202, body: result, event: { type: eventType, cursor } }
-  } catch (error) {
-    db.exec('ROLLBACK')
-    throw error
-  }
-}
-
-function acceptFakePolicy(
-  db: DatabaseSync,
-  input: FakePolicy,
-  path: string,
-  identity: LocalIdentity,
-) {
-  if (identity.capability === 'readOnly') return reject('ClientReadOnly')
-  if (!hasFakeRunDefinition(db)) return reject('RunRevisionConflict')
-  const current = state(db)
-  if (
-    input.expectedLeaseRevision !== current.control.revision ||
-    current.control.holderClientId !== identity.clientId
-  )
-    return reject('ControlLeaseLost')
-  const run = current.run
-  if (run === null) return reject('RunRevisionConflict')
-  const definition =
-    run.sourceDefinitionId === undefined
-      ? undefined
-      : Schema.decodeUnknownSync(
-          Schema.optional(Schema.Struct({ definition: Schema.String })),
-        )(
-          db
-            .prepare(
-              'SELECT definition FROM run_definitions WHERE run_definition_id=?',
-            )
-            .get(run.sourceDefinitionId),
-        )
-  if (definition === undefined) return reject('RunRevisionConflict')
-  const sequences = Schema.decodeUnknownSync(StoredRunDefinition)(
-    JSON.parse(definition.definition),
-  ).plan.sequences
-  const semanticKey = createHash('sha256')
-    .update(
-      JSON.stringify({
-        version: 1,
-        path,
-        expectedLeaseRevision: input.expectedLeaseRevision,
-        expectedRunRevision: input.expectedRunRevision,
-      }),
-    )
-    .digest('hex')
-  const priorRaw: unknown = db
-    .prepare(
-      'SELECT semantic_key,response FROM run_intervention_receipts WHERE idempotency_key=? AND owner_person_id=?',
-    )
-    .get(input.idempotencyKey, identity.personId)
-  const prior = Schema.decodeUnknownSync(
-    Schema.optional(InterventionReceiptRow),
-  )(priorRaw)
-  if (prior !== undefined)
-    return prior.semantic_key === semanticKey
-      ? {
-          status: 200,
-          body: Schema.decodeUnknownSync(CommandResultSchema)(
-            JSON.parse(prior.response),
-          ),
-        }
-      : reject('IdempotencyConflict')
-  if (input.expectedRunRevision !== run.revision)
-    return reject('RunRevisionConflict')
-  if (
-    run.phase === 'completed' ||
-    run.phase === 'stopped' ||
-    run.phase === 'parkRequested'
-  )
-    return reject('AlreadyTerminal')
-  if (run.phase === 'paused' && path !== 'stop' && path !== 'park')
-    return reject('PolicyUnavailable')
-  const policyPhase = resumableRunPhase(run.phase)
-  if (path === 'retry' && policyPhase === undefined)
-    return reject('PolicyUnavailable')
-  const activeSequenceIndex = run.activeSequenceIndex
-  const completedSequenceCount = run.completedSequenceCount
-  if (activeSequenceIndex === undefined || completedSequenceCount === undefined)
-    return reject('PolicyUnavailable')
-  const nextSequence = sequences[activeSequenceIndex + 1]
-  if (path === 'retry' && run.retryPhase !== undefined)
-    return reject('RetryExhausted')
-  let nextRun: Run
-  if (path === 'stop')
-    nextRun = { ...run, revision: run.revision + 1, phase: 'stopped' }
-  else if (path === 'skip')
-    nextRun =
-      nextSequence === undefined
-        ? {
-            ...run,
-            revision: run.revision + 1,
-            phase: 'completed',
-            progress: 100,
-            completedSequenceCount: completedSequenceCount + 1,
-          }
-        : {
-            ...run,
-            revision: run.revision + 1,
-            phase: 'preflight',
-            target: nextSequence.target,
-            progress: Math.floor(
-              ((completedSequenceCount + 1) / sequences.length) * 100,
-            ),
-            activeSequenceIndex: activeSequenceIndex + 1,
-            completedSequenceCount: completedSequenceCount + 1,
-          }
-  else if (path === 'retry') {
-    if (policyPhase === undefined) return reject('PolicyUnavailable')
-    nextRun = { ...run, revision: run.revision + 1, retryPhase: policyPhase }
-  } else
-    nextRun = { ...run, revision: run.revision + 1, phase: 'parkRequested' }
-  const eventType: ControlEvent =
-    path === 'stop'
-      ? 'RunStopped'
-      : path === 'skip'
-        ? 'FakeSequenceSkipped'
-        : path === 'retry'
-          ? 'FakePhaseRetried'
-          : 'FakeParkRequested'
-  db.exec('BEGIN IMMEDIATE')
-  try {
-    const cursor = current.eventCursor + 1
-    commit(db, {
-      snapshotVersion: current.snapshotVersion + 1,
-      eventCursor: cursor,
-      run: nextRun,
-    })
-    const body: CommandResult = {
-      outcome: 'accepted',
-      eventType,
-      run: nextRun,
-      snapshot: snapshot(db, identity),
-    }
-    db.prepare('INSERT INTO run_intervention_receipts VALUES (?,?,?,?)').run(
-      input.idempotencyKey,
-      identity.personId,
-      semanticKey,
-      JSON.stringify(body),
-    )
-    if (path === 'stop')
-      db.prepare('INSERT INTO receipts VALUES (?,?)').run(
-        input.idempotencyKey,
-        JSON.stringify(body),
-      )
-    db.prepare('INSERT INTO events VALUES (?,?,?)').run(
-      cursor,
-      eventType,
-      JSON.stringify(body),
-    )
-    db.exec('COMMIT')
-    return { status: 202, body, event: { type: eventType, cursor } }
-  } catch (error) {
-    db.exec('ROLLBACK')
-    throw error
-  }
-}
-
-const StoredMutationPreview = Schema.Struct({
-  preview_id: Schema.String,
-  run_id: Schema.String,
-  run_revision: Schema.Int,
-  owner_person_id: Schema.String,
-  mutation: Schema.Literals([
-    'reprioritizeSecond',
-    'shortenSecond',
-    'discardCurrent',
-  ]),
-  consequences: Schema.String,
-  classification: Schema.Literals(['nonDisruptive', 'notice', 'disruptive']),
-  expires_at: Schema.String,
-  applied_at: Schema.NullOr(Schema.String),
-})
-
-function previewRunMutation(
-  db: DatabaseSync,
-  input: PreviewRunMutation,
-  identity: LocalIdentity,
-) {
-  if (!isOwner(identity)) return reject('OwnerRequired').body
-  if (identity.capability === 'readOnly') return reject('ClientReadOnly').body
-  if (!hasFakeExecutor(db)) return reject('RunRevisionConflict').body
-  const current = state(db)
-  const run = current.run
-  if (run === null || input.expectedRunRevision !== run.revision)
-    return reject('RunRevisionConflict').body
-  if (
-    run.phase === 'paused' ||
-    run.phase === 'completed' ||
-    run.phase === 'stopped' ||
-    run.phase === 'parkRequested' ||
-    run.activeSequenceIndex !== 0
-  )
-    return reject('PolicyUnavailable').body
-  const semanticKey = createHash('sha256')
-    .update(
-      JSON.stringify({
-        version: 1,
-        mutation: input.mutation,
-        expectedLeaseRevision: input.expectedLeaseRevision,
-        expectedRunRevision: input.expectedRunRevision,
-      }),
-    )
-    .digest('hex')
-  const receiptRaw: unknown = db
-    .prepare(
-      'SELECT semantic_key,response FROM run_mutation_preview_receipts WHERE idempotency_key=? AND owner_person_id=?',
-    )
-    .get(input.idempotencyKey, identity.personId)
-  const receiptRow = Schema.decodeUnknownSync(
-    Schema.optional(
-      Schema.Struct({ semantic_key: Schema.String, response: Schema.String }),
-    ),
-  )(receiptRaw)
-  if (receiptRow !== undefined)
-    return receiptRow.semantic_key === semanticKey
-      ? JSON.parse(receiptRow.response)
-      : reject('IdempotencyConflict').body
-  const definition =
-    run.sourceDefinitionId === undefined
-      ? undefined
-      : Schema.decodeUnknownSync(
-          Schema.optional(Schema.Struct({ definition: Schema.String })),
-        )(
-          db
-            .prepare(
-              'SELECT definition FROM run_definitions WHERE run_definition_id=?',
-            )
-            .get(run.sourceDefinitionId),
-        )
-  const second =
-    definition === undefined
-      ? undefined
-      : Schema.decodeUnknownSync(StoredRunDefinition)(
-          JSON.parse(definition.definition),
-        ).plan.sequences[1]
-  if (second === undefined) return reject('PolicyUnavailable').body
-  const classification =
-    input.mutation === 'reprioritizeSecond'
-      ? ('nonDisruptive' as const)
-      : input.mutation === 'shortenSecond'
-        ? ('notice' as const)
-        : ('disruptive' as const)
-  const consequences =
-    input.mutation === 'reprioritizeSecond'
-      ? `The unstarted second fake sequence (${second.target}) remains after the current sequence.`
-      : input.mutation === 'shortenSecond'
-        ? `The unstarted second fake sequence (${second.target}) is shortened in this fake run.`
-        : `Current fake sequence progress is discarded and ${second.target} starts at preflight.`
-  const preview = {
-    previewId: `run-mutation-${randomUUID()}`,
-    runId: run.id,
-    runRevision: run.revision,
-    mutation: input.mutation,
-    classification,
-    consequences,
-    expiresAt: new Date(Date.now() + 300_000).toISOString(),
-    approvalRequired: classification === 'disruptive',
-  }
-  const result = {
-    outcome: 'accepted' as const,
-    preview,
-    ...(classification === 'disruptive' &&
-    current.control.holderClientId === identity.clientId
-      ? {
-          approvalToken: createHash('sha256')
-            .update(`${preview.previewId}:${consequences}`)
-            .digest('hex'),
-        }
-      : {}),
-  }
-  db.exec('BEGIN IMMEDIATE')
-  try {
-    const cursor = current.eventCursor + 1
-    commit(db, {
-      snapshotVersion: current.snapshotVersion + 1,
-      eventCursor: cursor,
-    })
-    db.prepare(
-      'INSERT INTO run_mutation_previews VALUES (?,?,?,?,?,?,?,?,NULL)',
-    ).run(
-      preview.previewId,
-      run.id,
-      run.revision,
-      identity.personId,
-      preview.mutation,
-      consequences,
-      classification,
-      preview.expiresAt,
-    )
-    db.prepare(
-      'INSERT INTO run_mutation_preview_receipts VALUES (?,?,?,?)',
-    ).run(
-      input.idempotencyKey,
-      identity.personId,
-      semanticKey,
-      JSON.stringify(result),
-    )
-    db.prepare('INSERT INTO events VALUES (?,?,?)').run(
-      cursor,
-      'RunMutationPreviewed',
-      JSON.stringify(result),
-    )
-    db.exec('COMMIT')
-    return {
-      ...result,
-      event: { type: 'RunMutationPreviewed', cursor },
-    }
-  } catch (error) {
-    db.exec('ROLLBACK')
-    throw error
-  }
-}
-
-function applyRunMutation(
-  db: DatabaseSync,
-  input: ApplyRunMutation | ApproveDisruptiveRunMutation,
-  approved: boolean,
-  identity: LocalIdentity,
-) {
-  if (!isOwner(identity)) return reject('OwnerRequired')
-  if (identity.capability === 'readOnly') return reject('ClientReadOnly')
-  if (!hasFakeExecutor(db)) return reject('RunRevisionConflict')
-  const current = state(db)
-  const run = current.run
-  if (
-    input.expectedLeaseRevision !== current.control.revision ||
-    current.control.holderClientId !== identity.clientId
-  )
-    return reject('ControlLeaseLost')
-  const semanticKey = createHash('sha256')
-    .update(
-      JSON.stringify({
-        version: 1,
-        previewId: input.previewId,
-        expectedLeaseRevision: input.expectedLeaseRevision,
-        expectedRunRevision: input.expectedRunRevision,
-        approved,
-      }),
-    )
-    .digest('hex')
-  const priorRaw: unknown = db
-    .prepare(
-      'SELECT semantic_key,response FROM run_intervention_receipts WHERE idempotency_key=? AND owner_person_id=?',
-    )
-    .get(input.idempotencyKey, identity.personId)
-  const prior = Schema.decodeUnknownSync(
-    Schema.optional(
-      Schema.Struct({ semantic_key: Schema.String, response: Schema.String }),
-    ),
-  )(priorRaw)
-  if (prior !== undefined)
-    return prior.semantic_key === semanticKey
-      ? {
-          status: 200,
-          body: Schema.decodeUnknownSync(CommandResultSchema)(
-            JSON.parse(prior.response),
-          ),
-        }
-      : reject('IdempotencyConflict')
-  if (run === null || input.expectedRunRevision !== run.revision)
-    return reject('RunRevisionConflict')
-  if (
-    run.phase === 'completed' ||
-    run.phase === 'stopped' ||
-    run.phase === 'parkRequested'
-  )
-    return reject('PolicyUnavailable')
-  const rowRaw: unknown = db
-    .prepare(
-      'SELECT preview_id,run_id,run_revision,owner_person_id,mutation,consequences,classification,expires_at,applied_at FROM run_mutation_previews WHERE preview_id=?',
-    )
-    .get(input.previewId)
-  const preview = Schema.decodeUnknownSync(
-    Schema.optional(StoredMutationPreview),
-  )(rowRaw)
-  if (preview === undefined || preview.run_id !== run.id)
-    return reject('PreviewUnavailable')
-  if (preview.applied_at !== null) return reject('PreviewUnavailable')
-  if (Date.parse(preview.expires_at) <= Date.now())
-    return reject('PreviewExpired')
-  if (preview.run_revision !== run.revision)
-    return reject('RunRevisionConflict')
-  if (preview.classification === 'disruptive' && !approved)
-    return reject('ApprovalRequired')
-  if (preview.classification !== 'disruptive' && approved)
-    return reject('ApprovalMismatch')
-  if (
-    preview.classification === 'disruptive' &&
-    'approvalToken' in input &&
-    input.approvalToken !==
-      createHash('sha256')
-        .update(`${preview.preview_id}:${preview.consequences}`)
-        .digest('hex')
-  )
-    return reject('ApprovalMismatch')
-  const nextRun: Run =
-    preview.mutation === 'discardCurrent'
-      ? {
-          ...run,
-          revision: run.revision + 1,
-          phase: 'preflight',
-          target: mutationNextTarget(db, run),
-          progress: Math.floor(
-            (((run.completedSequenceCount ?? 0) + 1) / 2) * 100,
-          ),
-          activeSequenceIndex: (run.activeSequenceIndex ?? 0) + 1,
-          completedSequenceCount: (run.completedSequenceCount ?? 0) + 1,
-          appliedMutations: [
-            ...(run.appliedMutations ?? []),
-            { previewId: preview.preview_id, kind: preview.mutation },
-          ],
-        }
-      : {
-          ...run,
-          revision: run.revision + 1,
-          appliedMutations: [
-            ...(run.appliedMutations ?? []),
-            { previewId: preview.preview_id, kind: preview.mutation },
-          ],
-        }
-  db.exec('BEGIN IMMEDIATE')
-  try {
-    const cursor = current.eventCursor + 1
-    commit(db, {
-      snapshotVersion: current.snapshotVersion + 1,
-      eventCursor: cursor,
-      run: nextRun,
-    })
-    db.prepare(
-      'UPDATE run_mutation_previews SET applied_at=? WHERE preview_id=? AND applied_at IS NULL',
-    ).run(new Date().toISOString(), preview.preview_id)
-    const body: CommandResult = {
-      outcome: 'accepted',
-      eventType: 'RunMutationApplied',
-      run: nextRun,
-      snapshot: snapshot(db, identity),
-    }
-    db.prepare('INSERT INTO run_intervention_receipts VALUES (?,?,?,?)').run(
-      input.idempotencyKey,
-      identity.personId,
-      semanticKey,
-      JSON.stringify(body),
-    )
-    db.prepare('INSERT INTO events VALUES (?,?,?)').run(
-      cursor,
-      'RunMutationApplied',
-      JSON.stringify(body),
-    )
-    db.exec('COMMIT')
-    return { status: 202, body, event: { type: 'RunMutationApplied', cursor } }
-  } catch (error) {
-    db.exec('ROLLBACK')
-    throw error
-  }
-}
-
-function mutationNextTarget(db: DatabaseSync, run: Run) {
-  const raw: unknown =
-    run.sourceDefinitionId === undefined
-      ? undefined
-      : db
-          .prepare(
-            'SELECT definition FROM run_definitions WHERE run_definition_id=?',
-          )
-          .get(run.sourceDefinitionId)
-  const definition = Schema.decodeUnknownSync(
-    Schema.optional(Schema.Struct({ definition: Schema.String })),
-  )(raw)
-  return definition === undefined
-    ? run.target
-    : (Schema.decodeUnknownSync(StoredRunDefinition)(
-        JSON.parse(definition.definition),
-      ).plan.sequences[(run.activeSequenceIndex ?? 0) + 1]?.target ??
-        run.target)
-}
-
-function acceptControl(
-  db: DatabaseSync,
-  command: typeof controlEnvelopeCommand.Type,
-  identity: LocalIdentity,
-) {
-  expireReconnectGrace(db)
-  const semanticKey = createHash('sha256')
-    .update(JSON.stringify({ version: 1, command }))
-    .digest('hex')
-  const existingRaw: unknown = db
-    .prepare(
-      'SELECT semantic_key,response FROM control_command_receipts WHERE idempotency_key=? AND actor_person_id=? AND actor_client_id=?',
-    )
-    .get(command.idempotencyKey, identity.personId, identity.clientId)
-  const existing = Schema.decodeUnknownSync(
-    Schema.optional(
-      Schema.Struct({ semantic_key: Schema.String, response: Schema.String }),
-    ),
-  )(existingRaw)
-  if (existing !== undefined)
-    return existing.semantic_key === semanticKey
-      ? {
-          status: 200,
-          body: Schema.decodeUnknownSync(CommandHttpSuccessEnvelope)(
-            JSON.parse(existing.response),
-          ),
-        }
-      : reject('IdempotencyConflict')
-  const current = state(db)
-  const desktop = identity.clientId.startsWith('desktop-')
-  if (identity.capability === 'readOnly' || !desktop)
-    return reject('ClientReadOnly')
-  if (command.expectedLeaseRevision !== current.control.revision)
-    return reject('FreshnessConflict')
-  if (
-    (Command.guards.GrantControl(command) ||
-      Command.guards.DeclineControl(command) ||
-      Command.guards.TakeControl(command)) &&
-    !isOwner(identity)
-  )
-    return reject('OwnerRequired')
-  if (
-    Command.guards.ReleaseControl(command) &&
-    current.control.holderClientId !== identity.clientId
-  )
-    return reject('ControlLeaseLost')
-  if (Command.guards.RequestControl(command)) {
-    if (current.control.holderClientId === identity.clientId)
-      return reject('AlreadyController')
-    const pendingRequest: unknown = db
-      .prepare('SELECT client_id FROM control_requests WHERE client_id=?')
-      .get(identity.clientId)
-    if (
-      Schema.decodeUnknownSync(
-        Schema.optional(Schema.Struct({ client_id: Schema.String })),
-      )(pendingRequest) !== undefined
-    )
-      return reject('ControlRequestAlreadyPending')
-  }
-  db.exec('BEGIN IMMEDIATE')
-  try {
-    let holder = current.control.holderClientId
-    let revision = current.control.revision
-    let event: typeof DomainEvent.Type
-    if (Command.guards.RequestControl(command)) {
-      const createdAt = new Date().toISOString()
-      const expiresAt = new Date(Date.now() + 60_000).toISOString()
-      const requestId = randomUUID()
-      db.prepare('INSERT INTO control_requests VALUES (?,?,?,?,?,?)').run(
-        requestId,
-        identity.clientId,
-        identity.personId,
-        createdAt,
-        expiresAt,
-        1,
-      )
-      event = domainEvent({
-        _tag: 'ControlRequested',
-        requestId,
-        requesterClientId: identity.clientId,
-      })
-    } else if (Command.guards.GrantControl(command)) {
-      expireControlRequests(db)
-      const requestRaw: unknown = db
-        .prepare(
-          'SELECT request_id,client_id,target_control_capable FROM control_requests WHERE request_id=? AND client_id=?',
-        )
-        .get(command.requestId, command.targetClientId)
-      const request = Schema.decodeUnknownSync(
-        Schema.optional(ControlRequestRow),
-      )(requestRaw)
-      if (request === undefined || request.target_control_capable !== 1) {
-        db.exec('ROLLBACK')
-        return reject('ControlRequestUnavailable')
-      }
-      holder = request.client_id
-      revision += 1
-      event = domainEvent({
-        _tag: 'ControlGranted',
-        requestId: request.request_id,
-        holderClientId: request.client_id,
-      })
-      db.exec('DELETE FROM control_requests')
-    } else if (Command.guards.DeclineControl(command)) {
-      const requestRaw: unknown = db
-        .prepare(
-          'SELECT request_id,client_id,target_control_capable FROM control_requests WHERE request_id=?',
-        )
-        .get(command.requestId)
-      const request = Schema.decodeUnknownSync(
-        Schema.optional(ControlRequestRow),
-      )(requestRaw)
-      if (request === undefined) {
-        db.exec('ROLLBACK')
-        return reject('ControlRequestUnavailable')
-      }
-      db.prepare('DELETE FROM control_requests WHERE request_id=?').run(
-        request.request_id,
-      )
-      event = domainEvent({
-        _tag: 'ControlDeclined',
-        requestId: request.request_id,
-      })
-    } else if (Command.guards.ReleaseControl(command)) {
-      holder = null
-      revision += 1
-      event = domainEvent({
-        _tag: 'ControlReleased',
-        previousHolderClientId: identity.clientId,
-      })
-      db.exec('DELETE FROM control_requests')
-    } else {
-      holder = identity.clientId
-      revision += 1
-      event = domainEvent({
-        _tag: 'OwnerTookControl',
-        holderClientId: identity.clientId,
-      })
-      db.exec('DELETE FROM control_requests')
-    }
-    const cursor = current.eventCursor + 1
-    commit(db, {
-      snapshotVersion: current.snapshotVersion + 1,
-      eventCursor: cursor,
-      leaseRevision: revision,
-      leaseHolder: holder,
-      leaseState: holder === null ? 'unheld' : 'held',
-      reconnectGraceUntil: null,
-    })
-    const data = Effect.runSync(bootstrapSnapshot(db, identity))
-    const body = Schema.decodeUnknownSync(CommandHttpSuccessEnvelope)({
-      ok: true,
-      data,
-    })
-    db.prepare('INSERT INTO control_command_receipts VALUES (?,?,?,?,?)').run(
-      command.idempotencyKey,
-      identity.personId,
-      identity.clientId,
-      semanticKey,
-      JSON.stringify(body),
-    )
-    db.prepare('INSERT INTO events VALUES (?,?,?)').run(
-      cursor,
-      event._tag,
-      JSON.stringify(event),
-    )
-    db.exec('COMMIT')
-    return { status: 202, body, event: { type: event._tag, cursor } }
-  } catch (error) {
-    db.exec('ROLLBACK')
-    throw error
-  }
-}
-
-function commit(db: DatabaseSync, values: Record<string, unknown>) {
-  const put = db.prepare('UPDATE state SET value=? WHERE key=?')
-  for (const [key, value] of Object.entries(values))
-    put.run(JSON.stringify(value), key)
-}
-function domainEvent(event: unknown) {
-  return Schema.decodeUnknownSync(DomainEvent)(event)
-}
-function persistEvidence(
-  db: DatabaseSync,
-  evidence: Evidence,
-  identityResolver: () => LocalIdentity,
-) {
-  const current = state(db)
-  db.exec('BEGIN IMMEDIATE')
-  try {
-    commit(db, {
-      evidence,
-      snapshotVersion: current.snapshotVersion + 1,
-      eventCursor: current.eventCursor + 1,
-    })
-    db.prepare('INSERT INTO events VALUES (?,?,?)').run(
-      current.eventCursor + 1,
-      'ObservationProjected',
-      JSON.stringify(evidence),
-    )
-    db.exec('COMMIT')
-    return snapshot(db, identityResolver())
-  } catch (error) {
-    db.exec('ROLLBACK')
-    throw error
-  }
-}
 function reject(reason: FailureReason) {
   return {
     status:
@@ -4156,231 +1237,7 @@ function reject(reason: FailureReason) {
     },
   }
 }
-function acceptPlanDraft(
-  db: DatabaseSync,
-  input: SavePlanDraft,
-  identity: LocalIdentity,
-) {
-  if (!isOwner(identity)) return reject('OwnerRequired')
-  if (identity.capability === 'readOnly') return reject('ClientReadOnly')
-  if (
-    input.sequences.length < 2 ||
-    new Set(input.sequences.map((sequence) => sequence.sequenceId)).size !==
-      input.sequences.length
-  )
-    return reject('InvalidInput')
-  const semanticKey = createHash('sha256')
-    .update(
-      JSON.stringify({
-        version: 1,
-        planId: input.planId,
-        expectedPlanRevision: input.expectedPlanRevision,
-        sequences: input.sequences,
-      }),
-    )
-    .digest('hex')
-  const receiptRaw: unknown = db
-    .prepare(
-      'SELECT response FROM observing_plan_receipts WHERE idempotency_key=? AND owner_person_id=?',
-    )
-    .get(input.idempotencyKey, identity.personId)
-  const existing = Schema.decodeUnknownSync(Schema.optional(PlanReceiptRow))(
-    receiptRaw,
-  )
-  if (existing !== undefined) {
-    const stored = Schema.decodeUnknownSync(
-      Schema.Struct({ semanticKey: Schema.String, result: Schema.Unknown }),
-    )(JSON.parse(existing.response))
-    return stored.semanticKey === semanticKey
-      ? { status: 200, body: stored.result }
-      : reject('IdempotencyConflict')
-  }
-  const current = state(db)
-  if (current.plan.readiness === 'unavailable') return reject('PlanUnavailable')
-  if (
-    input.planId !== current.plan.id ||
-    input.expectedPlanRevision !== current.plan.revision ||
-    current.run !== null
-  )
-    return reject('FreshnessConflict')
-  const currentPlan = planWorkspaceProjection(db, 'plan')
-  const currentSequences = currentPlan.sequences.map(
-    ({ viability, ...sequence }) => sequence,
-  )
-  if (JSON.stringify(input.sequences) === JSON.stringify(currentSequences))
-    return reject('DraftUnchanged')
-  const plan = evaluatePlan({
-    planId: input.planId,
-    revision: current.plan.revision + 1,
-    sequences: input.sequences,
-  })
-  db.exec('BEGIN IMMEDIATE')
-  try {
-    const cursor = current.eventCursor + 1
-    db.prepare(
-      'UPDATE observing_plans SET revision=?,projection=?,run_eligible=0 WHERE plan_id=? AND revision=?',
-    ).run(
-      plan.revision,
-      JSON.stringify(plan),
-      plan.planId,
-      current.plan.revision,
-    )
-    db.prepare(
-      "UPDATE workspace_projections SET value=? WHERE name='plan'",
-    ).run(JSON.stringify(plan))
-    commit(db, {
-      planRevision: plan.revision,
-      snapshotVersion: current.snapshotVersion + 1,
-      eventCursor: cursor,
-    })
-    const result: SavePlanDraftResult = {
-      outcome: 'accepted',
-      plan,
-      snapshot: snapshot(db, identity),
-    }
-    db.prepare('INSERT INTO observing_plan_receipts VALUES (?,?,?,?)').run(
-      input.idempotencyKey,
-      identity.personId,
-      semanticKey,
-      JSON.stringify({ semanticKey, result }),
-    )
-    db.prepare('INSERT INTO events VALUES (?,?,?)').run(
-      cursor,
-      'PlanDraftSaved',
-      JSON.stringify(result),
-    )
-    db.exec('COMMIT')
-    return {
-      status: 202,
-      body: result,
-      event: { type: 'PlanDraftSaved', cursor },
-    }
-  } catch (error) {
-    db.exec('ROLLBACK')
-    throw error
-  }
-}
-function acceptRunDefinition(
-  db: DatabaseSync,
-  input: AcceptRunDefinition,
-  identity: LocalIdentity,
-) {
-  if (!isOwner(identity)) return reject('OwnerRequired')
-  if (identity.capability === 'readOnly') return reject('ClientReadOnly')
-  const semanticKey = createHash('sha256')
-    .update(
-      JSON.stringify({
-        version: 1,
-        planId: input.planId,
-        expectedPlanRevision: input.expectedPlanRevision,
-        expectedLeaseRevision: input.expectedLeaseRevision,
-      }),
-    )
-    .digest('hex')
-  const receiptRaw: unknown = db
-    .prepare(
-      'SELECT response FROM run_definition_receipts WHERE idempotency_key=? AND owner_person_id=?',
-    )
-    .get(input.idempotencyKey, identity.personId)
-  const existing = Schema.decodeUnknownSync(
-    Schema.optional(RunDefinitionReceiptRow),
-  )(receiptRaw)
-  if (existing !== undefined) {
-    const stored = Schema.decodeUnknownSync(
-      Schema.Struct({ semanticKey: Schema.String, result: Schema.Unknown }),
-    )(JSON.parse(existing.response))
-    return stored.semanticKey === semanticKey
-      ? { status: 200, body: stored.result }
-      : reject('IdempotencyConflict')
-  }
-  const current = state(db)
-  if (current.plan.readiness === 'unavailable') return reject('PlanUnavailable')
-  if (
-    input.planId !== current.plan.id ||
-    input.expectedPlanRevision !== current.plan.revision ||
-    input.expectedLeaseRevision !== current.control.revision
-  )
-    return reject('FreshnessConflict')
-  if (current.run !== null) return reject('ActiveRunConflict')
-  if (current.plan.readiness !== 'ready') return reject('PlanNotReady')
-  const definitionRaw: unknown = db
-    .prepare(
-      'SELECT run_definition_id,source_plan_id,source_plan_revision,definition,accepted_at FROM run_definitions WHERE source_plan_id=? AND source_plan_revision=?',
-    )
-    .get(input.planId, input.expectedPlanRevision)
-  if (
-    Schema.decodeUnknownSync(Schema.optional(RunDefinitionRow))(
-      definitionRaw,
-    ) !== undefined
-  )
-    return reject('RunDefinitionAlreadyAccepted')
-  const planRaw: unknown = db
-    .prepare(
-      'SELECT projection FROM observing_plans WHERE plan_id=? AND revision=?',
-    )
-    .get(input.planId, input.expectedPlanRevision)
-  const plan = Schema.decodeUnknownSync(
-    Schema.Struct({ projection: Schema.String }),
-  )(planRaw)
-  const acceptedAt = new Date().toISOString()
-  const definition: RunDefinition = {
-    id: `run-definition-${randomUUID()}`,
-    sourcePlanId: input.planId,
-    sourcePlanRevision: input.expectedPlanRevision,
-    acceptedAt,
-    executor: 'fake',
-    plan: Schema.decodeUnknownSync(PlanWorkspace)(JSON.parse(plan.projection)),
-  }
-  db.exec('BEGIN IMMEDIATE')
-  try {
-    const cursor = current.eventCursor + 1
-    const marked = db
-      .prepare(
-        'UPDATE observing_plans SET run_eligible=1 WHERE plan_id=? AND revision=? AND run_eligible=0',
-      )
-      .run(input.planId, input.expectedPlanRevision)
-    if (marked.changes !== 1) {
-      db.exec('ROLLBACK')
-      return reject('RunDefinitionAlreadyAccepted')
-    }
-    db.prepare('INSERT INTO run_definitions VALUES (?,?,?,?,?)').run(
-      definition.id,
-      definition.sourcePlanId,
-      definition.sourcePlanRevision,
-      JSON.stringify(definition),
-      definition.acceptedAt,
-    )
-    commit(db, {
-      snapshotVersion: current.snapshotVersion + 1,
-      eventCursor: cursor,
-    })
-    const result: AcceptRunDefinitionResult = {
-      outcome: 'accepted',
-      runDefinition: definition,
-      snapshot: snapshot(db, identity),
-    }
-    db.prepare('INSERT INTO run_definition_receipts VALUES (?,?,?,?)').run(
-      input.idempotencyKey,
-      identity.personId,
-      semanticKey,
-      JSON.stringify({ semanticKey, result }),
-    )
-    db.prepare('INSERT INTO events VALUES (?,?,?)').run(
-      cursor,
-      'RunDefinitionAccepted',
-      JSON.stringify(result),
-    )
-    db.exec('COMMIT')
-    return {
-      status: 202,
-      body: result,
-      event: { type: 'RunDefinitionAccepted', cursor },
-    }
-  } catch (error) {
-    db.exec('ROLLBACK')
-    throw error
-  }
-}
+
 const commandFailureStatuses = {
   AuthenticationFailure: 401,
   AuthorizationFailure: 403,
@@ -4392,151 +1249,154 @@ const commandFailureStatuses = {
   ResourceProtected: 409,
   IdempotencyConflict: 409,
 } satisfies Record<CommandFailure['_tag'], number>
-const sqliteControlPersistenceLayer = (
-  db: DatabaseSync,
-  publish: (type: string, cursor: number) => void,
-) =>
-  controlPersistenceLayer({
-    execute: (commandId, command, identity) =>
-      Effect.sync(() => acceptControl(db, command, identity)).pipe(
-        Effect.flatMap((result) => {
-          if (!('ok' in result.body))
-            return Effect.fail(
-              new CommandRejected({
-                failure: commandFailure(commandId, result.body),
-              }),
-            )
-          return Effect.succeed({
-            status: result.status,
-            body: result.body,
-            ...('event' in result && result.event !== undefined
-              ? { event: result.event }
-              : {}),
-          })
-        }),
-      ),
-    publish: (type, cursor) => Effect.sync(() => publish(type, cursor)),
-  })
-const controlCommandFromEnvelope = Effect.fn(
-  'Server.controlCommandFromEnvelope',
-)(
-  function* (
-    request: Promise<unknown | undefined | typeof BodyTooLarge>,
-    db: DatabaseSync,
-    identity: LocalIdentity,
-    publish: (type: string, cursor: number) => void,
-  ) {
-    void db
-    void identity
-    void publish
-    return yield* executeControlRequest(request, BodyTooLarge, identity)
-  },
-  (effect, _request, db, identity, publish) =>
-    effect.pipe(Effect.provide(sqliteControlPersistenceLayer(db, publish))),
-)
 const sqlitePlanPersistenceLayer = (
-  db: DatabaseSync,
+  runRepository: RunSqliteRepositoryShape,
+  stateRepository: StateSqliteRepositoryShape,
   publish: (type: string, cursor: number) => void,
 ) =>
   planPersistenceLayer({
-    execute: (intent, identity) =>
+    saveDraft: (intent, identity) =>
       Effect.try({
-        try: () => planIntentResponse(db, intent, identity),
+        try: () => runRepository.saveDraft(intent, identity),
         catch: (cause) => cause,
       }),
-    snapshot: (identity) => bootstrapSnapshot(db, identity),
+    acceptRunDefinition: (intent, identity) =>
+      Effect.try({
+        try: () => runRepository.acceptRunDefinition(intent, identity),
+        catch: (cause) => cause,
+      }),
+    startAcceptedRun: (intent, identity) =>
+      Effect.try({
+        try: () => runRepository.startAcceptedRun(intent, identity),
+        catch: (cause) => cause,
+      }),
+    previewRunMutation: (intent, identity) =>
+      Effect.try({
+        try: () => runRepository.previewRunMutation(intent, identity),
+        catch: (cause) => cause,
+      }),
+    applyRunMutation: (intent, identity) =>
+      Effect.try({
+        try: () => runRepository.applyRunMutation(intent, identity),
+        catch: (cause) => cause,
+      }),
+    snapshot: (identity) => stateRepository.bootstrapSnapshot(identity),
     publish: (type, cursor) =>
       Effect.try({
         try: () => publish(type, cursor),
         catch: (cause) => cause,
       }),
   })
-function planIntentResponse(
-  db: DatabaseSync,
-  intent: typeof PlanIntent.Type,
-  identity: LocalIdentity,
-) {
-  if (PlanIntent.guards.SaveDraft(intent))
-    return acceptPlanDraft(db, intent, identity)
-  if (PlanIntent.guards.AcceptRunDefinition(intent))
-    return acceptRunDefinition(db, intent, identity)
-  if (PlanIntent.guards.StartAcceptedRun(intent))
-    return acceptRun(db, intent, identity)
-  if (PlanIntent.guards.PreviewRunMutation(intent)) {
-    const body = previewRunMutation(db, intent, identity)
-    return {
-      status: body.outcome === 'rejected' ? reject(body.reason).status : 202,
-      body,
-    }
-  }
-  if (PlanIntent.guards.ApplyRunMutation(intent))
-    return applyRunMutation(db, intent, false, identity)
-  return applyRunMutation(db, intent, true, identity)
-}
 const planCommandFromRequest = Effect.fn('Server.planCommandFromRequest')(
   function* (
     request: Promise<unknown | undefined | typeof BodyTooLarge>,
-    db: DatabaseSync,
+    runRepository: RunSqliteRepositoryShape,
+    stateRepository: StateSqliteRepositoryShape,
     identity: LocalIdentity,
     publish: (type: string, cursor: number) => void,
   ) {
-    void db
+    void runRepository
+    void stateRepository
     void identity
     void publish
     return yield* executePlanRequest(request, BodyTooLarge, identity)
   },
-  (effect, _request, db, identity, publish) =>
-    effect.pipe(Effect.provide(sqlitePlanPersistenceLayer(db, publish))),
+  (effect, _request, runRepository, stateRepository, identity, publish) =>
+    effect.pipe(
+      Effect.provide(
+        Layer.merge(
+          sqlitePlanPersistenceLayer(runRepository, stateRepository, publish),
+          planServiceLayer.pipe(
+            Layer.provide(
+              sqlitePlanPersistenceLayer(
+                runRepository,
+                stateRepository,
+                publish,
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
 )
 const sqliteObservePersistenceLayer = (
-  db: DatabaseSync,
+  runRepository: RunSqliteRepositoryShape,
+  stateRepository: StateSqliteRepositoryShape,
   publish: (type: string, cursor: number) => void,
 ) =>
   observePersistenceLayer({
-    execute: (intent, identity) =>
+    pause: (intent, identity) =>
       Effect.try({
-        try: () => observeIntentResponse(db, intent, identity),
+        try: () => runRepository.pause(intent, identity),
         catch: (cause) => cause,
       }),
-    snapshot: (identity) => bootstrapSnapshot(db, identity),
+    resume: (intent, identity) =>
+      Effect.try({
+        try: () => runRepository.resume(intent, identity),
+        catch: (cause) => cause,
+      }),
+    stop: (intent, identity) =>
+      Effect.try({
+        try: () => runRepository.stop(intent, identity),
+        catch: (cause) => cause,
+      }),
+    skip: (intent, identity) =>
+      Effect.try({
+        try: () => runRepository.skip(intent, identity),
+        catch: (cause) => cause,
+      }),
+    retry: (intent, identity) =>
+      Effect.try({
+        try: () => runRepository.retry(intent, identity),
+        catch: (cause) => cause,
+      }),
+    park: (intent, identity) =>
+      Effect.try({
+        try: () => runRepository.park(intent, identity),
+        catch: (cause) => cause,
+      }),
+    snapshot: (identity) => stateRepository.bootstrapSnapshot(identity),
     publish: (type, cursor) =>
       Effect.try({
         try: () => publish(type, cursor),
         catch: (cause) => cause,
       }),
   })
-function observeIntentResponse(
-  db: DatabaseSync,
-  intent: typeof ObserveIntent.Type,
-  identity: LocalIdentity,
-) {
-  if (ObserveIntent.guards.PauseRun(intent))
-    return acceptRunIntervention(db, intent, 'pause', identity)
-  if (ObserveIntent.guards.ResumeRun(intent))
-    return acceptRunIntervention(db, intent, 'resume', identity)
-  const path = ObserveIntent.guards.StopRun(intent)
-    ? 'stop'
-    : ObserveIntent.guards.SkipSequence(intent)
-      ? 'skip'
-      : ObserveIntent.guards.RetryPhase(intent)
-        ? 'retry'
-        : 'park'
-  return acceptFakePolicy(db, intent, path, identity)
-}
 const observeCommandFromRequest = Effect.fn('Server.observeCommandFromRequest')(
   function* (
     request: Promise<unknown | undefined | typeof BodyTooLarge>,
-    db: DatabaseSync,
+    runRepository: RunSqliteRepositoryShape,
+    stateRepository: StateSqliteRepositoryShape,
     identity: LocalIdentity,
     publish: (type: string, cursor: number) => void,
   ) {
-    void db
+    void runRepository
+    void stateRepository
     void identity
     void publish
     return yield* executeObserveRequest(request, BodyTooLarge, identity)
   },
-  (effect, _request, db, identity, publish) =>
-    effect.pipe(Effect.provide(sqliteObservePersistenceLayer(db, publish))),
+  (effect, _request, runRepository, stateRepository, identity, publish) =>
+    effect.pipe(
+      Effect.provide(
+        Layer.merge(
+          sqliteObservePersistenceLayer(
+            runRepository,
+            stateRepository,
+            publish,
+          ),
+          observeServiceLayer.pipe(
+            Layer.provide(
+              sqliteObservePersistenceLayer(
+                runRepository,
+                stateRepository,
+                publish,
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
 )
 const observeServiceResponse = Effect.fn('Server.observeServiceResponse')(
   function* (_failure: 'ObserveServiceUnavailable', summary: string) {
@@ -4548,8 +1408,11 @@ const observeServiceResponse = Effect.fn('Server.observeServiceResponse')(
   },
 )
 const observeInvalidResponse = Effect.fn('Server.observeInvalidResponse')(
-  function* (db: DatabaseSync, identity: LocalIdentity) {
-    const snapshot = yield* bootstrapSnapshot(db, identity)
+  function* (
+    stateRepository: StateSqliteRepositoryShape,
+    identity: LocalIdentity,
+  ) {
+    const snapshot = yield* stateRepository.bootstrapSnapshot(identity)
     const body = yield* Schema.decodeUnknownEffect(ObserveCommandResponse)({
       _tag: 'Rejected',
       failure: {
@@ -4572,10 +1435,10 @@ const planServiceResponse = Effect.fn('Server.planServiceResponse')(function* (
   return { status: 503, body }
 })
 const planInvalidResponse = Effect.fn('Server.planInvalidResponse')(function* (
-  db: DatabaseSync,
+  stateRepository: StateSqliteRepositoryShape,
   identity: LocalIdentity,
 ) {
-  const snapshot = yield* bootstrapSnapshot(db, identity)
+  const snapshot = yield* stateRepository.bootstrapSnapshot(identity)
   const body = yield* Schema.decodeUnknownEffect(PlanCommandResponse)({
     _tag: 'Rejected',
     failure: {
@@ -4586,52 +1449,6 @@ const planInvalidResponse = Effect.fn('Server.planInvalidResponse')(function* (
   })
   return { status: 400, body }
 })
-function commandFailure(
-  commandId: string,
-  rejected: Extract<CommandResult, { readonly outcome: 'rejected' }>,
-): CommandFailure {
-  const common = {
-    commandId,
-    summary: rejected.message,
-    retryable: false,
-    refreshFromSnapshot: rejected.reason === 'FreshnessConflict',
-    safeAlternatives: [],
-  }
-  const failure =
-    rejected.reason === 'ClientReadOnly' ||
-    rejected.reason === 'ControlLeaseLost' ||
-    rejected.reason === 'AlreadyController' ||
-    rejected.reason === 'ControlRequestAlreadyPending' ||
-    rejected.reason === 'OwnerRequired'
-      ? {
-          _tag: 'AuthorizationFailure',
-          ...common,
-          reason:
-            rejected.reason === 'ClientReadOnly'
-              ? 'ClientReadOnly'
-              : rejected.reason === 'ControlLeaseLost'
-                ? 'ControlLeaseLost'
-                : rejected.reason === 'AlreadyController'
-                  ? 'AlreadyController'
-                  : rejected.reason === 'ControlRequestAlreadyPending'
-                    ? 'ControlRequestAlreadyPending'
-                    : 'OwnerRequired',
-        }
-      : rejected.reason === 'IdempotencyConflict'
-        ? { _tag: 'IdempotencyConflict', ...common }
-        : rejected.reason === 'InvalidInput'
-          ? {
-              _tag: 'InvalidInput',
-              ...common,
-              reason: 'ProposedChangeInvalid',
-            }
-          : {
-              _tag: 'FreshnessConflict',
-              ...common,
-              reason: 'ReconnectRequired',
-            }
-  return Schema.decodeUnknownSync(CommandFailure)(failure)
-}
 const BodyTooLarge = Symbol('BodyTooLarge')
 function body(
   request: IncomingMessage,

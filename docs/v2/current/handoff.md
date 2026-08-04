@@ -1,6 +1,6 @@
 # Production Convergence Complete Handoff
 
-Status: **Phases 1, 2, and 2.5 closed — all five Production Convergence Epics complete; Phase 3 read-only preflight remains prepared, not accepted or implemented**
+Status: **Phases 1, 2, and 2.5 closed — Phase 3 read-only preflight remains prepared, not accepted or implemented**
 
 ## Completed Phase 2.5: Server Boundary Extraction
 
@@ -22,17 +22,17 @@ Previously completed and committed:
    15-second heartbeat), not `setInterval`; active timeouts clear on request or
    service close.
 
-Phase 2.5 is now complete. Plan, Control, Observe, and Library command/read
-boundaries own their HTTP decoding and response shaping through explicit
-SQLite-backed persistence, snapshot, and SSE publication ports. The origin
-router owns route selection and imports only HTTP and identity types;
-`server.ts` composes the existing handlers and real ports. No extracted module
-imports `server.ts`, and no persistence schema or browser, provider, device,
-Solar, or capture behavior changed.
+Phase 2.5 is complete. `server.ts` is now a 2,054-line origin composition and
+transport module. Focused SQLite/domain services own runtime bootstrap, state
+and projection, Plan/fake Observe, Control, Library, and Solar work. Rig worker
+and Solar CLI use SolarWorkService and SQLite directly; production source files
+may not import `server.ts`. No provider, device, Solar behavior, capture,
+browser, or persistence-model scope was added.
 
-Current evidence: `apps/server` `npm run check` passes format, lint,
-typecheck, source checks, and **62/62** integration tests. Phase 3 remains
-unimplemented and requires separate owner acceptance.
+Final evidence: contracts **184/184**, server **62/62**, and web **57/57**.
+All three Compose files render with inert absolute placeholders; unset real
+host-secret paths correctly refuse to render. Phase 3 remains unimplemented
+and requires separate owner acceptance.
 
 ## Production Convergence Complete
 
