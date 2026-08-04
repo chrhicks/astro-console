@@ -1,7 +1,13 @@
 import type { ServerResponse } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { Effect, Schema } from 'effect'
-import { LibraryQuery } from '@astro-console/v2-contracts'
+import {
+  LibraryQuery,
+  ObserveLiveFrameReview,
+} from '@astro-console/v2-contracts'
+import { ReviewAssetRequest } from '@astro-console/v2-contracts'
+import type { LocalIdentity } from '../auth/identity.ts'
+import { body } from './request-body.ts'
 import type { DownloadGrantIssuer } from '../storage/r2-download-grant.ts'
 import { sqliteLibraryServiceLayer } from '../persistence/library-sqlite-repository.ts'
 import {
@@ -15,6 +21,13 @@ export type DownloadGrantConfig = {
   readonly issuer: DownloadGrantIssuer
   readonly now?: () => Date
 }
+const ReviewAssetRow = Schema.Struct({
+  revision: Schema.Int,
+  detail: Schema.String,
+})
+const ReviewReceiptRow = Schema.Struct({ response: Schema.String })
+const ReviewRow = Schema.Struct({ revision: Schema.Int, review: Schema.String })
+const StateValueRow = Schema.Struct({ value: Schema.String })
 
 export function workspace(
   response: ServerResponse,
@@ -130,6 +143,173 @@ export async function libraryDetail(
     ),
   )
   return json(response, result.status, result.body)
+}
+
+export async function observeLiveFrameReview(
+  response: ServerResponse,
+  db: DatabaseSync,
+  snapshotVersion: () => number,
+  currentFrame: () => Promise<
+    | {
+        readonly sourceFrameAssetId: string
+        readonly capturedAtEpochMs: number
+        readonly disposition: 'accepted' | 'rejected'
+      }
+    | undefined
+  >,
+) {
+  const frame = await currentFrame()
+  if (frame === undefined)
+    return json(
+      response,
+      200,
+      ObserveLiveFrameReview.cases.Unavailable.make({
+        reason: 'NoCurrentFrame',
+        message: 'No current captured frame is available for review.',
+      }),
+    )
+  const result = await Effect.runPromise(
+    LibraryService.pipe(
+      Effect.flatMap((library) => library.detail(frame.sourceFrameAssetId)),
+      Effect.map((asset) =>
+        ObserveLiveFrameReview.cases.Available.make({
+          capturedAtEpochMs: frame.capturedAtEpochMs,
+          disposition: frame.disposition,
+          asset,
+        }),
+      ),
+      Effect.catchTags({
+        'Server.LibraryAssetNotFound': () =>
+          Effect.succeed(
+            ObserveLiveFrameReview.cases.Unavailable.make({
+              reason: 'LibraryAssetNotFound',
+              message: 'The current frame has not materialized in Library yet.',
+            }),
+          ),
+        'Server.LibraryInputInvalid': () =>
+          Effect.succeed(
+            ObserveLiveFrameReview.cases.Unavailable.make({
+              reason: 'LibraryAssetNotFound',
+              message: 'The current frame cannot be resolved in Library.',
+            }),
+          ),
+        'Server.LibraryPersistenceUnavailable': () =>
+          Effect.succeed(
+            ObserveLiveFrameReview.cases.Unavailable.make({
+              reason: 'LibraryUnavailable',
+              message: 'Library review evidence is temporarily unavailable.',
+            }),
+          ),
+      }),
+      Effect.provide(sqliteLibraryServiceLayer(db, snapshotVersion)),
+    ),
+  )
+  return json(response, 200, result)
+}
+export async function libraryReview(
+  response: ServerResponse,
+  db: DatabaseSync,
+  identity: LocalIdentity,
+  request: import('node:http').IncomingMessage,
+  encodedAssetId: string,
+) {
+  if (identity.role !== 'owner' || identity.capability !== 'controlCapable')
+    return json(response, 403, {
+      outcome: 'rejected',
+      reason: 'ClientReadOnly',
+    })
+  let input: typeof ReviewAssetRequest.Type
+  const assetId = decodedAssetId(encodedAssetId)
+  try {
+    input = Schema.decodeUnknownSync(ReviewAssetRequest)(await body(request))
+  } catch {
+    return json(response, 400, libraryInvalidBody)
+  }
+  const row = Schema.decodeUnknownSync(Schema.optional(ReviewAssetRow))(
+    db
+      .prepare('SELECT revision,detail FROM library_assets WHERE asset_id=?')
+      .get(assetId),
+  )
+  if (!row) return json(response, 404, libraryNotFoundBody)
+  const prior = Schema.decodeUnknownSync(Schema.optional(ReviewReceiptRow))(
+    db
+      .prepare(
+        'SELECT response FROM asset_review_receipts WHERE asset_id=? AND idempotency_key=?',
+      )
+      .get(assetId, input.idempotencyKey),
+  )
+  if (prior) return json(response, 200, JSON.parse(prior.response))
+  const existing = Schema.decodeUnknownSync(Schema.optional(ReviewRow))(
+    db
+      .prepare('SELECT revision,review FROM asset_reviews WHERE asset_id=?')
+      .get(assetId),
+  )
+  const reviewRevision = existing?.revision ?? 0
+  if (
+    row.revision !== input.expectedAssetRevision ||
+    reviewRevision !== input.expectedReviewRevision
+  )
+    return json(response, 409, {
+      outcome: 'rejected',
+      reason: 'RevisionConflict',
+    })
+  const review = {
+    revision: reviewRevision + 1,
+    decision: input.decision,
+    ...(input.rating === undefined ? {} : { rating: input.rating }),
+    ...(input.annotation === undefined ? {} : { annotation: input.annotation }),
+    updatedAt: new Date().toISOString(),
+  }
+  const result = { outcome: 'accepted', review }
+  const detail = { ...JSON.parse(row.detail), review }
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const cursor =
+      Number(
+        JSON.parse(
+          Schema.decodeUnknownSync(StateValueRow)(
+            db.prepare("SELECT value FROM state WHERE key='eventCursor'").get(),
+          ).value,
+        ),
+      ) + 1
+    db.prepare(
+      'INSERT INTO asset_reviews VALUES (?,?,?) ON CONFLICT(asset_id) DO UPDATE SET revision=excluded.revision,review=excluded.review',
+    ).run(assetId, review.revision, JSON.stringify(review))
+    db.prepare(
+      'UPDATE library_assets SET detail=?,updated_at=? WHERE asset_id=?',
+    ).run(JSON.stringify(detail), review.updatedAt, assetId)
+    db.prepare('INSERT INTO asset_review_receipts VALUES (?,?,?)').run(
+      assetId,
+      input.idempotencyKey,
+      JSON.stringify(result),
+    )
+    db.prepare("UPDATE state SET value=? WHERE key='eventCursor'").run(
+      JSON.stringify(cursor),
+    )
+    db.prepare("UPDATE state SET value=? WHERE key='snapshotVersion'").run(
+      JSON.stringify(
+        Number(
+          JSON.parse(
+            Schema.decodeUnknownSync(StateValueRow)(
+              db
+                .prepare("SELECT value FROM state WHERE key='snapshotVersion'")
+                .get(),
+            ).value,
+          ),
+        ) + 1,
+      ),
+    )
+    db.prepare('INSERT INTO events VALUES (?,?,?)').run(
+      cursor,
+      'AssetReviewUpdated',
+      JSON.stringify({ assetId, review }),
+    )
+    db.exec('COMMIT')
+    return json(response, 200, result)
+  } catch {
+    db.exec('ROLLBACK')
+    return json(response, 503, libraryUnavailableBody)
+  }
 }
 function decodedAssetId(value: string) {
   try {

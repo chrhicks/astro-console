@@ -39,6 +39,16 @@ export type OriginRouterDependencies = {
     response: ServerResponse,
     encodedAssetId: string,
   ) => RouteResult
+  readonly observeLiveFrameReview: (
+    response: ServerResponse,
+    identity: LocalIdentity,
+  ) => RouteResult
+  readonly libraryReview: (
+    response: ServerResponse,
+    identity: LocalIdentity,
+    request: IncomingMessage,
+    encodedAssetId: string,
+  ) => RouteResult
   readonly planCommand: (
     response: ServerResponse,
     identity: LocalIdentity,
@@ -95,6 +105,8 @@ export const createOriginRouter =
       return dependencies.processWorkspace(response, url)
     if (request.method === 'GET' && url.pathname === '/api/library')
       return dependencies.libraryPage(response, url)
+    if (request.method === 'GET' && url.pathname === '/api/observe/live-frame')
+      return dependencies.observeLiveFrameReview(response, identity)
     if (
       request.method === 'GET' &&
       url.pathname.startsWith('/api/library/assets/') &&
@@ -108,6 +120,17 @@ export const createOriginRouter =
       return dependencies.libraryDetail(
         response,
         url.pathname.slice('/api/library/assets/'.length),
+      )
+    if (
+      request.method === 'POST' &&
+      url.pathname.startsWith('/api/library/assets/') &&
+      url.pathname.endsWith('/review')
+    )
+      return dependencies.libraryReview(
+        response,
+        identity,
+        request,
+        url.pathname.slice('/api/library/assets/'.length, -'/review'.length),
       )
     if (request.method === 'POST' && url.pathname === '/api/plan/commands')
       return dependencies.planCommand(response, identity, request)

@@ -13,6 +13,7 @@ import {
   LibraryPage,
   LibraryQuery,
   LibraryAssetDetail,
+  ObserveLiveFrameReview,
   ProcessSourceHandoff,
   ProjectionNoticeEnvelope,
   acceptedCommandTags,
@@ -446,6 +447,23 @@ describe('Gate 5 contract foundation', () => {
         checksum: 'secret',
       })._tag,
       'Success',
+    )
+  })
+
+  it('keeps current Observe review to one Library-backed frame or explicit unavailability', () => {
+    const unavailable = Schema.decodeUnknownSync(ObserveLiveFrameReview)({
+      _tag: 'Unavailable',
+      reason: 'LibraryAssetNotFound',
+      message: 'The current frame has not materialized in Library yet.',
+    })
+    assert.equal(unavailable._tag, 'Unavailable')
+    assert.equal(
+      Schema.decodeUnknownResult(ObserveLiveFrameReview)({
+        _tag: 'Unavailable',
+        reason: 'CatalogUnavailable',
+        message: 'No catalog.',
+      })._tag,
+      'Failure',
     )
   })
 

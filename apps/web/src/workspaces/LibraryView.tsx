@@ -3,6 +3,7 @@ import type {
   LibraryPage,
   LibraryQuery,
 } from '../library-client'
+import { useEffect, useState } from 'react'
 import type { LibraryView as View } from '../presentation'
 import type { Route } from '../routes'
 import { Status } from './shared'
@@ -30,6 +31,7 @@ export function LibraryView({
   detailState,
   onQuery,
   readOnly,
+  onReview,
 }: {
   view: View
   assetId: string | undefined
@@ -46,7 +48,23 @@ export function LibraryView({
   detailState?: 'loading' | 'not-found' | 'unavailable'
   onQuery?: (query: LibraryQuery) => void
   readOnly?: boolean
+  onReview?: (decision: 'accepted' | 'rejected') => void
 }) {
+  const [comparisonIds, setComparisonIds] = useState<readonly string[]>([])
+  const [phoneComparison, setPhoneComparison] = useState(false)
+  useEffect(() => {
+    const query = matchMedia('(max-width: 600px)')
+    const update = () => setPhoneComparison(query.matches)
+    update()
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+
+  useEffect(() => {
+    if (phoneComparison) {
+      setComparisonIds([])
+    }
+  }, [phoneComparison])
   const remoteAssets = page?.value?.results
   // The root catalogue gives the first bounded record visual placement, but
   // does not claim that its detail has been loaded.
@@ -143,6 +161,23 @@ export function LibraryView({
         </small>
         <p>Originals are immutable. Related saved outputs are peers.</p>
       </aside>
+      <section className="library-comparison" aria-label="Transient comparison">
+        <span>Compare selected Library records</span>
+        {phoneComparison || readOnly ? (
+          <p>Comparison unavailable in read-only monitoring.</p>
+        ) : comparisonIds.length === 2 ? (
+          <p>
+            <b>{comparisonIds[0]}</b> ↔ <b>{comparisonIds[1]}</b>. Browser-only
+            selection; originals and durable reviews remain unchanged.
+          </p>
+        ) : (
+          <p>
+            {readOnly
+              ? 'Comparison is unavailable in read-only monitoring.'
+              : 'Select two records below to compare their saved evidence.'}
+          </p>
+        )}
+      </section>
       <section className="frame-grid" aria-label="Evidence records">
         <div className="frame-grid__heading">
           <span>Capture chronology</span>
@@ -161,6 +196,23 @@ export function LibraryView({
                   {asset.role} · {asset.format}
                 </b>
                 <small>{asset.availability}</small>
+                {!readOnly && !phoneComparison ? (
+                  <button
+                    aria-label={`Compare ${asset.assetId}`}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      setComparisonIds((current) =>
+                        current.includes(asset.assetId)
+                          ? current.filter((id) => id !== asset.assetId)
+                          : [...current, asset.assetId].slice(-2),
+                      )
+                    }}
+                  >
+                    {comparisonIds.includes(asset.assetId)
+                      ? 'Remove compare'
+                      : 'Compare'}
+                  </button>
+                ) : null}
               </a>
             ))
           : page
@@ -234,7 +286,48 @@ export function LibraryView({
             Open source in Process
           </a>
         ) : null}
-        <p>Metadata only; no preview is available.</p>
+        <section className="library-review" aria-label="Review selected frame">
+          <span>Review selected frame</span>
+          <p>
+            Asset {detail?.assetId ?? 'unavailable'} ·{' '}
+            {detail?.review?.decision ?? 'unreviewed'}
+          </p>
+          {detail?.inspection?._tag === 'Available' ? (
+            <>
+              <div
+                className="evidence-image"
+                aria-label="Deterministic frame preview"
+              >
+                Preview retained · {detail.inspection.preview.format}
+              </div>
+              <p>{detail.inspection.rationale.summary}</p>
+              <p>
+                Sharpness {detail.inspection.metrics.sharpness} · shape{' '}
+                {detail.inspection.metrics.shape} · drift{' '}
+                {detail.inspection.metrics.driftArcsec} arcsec · clipping{' '}
+                {detail.inspection.metrics.clippingPercent}%
+              </p>
+            </>
+          ) : detail?.inspection ? (
+            <p>
+              {detail.inspection._tag === 'Failed'
+                ? `Inspection failed: ${detail.inspection.summary}`
+                : `Inspection unavailable: ${detail.inspection.summary}`}
+            </p>
+          ) : (
+            <p>Inspection has not been generated for this selected frame.</p>
+          )}
+          {!readOnly && detail && onReview ? (
+            <div className="library-controls">
+              <button onClick={() => onReview('accepted')}>
+                Accept this frame
+              </button>
+              <button onClick={() => onReview('rejected')}>
+                Reject this frame
+              </button>
+            </div>
+          ) : null}
+        </section>
         <p>
           {detail?.representations
             .map(

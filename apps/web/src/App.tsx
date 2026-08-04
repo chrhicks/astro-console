@@ -46,6 +46,10 @@ import {
 import { ObserveView } from './workspaces/ObserveView'
 import { PlanView } from './workspaces/PlanView'
 import { ProcessView } from './workspaces/ProcessView'
+import {
+  loadLiveFrameReview,
+  type LiveFrameReview,
+} from './live-frame-review-client'
 
 const currentRoute = () => parseRoute(location.pathname, location.search)
 
@@ -130,14 +134,45 @@ export function App() {
     value: LibraryAssetDetail | undefined
     state: 'loading' | 'not-found' | 'unavailable' | undefined
   }>({ value: undefined, state: undefined })
+  const [liveFrameReview, setLiveFrameReview] = useState<{
+    value: LiveFrameReview | undefined
+    state: 'loading' | 'unavailable' | undefined
+  }>({ value: undefined, state: undefined })
   const libraryPageGeneration = useRef(0)
   const libraryDetailGeneration = useRef(0)
   const processSourceGeneration = useRef(0)
+  const liveFrameReviewGeneration = useRef(0)
   const [processSource, setProcessSource] = useState<{
     value: ProcessSourceHandoff | undefined
     state: 'loading' | 'not-found' | 'not-local' | 'unavailable' | undefined
   }>({ value: undefined, state: undefined })
 
+  useEffect(() => {
+    const frame = projection.observe.source?.acquire?.liveFrame
+    if (!projection.observe.detailAvailable || frame === undefined) {
+      setLiveFrameReview({ value: undefined, state: undefined })
+      return
+    }
+    const generation = ++liveFrameReviewGeneration.current
+    setLiveFrameReview({ value: undefined, state: 'loading' })
+    void loadLiveFrameReview().then(
+      (value) => {
+        if (generation === liveFrameReviewGeneration.current)
+          setLiveFrameReview({ value, state: undefined })
+      },
+      () => {
+        if (generation === liveFrameReviewGeneration.current)
+          setLiveFrameReview({ value: undefined, state: 'unavailable' })
+      },
+    )
+    return () => {
+      liveFrameReviewGeneration.current += 1
+    }
+  }, [
+    projection.observe.detailAvailable,
+    projection.observe.source?.acquire?.liveFrame?.sourceFrameAssetId,
+    projection.observe.snapshotVersion,
+  ])
   useEffect(() => {
     const onPopState = () => setRoute(currentRoute())
     addEventListener('popstate', onPopState)
@@ -557,6 +592,13 @@ export function App() {
             : projection.observe.source.runId
         }
         view={projection.observe}
+        {...(liveFrameReview.value === undefined
+          ? {}
+          : { liveFrameReview: liveFrameReview.value })}
+        {...(liveFrameReview.state === undefined
+          ? {}
+          : { liveFrameReviewState: liveFrameReview.state })}
+        readOnly={projection.shell.readOnly}
         {...(submitObserve === undefined ? {} : { submit: submitObserve })}
         {...(refreshPreflight === undefined ||
         projection.shell.readOnly ||
@@ -608,6 +650,31 @@ export function App() {
           : { detailState: libraryDetail.state })}
         onQuery={changeLibraryQuery}
         readOnly={projection.shell.readOnly}
+        onReview={(decision) => {
+          const detail = libraryDetail.value
+          if (!detail) return
+          void fetch(
+            `/api/library/assets/${encodeURIComponent(detail.assetId)}/review`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                expectedAssetRevision: detail.revision,
+                expectedReviewRevision: detail.review?.revision ?? 0,
+                decision,
+                idempotencyKey: crypto.randomUUID(),
+              }),
+            },
+          )
+            .then((response) => response.json())
+            .then((result) => {
+              if (result.outcome === 'accepted')
+                setLibraryDetail({
+                  value: { ...detail, review: result.review },
+                  state: undefined,
+                })
+            })
+        }}
       />
     ) : workspace === 'process' ? (
       <ProcessView

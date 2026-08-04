@@ -1,6 +1,6 @@
 # Astro Console V2 Delivery Plan
 
-Status: **durable V2 completion roadmap — Phases 0, 0.5, 1, 2, and 3 and Production Convergence complete; Phase 4 planning is next**
+Status: **durable V2 completion roadmap — Phases 0, 0.5, 1, 2, and 3 and Production Convergence complete; Phase 4 planning and contract boundary are accepted**
 
 ## Keep This Plan
 
@@ -166,7 +166,14 @@ device action, or physical capture is claimed. Its execution record is in the
 All Phase 3 exit criteria are complete with deterministic local proof. The
 current counts and proof limits are in the [current handoff](handoff.md).
 
-## Phase 4: Library and Frame Review
+## Phase 4: Library and Frame Review — Complete
+
+Implementation is organized under Continuum Epic `tkt-jnzkma5n`. The prepared
+[Phase 4 plan](phase-4-planning.md) identifies a required capture-to-asset,
+inspection, and durable-review contract addition. The owner accepted this
+boundary on 2026-08-04. The Epic is complete with deterministic local proof;
+the closeout evidence and remaining proof boundary are in the
+[Phase 4 plan](phase-4-planning.md).
 
 ### Outcomes
 

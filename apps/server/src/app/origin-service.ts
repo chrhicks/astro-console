@@ -10,6 +10,14 @@ import {
   saveProcessOutputs,
   type ProcessSaveStorage,
 } from '../services/process-save.ts'
+import {
+  materializeCapturedFrame,
+  type CapturedFrameStorage,
+} from '../services/captured-frame-intake.ts'
+import {
+  inspectCapturedFrame,
+  type FrameInspectionStorage,
+} from '../services/frame-inspection.ts'
 import type { DownloadGrantIssuer } from '../storage/r2-download-grant.ts'
 import { configuredDownloadGrantIssuer } from '../config/download-grant-config.ts'
 import {
@@ -69,7 +77,9 @@ import {
 import {
   downloadAsset,
   libraryDetail,
+  libraryReview,
   libraryPage,
+  observeLiveFrameReview,
   processWorkspace,
   workspace,
 } from '../http/library-handlers.ts'
@@ -135,12 +145,15 @@ export function createLocalWebService(
       | 'target-correction'
       | 'target-verification'
       | 'live-frame'
+      | 'live-frame-library'
       | 'managed-capture'
       | 'acquire-recovery'
     readonly webDistPath?: string
     readonly preflightProvider?: ReadOnlyPreflightProviderShape
     readonly polarMeasurementProvider?: PolarMeasurementProviderShape
     readonly targetAcquisitionProvider?: TargetAcquisitionProviderShape
+    readonly capturedFrameStorage?: CapturedFrameStorage
+    readonly frameInspectionStorage?: FrameInspectionStorage
   } = {},
 ) {
   const database = openOriginDatabase(databasePath)
@@ -210,6 +223,7 @@ export function createLocalWebService(
     options.fixture === 'target-correction' ||
     options.fixture === 'target-verification' ||
     options.fixture === 'live-frame' ||
+    options.fixture === 'live-frame-library' ||
     options.fixture === 'managed-capture' ||
     options.fixture === 'acquire-recovery'
   ) {
@@ -220,6 +234,7 @@ export function createLocalWebService(
       revision: 1,
       phase:
         options.fixture === 'live-frame' ||
+        options.fixture === 'live-frame-library' ||
         options.fixture === 'managed-capture' ||
         options.fixture === 'acquire-recovery'
           ? ('capture' as const)
@@ -255,6 +270,7 @@ export function createLocalWebService(
       options.fixture === 'target-correction' ||
       options.fixture === 'target-verification' ||
       options.fixture === 'live-frame' ||
+      options.fixture === 'live-frame-library' ||
       options.fixture === 'managed-capture'
     ) {
       const evidence = recordSolveCompletion(session, {
@@ -276,6 +292,7 @@ export function createLocalWebService(
           correction: {
             rightAscensionArcsec:
               options.fixture === 'live-frame' ||
+              options.fixture === 'live-frame-library' ||
               options.fixture === 'managed-capture'
                 ? 0
                 : options.fixture === 'target-verification'
@@ -307,6 +324,23 @@ export function createLocalWebService(
               ),
             })
           : undefined
+      const currentLiveFrame =
+        options.fixture === 'live-frame-library'
+          ? recordLiveFrameEvidence(acquired, {
+              sourceFrameAssetId: AssetId.make('asset-capture-live-001'),
+              capturedAtEpochMs: 1_722_729_600_300,
+              disposition: 'accepted',
+              acceptedFrameCount: 1,
+              rejectedFrameCount: 0,
+              targetFraming: 'inFrame',
+              driftArcsec: { _tag: 'Known', value: 1.2 },
+              clipping: 'clear',
+              exposure: 'usable',
+              focus: { _tag: 'Known', value: 1.1 },
+              shape: { _tag: 'Known', value: 1.8 },
+              storageForecastMb: { _tag: 'Known', value: 1_730 },
+            })
+          : acquired
       acquireRepository.install(
         options.fixture === 'managed-capture'
           ? recordManagedCapture(
@@ -341,8 +375,10 @@ export function createLocalWebService(
             )
           : verifiedFixture !== undefined && 'session' in verifiedFixture
             ? verifiedFixture.session
-            : acquired,
+            : currentLiveFrame,
       )
+      if (options.fixture === 'live-frame-library')
+        installCurrentLibraryFrameFixture(database)
     } else if (options.fixture === 'acquire-recovery') {
       const first = recordSolveCompletion(session, {
         attemptId: AttemptId.make('deepSkyPlateSolve-initial-1'),
@@ -410,6 +446,7 @@ export function createLocalWebService(
     (options.fixture === 'target-deep-sky' ||
     options.fixture === 'target-lunar' ||
     options.fixture === 'live-frame' ||
+    options.fixture === 'live-frame-library' ||
     options.fixture === 'managed-capture'
       ? deterministicTargetAcquisitionProvider
       : undefined)
@@ -507,6 +544,22 @@ export function createLocalWebService(
         encodedAssetId,
         () => stateRepository.state().snapshotVersion,
       ),
+    observeLiveFrameReview: (response, identity) =>
+      observeLiveFrameReview(
+        response,
+        database,
+        () => stateRepository.state().snapshotVersion,
+        () =>
+          Effect.runPromise(
+            stateRepository
+              .bootstrapSnapshot(identity)
+              .pipe(
+                Effect.map((snapshot) => snapshot.observe?.acquire?.liveFrame),
+              ),
+          ),
+      ),
+    libraryReview: (response, identity, request, encodedAssetId) =>
+      libraryReview(response, database, identity, request, encodedAssetId),
     planCommand: (response, identity, request) =>
       Effect.runPromise(
         planCommandFromRequest(
@@ -787,6 +840,32 @@ export function createLocalWebService(
     processSaveStorage === undefined
       ? 0
       : cleanupProcessOrphans(database, processSaveStorage)
+  const ingestCapturedFrame = (raw: unknown, bytes: Uint8Array) => {
+    if (options.capturedFrameStorage === undefined)
+      return {
+        outcome: 'rejected' as const,
+        reason: 'MaterializationFailed' as const,
+      }
+    const result = materializeCapturedFrame(
+      database,
+      options.capturedFrameStorage,
+      raw,
+      bytes,
+    )
+    if (result.outcome === 'accepted')
+      publish('CapturedFrameMaterialized', result.cursor)
+    return result
+  }
+  const inspectFrame = (assetId: string) =>
+    options.frameInspectionStorage === undefined
+      ? undefined
+      : Effect.runSync(
+          inspectCapturedFrame(
+            database,
+            options.frameInspectionStorage,
+            assetId,
+          ),
+        )
   const advanceFakeRun = () => {
     const result = runRepository.advance(projectionIdentity())
     if (result?.event !== undefined)
@@ -800,6 +879,8 @@ export function createLocalWebService(
     close,
     ingestObservation,
     saveProcess,
+    ingestCapturedFrame,
+    inspectFrame,
     cleanupSavedOrphans,
     advanceFakeRun,
   }
@@ -816,6 +897,86 @@ const deterministicPolarMeasurementProvider: PolarMeasurementProviderShape = {
       azimuthErrorArcsec: 0,
       uncertaintyArcsec: 4,
     }),
+}
+
+function installCurrentLibraryFrameFixture(
+  database: import('node:sqlite').DatabaseSync,
+) {
+  const capturedAt = '2024-08-04T01:00:00.000Z'
+  const detail = {
+    assetId: 'asset-capture-live-001',
+    revision: 1,
+    role: 'original',
+    format: 'fits',
+    availability: 'availableLocally',
+    capturedAt,
+    comparisonGroupId: 'run-deepSkyPlateSolve-fixture-sequence-l',
+    lineage: {
+      sourceAssetIds: [],
+      runId: 'run-deepSkyPlateSolve-fixture',
+      solveAttemptId: 'acquire-live-001',
+      sequenceId: 'sequence-l',
+      acquisitionId: 'acquire-live-001',
+    },
+    capture: {
+      frameId: 'frame-live-001',
+      exposureSeconds: 180,
+      filter: 'L',
+      binning: 1,
+      frameType: 'light',
+    },
+    inspection: {
+      _tag: 'Available',
+      preview: {
+        format: 'png',
+        checksum: 'fixture-preview-live-001',
+        provenance: {
+          algorithm: 'deterministic-fixture-v1',
+          sourceChecksum: 'fixture-original-live-001',
+        },
+      },
+      metrics: {
+        clippingPercent: 0,
+        framing: 'inFrame',
+        sharpness: 92,
+        shape: 8,
+        driftArcsec: 1,
+      },
+      rationale: {
+        decision: 'accepted',
+        summary:
+          'Deterministic fixture metrics are within the configured bounds.',
+      },
+    },
+    review: {
+      revision: 1,
+      decision: 'accepted',
+      updatedAt: capturedAt,
+    },
+    representations: [
+      { label: 'Immutable captured original retained', state: 'available' },
+      { label: 'Deterministic inspection preview', state: 'available' },
+    ],
+  }
+  database
+    .prepare(
+      'INSERT OR IGNORE INTO library_assets VALUES (?,?,?,?,?,?,?,?,?,?)',
+    )
+    .run(
+      detail.assetId,
+      detail.revision,
+      detail.role,
+      detail.format,
+      detail.availability,
+      detail.comparisonGroupId,
+      capturedAt,
+      capturedAt,
+      detail.inspection.metrics.sharpness,
+      JSON.stringify(detail),
+    )
+  database
+    .prepare('INSERT OR IGNORE INTO asset_reviews VALUES (?,?,?)')
+    .run(detail.assetId, detail.review.revision, JSON.stringify(detail.review))
 }
 
 const deterministicTargetAcquisitionProvider: TargetAcquisitionProviderShape = {
@@ -880,7 +1041,7 @@ const deterministicTargetAcquisitionProvider: TargetAcquisitionProviderShape = {
     }),
   frame: () =>
     Effect.succeed({
-      sourceFrameAssetId: 'fixture-live-frame-001',
+      sourceFrameAssetId: 'asset-capture-live-001',
       capturedAtEpochMs: 1_722_729_600_300,
       disposition: 'accepted' as const,
       acceptedFrameCount: 1,

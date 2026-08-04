@@ -1,6 +1,8 @@
 import { DatabaseSync } from 'node:sqlite'
 import { Effect, Layer, Schema } from 'effect'
 import {
+  AssetReview,
+  FrameInspection,
   LibraryAssetDetail,
   LibraryPage,
   ProcessSourceHandoff,
@@ -70,7 +72,20 @@ const LibraryDetail = Schema.Struct({
     sourceAssetIds: Schema.Array(Schema.String),
     runId: Schema.String,
     solveAttemptId: Schema.String,
+    sequenceId: Schema.optionalKey(Schema.String),
+    acquisitionId: Schema.optionalKey(Schema.String),
   }),
+  capture: Schema.optionalKey(
+    Schema.Struct({
+      frameId: Schema.String,
+      exposureSeconds: Schema.Number,
+      filter: Schema.String,
+      binning: Schema.Int,
+      frameType: Schema.Literals(['light', 'dark', 'flat', 'bias']),
+    }),
+  ),
+  inspection: Schema.optionalKey(FrameInspection),
+  review: Schema.optionalKey(AssetReview),
   representations: Schema.Array(
     Schema.Struct({ label: Schema.String, state: Schema.String }),
   ),
@@ -213,7 +228,9 @@ const libraryAssetId = (assetId: string, requireStableId = true) =>
   Schema.decodeUnknownEffect(LibraryAssetDetail.fields.assetId)(assetId).pipe(
     Effect.flatMap((id) =>
       !requireStableId ||
-      /^asset-(?:m27-\d{3}|process-[0-9a-f-]+|source-[a-z0-9-]+)$/.test(id)
+      /^asset-(?:m27-\d{3}|process-[0-9a-f-]+|source-[a-z0-9-]+|capture-[a-z0-9-]+)$/.test(
+        id,
+      )
         ? Effect.succeed(id)
         : Effect.fail(new LibraryInputInvalid()),
     ),

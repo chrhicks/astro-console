@@ -11,6 +11,7 @@ import {
   type ObserveOperation,
 } from '../observe-operation'
 import type { ObserveView as View } from '../presentation'
+import type { LiveFrameReview } from '../live-frame-review-client'
 import { Evidence, Status } from './shared'
 
 export function ObserveView({
@@ -24,6 +25,9 @@ export function ObserveView({
   acquireRecoveryCommand,
   approvePointingCorrection,
   revisePointingCorrection,
+  liveFrameReview,
+  liveFrameReviewState,
+  readOnly = false,
 }: {
   view: View
   submit?: (
@@ -56,6 +60,9 @@ export function ObserveView({
     rightAscensionArcsec: number,
     declinationArcsec: number,
   ) => Promise<void>
+  liveFrameReview?: LiveFrameReview
+  liveFrameReviewState?: 'loading' | 'unavailable'
+  readOnly?: boolean
 }) {
   const [result, setResult] = useState<{
     readonly runId: string
@@ -308,6 +315,10 @@ export function ObserveView({
             approvePointingCorrection={approvePointingCorrection}
             approveCorrection={approveCorrection}
             revisePointingCorrection={revisePointingCorrection}
+            liveFrameReview={liveFrameReview}
+            liveFrameReviewState={liveFrameReviewState}
+            reviewAvailable={view.detailAvailable}
+            readOnly={readOnly}
           />
         )}
         {current?.phase === 'preflight' && (
@@ -447,6 +458,10 @@ function TargetAcquisition({
   approvePointingCorrection,
   approveCorrection,
   revisePointingCorrection,
+  liveFrameReview,
+  liveFrameReviewState,
+  reviewAvailable,
+  readOnly,
 }: {
   current: NonNullable<View['source']>
   pending: boolean
@@ -471,6 +486,12 @@ function TargetAcquisition({
   revisePointingCorrection: Parameters<
     typeof ObserveView
   >[0]['revisePointingCorrection']
+  liveFrameReview: Parameters<typeof ObserveView>[0]['liveFrameReview']
+  liveFrameReviewState: Parameters<
+    typeof ObserveView
+  >[0]['liveFrameReviewState']
+  reviewAvailable: boolean
+  readOnly: boolean
 }) {
   const acquire = current.acquire
   if (acquire?.acquisitionMethod === undefined) return null
@@ -599,7 +620,15 @@ function TargetAcquisition({
         </p>
       )}
       {acquire.liveFrame !== undefined && (
-        <LiveFrameEvidence frame={acquire.liveFrame} />
+        <>
+          <LiveFrameEvidence frame={acquire.liveFrame} />
+          <LiveFrameReviewCard
+            review={liveFrameReview}
+            state={liveFrameReviewState}
+            reviewAvailable={reviewAvailable}
+            readOnly={readOnly}
+          />
+        </>
       )}
       {acquire.managedCapture !== undefined && (
         <ManagedCapture capture={acquire.managedCapture} />
@@ -810,6 +839,106 @@ function LiveFrameEvidence({
           <dd>{metric(frame.storageForecastMb, 'MB')}</dd>
         </div>
       </dl>
+    </section>
+  )
+}
+
+function LiveFrameReviewCard({
+  review,
+  state,
+  reviewAvailable,
+  readOnly,
+}: {
+  review: Parameters<typeof ObserveView>[0]['liveFrameReview']
+  state: Parameters<typeof ObserveView>[0]['liveFrameReviewState']
+  reviewAvailable: boolean
+  readOnly: boolean
+}) {
+  if (!reviewAvailable)
+    return (
+      <section
+        className="live-frame-evidence"
+        aria-label="Current frame review"
+      >
+        <span>Current frame review</span>
+        <h3>Current review unavailable</h3>
+        <p>Current Library review is unavailable while Observe is stale.</p>
+      </section>
+    )
+  if (state === 'loading')
+    return (
+      <section
+        className="live-frame-evidence"
+        aria-label="Current frame review"
+      >
+        <span>Current frame review</span>
+        <h3>Loading Library review</h3>
+      </section>
+    )
+  if (state === 'unavailable' || review?._tag === 'Unavailable')
+    return (
+      <section
+        className="live-frame-evidence"
+        aria-label="Current frame review"
+      >
+        <span>Current frame review</span>
+        <h3>Library review unavailable</h3>
+        <p>
+          {review?._tag === 'Unavailable'
+            ? review.message
+            : 'Library review evidence could not be read.'}
+        </p>
+      </section>
+    )
+  if (review === undefined) return null
+  const inspection = review.asset.inspection
+  const decision = review.asset.review?.decision
+  return (
+    <section className="live-frame-evidence" aria-label="Current frame review">
+      <span>Current Library review</span>
+      <h3>
+        {decision === undefined
+          ? 'Manual decision not recorded'
+          : `Manual decision: ${decision}`}
+      </h3>
+      <p>
+        {review.disposition === 'accepted'
+          ? 'Capture accepted'
+          : 'Capture rejected'}{' '}
+        at {new Date(review.capturedAtEpochMs).toLocaleTimeString()}.
+      </p>
+      {inspection?._tag === 'Available' ? (
+        <>
+          <p>
+            Automated {inspection.rationale.decision}:{' '}
+            {inspection.rationale.summary}
+          </p>
+          <dl>
+            <div>
+              <dt>Sharpness</dt>
+              <dd>{inspection.metrics.sharpness}</dd>
+            </div>
+            <div>
+              <dt>Shape</dt>
+              <dd>{inspection.metrics.shape}</dd>
+            </div>
+            <div>
+              <dt>Drift</dt>
+              <dd>{inspection.metrics.driftArcsec} arcsec</dd>
+            </div>
+          </dl>
+        </>
+      ) : inspection?._tag === 'Failed' ? (
+        <p>Inspection failed: {inspection.summary}</p>
+      ) : (
+        <p>Inspection is not available for this current Library frame.</p>
+      )}
+      <a href={`/library/assets/${encodeURIComponent(review.asset.assetId)}`}>
+        Open this frame in Library
+      </a>
+      {readOnly && (
+        <p>Monitoring-only client: review changes are unavailable.</p>
+      )}
     </section>
   )
 }

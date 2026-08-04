@@ -278,6 +278,7 @@ function observe(
       facts: source.attemptFacts,
       lifecycle,
       leaseRevision: snapshot.control.revision,
+      snapshotVersion: snapshot.snapshotVersion,
       ...(terminal !== undefined
         ? { recovery: 'Return to Plan to review the next accepted run.' }
         : controlRequired

@@ -3,11 +3,13 @@ import {
   AssetId,
   AssetRevision,
   NonNegativeInt,
+  PositiveNumber,
   OperationId,
   ProcessingOutputId,
   ProcessingRevision,
   ProcessingSessionId,
   RepresentationId,
+  RunId,
 } from './primitives.js'
 import { ProcessingImageRef, ProcessingSession } from './processing-domain.js'
 
@@ -18,6 +20,81 @@ export const AssetFormat = Schema.Literals([
   'png',
   'jpeg',
 ])
+
+/**
+ * The metadata that a capture adapter supplies with original bytes. The bytes
+ * stay behind the server-owned intake port; they are deliberately not part of
+ * a browser command contract.
+ */
+export const CapturedFrameIntake = Schema.Struct({
+  assetId: AssetId,
+  frameId: Schema.NonEmptyString,
+  capturedAt: Schema.NonEmptyString,
+  format: Schema.Literals(['fits', 'tiff']),
+  capture: Schema.Struct({
+    exposureSeconds: PositiveNumber,
+    filter: Schema.NonEmptyString,
+    binning: NonNegativeInt,
+    frameType: Schema.Literals(['light', 'dark', 'flat', 'bias']),
+  }),
+  lineage: Schema.Struct({
+    runId: RunId,
+    sequenceId: Schema.NonEmptyString,
+    acquisitionId: Schema.NonEmptyString,
+  }),
+  idempotencyKey: Schema.NonEmptyString,
+})
+export interface CapturedFrameIntake extends Schema.Schema.Type<
+  typeof CapturedFrameIntake
+> {}
+
+export const FrameInspection = Schema.TaggedUnion({
+  Available: {
+    preview: Schema.Struct({
+      format: Schema.Literal('png'),
+      checksum: Schema.NonEmptyString,
+      provenance: Schema.Struct({
+        algorithm: Schema.Literal('deterministic-fixture-v1'),
+        sourceChecksum: Schema.NonEmptyString,
+      }),
+    }),
+    metrics: Schema.Struct({
+      clippingPercent: NonNegativeInt,
+      framing: Schema.Literals(['inFrame', 'attention']),
+      sharpness: NonNegativeInt,
+      shape: NonNegativeInt,
+      driftArcsec: NonNegativeInt,
+    }),
+    rationale: Schema.Struct({
+      decision: Schema.Literals(['accepted', 'rejected']),
+      summary: Schema.NonEmptyString,
+    }),
+  },
+  Unavailable: { summary: Schema.NonEmptyString },
+  Failed: {
+    summary: Schema.NonEmptyString,
+    diagnosticRef: Schema.NonEmptyString,
+  },
+})
+export type FrameInspection = typeof FrameInspection.Type
+
+export const AssetReview = Schema.Struct({
+  revision: AssetRevision,
+  decision: Schema.Literals(['accepted', 'rejected', 'unreviewed']),
+  rating: Schema.optionalKey(NonNegativeInt),
+  annotation: Schema.optionalKey(Schema.NonEmptyString),
+  updatedAt: Schema.NonEmptyString,
+})
+export interface AssetReview extends Schema.Schema.Type<typeof AssetReview> {}
+
+export const ReviewAssetRequest = Schema.Struct({
+  expectedAssetRevision: AssetRevision,
+  expectedReviewRevision: AssetRevision,
+  decision: Schema.Literals(['accepted', 'rejected', 'unreviewed']),
+  rating: Schema.optionalKey(NonNegativeInt),
+  annotation: Schema.optionalKey(Schema.NonEmptyString),
+  idempotencyKey: Schema.NonEmptyString,
+})
 
 export const AssetLineage = Schema.Struct({
   comparisonGroupId: Schema.NonEmptyString,

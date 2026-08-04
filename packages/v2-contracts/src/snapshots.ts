@@ -1,7 +1,12 @@
 import { Schema } from 'effect'
 import { CommandTag } from './commands.js'
 import { CaptureMetric, PointingVector } from './acquire.js'
-import { DeliveryRepresentation, LibraryAsset } from './asset-domain.js'
+import {
+  DeliveryRepresentation,
+  FrameInspection,
+  AssetReview,
+  LibraryAsset,
+} from './asset-domain.js'
 import {
   AssistantFinding,
   FailedProcessingAttemptRecord,
@@ -35,6 +40,7 @@ import {
   PlanId,
   PlanRevision,
   PositiveInt,
+  PositiveNumber,
   ProcessingRevision,
   ProcessingSessionId,
   ProcessingOutputId,
@@ -428,7 +434,20 @@ export const LibraryAssetDetail = Schema.Struct({
     sourceAssetIds: Schema.Array(AssetId),
     runId: Schema.NonEmptyString,
     solveAttemptId: Schema.NonEmptyString,
+    sequenceId: Schema.optionalKey(Schema.NonEmptyString),
+    acquisitionId: Schema.optionalKey(Schema.NonEmptyString),
   }),
+  capture: Schema.optionalKey(
+    Schema.Struct({
+      frameId: Schema.NonEmptyString,
+      exposureSeconds: PositiveNumber,
+      filter: Schema.NonEmptyString,
+      binning: NonNegativeInt,
+      frameType: Schema.Literals(['light', 'dark', 'flat', 'bias']),
+    }),
+  ),
+  inspection: Schema.optionalKey(FrameInspection),
+  review: Schema.optionalKey(AssetReview),
   representations: Schema.Array(
     Schema.Struct({
       label: Schema.NonEmptyString,
@@ -436,6 +455,26 @@ export const LibraryAssetDetail = Schema.Struct({
     }),
   ),
   actions: Schema.Array(LibraryAssetAction),
+})
+
+/**
+ * The current Observe frame resolved through its authoritative Library record.
+ * This is deliberately one record, not a Library catalog projection.
+ */
+export const ObserveLiveFrameReview = Schema.TaggedUnion({
+  Available: {
+    capturedAtEpochMs: NonNegativeInt,
+    disposition: Schema.Literals(['accepted', 'rejected']),
+    asset: LibraryAssetDetail,
+  },
+  Unavailable: {
+    reason: Schema.Literals([
+      'NoCurrentFrame',
+      'LibraryAssetNotFound',
+      'LibraryUnavailable',
+    ]),
+    message: Schema.NonEmptyString,
+  },
 })
 
 export const ProcessSourceHandoff = Schema.Struct({
@@ -449,6 +488,8 @@ export const ProcessSourceHandoff = Schema.Struct({
     sourceAssetIds: Schema.Array(AssetId),
     runId: Schema.NonEmptyString,
     solveAttemptId: Schema.NonEmptyString,
+    sequenceId: Schema.optionalKey(Schema.NonEmptyString),
+    acquisitionId: Schema.optionalKey(Schema.NonEmptyString),
   }),
   processing: Schema.Struct({
     availability: Schema.Literal('unavailable'),

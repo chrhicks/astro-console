@@ -27,6 +27,7 @@ if (
     'target-correction',
     'target-verification',
     'live-frame',
+    'live-frame-library',
     'managed-capture',
     'acquire-recovery',
     'plan-draft',
@@ -34,7 +35,7 @@ if (
   ].includes(scenario)
 )
   throw new Error(
-    '--scenario must be m27, polar, target-deep-sky, target-lunar, target-correction, target-verification, live-frame, managed-capture, acquire-recovery, plan-draft, or library-published',
+    '--scenario must be m27, polar, target-deep-sky, target-lunar, target-correction, target-verification, live-frame, live-frame-library, managed-capture, acquire-recovery, plan-draft, or library-published',
   )
 const scenarioSuffix = scenario === 'm27' ? '' : `-${scenario}`
 const profile = resolve(
@@ -45,7 +46,11 @@ const database = resolve(
   appRoot,
   `.astro-server/inspect-state-${requestedClient}${scenarioSuffix}.sqlite`,
 )
-const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+const chrome =
+  process.env.ASTRO_SERVER_CHROME ??
+  (process.platform === 'darwin'
+    ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+    : 'google-chrome')
 mkdirSync(profile, { recursive: true })
 const server = spawn(
   process.execPath,

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -45,6 +47,7 @@ import {
 import { createPublisherWorker } from './workers/publisher-worker.ts'
 import { originServerConfig } from './config/environment-config.ts'
 import { alpacaPreflightProvider } from './providers/alpaca-preflight-provider.ts'
+import { materializeCapturedFrame } from './services/captured-frame-intake.ts'
 
 function createFixtureService(
   databasePath?: Parameters<typeof createLocalWebService>[0],
@@ -66,6 +69,578 @@ async function bootstrapSnapshot(url: string, init?: RequestInit) {
   const body: unknown = await response.json()
   return Schema.decodeUnknownSync(BootstrapHttpSuccessEnvelope)(body).data
 }
+
+test('materializes deterministic captured bytes as an immutable Library asset with restart, HTTP, and SSE projection', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-captured-frame-'))
+  const databasePath = join(root, 'state.sqlite')
+  const originalsRoot = join(root, 'originals')
+  const previewsRoot = join(root, 'previews')
+  const service = createLocalWebService(
+    databasePath,
+    undefined,
+    undefined,
+    undefined,
+    {
+      capturedFrameStorage: { originalsRoot },
+      frameInspectionStorage: { originalsRoot, previewsRoot },
+    },
+  )
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  const stream = await fetch(`${base}/api/events`)
+  const reader = stream.body?.getReader()
+  if (reader === undefined) throw new Error('SSE response has no body')
+  await reader.read()
+  const first = service.ingestCapturedFrame(
+    {
+      assetId: 'asset-capture-m27-001',
+      frameId: 'frame-m27-001',
+      capturedAt: '2026-08-04T01:02:03.000Z',
+      format: 'fits',
+      capture: {
+        exposureSeconds: 180,
+        filter: 'L',
+        binning: 1,
+        frameType: 'light',
+      },
+      lineage: {
+        runId: 'run-capture-m27',
+        sequenceId: 'sequence-l',
+        acquisitionId: 'acquire-m27-001',
+      },
+      idempotencyKey: 'capture-m27-001',
+    },
+    new TextEncoder().encode('deterministic-fits-bytes'),
+  )
+  assert.equal(first.outcome, 'accepted')
+  if (first.outcome !== 'accepted')
+    throw new Error('capture frame was rejected')
+  assert.deepEqual(
+    service.ingestCapturedFrame(
+      {
+        assetId: 'asset-capture-m27-001',
+        frameId: 'frame-m27-001',
+        capturedAt: '2026-08-04T01:02:03.000Z',
+        format: 'fits',
+        capture: {
+          exposureSeconds: 180,
+          filter: 'L',
+          binning: 1,
+          frameType: 'light',
+        },
+        lineage: {
+          runId: 'run-capture-m27',
+          sequenceId: 'sequence-l',
+          acquisitionId: 'acquire-m27-001',
+        },
+        idempotencyKey: 'capture-m27-001',
+      },
+      new TextEncoder().encode('deterministic-fits-bytes'),
+    ),
+    first,
+  )
+  const emitted = new TextDecoder().decode((await reader.read()).value)
+  assert.match(emitted, /"eventCursor":1/)
+  const inspected = service.inspectFrame('asset-capture-m27-001')
+  assert.equal(inspected?.inspection._tag, 'Available')
+  assert.equal(
+    existsSync(join(previewsRoot, 'asset-capture-m27-001.png')),
+    true,
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database
+        .prepare(
+          "SELECT count(*) AS count FROM events WHERE type='FrameInspectionUpdated'",
+        )
+        .get(),
+    ).count,
+    1,
+  )
+  const detail = await fetch(
+    `${base}/api/library/assets/asset-capture-m27-001`,
+  ).then((response) => response.json())
+  assert.deepEqual(detail.capture, {
+    frameId: 'frame-m27-001',
+    exposureSeconds: 180,
+    filter: 'L',
+    binning: 1,
+    frameType: 'light',
+  })
+  assert.deepEqual(detail.lineage, {
+    sourceAssetIds: [],
+    runId: 'run-capture-m27',
+    solveAttemptId: 'acquire-m27-001',
+    sequenceId: 'sequence-l',
+    acquisitionId: 'acquire-m27-001',
+  })
+  assert.equal(detail.inspection._tag, 'Available')
+  assert.equal(
+    detail.inspection.preview.provenance.algorithm,
+    'deterministic-fixture-v1',
+  )
+  assert.equal(
+    readFileSync(join(originalsRoot, 'asset-capture-m27-001.fits'), 'utf8'),
+    'deterministic-fits-bytes',
+  )
+  await reader.cancel()
+  await listener.close()
+  service.close()
+  const recovered = createLocalWebService(
+    databasePath,
+    undefined,
+    undefined,
+    undefined,
+    {
+      capturedFrameStorage: { originalsRoot },
+      frameInspectionStorage: { originalsRoot, previewsRoot },
+    },
+  )
+  const recoveredListener = await recovered.listen()
+  t.after(async () => {
+    await recoveredListener.close()
+    recovered.close()
+  })
+  const recoveredDetail = await fetch(
+    `http://127.0.0.1:${recoveredListener.port}/api/library/assets/asset-capture-m27-001`,
+  ).then((response) => response.json())
+  assert.equal(recoveredDetail.assetId, 'asset-capture-m27-001')
+  assert.equal(recoveredDetail.inspection._tag, 'Available')
+})
+
+test('records a checksum-backed captured-frame orphan when the SQLite transaction fails', () => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-captured-frame-orphan-'))
+  const database = openAppOwnedDatabase(join(root, 'state.sqlite'), `${root}/`)
+  database.exec(
+    "CREATE TRIGGER reject_capture_event BEFORE INSERT ON captured_frame_events BEGIN SELECT RAISE(ABORT, 'forced capture intake failure'); END;",
+  )
+  const result = materializeCapturedFrame(
+    database,
+    { originalsRoot: join(root, 'originals') },
+    {
+      assetId: 'asset-capture-orphan-001',
+      frameId: 'frame-orphan-001',
+      capturedAt: '2026-08-04T01:02:03.000Z',
+      format: 'fits',
+      capture: {
+        exposureSeconds: 180,
+        filter: 'L',
+        binning: 1,
+        frameType: 'light',
+      },
+      lineage: {
+        runId: 'run-capture-m27',
+        sequenceId: 'sequence-l',
+        acquisitionId: 'acquire-m27-001',
+      },
+      idempotencyKey: 'capture-orphan-001',
+    },
+    new TextEncoder().encode('orphaned-fits-bytes'),
+  )
+  assert.deepEqual(result, {
+    outcome: 'rejected',
+    reason: 'MaterializationFailed',
+  })
+  const orphan = databaseRow(
+    Schema.Struct({ path: Schema.String, checksum: Schema.String }),
+    database.prepare('SELECT path,checksum FROM captured_frame_orphans').get(),
+  )
+  assert.equal(existsSync(orphan.path), true)
+  assert.match(orphan.checksum, /^[0-9a-f]{64}$/)
+  assert.equal(
+    databaseRow(
+      CountRow,
+      database.prepare('SELECT count(*) AS count FROM library_assets').get(),
+    ).count,
+    0,
+  )
+  database.close()
+})
+
+test('Phase 4 deterministic chain carries one current captured frame through Library review and restart', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-phase-4-chain-'))
+  const databasePath = join(root, 'state.sqlite')
+  const originalsRoot = join(root, 'originals')
+  const previewsRoot = join(root, 'previews')
+  let service = createLocalWebService(
+    databasePath,
+    undefined,
+    undefined,
+    undefined,
+    {
+      fixture: 'live-frame',
+      capturedFrameStorage: { originalsRoot },
+      frameInspectionStorage: { originalsRoot, previewsRoot },
+    },
+  )
+  let listener = await service.listen()
+  let base = `http://127.0.0.1:${listener.port}`
+  const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (
+    initial.activeRun._tag !== 'Active' ||
+    initial.observe?.acquire === undefined
+  )
+    throw new Error('Live-frame chain fixture is unavailable')
+  const recorded = await submitPolar(base, {
+    _tag: 'RecordLiveFrameEvidence',
+    expectedLeaseRevision: initial.control.revision,
+    expectedRunRevision: initial.activeRun.run.revision,
+    expectedAcquireRevision: initial.observe.acquire.revision,
+    idempotencyKey: 'phase-4-live-frame',
+  })
+  assert.equal(recorded.response.status, 200)
+  const first = service.ingestCapturedFrame(
+    {
+      assetId: 'asset-capture-live-001',
+      frameId: 'frame-live-001',
+      capturedAt: '2026-08-04T01:02:03.000Z',
+      format: 'fits',
+      capture: {
+        exposureSeconds: 180,
+        filter: 'L',
+        binning: 1,
+        frameType: 'light',
+      },
+      lineage: {
+        runId: initial.activeRun.run.runId,
+        sequenceId: 'sequence-l',
+        acquisitionId: 'acquire-live-001',
+      },
+      idempotencyKey: 'phase-4-capture-live',
+    },
+    new TextEncoder().encode('phase-4-live-fits-bytes'),
+  )
+  assert.equal(first.outcome, 'accepted')
+  assert.equal(
+    service.inspectFrame('asset-capture-live-001')?.inspection._tag,
+    'Available',
+  )
+  const asset = await fetch(
+    `${base}/api/library/assets/asset-capture-live-001`,
+  ).then((response) => response.json())
+  assert.equal(asset.inspection._tag, 'Available')
+  assert.equal(asset.inspection.metrics.sharpness, 128)
+  assert.match(asset.inspection.rationale.summary, /fixture/i)
+  const review = await fetch(
+    `${base}/api/library/assets/asset-capture-live-001/review`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        expectedAssetRevision: asset.revision,
+        expectedReviewRevision: 0,
+        decision: 'accepted',
+        idempotencyKey: 'phase-4-review-live',
+      }),
+    },
+  ).then((response) => response.json())
+  assert.equal(review.outcome, 'accepted')
+  assert.equal(review.review.decision, 'accepted')
+  const second = service.ingestCapturedFrame(
+    {
+      assetId: 'asset-capture-live-002',
+      frameId: 'frame-live-002',
+      capturedAt: '2026-08-04T01:02:04.000Z',
+      format: 'fits',
+      capture: {
+        exposureSeconds: 180,
+        filter: 'L',
+        binning: 1,
+        frameType: 'light',
+      },
+      lineage: {
+        runId: initial.activeRun.run.runId,
+        sequenceId: 'sequence-l',
+        acquisitionId: 'acquire-live-002',
+      },
+      idempotencyKey: 'phase-4-capture-second',
+    },
+    new TextEncoder().encode('phase-4-second-fits-bytes'),
+  )
+  assert.equal(second.outcome, 'accepted')
+  const firstPage = await fetch(
+    `${base}/api/library?queryId=phase-4&pageSize=1&sort=capturedAtDescending`,
+  ).then((response) => response.json())
+  assert.equal(firstPage.results.length, 1)
+  assert.equal(firstPage.nextCursor, '1')
+  const secondPage = await fetch(
+    `${base}/api/library?queryId=phase-4&cursor=1&pageSize=1&sort=capturedAtDescending`,
+  ).then((response) => response.json())
+  assert.equal(secondPage.results.length, 1)
+  assert.notEqual(firstPage.results[0].assetId, secondPage.results[0].assetId)
+  assert.equal(
+    (
+      await fetch(
+        `${base}/api/library?queryId=phase-4&pageSize=101&sort=capturedAtDescending`,
+      )
+    ).status,
+    400,
+  )
+  const currentReview = await fetch(`${base}/api/observe/live-frame`).then(
+    (response) => response.json(),
+  )
+  assert.equal(currentReview._tag, 'Available')
+  assert.equal(currentReview.asset.assetId, 'asset-capture-live-001')
+  assert.equal(currentReview.asset.review.decision, 'accepted')
+  const stream = await fetch(`${base}/api/events`)
+  const reader = stream.body?.getReader()
+  if (reader === undefined) throw new Error('SSE response has no body')
+  const connected = new TextDecoder().decode((await reader.read()).value)
+  assert.match(connected, /eventCursor/)
+  await reader.cancel()
+  await listener.close()
+  service.close()
+  service = createLocalWebService(
+    databasePath,
+    undefined,
+    undefined,
+    undefined,
+    {
+      capturedFrameStorage: { originalsRoot },
+      frameInspectionStorage: { originalsRoot, previewsRoot },
+    },
+  )
+  listener = await service.listen()
+  base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const restartedReview = await fetch(`${base}/api/observe/live-frame`).then(
+    (response) => response.json(),
+  )
+  assert.equal(restartedReview._tag, 'Available')
+  assert.equal(restartedReview.asset.inspection._tag, 'Available')
+  assert.equal(restartedReview.asset.review.decision, 'accepted')
+  const reconnect = await fetch(`${base}/api/events`)
+  const reconnectReader = reconnect.body?.getReader()
+  if (reconnectReader === undefined)
+    throw new Error('SSE reconnect has no body')
+  assert.match(
+    new TextDecoder().decode((await reconnectReader.read()).value),
+    /eventCursor/,
+  )
+  await reconnectReader.cancel()
+})
+
+test('live-frame-library fixture exposes the available current review without a catalog request', async (t) => {
+  const service = createLocalWebService(
+    ':memory:',
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'live-frame-library' },
+  )
+  const listener = await service.listen()
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const review = await fetch(
+    `http://127.0.0.1:${listener.port}/api/observe/live-frame`,
+  ).then((response) => response.json())
+  assert.equal(review._tag, 'Available')
+  assert.equal(review.asset.assetId, 'asset-capture-live-001')
+  assert.equal(review.asset.inspection._tag, 'Available')
+  assert.equal(review.asset.review.decision, 'accepted')
+})
+
+test('persists truthful unavailable inspection state when a retained original is absent', () => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-inspection-unavailable-'))
+  const originalsRoot = join(root, 'originals')
+  const service = createLocalWebService(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      capturedFrameStorage: { originalsRoot },
+      frameInspectionStorage: {
+        originalsRoot,
+        previewsRoot: join(root, 'previews'),
+      },
+    },
+  )
+  const created = service.ingestCapturedFrame(
+    {
+      assetId: 'asset-capture-unavailable-001',
+      frameId: 'frame-unavailable-001',
+      capturedAt: '2026-08-04T01:02:03.000Z',
+      format: 'fits',
+      capture: {
+        exposureSeconds: 180,
+        filter: 'L',
+        binning: 1,
+        frameType: 'light',
+      },
+      lineage: {
+        runId: 'run-capture-m27',
+        sequenceId: 'sequence-l',
+        acquisitionId: 'acquire-m27-001',
+      },
+      idempotencyKey: 'capture-unavailable-001',
+    },
+    new TextEncoder().encode('unavailable-fits-bytes'),
+  )
+  assert.equal(created.outcome, 'accepted')
+  unlinkSync(join(originalsRoot, 'asset-capture-unavailable-001.fits'))
+  assert.deepEqual(
+    service.inspectFrame('asset-capture-unavailable-001')?.inspection,
+    {
+      _tag: 'Unavailable',
+      summary: 'The immutable original is not available for inspection.',
+    },
+  )
+  service.close()
+})
+
+test('persists truthful failed inspection state when a retained original changes', () => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-inspection-failed-'))
+  const originalsRoot = join(root, 'originals')
+  const service = createLocalWebService(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      capturedFrameStorage: { originalsRoot },
+      frameInspectionStorage: {
+        originalsRoot,
+        previewsRoot: join(root, 'previews'),
+      },
+    },
+  )
+  const created = service.ingestCapturedFrame(
+    {
+      assetId: 'asset-capture-failed-001',
+      frameId: 'frame-failed-001',
+      capturedAt: '2026-08-04T01:02:03.000Z',
+      format: 'fits',
+      capture: {
+        exposureSeconds: 180,
+        filter: 'L',
+        binning: 1,
+        frameType: 'light',
+      },
+      lineage: {
+        runId: 'run-capture-m27',
+        sequenceId: 'sequence-l',
+        acquisitionId: 'acquire-m27-001',
+      },
+      idempotencyKey: 'capture-failed-001',
+    },
+    new TextEncoder().encode('original-fits-bytes'),
+  )
+  assert.equal(created.outcome, 'accepted')
+  writeFileSync(
+    join(originalsRoot, 'asset-capture-failed-001.fits'),
+    'changed-fits-bytes',
+  )
+  assert.equal(
+    service.inspectFrame('asset-capture-failed-001')?.inspection._tag,
+    'Failed',
+  )
+  service.close()
+})
+
+test('Library review is owner-only, revision-guarded, idempotent, durable, and projected', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-library-review-'))
+  const databasePath = join(root, 'state.sqlite')
+  const service = createFixtureService(databasePath)
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  const stream = await fetch(`${base}/api/events`)
+  const reader = stream.body?.getReader()
+  if (reader === undefined) throw new Error('SSE response has no body')
+  await reader.read()
+  const asset = await fetch(`${base}/api/library/assets/asset-m27-001`).then(
+    (response) => response.json(),
+  )
+  const request = {
+    expectedAssetRevision: asset.revision,
+    expectedReviewRevision: 0,
+    decision: 'accepted',
+    rating: 5,
+    annotation: 'Keep this frame.',
+    idempotencyKey: 'review-m27-001',
+  }
+  const accepted = await fetch(
+    `${base}/api/library/assets/asset-m27-001/review`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+    },
+  ).then((response) => response.json())
+  assert.equal(accepted.outcome, 'accepted')
+  const reviewEvent = new TextDecoder().decode((await reader.read()).value)
+  assert.match(reviewEvent, /"eventCursor":1/)
+  assert.deepEqual(
+    await fetch(`${base}/api/library/assets/asset-m27-001/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+    }).then((response) => response.json()),
+    accepted,
+  )
+  assert.equal(
+    (
+      await fetch(`${base}/api/library/assets/asset-m27-001/review`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...request,
+          idempotencyKey: 'review-stale',
+          expectedReviewRevision: 0,
+          decision: 'rejected',
+        }),
+      })
+    ).status,
+    409,
+  )
+  const detail = await fetch(`${base}/api/library/assets/asset-m27-001`).then(
+    (response) => response.json(),
+  )
+  assert.deepEqual(detail.review, accepted.review)
+  const viewer = createFixtureService(undefined, () => ({
+    personId: 'viewer',
+    clientId: 'viewer',
+    role: 'viewer' as const,
+    capability: 'readOnly' as const,
+  }))
+  const viewerListener = await viewer.listen()
+  t.after(async () => {
+    await viewerListener.close()
+    viewer.close()
+  })
+  assert.equal(
+    (
+      await fetch(
+        `http://127.0.0.1:${viewerListener.port}/api/library/assets/asset-m27-001/review`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(request),
+        },
+      )
+    ).status,
+    403,
+  )
+  await reader.cancel()
+  await listener.close()
+  service.close()
+  const recovered = createFixtureService(databasePath)
+  const recoveredListener = await recovered.listen()
+  t.after(async () => {
+    await recoveredListener.close()
+    recovered.close()
+  })
+  const recoveredDetail = await fetch(
+    `http://127.0.0.1:${recoveredListener.port}/api/library/assets/asset-m27-001`,
+  ).then((response) => response.json())
+  assert.deepEqual(recoveredDetail.review, accepted.review)
+})
 
 test('bootstrap and bounded control transport decode shared contracts before mutation', async (t) => {
   const service = createFixtureService(undefined, () => ({
@@ -314,10 +889,8 @@ test('lunar target acquisition publishes image evidence and survives restart', a
 })
 
 test('live frame evidence is durable, idempotent, published over SSE, and stays read-only on phone', async () => {
-  const databasePath = join(
-    mkdtempSync(join(tmpdir(), 'astro-live-frame-')),
-    'state.sqlite',
-  )
+  const root = mkdtempSync(join(tmpdir(), 'astro-live-frame-'))
+  const databasePath = join(root, 'state.sqlite')
   let service = createLocalWebService(
     databasePath,
     (request) =>
@@ -366,10 +939,54 @@ test('live frame evidence is durable, idempotent, published over SSE, and stays 
   const recorded = await bootstrapSnapshot(`${base}/api/snapshot`)
   assert.equal(
     recorded.observe?.acquire?.liveFrame?.sourceFrameAssetId,
-    'fixture-live-frame-001',
+    'asset-capture-live-001',
   )
   assert.equal(recorded.observe?.acquire?.liveFrame?.acceptedFrameCount, 1)
   assert.equal(recorded.observe?.acquire?.liveFrame?.focus._tag, 'Unknown')
+  const unresolvedReview = await fetch(`${base}/api/observe/live-frame`).then(
+    (response) => response.json(),
+  )
+  assert.equal(unresolvedReview._tag, 'Unavailable')
+  assert.equal(unresolvedReview.reason, 'LibraryAssetNotFound')
+  assert.deepEqual(
+    materializeCapturedFrame(
+      service.database,
+      { originalsRoot: join(root, 'originals') },
+      {
+        assetId: 'asset-capture-live-001',
+        frameId: 'frame-live-001',
+        capturedAt: '2026-08-04T01:02:03.000Z',
+        format: 'fits',
+        capture: {
+          exposureSeconds: 180,
+          filter: 'L',
+          binning: 1,
+          frameType: 'light',
+        },
+        lineage: {
+          runId: 'run-live-frame',
+          sequenceId: 'sequence-l',
+          acquisitionId: 'acquire-live-001',
+        },
+        idempotencyKey: 'capture-live-001',
+      },
+      new TextEncoder().encode('live-frame-fits-bytes'),
+    ).outcome,
+    'accepted',
+  )
+  const resolvedReview = await fetch(`${base}/api/observe/live-frame`).then(
+    (response) => response.json(),
+  )
+  assert.equal(resolvedReview._tag, 'Available')
+  assert.equal(resolvedReview.asset.assetId, 'asset-capture-live-001')
+  assert.equal(
+    (
+      await fetch(`${base}/api/observe/live-frame`, {
+        headers: { authorization: 'Bearer phone' },
+      })
+    ).status,
+    200,
+  )
   const stored = Schema.decodeUnknownSync(
     Schema.Struct({ session: Schema.String }),
   )(service.database.prepare('SELECT session FROM acquire_sessions').get())

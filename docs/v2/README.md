@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **Phases 0, 0.5, 1, 2, and 3 are complete with deterministic local proof; Phase 4 planning is next**
+Status: **Phases 0, 0.5, 1, 2, 3, and 4 are complete with deterministic local proof; Phase 5 planning is next**
 
 This directory is organized to keep normal working context small. Do not read
 the entire V2 tree by default.
@@ -15,8 +15,8 @@ Read these in order when starting or resuming V2 work:
    deferred boundaries.
 3. [V2 delivery plan](current/delivery-plan.md) — durable end-to-end V2.0
    scope and phase exit criteria.
-4. [V2 delivery plan](current/delivery-plan.md) — current Phase 4 scope and
-   exit criteria.
+4. [Phase 4 planning](current/phase-4-planning.md) — accepted delivery order
+   and contract boundary.
 
 That is the complete default context. Load another document only when the task
 requires its specific detail.
@@ -71,11 +71,14 @@ Epics, `tkt-ezxr1fsb`, `tkt-n9yoieoz`, `tkt-uuom4upo`, `tkt-qffwfa47`, and
 version-matched web bundle from the rig-local server origin and has migrated
 the Plan, fake managed-run Observe, Library delivery, and current Process
 handoff boundaries while retiring experimental runtime paths.
-Phase 3 (Observe, Acquire, and Capture) is complete with deterministic local
+Phase 3 (Observe, Acquire, and Capture) and Phase 4 (Library and Frame Review)
+are complete with deterministic local
 proof. Its opt-in Alpaca preflight adapter makes only declared GET reads; its
 Acquire and Capture workflows persist server-owned evidence, actions, and
 recovery truth. A real rig has not yet been contacted. Phase 4 Library and
-Frame Review is the next planning decision.
+Frame Review now provides immutable captured-frame intake, inspection, durable
+review, comparison, and Observe handoff with local deterministic proof. Phase 5
+Process Workspace is the next planning decision.
 
 `apps/web` source, CSS, and accepted screenshot evidence are the production
 visual authority. `docs/v2-ui-final` and `prototype/v2-ui` are historical Gate

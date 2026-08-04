@@ -21,6 +21,7 @@ import {
 } from './processing-domain.js'
 import {
   DeliveryRepresentation,
+  CapturedFrameIntake,
   LibraryAsset,
   buildLibraryComparison,
   completeAssetPublication,
@@ -89,6 +90,35 @@ const original = LibraryAsset.make({
 })
 
 describe('hardened Asset domain', () => {
+  it('keeps capture intake metadata separate from opaque original bytes', () => {
+    const valid = {
+      assetId: 'asset-capture-m27-001',
+      frameId: 'frame-m27-001',
+      capturedAt: '2026-08-04T01:02:03.000Z',
+      format: 'fits',
+      capture: {
+        exposureSeconds: 180,
+        filter: 'L',
+        binning: 1,
+        frameType: 'light',
+      },
+      lineage: {
+        runId: 'run-capture-m27',
+        sequenceId: 'sequence-l',
+        acquisitionId: 'acquire-m27-001',
+      },
+      idempotencyKey: 'capture-m27-001',
+    }
+    assert.equal(Schema.is(CapturedFrameIntake)(valid), true)
+    assert.equal(
+      Schema.is(CapturedFrameIntake)({
+        ...valid,
+        capture: { ...valid.capture, exposureSeconds: 0 },
+      }),
+      false,
+    )
+  })
+
   it('creates several durable assets and leaves Process as a working session', () => {
     const decision = completeProcessingSave(session, 'm27-source', [
       {
