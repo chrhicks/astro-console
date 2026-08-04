@@ -51,6 +51,8 @@ const chrome =
   (process.platform === 'darwin'
     ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
     : 'google-chrome')
+const chromeDisplayArgs =
+  process.platform === 'linux' && !process.env.DISPLAY ? ['--headless=new'] : []
 mkdirSync(profile, { recursive: true })
 const server = spawn(
   process.execPath,
@@ -129,6 +131,7 @@ function openBrowser() {
       '--no-first-run',
       '--no-default-browser-check',
       '--new-window',
+      ...chromeDisplayArgs,
       url,
     ],
     { stdio: 'inherit' },
