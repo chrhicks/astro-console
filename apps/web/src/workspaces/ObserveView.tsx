@@ -21,6 +21,7 @@ export function ObserveView({
   targetAcquisitionCommand,
   recordLiveFrameEvidence,
   managedCaptureCommand,
+  acquireRecoveryCommand,
   approvePointingCorrection,
   revisePointingCorrection,
 }: {
@@ -42,6 +43,12 @@ export function ObserveView({
       | 'PauseManagedCapture'
       | 'StopManagedCapture'
       | 'RecenterManagedCapture',
+  ) => Promise<void>
+  acquireRecoveryCommand?: (
+    action:
+      | 'RetryPlateSolveWithParameters'
+      | 'SkipAcquireTarget'
+      | 'AbortAcquire',
   ) => Promise<void>
   approvePointingCorrection?: (proposalId: string) => Promise<void>
   revisePointingCorrection?: (
@@ -295,6 +302,7 @@ export function ObserveView({
             targetAcquisitionCommand={targetAcquisitionCommand}
             recordLiveFrameEvidence={recordLiveFrameEvidence}
             managedCaptureCommand={managedCaptureCommand}
+            acquireRecoveryCommand={acquireRecoveryCommand}
             acquireTarget={acquireTarget}
             recordFrame={recordFrame}
             approvePointingCorrection={approvePointingCorrection}
@@ -433,6 +441,7 @@ function TargetAcquisition({
   targetAcquisitionCommand,
   recordLiveFrameEvidence,
   managedCaptureCommand,
+  acquireRecoveryCommand,
   acquireTarget,
   recordFrame,
   approvePointingCorrection,
@@ -450,6 +459,9 @@ function TargetAcquisition({
   managedCaptureCommand: Parameters<
     typeof ObserveView
   >[0]['managedCaptureCommand']
+  acquireRecoveryCommand: Parameters<
+    typeof ObserveView
+  >[0]['acquireRecoveryCommand']
   acquireTarget: () => void
   recordFrame: () => void
   approvePointingCorrection: Parameters<
@@ -480,6 +492,15 @@ function TargetAcquisition({
   ) => {
     if (managedCaptureCommand === undefined) return
     void managedCaptureCommand(action)
+  }
+  const recover = (
+    action:
+      | 'RetryPlateSolveWithParameters'
+      | 'SkipAcquireTarget'
+      | 'AbortAcquire',
+  ) => {
+    if (acquireRecoveryCommand === undefined) return
+    void acquireRecoveryCommand(action)
   }
   useEffect(() => {
     setRightAscensionArcsec(
@@ -582,6 +603,54 @@ function TargetAcquisition({
       )}
       {acquire.managedCapture !== undefined && (
         <ManagedCapture capture={acquire.managedCapture} />
+      )}
+      {acquire.recovery !== undefined && acquire.phase !== 'completed' && (
+        <section className="live-frame-evidence" aria-label="Acquire recovery">
+          <span>Acquire recovery</span>
+          <h3>
+            {acquire.phase === 'paused'
+              ? 'Bounded recovery is ready'
+              : 'Bounded evidence state'}
+          </h3>
+          <p>
+            {acquire.recovery.remainingAttempts} identical solve attempt
+            {acquire.recovery.remainingAttempts === 1 ? '' : 's'} remain in this
+            series. {acquire.recovery.remainingRecoverySeries} changed recovery
+            series remain.
+          </p>
+          <p>{acquire.recovery.reconciliation}</p>
+          {acquireRecoveryCommand !== undefined &&
+            acquire.actions.some(
+              ({ action }) => action === 'RetryPlateSolveWithParameters',
+            ) && (
+              <button
+                onClick={() => recover('RetryPlateSolveWithParameters')}
+                disabled={pending}
+              >
+                Retry at 15 s exposure
+              </button>
+            )}
+          {acquireRecoveryCommand !== undefined &&
+            acquire.actions.some(
+              ({ action }) => action === 'SkipAcquireTarget',
+            ) && (
+              <button
+                onClick={() => recover('SkipAcquireTarget')}
+                disabled={pending}
+              >
+                Skip target
+              </button>
+            )}
+          {acquireRecoveryCommand !== undefined &&
+            acquire.actions.some(({ action }) => action === 'AbortAcquire') && (
+              <button
+                onClick={() => recover('AbortAcquire')}
+                disabled={pending}
+              >
+                Abort acquisition
+              </button>
+            )}
+        </section>
       )}
       {targetAcquisitionCommand !== undefined &&
         acquire.actions.length > 0 &&

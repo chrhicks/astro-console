@@ -152,6 +152,7 @@ export const acceptedCommandTags = [
   'TakeControl',
   'RetryPlateSolveWithParameters',
   'SkipAcquireTarget',
+  'AbortAcquire',
   'ApprovePointingCorrection',
   'RevisePointingCorrection',
   'CaptureTargetAcquisitionEvidence',
@@ -246,6 +247,10 @@ export const Command = Schema.TaggedUnion({
     ...DurableMutation,
   },
   SkipAcquireTarget: {
+    ...AcquireCommandFreshness,
+    ...DurableMutation,
+  },
+  AbortAcquire: {
     ...AcquireCommandFreshness,
     ...DurableMutation,
   },

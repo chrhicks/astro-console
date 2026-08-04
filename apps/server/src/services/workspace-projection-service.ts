@@ -188,6 +188,12 @@ function acquireSnapshot(
       AcquireEvidence.guards.LunarDiskLimbMeasurement(evidence),
   )
   const liveFrame = session.evidence.findLast(AcquireEvidence.guards.LiveFrame)
+  const currentSeries = session.solveSeries.at(-1)
+  const latestSolved = session.evidence.findLast(
+    (evidence) =>
+      AcquireEvidence.guards.SolveAttempt(evidence) &&
+      PointingSolveResult.guards.Solved(evidence.result),
+  )
   let latestEvidence: (typeof AcquireSnapshot.Type)['latestEvidence']
   if (latest !== undefined && AcquireEvidence.guards.SolveAttempt(latest)) {
     latestEvidence = PointingSolveResult.guards.Solved(latest.result)
@@ -248,6 +254,32 @@ function acquireSnapshot(
     phase: session.phase,
     recoverySeries: 0,
     attemptCount: session.evidence.length,
+    ...(currentSeries === undefined
+      ? {}
+      : {
+          recovery: {
+            remainingAttempts: Math.max(
+              0,
+              currentSeries.maxAttempts -
+                currentSeries.completedAttemptIds.length,
+            ),
+            remainingRecoverySeries: Math.max(
+              0,
+              session.policy.maxRecoverySeries -
+                session.solveSeries.filter(
+                  ({ purpose }) => purpose === 'operatorRecovery',
+                ).length,
+            ),
+            priorVerifiedState:
+              latestSolved === undefined
+                ? ('unverified' as const)
+                : ('retained' as const),
+            reconciliation:
+              latestSolved === undefined
+                ? 'No verified pointing result is available; rejected or unverified work stays separate.'
+                : 'Prior solved image evidence is retained while rejected or unverified work is reconciled.',
+          },
+        }),
     ...(session.acquisitionMethod === undefined
       ? {}
       : {
@@ -325,6 +357,19 @@ function acquireSnapshot(
               'The provider acknowledgement is provisional. Capture a fresh solved frame to verify pointing.',
           }
         : {}),
+    ...(session.phase === 'paused'
+      ? {
+          attention:
+            'Acquire is paused after bounded work. Choose one recovery action; previous verified evidence remains available.',
+        }
+      : session.phase === 'skipped'
+        ? { attention: 'This target was skipped after bounded recovery.' }
+        : session.phase === 'aborted'
+          ? {
+              attention:
+                'Acquire was aborted; no unverified result was accepted.',
+            }
+          : {}),
     actions:
       writable && session.mode === 'polar' && session.phase === 'polarGuidance'
         ? [
@@ -356,53 +401,81 @@ function acquireSnapshot(
                 },
               ]
             : writable &&
-                session.acquisitionMethod !== undefined &&
-                session.phase === 'completed'
+                session.acquisitionMethod === 'deepSkyPlateSolve' &&
+                session.phase === 'paused'
               ? [
-                  ...(session.managedCapture === undefined
-                    ? [
-                        {
-                          _tag: 'Available' as const,
-                          action: 'RecordLiveFrameEvidence' as const,
-                        },
-                        ...(liveFrame === undefined
-                          ? []
-                          : [
-                              {
-                                _tag: 'Available' as const,
-                                action: 'StartManagedCapture' as const,
-                              },
-                            ]),
-                      ]
-                    : session.managedCapture.state === 'active'
-                      ? [
-                          {
-                            _tag: 'Available' as const,
-                            action: 'PauseManagedCapture' as const,
-                          },
-                          {
-                            _tag: 'Available' as const,
-                            action: 'StopManagedCapture' as const,
-                          },
-                          ...(session.managedCapture.quality === 'attention'
-                            ? [
-                                {
-                                  _tag: 'Available' as const,
-                                  action: 'RecenterManagedCapture' as const,
-                                },
-                              ]
-                            : []),
-                        ]
-                      : session.managedCapture.state === 'paused'
+                  {
+                    _tag: 'Available' as const,
+                    action: 'RetryPlateSolveWithParameters' as const,
+                  },
+                  {
+                    _tag: 'Available' as const,
+                    action: 'SkipAcquireTarget' as const,
+                  },
+                  {
+                    _tag: 'Available' as const,
+                    action: 'AbortAcquire' as const,
+                  },
+                ]
+              : writable &&
+                  session.acquisitionMethod !== undefined &&
+                  session.phase !== 'completed' &&
+                  session.phase !== 'skipped' &&
+                  session.phase !== 'aborted'
+                ? [
+                    {
+                      _tag: 'Available' as const,
+                      action: 'AbortAcquire' as const,
+                    },
+                  ]
+                : writable &&
+                    session.acquisitionMethod !== undefined &&
+                    session.phase === 'completed'
+                  ? [
+                      ...(session.managedCapture === undefined
                         ? [
                             {
                               _tag: 'Available' as const,
-                              action: 'StopManagedCapture' as const,
+                              action: 'RecordLiveFrameEvidence' as const,
                             },
+                            ...(liveFrame === undefined
+                              ? []
+                              : [
+                                  {
+                                    _tag: 'Available' as const,
+                                    action: 'StartManagedCapture' as const,
+                                  },
+                                ]),
                           ]
-                        : []),
-                ]
-              : [],
+                        : session.managedCapture.state === 'active'
+                          ? [
+                              {
+                                _tag: 'Available' as const,
+                                action: 'PauseManagedCapture' as const,
+                              },
+                              {
+                                _tag: 'Available' as const,
+                                action: 'StopManagedCapture' as const,
+                              },
+                              ...(session.managedCapture.quality === 'attention'
+                                ? [
+                                    {
+                                      _tag: 'Available' as const,
+                                      action: 'RecenterManagedCapture' as const,
+                                    },
+                                  ]
+                                : []),
+                            ]
+                          : session.managedCapture.state === 'paused'
+                            ? [
+                                {
+                                  _tag: 'Available' as const,
+                                  action: 'StopManagedCapture' as const,
+                                },
+                              ]
+                            : []),
+                    ]
+                  : [],
   }
 }
 

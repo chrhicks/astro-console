@@ -9,6 +9,29 @@ import {
 } from './primitives.js'
 
 export const AcquireIntent = Schema.TaggedUnion({
+  RetryPlateSolveWithParameters: {
+    expectedLeaseRevision: LeaseRevision,
+    expectedRunRevision: RunRevision,
+    expectedAcquireRevision: AcquireRevision,
+    parameters: Schema.Struct({
+      exposureSeconds: Schema.Finite.check(Schema.isGreaterThan(0)),
+      binning: Schema.Int.check(Schema.isGreaterThan(0)),
+      solverProfile: Schema.NonEmptyString,
+    }),
+    idempotencyKey: IdempotencyKey,
+  },
+  SkipAcquireTarget: {
+    expectedLeaseRevision: LeaseRevision,
+    expectedRunRevision: RunRevision,
+    expectedAcquireRevision: AcquireRevision,
+    idempotencyKey: IdempotencyKey,
+  },
+  AbortAcquire: {
+    expectedLeaseRevision: LeaseRevision,
+    expectedRunRevision: RunRevision,
+    expectedAcquireRevision: AcquireRevision,
+    idempotencyKey: IdempotencyKey,
+  },
   CaptureTargetAcquisitionEvidence: {
     expectedLeaseRevision: LeaseRevision,
     expectedRunRevision: RunRevision,

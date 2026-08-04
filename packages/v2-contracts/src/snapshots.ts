@@ -130,10 +130,19 @@ export const AcquireSnapshot = Schema.Struct({
     'polarGuidance',
     'paused',
     'skipped',
+    'aborted',
     'completed',
   ]),
   recoverySeries: NonNegativeInt,
   attemptCount: NonNegativeInt,
+  recovery: Schema.optionalKey(
+    Schema.Struct({
+      remainingAttempts: NonNegativeInt,
+      remainingRecoverySeries: NonNegativeInt,
+      priorVerifiedState: Schema.Literals(['retained', 'unverified']),
+      reconciliation: Schema.NonEmptyString,
+    }),
+  ),
   correctionAttemptsRemaining: Schema.optionalKey(NonNegativeInt),
   activeAttemptId: Schema.optionalKey(AttemptId),
   pendingProposal: Schema.optionalKey(

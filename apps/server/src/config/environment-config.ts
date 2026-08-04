@@ -49,6 +49,7 @@ export type OriginServerConfig = {
     | 'target-correction'
     | 'live-frame'
     | 'managed-capture'
+    | 'acquire-recovery'
     | 'plan-draft'
     | 'library-published'
     | undefined
@@ -117,11 +118,12 @@ export const originServerConfig = Config.all({
         input.fixture.value !== 'target-correction' &&
         input.fixture.value !== 'live-frame' &&
         input.fixture.value !== 'managed-capture' &&
+        input.fixture.value !== 'acquire-recovery' &&
         input.fixture.value !== 'plan-draft' &&
         input.fixture.value !== 'library-published'
       )
         return configFailure(
-          'ASTRO_SERVER_FIXTURE must be m27, polar, target-deep-sky, target-lunar, target-correction, live-frame, plan-draft, or library-published when set',
+          'ASTRO_SERVER_FIXTURE must be m27, polar, target-deep-sky, target-lunar, target-correction, live-frame, managed-capture, acquire-recovery, plan-draft, or library-published when set',
         )
       if (
         Option.isNone(input.downloadGrantUrl) &&
@@ -178,6 +180,7 @@ function originServer(input: {
         input.fixture.value === 'target-correction' ||
         input.fixture.value === 'live-frame' ||
         input.fixture.value === 'managed-capture' ||
+        input.fixture.value === 'acquire-recovery' ||
         input.fixture.value === 'plan-draft' ||
         input.fixture.value === 'library-published')
         ? input.fixture.value

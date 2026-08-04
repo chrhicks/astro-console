@@ -44,6 +44,16 @@ replays them, and phone remains read-only. SQLite, typed HTTP, idempotency,
 SSE, restart, and responsive Observe proof are present. This does not contact
 a camera or provider, collect physical data, or create a Library asset.
 
+The recovery-and-rollback child is complete as deterministic server-backed
+behavior. Exhausted solving exposes only one separately bounded,
+changed-parameter recovery series, plus explicit Skip and Abort choices.
+Recovery facts retain the last verified pointing and identify rejected or
+unverified work for reconciliation. Typed commands remain lease, run, Acquire,
+and idempotency guarded; the browser does not replay them and phone is
+read-only. SQLite, typed HTTP, SSE, restart, and responsive Observe proof are
+present. This does not contact a provider or device, move hardware, or claim
+physical capture.
+
 ## Completed Phase 2.5: Server Boundary Extraction
 
 Phase 2.5 is authorized before Phase 3. It is an internal cleanup only: no

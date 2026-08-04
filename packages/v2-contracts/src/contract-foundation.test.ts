@@ -117,6 +117,7 @@ const commandFixtures: ReadonlyArray<unknown> = [
     idempotencyKey: 'i-11',
   },
   { _tag: 'SkipAcquireTarget', ...acquireFreshness, idempotencyKey: 'i-12' },
+  { _tag: 'AbortAcquire', ...acquireFreshness, idempotencyKey: 'i-12a' },
   {
     _tag: 'ApprovePointingCorrection',
     ...acquireFreshness,
@@ -249,7 +250,7 @@ const commandFixtures: ReadonlyArray<unknown> = [
 
 describe('Gate 5 contract foundation', () => {
   it('keeps the accepted command vocabulary closed', () => {
-    assert.equal(commandTags.length, 39)
+    assert.equal(commandTags.length, 40)
     assert.deepEqual(commandTags, acceptedCommandTags)
     assert.deepEqual(
       commandTags,

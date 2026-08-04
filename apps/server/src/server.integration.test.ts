@@ -507,6 +507,129 @@ test('managed capture persists guarded progress actions, replay, SSE, restart, a
   service.close()
 })
 
+test('Acquire recovery is bounded, reconciled, idempotent, streamed, restart-safe, and phone read-only', async () => {
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-acquire-recovery-')),
+    'state.sqlite',
+  )
+  const admission = (request?: Pick<IncomingMessage, 'headers'>) =>
+    request?.headers.authorization === 'Bearer phone'
+      ? {
+          personId: 'owner-chicks',
+          clientId: 'phone-owner',
+          role: 'owner' as const,
+          capability: 'readOnly' as const,
+        }
+      : {
+          personId: 'owner-chicks',
+          clientId: 'desktop-owner',
+          role: 'owner' as const,
+          capability: 'controlCapable' as const,
+        }
+  let service = createLocalWebService(
+    databasePath,
+    admission,
+    undefined,
+    undefined,
+    { fixture: 'acquire-recovery' },
+  )
+  let listener = await service.listen()
+  let base = `http://127.0.0.1:${listener.port}`
+  const phone = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: { authorization: 'Bearer phone' },
+  })
+  assert.deepEqual(phone.observe?.acquire?.actions, [])
+  const stream = await fetch(`${base}/api/events`)
+  const reader = stream.body?.getReader()
+  await reader?.read()
+  const paused = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (
+    paused.activeRun._tag !== 'Active' ||
+    paused.observe?.acquire === undefined
+  )
+    throw new Error('Acquire recovery fixture is unavailable')
+  assert.equal(paused.observe.acquire.phase, 'paused')
+  assert.deepEqual(paused.observe.acquire.actions, [
+    { _tag: 'Available', action: 'RetryPlateSolveWithParameters' },
+    { _tag: 'Available', action: 'SkipAcquireTarget' },
+    { _tag: 'Available', action: 'AbortAcquire' },
+  ])
+  assert.equal(paused.observe.acquire.recovery?.remainingAttempts, 0)
+  assert.equal(paused.observe.acquire.recovery?.remainingRecoverySeries, 1)
+  const recovery = {
+    _tag: 'RetryPlateSolveWithParameters' as const,
+    expectedLeaseRevision: paused.control.revision,
+    expectedRunRevision: paused.activeRun.run.revision,
+    expectedAcquireRevision: paused.observe.acquire.revision,
+    parameters: {
+      exposureSeconds: 15,
+      binning: 1,
+      solverProfile: 'deep-sky-plate-solve',
+    },
+    idempotencyKey: 'recovery-replay',
+  }
+  assert.equal((await submitPolar(base, recovery)).response.status, 200)
+  assert.match(await nextEvent(reader), /"phase":"solving"/)
+  assert.equal((await submitPolar(base, recovery)).response.status, 200)
+  const recovered = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(recovered.observe?.acquire?.phase, 'solving')
+  assert.equal(recovered.observe?.acquire?.recovery?.remainingRecoverySeries, 0)
+  assert.equal(
+    (
+      await submitPolar(base, {
+        ...recovery,
+        idempotencyKey: 'recovery-stale',
+      })
+    ).response.status,
+    409,
+  )
+  await reader?.cancel()
+  await listener.close()
+  service.close()
+
+  service = createLocalWebService(databasePath, admission)
+  listener = await service.listen()
+  base = `http://127.0.0.1:${listener.port}`
+  assert.equal(
+    (await bootstrapSnapshot(`${base}/api/snapshot`)).observe?.acquire?.phase,
+    'solving',
+  )
+  await listener.close()
+  service.close()
+
+  const skipService = createLocalWebService(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'acquire-recovery' },
+  )
+  const skipListener = await skipService.listen()
+  const skipBase = `http://127.0.0.1:${skipListener.port}`
+  const skipSnapshot = await bootstrapSnapshot(`${skipBase}/api/snapshot`)
+  if (
+    skipSnapshot.activeRun._tag !== 'Active' ||
+    skipSnapshot.observe?.acquire === undefined
+  )
+    throw new Error('Acquire recovery skip fixture is unavailable')
+  const skip = {
+    _tag: 'SkipAcquireTarget' as const,
+    expectedLeaseRevision: skipSnapshot.control.revision,
+    expectedRunRevision: skipSnapshot.activeRun.run.revision,
+    expectedAcquireRevision: skipSnapshot.observe.acquire.revision,
+    idempotencyKey: 'skip-replay',
+  }
+  assert.equal((await submitPolar(skipBase, skip)).response.status, 200)
+  assert.equal((await submitPolar(skipBase, skip)).response.status, 200)
+  assert.equal(
+    (await bootstrapSnapshot(`${skipBase}/api/snapshot`)).observe?.acquire
+      ?.phase,
+    'skipped',
+  )
+  await skipListener.close()
+  skipService.close()
+})
+
 test('target correction fixture installs a durable large pending proposal without a provider call', async (t) => {
   const service = createLocalWebService(
     undefined,

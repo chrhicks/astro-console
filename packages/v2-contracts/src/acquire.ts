@@ -276,6 +276,7 @@ export const AcquireSession = Schema.Struct({
     'polarGuidance',
     'paused',
     'skipped',
+    'aborted',
     'completed',
   ]),
   policy: AcquireEvidencePolicy,
@@ -627,6 +628,24 @@ export const openRecoverySeries = (
     attemptId: input.attemptId,
   })
 }
+
+export const skipAcquireTarget = (session: AcquireSession): AcquireSession =>
+  AcquireSession.make({
+    ...session,
+    revision: AcquireRevision.make(session.revision + 1),
+    phase: 'skipped',
+    activeWork: null,
+    pendingCorrectionProposal: null,
+  })
+
+export const abortAcquire = (session: AcquireSession): AcquireSession =>
+  AcquireSession.make({
+    ...session,
+    revision: AcquireRevision.make(session.revision + 1),
+    phase: 'aborted',
+    activeWork: null,
+    pendingCorrectionProposal: null,
+  })
 
 export type CorrectionCommandDecision = Data.TaggedEnum<{
   Started: {
@@ -1011,6 +1030,10 @@ function validateAcquireSession(session: {
     | 'polarGuidance'
     | 'paused'
     | 'skipped'
+    | 'aborted'
+    | 'completed'
+    | 'paused'
+    | 'skipped'
     | 'completed'
   readonly solveSeries: ReadonlyArray<SolveSeries>
   readonly evidence: ReadonlyArray<AcquireEvidence>
@@ -1081,6 +1104,7 @@ function validateAcquireSession(session: {
   if (
     (session.phase === 'paused' ||
       session.phase === 'skipped' ||
+      session.phase === 'aborted' ||
       session.phase === 'completed' ||
       session.phase === 'awaitingApproval' ||
       session.phase === 'polarGuidance') &&

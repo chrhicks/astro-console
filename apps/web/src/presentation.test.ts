@@ -10,12 +10,14 @@ import { Shell } from './Shell'
 import { planDraftStatus, PlanView } from './workspaces/PlanView'
 import { ProcessView } from './workspaces/ProcessView'
 import { Status } from './workspaces/shared'
+import { ObserveView } from './workspaces/ObserveView'
 import { BootstrapClientState } from './bootstrap-client'
 import { projectBootstrapState } from './bootstrap-projection'
 import {
   bootstrapFixtures,
   BootstrapSnapshot,
   ProcessSourceHandoff,
+  ObserveWorkspaceProjection,
 } from '@astro-console/v2-contracts'
 test('routes parse stable IDs and build escaped URLs', () => {
   assert.deepEqual(parseRoute('/library/assets/asset%2Fone'), {
@@ -221,6 +223,81 @@ test('Plan distinguishes saved drafts, unsaved edits, immutable definitions, and
 test('freshness protects actions without viewport-derived authority', () => {
   assert.equal(actionAvailability({ fresh: false }), 'protected')
   assert.equal(actionAvailability({ fresh: true }), 'unavailable')
+})
+
+test('Observe presents bounded recovery facts and withholds recovery actions on read-only phone', () => {
+  const source = Schema.decodeUnknownSync(ObserveWorkspaceProjection)({
+    runId: 'run-recovery',
+    revision: 1,
+    executor: 'fixture',
+    phase: 'acquire',
+    target: 'M27 Dumbbell Nebula',
+    currentSequence: 0,
+    completedSequences: 0,
+    totalSequences: 1,
+    retryUsed: false,
+    acquire: {
+      revision: 2,
+      mode: 'pointing',
+      acquisitionMethod: 'deepSkyPlateSolve',
+      phase: 'paused',
+      recoverySeries: 0,
+      attemptCount: 2,
+      correctionAttemptsRemaining: 2,
+      recovery: {
+        remainingAttempts: 0,
+        remainingRecoverySeries: 1,
+        priorVerifiedState: 'unverified',
+        reconciliation:
+          'No verified pointing result is available; rejected or unverified work stays separate.',
+      },
+      actions: [
+        { _tag: 'Available', action: 'RetryPlateSolveWithParameters' },
+        { _tag: 'Available', action: 'SkipAcquireTarget' },
+        { _tag: 'Available', action: 'AbortAcquire' },
+      ],
+    },
+    lifecycleFacts: ['Fixture recovery is paused.'],
+    attemptFacts: ['No physical capture is claimed.'],
+    actions: {
+      pause: { _tag: 'Ineligible', reason: 'policyUnavailable' },
+      resume: { _tag: 'Ineligible', reason: 'policyUnavailable' },
+      stop: { _tag: 'Eligible' },
+      skip: { _tag: 'Ineligible', reason: 'policyUnavailable' },
+      retry: { _tag: 'Ineligible', reason: 'policyUnavailable' },
+      park: { _tag: 'Eligible' },
+    },
+  })
+  const view = {
+    detailAvailable: true,
+    target: 'M27 Dumbbell Nebula',
+    phase: 'acquire',
+    status: 'Acquire paused',
+    tone: 'attention' as const,
+    evidence: 'Two failed solves are retained.',
+    annotation: 'Recovery needs an explicit choice.',
+    heading: 'Recovery is ready',
+    trace: ['No movement is requested.'],
+    facts: ['Failed evidence is retained.'],
+    lifecycle: ['acquire'],
+    source,
+  }
+  const desktop = renderToStaticMarkup(
+    createElement(ObserveView, {
+      view,
+      acquireRecoveryCommand: async () => undefined,
+    }),
+  )
+  const phone = renderToStaticMarkup(createElement(ObserveView, { view }))
+  assert.match(desktop, /Bounded recovery is ready/)
+  assert.match(desktop, /Retry at 15 s exposure/)
+  assert.match(desktop, /Skip target/)
+  assert.match(desktop, /Abort acquisition/)
+  assert.match(desktop, /rejected or unverified work stays separate/)
+  assert.doesNotMatch(
+    phone,
+    /Retry at 15 s exposure|Skip target|Abort acquisition/,
+  )
 })
 
 test('typed unavailable results retain the visible protection reason', () => {

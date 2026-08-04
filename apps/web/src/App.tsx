@@ -93,6 +93,15 @@ export function App() {
       ) => Promise<void>)
     | undefined
   >()
+  const [acquireRecoveryCommand, setAcquireRecoveryCommand] = useState<
+    | ((
+        action:
+          | 'RetryPlateSolveWithParameters'
+          | 'SkipAcquireTarget'
+          | 'AbortAcquire',
+      ) => Promise<void>)
+    | undefined
+  >()
   const [approvePointingCorrection, setApprovePointingCorrection] = useState<
     ((proposalId: string) => Promise<void>) | undefined
   >()
@@ -379,6 +388,44 @@ export function App() {
           if (!response.ok) throw new Error('Managed capture command rejected')
         },
     )
+    setAcquireRecoveryCommand(
+      () =>
+        async (
+          action:
+            | 'RetryPlateSolveWithParameters'
+            | 'SkipAcquireTarget'
+            | 'AbortAcquire',
+        ) => {
+          const observe = projectionRef.current.observe
+          if (
+            observe.source?.acquire === undefined ||
+            observe.leaseRevision === undefined
+          )
+            throw new Error('Acquire recovery state unavailable')
+          const intent = {
+            _tag: action,
+            expectedLeaseRevision: observe.leaseRevision,
+            expectedRunRevision: observe.source.revision,
+            expectedAcquireRevision: observe.source.acquire.revision,
+            idempotencyKey: crypto.randomUUID(),
+            ...(action === 'RetryPlateSolveWithParameters'
+              ? {
+                  parameters: {
+                    exposureSeconds: 15,
+                    binning: 1,
+                    solverProfile: 'deep-sky-plate-solve',
+                  },
+                }
+              : {}),
+          }
+          const response = await fetch('/api/acquire/commands', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ intent }),
+          })
+          if (!response.ok) throw new Error('Acquire recovery command rejected')
+        },
+    )
     setApprovePointingCorrection(() => async (proposalId: string) => {
       const observe = projectionRef.current.observe
       if (
@@ -528,6 +575,9 @@ export function App() {
         {...(managedCaptureCommand === undefined || projection.shell.readOnly
           ? {}
           : { managedCaptureCommand })}
+        {...(acquireRecoveryCommand === undefined || projection.shell.readOnly
+          ? {}
+          : { acquireRecoveryCommand })}
         {...(approvePointingCorrection === undefined ||
         projection.shell.readOnly
           ? {}

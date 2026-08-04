@@ -9,6 +9,7 @@ import {
   AttemptId,
   PointingSolveResult,
   RecoverySeriesId,
+  RecoverySeriesDecision,
   LunarDiskLimbCompletion,
   CorrectionAcknowledgementDecision,
   CorrectionCommandDecision,
@@ -21,6 +22,9 @@ import {
   recordLiveFrameEvidence,
   recordSolveCompletion,
   recordTargetSlewAcknowledgement,
+  openRecoverySeries,
+  skipAcquireTarget,
+  abortAcquire,
 } from '@astro-console/v2-contracts'
 import { AcquirePersistence } from './polar-service.ts'
 
@@ -123,6 +127,54 @@ export const executeTargetAcquisitionCommand = Effect.fn(
       summary: 'Target evidence changed. Read the current Observe projection.',
     }
   const intent = input.value.intent
+  if (AcquireIntent.guards.RetryPlateSolveWithParameters(intent)) {
+    const recovery = openRecoverySeries(session, {
+      seriesId: RecoverySeriesId.make(`recovery-${session.revision + 1}`),
+      attemptId: AttemptId.make(`recovery-solve-${session.revision + 1}`),
+      parameters: intent.parameters,
+    })
+    if (!RecoverySeriesDecision.$is('Started')(recovery))
+      return {
+        _tag: 'Rejected' as const,
+        summary:
+          recovery.reason === 'RecoveryParametersUnchanged'
+            ? 'Recovery needs materially changed solve parameters.'
+            : recovery.reason === 'RecoveryBudgetExhausted'
+              ? 'The one recovery series has already been used.'
+              : 'Acquire is not paused for plate-solve recovery.',
+      }
+    return {
+      _tag: 'Committed' as const,
+      cursor: persistence.commit(recovery.session, 'AcquireRecoveryStarted')
+        .cursor,
+    }
+  }
+  if (AcquireIntent.guards.SkipAcquireTarget(intent)) {
+    if (session.phase !== 'paused')
+      return {
+        _tag: 'Rejected' as const,
+        summary: 'Skip is available only while Acquire is paused for recovery.',
+      }
+    return {
+      _tag: 'Committed' as const,
+      cursor: persistence.commit(
+        skipAcquireTarget(session),
+        'AcquireTargetSkipped',
+      ).cursor,
+    }
+  }
+  if (AcquireIntent.guards.AbortAcquire(intent)) {
+    if (session.phase === 'completed' || session.phase === 'skipped')
+      return {
+        _tag: 'Rejected' as const,
+        summary: 'Acquire is already terminal for this target.',
+      }
+    return {
+      _tag: 'Committed' as const,
+      cursor: persistence.commit(abortAcquire(session), 'AcquireAborted')
+        .cursor,
+    }
+  }
   if (AcquireIntent.guards.ApprovePointingCorrection(intent)) {
     const approved = approveCorrectionProposal(session, {
       proposalId: intent.proposalId,

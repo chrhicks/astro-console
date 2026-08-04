@@ -133,6 +133,7 @@ export function createLocalWebService(
       | 'target-correction'
       | 'live-frame'
       | 'managed-capture'
+      | 'acquire-recovery'
     readonly webDistPath?: string
     readonly preflightProvider?: ReadOnlyPreflightProviderShape
     readonly polarMeasurementProvider?: PolarMeasurementProviderShape
@@ -205,7 +206,8 @@ export function createLocalWebService(
     options.fixture === 'target-lunar' ||
     options.fixture === 'target-correction' ||
     options.fixture === 'live-frame' ||
-    options.fixture === 'managed-capture'
+    options.fixture === 'managed-capture' ||
+    options.fixture === 'acquire-recovery'
   ) {
     const acquisitionMethod =
       options.fixture === 'target-lunar' ? 'lunarDiskLimb' : 'deepSkyPlateSolve'
@@ -214,7 +216,8 @@ export function createLocalWebService(
       revision: 1,
       phase:
         options.fixture === 'live-frame' ||
-        options.fixture === 'managed-capture'
+        options.fixture === 'managed-capture' ||
+        options.fixture === 'acquire-recovery'
           ? ('capture' as const)
           : ('acquire' as const),
       target:
@@ -316,6 +319,43 @@ export function createLocalWebService(
             )
           : acquired,
       )
+    } else if (options.fixture === 'acquire-recovery') {
+      const first = recordSolveCompletion(session, {
+        attemptId: AttemptId.make('deepSkyPlateSolve-initial-1'),
+        sourceFrameAssetId: AssetId.make('fixture-recovery-frame-1'),
+        capturedAtEpochMs: 1_722_729_600_100,
+        solverId: 'fixture-plate-solver',
+        solverVersion: '1.0.0',
+        result: {
+          _tag: 'NoSolution',
+          category: 'stars-insufficient',
+          retryable: true,
+          diagnosticRef: 'fixture-recovery-diagnostic-1',
+        },
+        nextAttemptId: AttemptId.make('fixture-recovery-retry-2'),
+        correctionAttemptId: AttemptId.make('fixture-recovery-correction'),
+        proposalId: 'fixture-recovery-proposal',
+        proposalExpiresAtEpochMs: 1_722_729_660_000,
+      })
+      const retry = 'session' in first ? first.session : session
+      const paused = recordSolveCompletion(retry, {
+        attemptId: AttemptId.make('fixture-recovery-retry-2'),
+        sourceFrameAssetId: AssetId.make('fixture-recovery-frame-2'),
+        capturedAtEpochMs: 1_722_729_600_200,
+        solverId: 'fixture-plate-solver',
+        solverVersion: '1.0.0',
+        result: {
+          _tag: 'NoSolution',
+          category: 'stars-insufficient',
+          retryable: true,
+          diagnosticRef: 'fixture-recovery-diagnostic-2',
+        },
+        nextAttemptId: AttemptId.make('fixture-recovery-retry-3'),
+        correctionAttemptId: AttemptId.make('fixture-recovery-correction-2'),
+        proposalId: 'fixture-recovery-proposal-2',
+        proposalExpiresAtEpochMs: 1_722_729_660_000,
+      })
+      acquireRepository.install('session' in paused ? paused.session : retry)
     } else acquireRepository.install(session)
   }
   const webHost = Effect.runSync(
@@ -566,6 +606,11 @@ export function createLocalWebService(
           (AcquireIntent.guards.CaptureTargetAcquisitionEvidence(
             decoded.intent,
           ) ||
+            AcquireIntent.guards.RetryPlateSolveWithParameters(
+              decoded.intent,
+            ) ||
+            AcquireIntent.guards.SkipAcquireTarget(decoded.intent) ||
+            AcquireIntent.guards.AbortAcquire(decoded.intent) ||
             AcquireIntent.guards.RecordLiveFrameEvidence(decoded.intent) ||
             AcquireIntent.guards.StartManagedCapture(decoded.intent) ||
             AcquireIntent.guards.PauseManagedCapture(decoded.intent) ||

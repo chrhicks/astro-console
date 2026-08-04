@@ -85,6 +85,7 @@ export const commandPolicies = {
     requiresDesktop: true,
   },
   SkipAcquireTarget: { authority: 'controller', requiresDesktop: true },
+  AbortAcquire: { authority: 'controller', requiresDesktop: true },
   ApprovePointingCorrection: { authority: 'controller', requiresDesktop: true },
   RevisePointingCorrection: { authority: 'controller', requiresDesktop: true },
   CaptureTargetAcquisitionEvidence: {
