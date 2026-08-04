@@ -17,6 +17,21 @@ success; subsequent image evidence remains the proof of pointing and capture.
 
 Status: **prepared for acceptance — implementation is not authorized yet**
 
+### Entry Gate
+
+Preparation is complete. The next owner decision is to accept this exact
+read-only slice. Acceptance authorizes only the configured provider read,
+typed `PreflightSnapshot` projection, SQLite/HTTP/SSE proof, and the bounded
+Observe presentation described below. It does not authorize a provider write,
+device command, capture, Solar capability, or a later Phase 3 slice.
+
+Continuum task `tkt-2e396ziz` tracks this entry slice. Its first pending step
+is that owner acceptance; it is intentionally open rather than ready.
+
+After acceptance, implementation starts from one current fake `ActiveRun` at
+`preflight`, with one configured read-only provider adapter. Missing provider
+configuration must project `unavailable` or `unknown`, never a safe verdict.
+
 The first slice should make a current accepted fake `ActiveRun` legible at
 `preflight` through a service-owned, timestamped checklist. It reads provider
 facts only; it sends no mount, camera, focuser, filter, or capture command.

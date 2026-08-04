@@ -29,8 +29,11 @@ reusable behavior. The source check rejects exports from or imports of
 `server.ts`. No provider, device, capture, browser, or persistence-model scope
 was added.
 
-Final Phase 2.5 evidence: contracts **184/184**, server **62/62**, and web
-**57/57**.
+Phase 2.5 closeout evidence was contracts **184/184**, server **62/62**, and
+web **57/57**. The later server test reorganization and Effect beta.103
+maintenance upgrade currently validate contracts **184/184**, server **56/56**,
+web **57/57**, and SDK **62/62**. Local `file:` packages now install as copies
+through root `.npmrc`, so shared Effect Schemas resolve one runtime instance.
 Both remaining Compose files render with inert absolute placeholders; unset real
 host-secret paths correctly refuse to render. Phase 3 remains unimplemented
 and requires separate owner acceptance.
@@ -71,7 +74,8 @@ request/grant/decline/release/take seam is preserved, but user-facing presence
 and control UI remain Phase 6 work; reconnect and presence lifecycle are not
 claimed.
 
-Final evidence: contracts **184/184**, server **62/62**, and web **57/57**;
+Convergence closeout evidence was contracts **184/184**, server **62/62**, and
+web **57/57**; the current maintenance validation is recorded above.
 Compose base/download, rig, and publisher renders; and Designer PASS at wide,
 compact, and 390 px for owner, friend, and phone projections. Final image:
 `sha256:10c3f8ccbcf9530b24a595e90242ad497720d177b8ffdaae95104cf62b18835e`.
@@ -202,8 +206,8 @@ same-host resilience. Off-host recovery is not current Phase 1 scope.
 ## Verified Baseline
 
 - `apps/server` type checks and its SQLite/HTTP/SSE/worker/filesystem
-  integration suite pass **62/62**. The suite covers the retained local-web
-  foundation, Process Save/publisher boundary, and the deliberately installed
+  integration suite currently passes **56/56**. The suite covers the retained
+  local-web foundation, Process Save/publisher boundary, and the deliberately installed
   deterministic M27 fixture without creating generic hardware work. Normal
   origin, publisher, and processor database opening runs migrations without
   seeding that fixture's Plan, Library, or Process data.

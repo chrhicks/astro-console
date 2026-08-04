@@ -123,10 +123,12 @@ typed control, Plan, fake managed-run Observe, Library/download, and Process
 handoff; direct legacy routes are retired. The production bundle contains no
 fixture adapter, theme-study runtime, or prototype runtime.
 
-The completed exit criteria are evidenced by **184/184** contract,
-**62/62** server, and **57/57** web tests; Compose base/download, rig, and
-publisher renders; and Designer PASS at wide, compact, and 390 px for owner,
-friend, and phone projections. Final image:
+The completed exit criteria were evidenced at closeout by **184/184** contract,
+**62/62** server, and **57/57** web tests. Current maintenance validation after
+the server test reorganization and Effect beta.103 upgrade is **184/184**
+contract, **56/56** server, **57/57** web, and **62/62** SDK tests; Compose
+base/download, rig, and publisher renders; and Designer PASS at wide, compact,
+and 390 px for owner, friend, and phone projections. Final image:
 `sha256:10c3f8ccbcf9530b24a595e90242ad497720d177b8ffdaae95104cf62b18835e`.
 `ASTRO_SERVER` is the canonical environment configuration, with bounded
 deployed legacy aliases only. No provider, device, Solar, physical, or capture
