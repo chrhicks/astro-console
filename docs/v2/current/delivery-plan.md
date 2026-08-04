@@ -126,7 +126,7 @@ fixture adapter, theme-study runtime, or prototype runtime.
 The completed exit criteria were evidenced at closeout by **184/184** contract,
 **62/62** server, and **57/57** web tests. Current maintenance validation after
 the server test reorganization and Effect beta.103 upgrade is **184/184**
-contract, **56/56** server, **57/57** web, and **62/62** SDK tests; Compose
+contract, **57/57** server, **59/59** web, and **62/62** SDK tests; Compose
 base/download, rig, and publisher renders; and Designer PASS at wide, compact,
 and 390 px for owner, friend, and phone projections. Final image:
 `sha256:10c3f8ccbcf9530b24a595e90242ad497720d177b8ffdaae95104cf62b18835e`.
@@ -137,8 +137,10 @@ work was performed or authorized.
 The typed control request/grant/decline/release/take seam remains preserved,
 but user-facing presence and control UI is deferred to Phase 6; reconnect and
 presence lifecycle are not claimed. Interactive Process is deferred to Phase 5.
-Phase 3 remains separately authorized only by accepted bounded slices; its
-prepared read-only preflight packet is not accepted or implemented.
+Phase 3 is organized as the ordered Continuum Epic `tkt-2xpkp65f`. Its
+preflight child is accepted and has a deterministic provider-boundary proof;
+the real read-only adapter and every later child require their own owner
+authorization before implementation.
 
 ## Phase 3: Observe, Acquire, and Capture — After Production Convergence
 

@@ -1,85 +1,89 @@
 # Phase 3 Implementation Planning
 
-Status: **authorized V2.0 first slice — provider-boundary and projection proof implemented; real provider adapter remains pending**
+Status: **one ordered Epic; only its preflight child has owner authorization**
 
-This document prepares Phase 3 in the durable [V2 delivery plan](delivery-plan.md).
-Production Convergence is complete. The owner has accepted the first read-only
-slice. It authorizes provider reads only; device commands, Solar work, and
-capture remain out of scope.
+This is the execution plan for Phase 3 in the durable
+[V2 delivery plan](delivery-plan.md). It turns the six Phase 3 outcomes into
+one dependent Epic, rather than treating them as unrelated slices.
 
 ## Objective
 
-Deliver an operator-visible Acquire workflow whose decisions are backed by
-current rig evidence. A command acknowledgement is never presented as physical
-success; subsequent image evidence remains the proof of pointing and capture.
+Deliver an operator-visible Observe, Acquire, and Capture workflow whose
+decisions use current rig and image evidence. A driver acknowledgement is never
+physical success. Solar is not a product capability and is excluded.
 
-## First Slice: Read-Only Decision-Grade Preflight
+## Epic And Delivery Order
 
-Status: **authorized — provider-boundary and projection proof implemented**
+Continuum Epic `tkt-2xpkp65f` — **Phase 3: Observe, Acquire, and Capture** —
+owns the complete phase. Each child has its own implementation detail,
+acceptance gate, and proof. A child starts only after its blockers are complete;
+the owner must explicitly authorize it before implementation. The existing
+preflight child is the one exception: it is already authorized and partly
+implemented.
 
-### Entry Gate
+| Order | Child task | Delivery responsibility | Depends on |
+| --- | --- | --- | --- |
+| 1 | `tkt-2e396ziz` — Complete real read-only preflight adapter | Read and decode rig, plan, and safety facts into a timestamped `PreflightSnapshot`. Normal runtime remains `unavailable` until a provider is proven read-only. | — |
+| 2 | `tkt-ue2yl172` — Guide polar alignment from solved frames | Capture/solve a polar measurement, show manual Alt/Az overlay guidance, and require explicit acceptance of current in-tolerance evidence. | 1 |
+| 3 | `tkt-gj8btl1l` — Acquire targets with deep-sky and lunar paths | Use plate solve for deep-sky slew/center and a separate disk/limb path for lunar acquisition. | 1, 2 |
+| 4 | `tkt-gwl6lc30` — Verify pointing corrections from successive images | Persist the correction proposal and bound; verify the physical result from a new solved image. | 3 |
+| 5 | `tkt-dqmkymd7` — Project live frame evidence and quality | Project frame identity, quality, drift, target-in-frame, and storage facts during Capture. Full Library review stays in Phase 4. | 4 |
+| 6 | `tkt-0g6q3wl7` — Run managed capture with visible progress and actions | Run approved sequences with progress, stop conditions, storage reserve, and server-owned actions. | 5 |
+| 7 | `tkt-1ozfsam5` — Add bounded Acquire recovery and rollback | Keep failure, remaining budget, recovery choice, rollback/reconciliation, and abort visible. | 4, 5, 6 |
+| 8 | `tkt-wnhdp696` — Prove Phase 3 exit criteria end to end | Verify every outcome and responsive projection through deterministic adapters and the configured provider boundary. | 1–7 |
 
-Preparation is complete and the owner has accepted this exact read-only slice.
-The authorization permits only the configured provider read,
-typed `PreflightSnapshot` projection, SQLite/HTTP/SSE proof, and the bounded
-Observe presentation described below. It does not authorize a provider write,
-device command, capture, Solar capability, or a later Phase 3 slice.
+## Child Implementation Rules
 
-Continuum task `tkt-2e396ziz` tracks this entry slice. Owner acceptance,
-contract, SQLite/HTTP/SSE projection, unavailable behavior, and Observe
-presentation are implemented and verified with a deterministic read-only
-provider. A real configured adapter remains pending.
+All device-facing children use the accepted capability, control-lease, run
+revision, acquire revision, idempotency, SQLite, HTTP, and SSE seams. The
+server owns policy and transitions; the browser renders the current projection.
+Phone remains read-only.
 
-Implementation starts from one current fake `ActiveRun` at `preflight` and a
-typed read-only provider boundary. In normal runtime no provider is configured,
-so it returns `unavailable`, never a safe verdict. Existing SDK connection and
-authentication paths are not proven read-only, so a real configured adapter is
-deliberately deferred to a separate accepted implementation step.
+1. **Preflight.** The existing typed boundary, SQLite/HTTP/SSE persistence,
+   unavailable behavior, and Observe panel are complete with a deterministic
+   provider. The remaining work is a real provider adapter that can prove it
+   performs reads only. Existing SDK connection and authentication calls cannot
+   be used until this is true. It must produce `ready`, `blocked`,
+   `unavailable`, or `unknown` facts without device commands, capture, outbox
+   work, or Solar behavior.
+2. **Polar.** Implement accepted `ACQ-06` and `ACQ-07`:
+   `CapturePolarAlignmentMeasurement` and `AcceptPolarAlignmentEvidence`.
+   The operator makes the physical adjustment. The service records a solved
+   measurement and overlays estimated axis, true pole, vector, tolerance,
+   timestamp, image identity, and Alt/Az guidance. It never sends a motor
+   command for manual alignment.
+3. **Target acquisition.** Keep deep-sky plate-solve correction distinct from
+   the lunar disk/limb method. Both record provider acknowledgement as
+   provisional and await image evidence. Unsupported capability, unsafe rig
+   state, cancellation, and abort have typed results.
+4. **Correction verification.** Implement accepted `ACQ-01`, `ACQ-04`, and
+   `ACQ-05`. Automatic corrections are only inside policy bounds; larger
+   corrections require an exact approval/proposal. A subsequent solved image,
+   not a mount acknowledgement, completes centering.
+5. **Live frame evidence.** Decode and persist only bounded capture facts:
+   current frame, acceptance/rejection counts, target framing, drift,
+   clipping/exposure, focus/shape when available, and storage forecast. Facts
+   may be unavailable or unknown. Asset catalog and review workflows remain
+   Phase 4 work.
+6. **Managed capture.** Project exposure/stack, elapsed/remaining time,
+   stop condition, resource protection, quality state, and current allowed
+   actions. Pause, stop, and recenter stay guarded server intents. No browser
+   retry or inferred capture success is allowed.
+7. **Recovery and rollback.** Implement accepted `ACQ-02` through `ACQ-04`:
+   bounded identical retries, one materially changed recovery series, explicit
+   skip/abort, and reconciliation after rejected or unverified work. Recovery
+   preserves the prior verified state and does not become an unbounded loop.
+8. **Exit proof.** Prove both target paths, polar acceptance, image-verified
+   correction, live capture quality/storage/drift, recovery, restart and
+   reconnect, and owner/viewer/phone projections. Run the Designer review at
+   wide, compact, and 390 px. Real-rig/provider evidence remains separately
+   stated; deterministic proof does not imply physical capture.
 
-The first slice should make a current accepted fake `ActiveRun` legible at
-`preflight` through a service-owned, timestamped checklist. It reads provider
-facts only; it sends no mount, camera, focuser, filter, or capture command.
+## Phase Exit Criteria
 
-### Scenario And Owner
+Phase 3 completes only when the Epic proves all four delivery-plan criteria:
 
-Given an admitted desktop and a persisted accepted fake run at
-`preflight`, the service refreshes and projects the current state of rig
-connectivity, ownership, mount/camera availability, observer time/location,
-target horizon facts, storage forecast, required focuser/filter capability,
-plan validity, and an explicit safe-state verdict. Each check is `ready`,
-`blocked`, `unavailable`, or `unknown`, with an observed-at time and an
-operator-readable reason.
-
-`ActiveRun` owns the preflight lifecycle and its run revision. A new embedded
-`PreflightSnapshot` owns the checklist source facts, freshness, aggregate
-verdict, and available next action. The browser renders that projection and may
-request a fresh read-only evaluation; it does not combine facts into a verdict
-or decide that unknown state is safe.
-
-### Contract And Verification
-
-The packet must define one admitted read-only refresh intent and a typed
-projection result. It carries no lease or idempotency guard because it neither
-accepts a durable mutation nor sends hardware work. It rejects an unavailable
-service/provider, unsupported required capability, and malformed input. A fresh
-response replaces the browser projection through the existing snapshot/SSE
-path.
-
-The implemented proof covers a deterministic configured provider boundary,
-SQLite/HTTP/SSE persistence across restart, a blocked case, source timestamps,
-and no outbox row. Missing provider returns `unavailable`; it never fabricates
-a safe result. The still-pending real adapter must prove ready, blocked, and
-unknown provider cases with no device command, capture evidence, or Solar
-activity.
-
-The Observe desktop surface leads with the next blocker and its evidence, not
-a telemetry grid. Compact desktop retains the verdict and action. Phone remains
-read-only. Any UI change requires wide, compact, and 390 px Designer validation.
-
-### Deferred Remainder
-
-This slice does not start a real run or command the rig. Polar alignment,
-slew/solve/center, corrections, focus/filter preparation, capture, live frame
-quality, recovery, physical stop/park, and Solar work remain later Phase 3
-slices. Provider acknowledgement and image evidence are separate from this
-read-only preflight proof.
+1. Acquire exposes correction, evidence, remaining bound, and abort path.
+2. Driver acknowledgement stays provisional until image evidence confirms it.
+3. Capture says whether useful evidence is accumulating.
+4. Recovery remains visible across Observe and responsive layouts.
