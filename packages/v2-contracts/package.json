@@ -24,7 +24,7 @@
     "check": "npm run format:check && npm run lint && npm run build && npm run test"
   },
   "dependencies": {
-    "effect": "4.0.0-beta.98"
+    "effect": "4.0.0-beta.103"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

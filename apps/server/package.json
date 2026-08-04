@@ -7,7 +7,7 @@
   },
   "dependencies": {
     "@astro-console/v2-contracts": "file:../../packages/v2-contracts",
-    "effect": "^4.0.0-beta.98"
+    "effect": "^4.0.0-beta.103"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

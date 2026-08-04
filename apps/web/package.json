@@ -21,10 +21,10 @@
   "dependencies": {
     "@astro-console/v2-contracts": "file:../../packages/v2-contracts",
     "@vitejs/plugin-react": "4.4.1",
+    "effect": "4.0.0-beta.103",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "vite": "6.3.5",
-    "effect": "4.0.0-beta.98"
+    "vite": "6.3.5"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

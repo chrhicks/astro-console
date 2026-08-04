@@ -25,7 +25,7 @@
   "dependencies": {
     "@tanstack/react-query": "^5.101.0",
     "astronomy-engine": "^2.1.19",
-    "effect": "4.0.0-beta.98",
+    "effect": "4.0.0-beta.103",
     "electron": "^39.8.6",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
