@@ -14,14 +14,24 @@ those kinds of decisions.
 
 ## Working within this project
 
+### Astro Console operating skill
+
+For Astro Console work, read and follow
+`.agents/skills/astro-console/SKILL.md`. It routes task-specific authority,
+planning, documentation maintenance, verification, and closeout work without
+putting temporary project state in this file.
+
+Use judgment, not rigid checklists. Preserve the intent of these rules: keep
+work aligned to accepted outcomes, make the smallest complete change, and state
+what the evidence actually proves.
+
 ### V2 documentation context
 
-For V2 work, begin with `docs/v2/README.md` and follow its task-specific
-reading table. The default context is only `docs/v2/ux-design-guidance.md` and
-`docs/v2/current/handoff.md`.
+For V2 work, begin with `docs/v2/README.md` and follow its current reading
+table. It is the authority for the default context and task-specific documents.
 
-- Load `docs/v2/current/product-spec.md`, one accepted gate document, or one
-  infrastructure section only when the task requires that detail.
+- Load one accepted gate document or one infrastructure section only when the
+  task requires that detail.
 - Do not broadly ingest `docs/v2/archive/` or `prototype/v2-ui/archive/`.
   Archived material is non-authoritative and is used only to answer a specific
   historical question.
@@ -29,10 +39,32 @@ reading table. The default context is only `docs/v2/ux-design-guidance.md` and
   runtime implementation authority. Rejected alternatives and earlier studies
   live under its `archive/` directory.
 
+### Documentation maintenance
+
+- Keep `docs/v2/current/` short and useful for the next accepted work.
+- At a phase or milestone closeout, move superseded detail into the appropriate
+  dated archive and update the relevant archive index. Do not delete or
+  overwrite historical documentation; preserve it as non-authoritative record.
+- Keep durable operating guidance in this file or the Astro Console skill;
+  keep product and phase decisions in the V2 documents so they can age out of
+  the active context.
+- Do not turn routine cleanup into a broad refactor. Archive when stale detail
+  obscures the current decision or when a milestone closes.
+
 ### Subagents - delegation and context preservation
 
 - Use the `coder` agent as the default implementation path for coding tasks in this project.
 - Use the `designer` subagent after every UI-affecting change in V2 or the web implementation, including UI validation. This agent is allowed to make UI (React/CSS/Markup) changes and will report back everything else.
+
+### Verification boundaries
+
+- Functional UI verification proves that the implemented behavior works through
+  the relevant route, state, and interaction path.
+- Designer verification proves visual and usability quality against the design
+  guidance. Run it after each UI-affecting V2 or web change, with wide, compact,
+  and 390px phone evidence, and re-review P0/P1 fixes.
+- Keep these proof types separate, along with local test, deployment, provider,
+  device, and physical-capture evidence.
 
 ### Executor
 
