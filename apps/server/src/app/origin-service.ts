@@ -26,15 +26,6 @@ import {
   createProductionAccessAdmission,
 } from '../auth/access-admission.ts'
 
-export {
-  createJwksKeyResolver,
-  createLocalFixtureAdmission,
-  createMembershipBootstrapResolver,
-  createProductionAccessAdmission,
-  type JwksFetcher,
-  type JwksKeyResolver,
-  type MembershipBootstrapResolver,
-} from '../auth/access-admission.ts'
 import { type Evidence } from '../services/domain-state.ts'
 import {
   ProjectionPublication,
@@ -61,28 +52,25 @@ import {
   bootstrapPlanWorkspaceProjection,
   observeWorkspaceProjection,
 } from '../services/workspace-projection-service.ts'
+import { AdapterObservation, isOwner, reject } from '../http/origin-handlers.ts'
+import { BodyTooLarge, body } from '../http/request-body.ts'
+import { json, responseHeaders, unauthenticated } from '../http/response.ts'
 import {
-  AdapterObservation,
-  BodyTooLarge,
-  body,
   commandFailureStatuses,
-  downloadAsset,
-  json,
-  isOwner,
-  libraryDetail,
-  libraryPage,
   observeCommandFromRequest,
   observeInvalidResponse,
   observeServiceResponse,
   planCommandFromRequest,
   planInvalidResponse,
   planServiceResponse,
+} from '../http/command-handlers.ts'
+import {
+  downloadAsset,
+  libraryDetail,
+  libraryPage,
   processWorkspace,
-  reject,
-  responseHeaders,
-  unauthenticated,
   workspace,
-} from '../http/origin-handlers.ts'
+} from '../http/library-handlers.ts'
 export type DownloadGrantConfig = {
   readonly issuer: DownloadGrantIssuer
   readonly now?: () => Date
@@ -208,12 +196,34 @@ export function createLocalWebService(
       ).then(({ status, body }) => json(response, status, body)),
     planWorkspace: (response) => workspace(response, database, 'plan'),
     processWorkspace: (response, url) =>
-      processWorkspace(response, database, url),
-    libraryPage: (response, url) => libraryPage(response, database, url),
+      processWorkspace(
+        response,
+        database,
+        url,
+        () => stateRepository.state().snapshotVersion,
+      ),
+    libraryPage: (response, url) =>
+      libraryPage(
+        response,
+        database,
+        url,
+        () => stateRepository.state().snapshotVersion,
+      ),
     libraryDownload: (response, url) =>
-      downloadAsset(response, database, url, downloadGrants),
+      downloadAsset(
+        response,
+        database,
+        url,
+        downloadGrants,
+        () => stateRepository.state().snapshotVersion,
+      ),
     libraryDetail: (response, encodedAssetId) =>
-      libraryDetail(response, database, encodedAssetId),
+      libraryDetail(
+        response,
+        database,
+        encodedAssetId,
+        () => stateRepository.state().snapshotVersion,
+      ),
     planCommand: (response, identity, request) =>
       Effect.runPromise(
         planCommandFromRequest(
