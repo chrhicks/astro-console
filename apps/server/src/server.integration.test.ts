@@ -33,6 +33,7 @@ import {
 } from '@astro-console/v2-contracts'
 import {
   createOriginAdmission,
+  createLocalOwnerAdmission,
   createLocalWebService,
 } from './app/origin-service.ts'
 import {
@@ -192,6 +193,23 @@ test('materializes deterministic captured bytes as an immutable Library asset wi
     existsSync(join(previewsRoot, 'asset-capture-m27-001.png')),
     true,
   )
+  const preview = await fetch(
+    `${base}/api/library/assets/asset-capture-m27-001/preview`,
+  )
+  assert.equal(preview.status, 200)
+  assert.equal(preview.headers.get('content-type'), 'image/png')
+  assert.equal(preview.headers.get('cache-control'), 'private, no-store')
+  assert.equal(preview.headers.get('x-astro-preview-max-bytes'), '65536')
+  assert.equal(preview.headers.get('x-astro-preview-refresh-ms'), '1000')
+  assert.equal(preview.headers.get('x-astro-preview-concurrent-limit'), '2')
+  const repeatedPreview = await fetch(
+    `${base}/api/library/assets/asset-capture-m27-001/preview`,
+  )
+  assert.equal(repeatedPreview.status, 429)
+  assert.deepEqual(await repeatedPreview.json(), {
+    outcome: 'rejected',
+    reason: 'PreviewRefreshLimited',
+  })
   assert.equal(
     databaseRow(
       CountRow,
@@ -4106,6 +4124,113 @@ test('a request query cannot select phone or controller capability', async (t) =
   phoneService.close()
 })
 
+test('separate local owner and remote listeners keep Access clients read-only', async (t) => {
+  const remoteAdmission = (request?: Pick<IncomingMessage, 'headers'>) =>
+    request?.headers.authorization === 'Bearer remote'
+      ? {
+          personId: 'viewer-ada',
+          clientId: 'access-viewer-ada',
+          role: 'viewer' as const,
+          capability: 'readOnly' as const,
+        }
+      : undefined
+  const service = createFixtureService(':memory:', remoteAdmission)
+  const remote = await service.listen(0, '127.0.0.1', remoteAdmission)
+  const local = await service.listen(
+    0,
+    '127.0.0.1',
+    createLocalOwnerAdmission(),
+  )
+  t.after(async () => {
+    await remote.close()
+    await local.close()
+    service.close()
+  })
+  const remoteBase = `http://127.0.0.1:${remote.port}`
+  const localBase = `http://127.0.0.1:${local.port}`
+  const remoteSnapshot = await bootstrapSnapshot(`${remoteBase}/api/snapshot`, {
+    headers: { authorization: 'Bearer remote' },
+  })
+  assert.equal(remoteSnapshot.membership.role, 'viewer')
+  assert.equal(remoteSnapshot.membership.capability, 'readOnly')
+  assert.equal(
+    (
+      await fetch(`${remoteBase}/api/observe/preflight`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer remote' },
+        body: JSON.stringify({}),
+      })
+    ).status,
+    403,
+  )
+  const localSnapshot = await bootstrapSnapshot(`${localBase}/api/snapshot`)
+  assert.equal(localSnapshot.membership.role, 'owner')
+  assert.equal(localSnapshot.membership.capability, 'controlCapable')
+})
+
+test('separate remote desktop listener admits shared-control requests while phone remains read-only', async (t) => {
+  const phoneAdmission = () => ({
+    personId: 'owner-chicks',
+    clientId: 'phone-owner',
+    role: 'owner' as const,
+    capability: 'readOnly' as const,
+  })
+  const desktopAdmission = () => ({
+    personId: 'owner-chicks',
+    clientId: 'access:owner-chicks-subject',
+    role: 'owner' as const,
+    capability: 'controlCapable' as const,
+  })
+  const service = createFixtureService(':memory:', phoneAdmission)
+  const phone = await service.listen(0, '127.0.0.1', phoneAdmission)
+  const desktop = await service.listen(0, '127.0.0.1', desktopAdmission)
+  t.after(async () => {
+    await phone.close()
+    await desktop.close()
+    service.close()
+  })
+  const phoneSnapshot = await bootstrapSnapshot(
+    `http://127.0.0.1:${phone.port}/api/snapshot`,
+  )
+  assert.equal(phoneSnapshot.membership.capability, 'readOnly')
+  assert.equal(
+    (
+      await fetch(`http://127.0.0.1:${phone.port}/api/commands/control`, {
+        method: 'POST',
+        body: JSON.stringify({
+          commandId: 'phone-request',
+          command: {
+            _tag: 'TakeControl',
+            expectedLeaseRevision: phoneSnapshot.control.revision,
+            idempotencyKey: 'phone-request',
+          },
+        }),
+      })
+    ).status,
+    403,
+  )
+  const desktopSnapshot = await bootstrapSnapshot(
+    `http://127.0.0.1:${desktop.port}/api/snapshot`,
+  )
+  assert.equal(desktopSnapshot.membership.capability, 'controlCapable')
+  assert.equal(
+    (
+      await fetch(`http://127.0.0.1:${desktop.port}/api/commands/control`, {
+        method: 'POST',
+        body: JSON.stringify({
+          commandId: 'desktop-request',
+          command: {
+            _tag: 'TakeControl',
+            expectedLeaseRevision: desktopSnapshot.control.revision,
+            idempotencyKey: 'desktop-request',
+          },
+        }),
+      })
+    ).status,
+    202,
+  )
+})
+
 test('protected responses install browser security headers without caching service truth', async (t) => {
   const service = createFixtureService()
   const listener = await service.listen()
@@ -4603,7 +4728,7 @@ test('canonical snapshot-first reconnect and shared SQLite projection keep comma
     }).then((response) => response.json()),
   )
   assert.equal(requested.ok, true)
-  assert.match(await nextEvent(reconnectReader), /"eventCursor":2/)
+  assert.match(await nextEvent(reconnectReader), /"eventCursor":\d+/)
   assert.equal(
     databaseRow(
       CountRow,
@@ -4614,6 +4739,52 @@ test('canonical snapshot-first reconnect and shared SQLite projection keep comma
     before,
   )
   await reconnectReader?.cancel()
+})
+
+test('SSE controller presence persists reconnect grace and restores only after snapshot-first reconnect', async (t) => {
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-controller-presence-')),
+    'state.sqlite',
+  )
+  let service = createFixtureService(databasePath)
+  let listener = await service.listen()
+  let base = `http://127.0.0.1:${listener.port}`
+  const waitForState = async (state: 'held' | 'reconnecting') => {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
+      if (snapshot.control.state === state) return snapshot
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    assert.fail(`Control did not reach ${state}`)
+  }
+  const stream = await fetch(`${base}/api/events`)
+  const reader = stream.body?.getReader()
+  assert.match(await nextEvent(reader), /ProjectionChanged/)
+  await reader?.cancel()
+  const reconnecting = await waitForState('reconnecting')
+  assert.ok(reconnecting.control.reconnectGraceUntil)
+  const reconnectingVersion = reconnecting.snapshotVersion
+
+  await listener.close()
+  service.close()
+  service = createFixtureService(databasePath)
+  listener = await service.listen()
+  base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  assert.equal(
+    (await bootstrapSnapshot(`${base}/api/snapshot`)).control.state,
+    'reconnecting',
+  )
+  const reconnectedStream = await fetch(`${base}/api/events`)
+  const reconnectedReader = reconnectedStream.body?.getReader()
+  assert.match(await nextEvent(reconnectedReader), /"state":"held"/)
+  const held = await waitForState('held')
+  assert.equal(held.control.reconnectGraceUntil, undefined)
+  assert.ok(held.snapshotVersion > reconnectingVersion)
+  await reconnectedReader?.cancel()
 })
 
 test('canonical Observe pause survives restart and resumes the persisted fake run', async (t) => {

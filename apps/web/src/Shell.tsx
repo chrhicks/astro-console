@@ -1,4 +1,6 @@
-import type { PropsWithChildren } from 'react'
+import { useState, type PropsWithChildren } from 'react'
+import { CommandId, IdempotencyKey } from '@astro-console/v2-contracts'
+import type { ControlIntent } from './command-client'
 import {
   ActionResult,
   type ActionResult as ActionResultType,
@@ -20,6 +22,7 @@ export function Shell({
   view,
   link,
   result,
+  submitControl,
   children,
 }: PropsWithChildren<{
   workspace: Workspace | undefined
@@ -29,6 +32,12 @@ export function Shell({
     onClick: React.MouseEventHandler<HTMLAnchorElement>
   }
   result: ActionResultType | undefined
+  submitControl?: (intent: ControlIntent) => Promise<{
+    readonly _tag: 'Accepted' | 'Rejected' | 'Unavailable'
+    readonly safeNextAction: string
+    readonly reason?: string
+    readonly failure?: { readonly summary: string }
+  }>
 }>) {
   return (
     <main className="app-shell">
@@ -108,6 +117,12 @@ export function Shell({
         <div className="status-anchor__authority">
           <span className="status-anchor__controller">{view.controller}</span>
           <span className="status-anchor__membership">{view.membership}</span>
+          <span className="status-anchor__remote">
+            {view.remoteAvailability}
+          </span>
+          <span className="status-anchor__authority-reason">
+            {view.authority}
+          </span>
           <span className="status-anchor__presence">{view.presence}</span>
           <span className="status-anchor__attention-owner">
             {view.attentionOwner}
@@ -129,6 +144,10 @@ export function Shell({
           ))}
         </div>
       </section>
+      <SharedControl
+        control={view.control}
+        submit={submitControl}
+      />
       {result && (
         <p className="action-result" role="status">
           {ActionResult.$match(result, {
@@ -140,5 +159,91 @@ export function Shell({
       )}
       <section className="app-shell__content">{children}</section>
     </main>
+  )
+}
+
+function SharedControl({
+  control,
+  submit,
+}: {
+  control: ShellView['control']
+  submit: ((intent: ControlIntent) => Promise<{
+    readonly _tag: 'Accepted' | 'Rejected' | 'Unavailable'
+    readonly safeNextAction: string
+    readonly reason?: string
+    readonly failure?: { readonly summary: string }
+  }>) | undefined
+}) {
+  const [pending, setPending] = useState(false)
+  const [message, setMessage] = useState<string | undefined>()
+  const action = (value: (typeof control.actions)[number]) => {
+    if (submit === undefined || pending) return
+    const commandId = CommandId.make(crypto.randomUUID())
+    const idempotencyKey = IdempotencyKey.make(crypto.randomUUID())
+    const intent: ControlIntent =
+      value.kind === 'request'
+        ? { _tag: 'RequestControl', commandId, idempotencyKey }
+        : value.kind === 'release'
+          ? { _tag: 'ReleaseControl', commandId, idempotencyKey }
+          : value.kind === 'take'
+            ? { _tag: 'TakeControl', commandId, idempotencyKey }
+            : value.kind === 'grant'
+              ? {
+                  _tag: 'GrantControl',
+                  commandId,
+                  idempotencyKey,
+                  requestId: value.requestId,
+                  targetClientId: value.targetClientId ?? '',
+                }
+              : {
+                  _tag: 'DeclineControl',
+                  commandId,
+                  idempotencyKey,
+                  requestId: value.requestId,
+                }
+    setPending(true)
+    setMessage(undefined)
+    void submit(intent).then(
+      (result) => {
+        setPending(false)
+        setMessage(
+          result._tag === 'Accepted'
+            ? 'Control action recorded. Waiting for the current service projection.'
+            : `${result.reason ?? result.failure?.summary ?? 'Control action unavailable.'} ${result.safeNextAction}`,
+        )
+      },
+      () => {
+        setPending(false)
+        setMessage('Control action could not reach the service.')
+      },
+    )
+  }
+  return (
+    <section className="shared-control" aria-label="Shared control">
+      <div>
+        <strong>Shared control</strong>
+        <span>Lease revision {control.revision}</span>
+        <span>{control.presence}</span>
+      </div>
+      {control.requests.length > 0 && (
+        <p>{control.requests.map((request) => request.label).join(' ')}</p>
+      )}
+      {!control.readOnly && control.actions.length > 0 && (
+        <div className="shared-control__actions">
+          {control.actions.map((value) => (
+            <button
+              key={`${value.kind}-${'requestId' in value ? value.requestId : ''}`}
+              type="button"
+              disabled={pending}
+              onClick={() => action(value)}
+            >
+              {value.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {control.readOnly && <p>This client is read-only; control actions are unavailable.</p>}
+      {message && <p role="status">{message}</p>}
+    </section>
   )
 }

@@ -2,21 +2,30 @@
 
 This is a non-activating Compose starter, not a production deployment. The
 executable defaults to loopback. `config.example` sets
-`ASTRO_SERVER_PORT=8080` to match the Compose-internal origin port. Compose
-uses `0.0.0.0` only within its private service network so `cloudflared` can
-reach the origin; it does not publish a host port. `cloudflared` is the sole
-public-ingress component and must be configured to reach the private origin
+`ASTRO_SERVER_PORT=8080` to match the Compose remote-listener port. Compose
+uses `0.0.0.0` only inside the container and publishes only loopback host
+ports. The existing `cloudflared` Tunnel must route to the remote host port
 after Access validation.
-The Compose starter publishes no host port. A distinct LAN ingress and its
-authorization policy are activation work; do not infer a local-owner bypass
-from this file.
+The Compose starter publishes two loopback-only host ports. The remote port
+serves the Access-admitted, read-only listener for the Tunnel. The local owner
+port is separate and never published through the Tunnel. Do not route a LAN
+or public listener to the local owner port.
+The optional remote desktop port is also loopback-only on the host. If shared
+control is enabled, configure a distinct Access-protected hostname to that
+port; its server-owned client context is desktop. Do not route the phone
+hostname to it.
+Frame previews are served only from `ASTRO_PREVIEW_ROOT` (the state-volume
+default is `/var/lib/astro-console/previews`). Each admitted client receives at
+most one 64 KiB preview per second, with two concurrent streams per origin.
+The Library original-download link remains a deliberate signed-grant request:
+it is private, no-store, and does not expose storage credentials or object
+keys.
 Do not add router forwarding, home-directory mounts, device credentials, or
 tunnel tokens to this folder.
 
 Production admission is fail-closed: set `ASTRO_ADMISSION_MODE=production`,
 provide the verified Access issuer/audience, HTTPS JWKS/certificate URL,
-bounded JWKS cache TTL, bootstrap path, and a server-configured desktop or
-phone client context. The bootstrap file is
+bounded JWKS cache TTL, bootstrap path, and local owner port. The bootstrap file is
 host-managed JSON, never committed: `[{"email":"...","personId":"...","role":"owner"|"viewer"}]`.
 On the first verified Access assertion for one of those emails, the service
 durably binds its Access subject to that membership; request bodies, queries,
@@ -29,8 +38,11 @@ an unfamiliar `kid`, and rejects an unknown key, malformed document, failed
 refresh, or expired cache without falling back to a file or stale key.
 
 Owner authority is the durable membership role, not a magic fixture person ID:
-an owner bootstrap entry may use any stable non-empty `personId`. A phone
-client context remains read-only even for an owner membership. Bootstrap email
+an owner bootstrap entry may use any stable non-empty `personId`. The phone
+remote listener uses read-only capability for every Access identity, including
+an owner membership. The separate Access desktop listener is control-capable
+only through the service-owned lease; the host-loopback local owner route is
+also control-capable. Bootstrap email
 comparison is trimmed and case-normalized, rejects duplicates after
 normalization, and is rechecked on every verified request, so removing an
 email revokes origin admission even if its prior Access subject remains in
@@ -41,7 +53,8 @@ apps/server/deployment/Dockerfile .`; it builds the contracts, web bundle, and
 server runtime into one image. The runtime contains only the web `dist` output,
 not web source, fixtures, theme-study files, screenshots, or development
 dependencies. `ASTRO_WEB_DIST=../web/dist` is the packaged default. Activation
-must use a reviewed immutable image digest rather than the starter tag. Before activation: supply
+sets `ASTRO_ORIGIN_IMAGE` in the host Compose environment to a reviewed
+immutable image digest rather than the starter tag. Before activation: supply
 host-managed secrets, copy `config.example` outside the repository, validate
 the non-secret runtime configuration at process startup, run the image's
 startup migrations against a backed-up local database, and check admitted

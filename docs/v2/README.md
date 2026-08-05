@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **Phases 0, 0.5, 1, 2, 3, 4, and 5 are complete with deterministic local proof**
+Status: **V2.0 complete — Phases 0, 0.5, 1, 2, 3, 4, 5, and 6 delivered**
 
 This directory is organized to keep normal working context small. Do not read
 the entire V2 tree by default.
@@ -13,8 +13,8 @@ Read these in order when starting or resuming V2 work:
    rules accepted through Gate 4.
 2. [Current handoff](current/handoff.md) — current V2 status, proof boundary,
    and next owner action.
-3. [V2 delivery plan](current/delivery-plan.md) — durable end-to-end V2.0
-   scope and phase exit criteria.
+3. [Next delivery-plan stub](current/delivery-plan.md) — placeholder for the
+   next owner-approved multi-phase plan.
 
 That is the complete default context. Load another document only when the task
 requires its specific detail.
@@ -29,7 +29,7 @@ requires its specific detail.
 | Accepted Gate 5 consequential actions                    | [Gate 5 action map](current/gate-05-action-map.md)                                                                                                                                                                                               |
 | Accepted canonical Gate 5 contract language              | [Gate 5 contract vocabulary](current/gate-05-contract-vocabulary.md)                                                                                                                                                                             |
 | Executable Effect Schema candidates and fixtures         | [V2 contracts package](../../packages/v2-contracts/README.md)                                                                                                                                                                                    |
-| End-to-end V2.0 scope, phases, and exit criteria         | [V2 delivery plan](current/delivery-plan.md)                                                                                                                                                                                                     |
+| Completed V2.0 scope, phases, and exit criteria          | [V2 delivery-plan archive](archive/plans/v2-delivery-plan-2026-08-05.md)                                                                                                                                                                        |
 | Completed Phase 2 execution history                      | [Phase 2 implementation plan archive](archive/plans/phase-2-implementation-plan-2026-08-04.md)                                                                                                                                                  |
 | Completed Phase 3–5 execution history                    | [Phase 3 archive](archive/phase-3/README.md), [Phase 4 plan](archive/phase-4/implementation-plan-2026-08-04.md), and [Phase 5 plan](archive/phase-5/implementation-plan-2026-08-04.md)                                                       |
 | Ideas outside V2.0                                       | [Post-V2.0 notes](current/v2-post-v2.0-notes.md)                                                                                                                                                                                                 |
@@ -77,8 +77,10 @@ recovery truth. A real rig has not yet been contacted. Phase 4 Library and
 Frame Review now provides immutable captured-frame intake, inspection, durable
 review, comparison, and Observe handoff with local deterministic proof. Phase 5
 Process Workspace is also complete with durable session, deterministic Build,
-history, recovery, and restart proof. The next V2 phase requires owner
-approval.
+history, recovery, and restart proof. Phase 6 completes V2.0 with
+Access-protected remote viewing, a separate desktop shared-control route,
+bounded remote evidence, and a local-continuity outage drill. Future V2.1
+scope requires owner approval.
 
 `apps/web` source, CSS, and accepted screenshot evidence are the production
 visual authority. `docs/v2-ui-final` and `prototype/v2-ui` are historical Gate

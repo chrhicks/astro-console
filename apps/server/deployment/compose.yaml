@@ -3,15 +3,21 @@ services:
     build:
       context: ../../..
       dockerfile: apps/server/deployment/Dockerfile
-    image: ghcr.io/chicks/astro-console:REPLACE_WITH_PINNED_RELEASE
+    image: ${ASTRO_ORIGIN_IMAGE:?Set the immutable origin image in the Compose environment file}
     env_file: ${ASTRO_ORIGIN_ENV_FILE:?Set the host-managed origin environment file in the Compose environment file}
     environment:
       ASTRO_SERVER_BIND: 0.0.0.0
+      ASTRO_LOCAL_OWNER_PORT: 8081
+      ASTRO_REMOTE_DESKTOP_PORT: 8082
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
-    expose: ['8080']
+    expose: ['8080', '8081', '8082']
+    ports:
+      - 127.0.0.1:${ASTRO_REMOTE_HOST_PORT:-18080}:8080
+      - 127.0.0.1:${ASTRO_LOCAL_OWNER_HOST_PORT:-18081}:8081
+      - 127.0.0.1:${ASTRO_REMOTE_DESKTOP_HOST_PORT:-18082}:8082
     volumes:
       - type: volume
         source: astro_console_state
@@ -20,9 +26,13 @@ services:
         source: ${ASTRO_DOWNLOAD_GRANT_SHARED_SECRET_HOST_PATH:?Set shared signer secret path in the Compose environment file}
         target: /run/secrets/download-grant-shared-secret
         read_only: true
+      - type: bind
+        source: ${ASTRO_MEMBERSHIP_BOOTSTRAP_HOST_PATH:?Set membership bootstrap path in the Compose environment file}
+        target: /run/config/membership-bootstrap.json
+        read_only: true
   download-grant:
     profiles: [download]
-    image: ghcr.io/chicks/astro-console:REPLACE_WITH_PINNED_RELEASE
+    image: ${ASTRO_ORIGIN_IMAGE:?Set the immutable origin image in the Compose environment file}
     command:
       [
         'node',

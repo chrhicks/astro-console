@@ -39,6 +39,11 @@ export type OriginRouterDependencies = {
     response: ServerResponse,
     encodedAssetId: string,
   ) => RouteResult
+  readonly libraryPreview: (
+    response: ServerResponse,
+    encodedAssetId: string,
+    identity: LocalIdentity,
+  ) => RouteResult
   readonly observeLiveFrameReview: (
     response: ServerResponse,
     identity: LocalIdentity,
@@ -118,6 +123,16 @@ export const createOriginRouter =
       url.pathname.endsWith('/download')
     )
       return dependencies.libraryDownload(response, url)
+    if (
+      request.method === 'GET' &&
+      url.pathname.startsWith('/api/library/assets/') &&
+      url.pathname.endsWith('/preview')
+    )
+      return dependencies.libraryPreview(
+        response,
+        url.pathname.slice('/api/library/assets/'.length, -'/preview'.length),
+        identity,
+      )
     if (
       request.method === 'GET' &&
       url.pathname.startsWith('/api/library/assets/')

@@ -341,10 +341,76 @@ test('status and shell environment preserve semantic and projected facts', () =>
   )
   assert.match(status, /role="status"/)
   assert.match(shell, /Authoritative projection/)
+  assert.match(shell, /Remote viewing unavailable from this client/)
+  assert.match(
+    shell,
+    /Authority unavailable without an admitted service snapshot/,
+  )
   assert.match(shell, /Capability unknown \/ mutations unavailable/)
   assert.match(shell, /Commands cannot be sent or replayed/)
   assert.match(shell, /Service availability unknown without a snapshot/)
   assert.match(shell, /Static result output remains visible/)
+})
+
+test('desktop shared-control surface exposes request resolution and takeover only from current service truth', () => {
+  const owner = Schema.decodeUnknownSync(BootstrapSnapshot)({
+    ...bootstrapFixtures.fresh,
+    control: {
+      revision: 8,
+      state: 'held',
+      holderClientId: 'desktop-friend',
+      pendingRequests: [
+        {
+          requestId: 'request-friend',
+          personId: 'friend-ada',
+          clientId: 'desktop-friend',
+          expiresAt: '2026-08-02T20:10:00Z',
+        },
+      ],
+    },
+  })
+  const ownerView = projectBootstrapState(
+    BootstrapClientState.Current({ snapshot: owner }),
+  ).shell
+  const ownerMarkup = renderToStaticMarkup(
+    createElement(
+      Shell,
+      {
+        workspace: 'observe',
+        view: ownerView,
+        link: (route) => ({ href: routePath(route), onClick: () => undefined }),
+        result: undefined,
+      },
+      createElement('p', null, 'Workspace'),
+    ),
+  )
+  assert.match(ownerMarkup, /Lease revision 8/)
+  assert.match(ownerMarkup, /Desktop desktop-friend requested control/)
+  assert.match(ownerMarkup, />Grant desktop-friend</)
+  assert.match(ownerMarkup, />Decline desktop-friend</)
+  assert.match(ownerMarkup, />Take control</)
+
+  const phone = projectBootstrapState(
+    BootstrapClientState.Current({
+      snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)(
+        bootstrapFixtures.phone,
+      ),
+    }),
+  ).shell
+  const phoneMarkup = renderToStaticMarkup(
+    createElement(
+      Shell,
+      {
+        workspace: 'observe',
+        view: phone,
+        link: (route) => ({ href: routePath(route), onClick: () => undefined }),
+        result: undefined,
+      },
+      createElement('p', null, 'Workspace'),
+    ),
+  )
+  assert.match(phoneMarkup, /This client is read-only; control actions are unavailable/)
+  assert.doesNotMatch(phoneMarkup, /Request control|Take control|Release control/)
 })
 
 test('process has a focusable screen heading', () => {
@@ -353,10 +419,7 @@ test('process has a focusable screen heading', () => {
       sourceAssetId: undefined,
     }),
   )
-  assert.match(
-    markup,
-    /<h1 tabindex="-1">Open a Library source<\/h1>/,
-  )
+  assert.match(markup, /<h1 tabindex="-1">Open a Library source<\/h1>/)
 })
 
 test('Process source handoffs resolve only from the server without Process claims', () => {

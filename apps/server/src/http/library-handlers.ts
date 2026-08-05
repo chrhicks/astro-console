@@ -1,3 +1,5 @@
+import { readFile, stat } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { ServerResponse } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { Effect, Schema } from 'effect'
@@ -143,6 +145,59 @@ export async function libraryDetail(
     ),
   )
   return json(response, result.status, result.body)
+}
+const previewLimitBytes = 64 * 1024
+const previewRefreshMs = 1_000
+const previewConcurrentLimit = 2
+export function createLibraryPreviewHandler(previewsRoot: string) {
+  let active = 0
+  const lastDelivered = new Map<string, number>()
+  return async function libraryPreview(
+    response: ServerResponse,
+    db: DatabaseSync,
+    encodedAssetId: string,
+    identity: LocalIdentity,
+    snapshotVersion: () => number,
+  ) {
+    const assetId = decodedAssetId(encodedAssetId)
+    if (!/^[A-Za-z0-9-]+$/.test(assetId))
+      return json(response, 400, { outcome: 'rejected', reason: 'InvalidInput' })
+    const now = Date.now()
+    if ((lastDelivered.get(identity.clientId) ?? 0) + previewRefreshMs > now)
+      return json(response, 429, { outcome: 'rejected', reason: 'PreviewRefreshLimited' })
+    if (active >= previewConcurrentLimit)
+      return json(response, 429, { outcome: 'rejected', reason: 'PreviewBusy' })
+    active += 1
+    try {
+      const detail = await Effect.runPromise(
+        LibraryService.pipe(
+          Effect.flatMap((library) => library.detail(assetId)),
+          Effect.provide(sqliteLibraryServiceLayer(db, snapshotVersion)),
+        ),
+      )
+      if (detail.inspection?._tag !== 'Available')
+        return json(response, 409, { outcome: 'rejected', reason: 'PreviewUnavailable' })
+      const path = join(previewsRoot, `${assetId}.png`)
+      const metadata = await stat(path)
+      if (metadata.size > previewLimitBytes)
+        return json(response, 413, { outcome: 'rejected', reason: 'PreviewTooLarge' })
+      const bytes = await readFile(path)
+      lastDelivered.set(identity.clientId, now)
+      return response
+        .writeHead(200, {
+          ...responseHeaders('image/png', 'private, no-store'),
+          'content-length': String(bytes.byteLength),
+          'x-astro-preview-max-bytes': String(previewLimitBytes),
+          'x-astro-preview-refresh-ms': String(previewRefreshMs),
+          'x-astro-preview-concurrent-limit': String(previewConcurrentLimit),
+        })
+        .end(bytes)
+    } catch {
+      return json(response, 409, { outcome: 'rejected', reason: 'PreviewUnavailable' })
+    } finally {
+      active -= 1
+    }
+  }
 }
 
 export async function observeLiveFrameReview(

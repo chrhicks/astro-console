@@ -78,10 +78,34 @@ export type ShellView = {
   freshness: string
   controller: string
   membership: string
+  remoteAvailability: string
+  authority: string
   presence: string
   attentionOwner: string
   capability: string
   protection: string
+  control: {
+    revision: number
+    state: string
+    presence: string
+    readOnly: boolean
+    requests: readonly {
+      requestId: string
+      clientId: string
+      label: string
+    }[]
+    actions: readonly (
+      | { kind: 'request'; label: string }
+      | { kind: 'release'; label: string }
+      | { kind: 'take'; label: string }
+      | {
+          kind: 'grant' | 'decline'
+          label: string
+          requestId: string
+          targetClientId?: string
+        }
+    )[]
+  }
   health: readonly HealthFact[]
 }
 export type PlanView = {

@@ -29,6 +29,9 @@ export type OriginServerConfig = {
     readonly port: number
     readonly host: string
     readonly webDistPath: string
+    readonly previewRoot: string
+    readonly localOwnerPort?: number
+    readonly remoteDesktopPort?: number
   }
   readonly admission:
     | { readonly mode: 'development'; readonly client: string }
@@ -88,8 +91,11 @@ export const originServerConfig = Config.all({
   issuer: optional('CF_ACCESS_ISSUER'),
   jwksUrl: optional('CF_ACCESS_JWKS_URL'),
   port: migratedText('ASTRO_SERVER_PORT', 'ASTRO_LOCAL_WEB_PORT', '0'),
+  localOwnerPort: optional('ASTRO_LOCAL_OWNER_PORT'),
+  remoteDesktopPort: optional('ASTRO_REMOTE_DESKTOP_PORT'),
   release: text('ASTRO_RELEASE', 'server'),
   webDistPath: text('ASTRO_WEB_DIST', '../web/dist'),
+  previewRoot: text('ASTRO_PREVIEW_ROOT', '/var/lib/astro-console/previews'),
   downloadGrantUrl: optional('ASTRO_DOWNLOAD_GRANT_URL'),
   downloadGrantSecretPath: optional('ASTRO_DOWNLOAD_GRANT_SHARED_SECRET_PATH'),
   preflightProvider: text('ASTRO_PREFLIGHT_PROVIDER', 'disabled'),
@@ -106,6 +112,24 @@ export const originServerConfig = Config.all({
       if (!/^\d+$/.test(input.port) || Number(input.port) > 65_535)
         return configFailure(
           'ASTRO_SERVER_PORT must be an integer from 0 to 65535',
+        )
+      if (
+        Option.isSome(input.localOwnerPort) &&
+        (!/^\d+$/.test(input.localOwnerPort.value) ||
+          Number(input.localOwnerPort.value) === 0 ||
+          Number(input.localOwnerPort.value) > 65_535)
+      )
+        return configFailure(
+          'ASTRO_LOCAL_OWNER_PORT must be an integer from 1 to 65535',
+        )
+      if (
+        Option.isSome(input.remoteDesktopPort) &&
+        (!/^\d+$/.test(input.remoteDesktopPort.value) ||
+          Number(input.remoteDesktopPort.value) === 0 ||
+          Number(input.remoteDesktopPort.value) > 65_535)
+      )
+        return configFailure(
+          'ASTRO_REMOTE_DESKTOP_PORT must be an integer from 1 to 65535',
         )
       if (!/^\d+$/.test(input.cacheTtl))
         return configFailure(
@@ -164,9 +188,12 @@ function originServer(input: {
   readonly fixture: Option.Option<string>
   readonly issuer: Option.Option<string>
   readonly jwksUrl: Option.Option<string>
+  readonly localOwnerPort: Option.Option<string>
+  readonly remoteDesktopPort: Option.Option<string>
   readonly port: string
   readonly release: string
   readonly webDistPath: string
+  readonly previewRoot: string
   readonly downloadGrantUrl: Option.Option<string>
   readonly downloadGrantSecretPath: Option.Option<string>
   readonly preflightProvider: string
@@ -203,6 +230,10 @@ function originServer(input: {
       input.webDistPath,
       'Runtime configuration contains an invalid non-secret value',
     )
+    const previewRoot = yield* validText(
+      input.previewRoot,
+      'Runtime configuration contains an invalid non-secret value',
+    )
     const preflightProvider = yield* configuredPreflightProvider(input)
     if (input.admissionMode === 'development') {
       if (input.bind !== '127.0.0.1')
@@ -216,6 +247,7 @@ function originServer(input: {
           port: Number(input.port),
           host: input.bind,
           webDistPath,
+          previewRoot,
         },
         admission: { mode: 'development' as const, client: input.client },
         fixture,
@@ -239,12 +271,13 @@ function originServer(input: {
       Option.isNone(input.audience) ||
       Option.isNone(input.jwksUrl) ||
       Option.isNone(input.bootstrapPath) ||
+      Option.isNone(input.localOwnerPort) ||
       Option.isNone(input.clientContext) ||
       (input.clientContext.value !== 'desktop' &&
         input.clientContext.value !== 'phone')
     )
       return yield* configFailure(
-        'Production admission requires Access issuer, audience, HTTPS JWKS URL, bootstrap path, client context, and integer JWKS cache TTL',
+        'Production admission requires Access issuer, audience, HTTPS JWKS URL, bootstrap path, local owner port, client context, and integer JWKS cache TTL',
       )
     if (Option.isSome(input.fixture))
       return yield* configFailure(
@@ -268,9 +301,14 @@ function originServer(input: {
       runtime: {
         databasePath,
         release,
-        port: Number(input.port),
-        host: input.bind,
-        webDistPath,
+          port: Number(input.port),
+          host: input.bind,
+          webDistPath,
+          previewRoot,
+          localOwnerPort: Number(input.localOwnerPort.value),
+          ...(Option.isSome(input.remoteDesktopPort)
+            ? { remoteDesktopPort: Number(input.remoteDesktopPort.value) }
+            : {}),
       },
       admission: {
         mode: 'production' as const,

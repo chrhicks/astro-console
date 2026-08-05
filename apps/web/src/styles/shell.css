@@ -1,6 +1,6 @@
 .app-shell {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   height: 100vh;
   min-height: 100vh;
   background: var(--color-canvas);
@@ -181,6 +181,49 @@
 .app-shell__content {
   min-height: 0;
 }
+.shared-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  padding: var(--space-8) var(--space-16);
+  border-bottom: var(--border-width) solid var(--color-border-strong);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+}
+.shared-control > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+.shared-control strong {
+  color: var(--color-text);
+}
+.shared-control p {
+  margin: 0;
+}
+.shared-control__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+.shared-control button {
+  border: var(--border-width) solid var(--color-primary);
+  border-radius: var(--radius-frame);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-weight: 700;
+  padding: var(--space-4) var(--space-8);
+}
+.shared-control button:hover:not(:disabled) {
+  border-color: var(--color-secondary);
+  color: var(--color-secondary);
+}
+.shared-control button:disabled {
+  opacity: 0.6;
+}
 @media (max-width: 1080px) and (min-width: 601px) {
   .status-anchor {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -266,5 +309,10 @@
   }
   .app-shell__content {
     min-height: calc(100vh - 11.5rem);
+  }
+  .shared-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--space-8) var(--space-12);
   }
 }

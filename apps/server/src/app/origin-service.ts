@@ -80,6 +80,7 @@ import {
 } from '../http/command-handlers.ts'
 import {
   downloadAsset,
+  createLibraryPreviewHandler,
   libraryDetail,
   libraryReview,
   libraryPage,
@@ -153,6 +154,7 @@ export function createLocalWebService(
       | 'managed-capture'
       | 'acquire-recovery'
     readonly webDistPath?: string
+    readonly previewRoot?: string
     readonly preflightProvider?: ReadOnlyPreflightProviderShape
     readonly polarMeasurementProvider?: PolarMeasurementProviderShape
     readonly targetAcquisitionProvider?: TargetAcquisitionProviderShape
@@ -437,10 +439,19 @@ export function createLocalWebService(
           expire: () => stateRepository.expireReconnectGrace(),
           currentCursor: () => stateRepository.state().eventCursor,
           eventFor: (identity) => stateRepository.sseProjection(identity),
+          controllerConnected: (identity) =>
+            stateRepository.controllerConnected(identity),
+          controllerDisconnected: (identity) =>
+            stateRepository.controllerDisconnected(identity),
           responseHeaders,
         }),
       ),
     ),
+  )
+  const libraryPreview = createLibraryPreviewHandler(
+    options.frameInspectionStorage?.previewsRoot ??
+      options.previewRoot ??
+      './.astro-server/previews',
   )
   let closed = false
   const publish = (type: string, cursor: number) =>
@@ -460,327 +471,358 @@ export function createLocalWebService(
       ? deterministicPolarMeasurementProvider
       : undefined)
 
-  const handler = createOriginRouter({
-    identityResolver,
-    expireReconnectGrace: () => stateRepository.expireReconnectGrace(),
-    live: (response) => json(response, 200, { status: 'alive' }),
-    unauthenticated,
-    snapshot: (response, identity) =>
-      void Effect.runSync(
-        stateRepository.bootstrapSnapshot(identity).pipe(
-          Effect.flatMap((data) =>
-            Schema.decodeUnknownEffect(BootstrapHttpSuccessEnvelope)({
-              ok: true,
-              data,
+  const handler = (requestAdmission: RequestAdmission = identityResolver) =>
+    createOriginRouter({
+      identityResolver: requestAdmission,
+      expireReconnectGrace: () => stateRepository.expireReconnectGrace(),
+      live: (response) => json(response, 200, { status: 'alive' }),
+      unauthenticated,
+      snapshot: (response, identity) =>
+        void Effect.runSync(
+          stateRepository.bootstrapSnapshot(identity).pipe(
+            Effect.flatMap((data) =>
+              Schema.decodeUnknownEffect(BootstrapHttpSuccessEnvelope)({
+                ok: true,
+                data,
+              }),
+            ),
+            Effect.map((body) => json(response, 200, body)),
+          ),
+        ),
+      ready: (response) => json(response, 200, stateRepository.readiness()),
+      operations: (response, identity) =>
+        isOwner(identity)
+          ? json(response, 200, stateRepository.operations())
+          : json(response, 403, reject('OwnerRequired').body),
+      events: (request, response, identity) =>
+        void Effect.runSync(
+          projectionPublication.stream(request, response, identity),
+        ),
+      control: (response, identity, request) =>
+        Effect.runPromise(
+          controlCommandFromEnvelope(
+            body(request),
+            BodyTooLarge,
+            database,
+            stateRepository,
+            identity,
+            publish,
+          ).pipe(
+            Effect.catchTags({
+              'Server.CommandInputInvalid': () =>
+                Schema.decodeUnknownEffect(CommandHttpFailureEnvelope)({
+                  ok: false,
+                  failure: {
+                    _tag: 'InvalidInput',
+                    summary: 'The service could not read that action.',
+                  },
+                }).pipe(Effect.map((body) => ({ status: 400, body }))),
+              'Server.CommandRejected': ({ failure }) =>
+                Schema.decodeUnknownEffect(CommandHttpFailureEnvelope)({
+                  ok: false,
+                  failure: { _tag: 'CommandRejected', failure },
+                }).pipe(
+                  Effect.map((body) => ({
+                    status: commandFailureStatuses[failure._tag],
+                    body,
+                  })),
+                ),
             }),
           ),
-          Effect.map((body) => json(response, 200, body)),
-        ),
-      ),
-    ready: (response) => json(response, 200, stateRepository.readiness()),
-    operations: (response, identity) =>
-      isOwner(identity)
-        ? json(response, 200, stateRepository.operations())
-        : json(response, 403, reject('OwnerRequired').body),
-    events: (request, response, identity) =>
-      void Effect.runSync(
-        projectionPublication.stream(request, response, identity),
-      ),
-    control: (response, identity, request) =>
-      Effect.runPromise(
-        controlCommandFromEnvelope(
-          body(request),
-          BodyTooLarge,
+        ).then(({ status, body }) => json(response, status, body)),
+      planWorkspace: (response) => workspace(response, database, 'plan'),
+      processWorkspace: (response, url) =>
+        url.searchParams.has('sourceAssetId')
+          ? processWorkspace(
+              response,
+              database,
+              url,
+              () => stateRepository.state().snapshotVersion,
+            )
+          : json(response, 200, processSnapshot(database)),
+      libraryPage: (response, url) =>
+        libraryPage(
+          response,
           database,
-          stateRepository,
-          identity,
-          publish,
-        ).pipe(
-          Effect.catchTags({
-            'Server.CommandInputInvalid': () =>
-              Schema.decodeUnknownEffect(CommandHttpFailureEnvelope)({
-                ok: false,
-                failure: {
-                  _tag: 'InvalidInput',
-                  summary: 'The service could not read that action.',
-                },
-              }).pipe(Effect.map((body) => ({ status: 400, body }))),
-            'Server.CommandRejected': ({ failure }) =>
-              Schema.decodeUnknownEffect(CommandHttpFailureEnvelope)({
-                ok: false,
-                failure: { _tag: 'CommandRejected', failure },
-              }).pipe(
-                Effect.map((body) => ({
-                  status: commandFailureStatuses[failure._tag],
-                  body,
-                })),
-              ),
-          }),
+          url,
+          () => stateRepository.state().snapshotVersion,
         ),
-      ).then(({ status, body }) => json(response, status, body)),
-    planWorkspace: (response) => workspace(response, database, 'plan'),
-    processWorkspace: (response, url) =>
-      url.searchParams.has('sourceAssetId')
-        ? processWorkspace(response, database, url, () => stateRepository.state().snapshotVersion)
-        : json(response, 200, processSnapshot(database)),
-    libraryPage: (response, url) =>
-      libraryPage(
-        response,
-        database,
-        url,
-        () => stateRepository.state().snapshotVersion,
-      ),
-    libraryDownload: (response, url) =>
-      downloadAsset(
-        response,
-        database,
-        url,
-        downloadGrants,
-        () => stateRepository.state().snapshotVersion,
-      ),
-    libraryDetail: (response, encodedAssetId) =>
-      libraryDetail(
-        response,
-        database,
-        encodedAssetId,
-        () => stateRepository.state().snapshotVersion,
-      ),
-    observeLiveFrameReview: (response, identity) =>
-      observeLiveFrameReview(
-        response,
-        database,
-        () => stateRepository.state().snapshotVersion,
-        () =>
-          Effect.runPromise(
-            stateRepository
-              .bootstrapSnapshot(identity)
-              .pipe(
-                Effect.map((snapshot) => snapshot.observe?.acquire?.liveFrame),
-              ),
-          ),
-      ),
-    libraryReview: (response, identity, request, encodedAssetId) =>
-      libraryReview(response, database, identity, request, encodedAssetId),
-    planCommand: (response, identity, request) =>
-      Effect.runPromise(
-        planCommandFromRequest(
-          body(request),
-          runRepository,
-          stateRepository,
-          identity,
-          publish,
-        ).pipe(
-          Effect.catchTags({
-            'Server.PlanCommandInputInvalid': () =>
-              planInvalidResponse(stateRepository, identity),
-            'Server.PlanServiceUnavailable': () =>
-              planServiceResponse(
-                'PlanServiceUnavailable',
-                'The Plan service is temporarily unavailable.',
-              ),
-          }),
-          Effect.map(({ status, body }) => json(response, status, body)),
-        ),
-      ),
-    observeCommand: (response, identity, request) =>
-      Effect.runPromise(
-        observeCommandFromRequest(
-          body(request),
-          runRepository,
-          stateRepository,
-          identity,
-          publish,
-        ).pipe(
-          Effect.catchTags({
-            'Server.ObserveCommandInputInvalid': () =>
-              observeInvalidResponse(stateRepository, identity),
-            'Server.ObserveServiceUnavailable': () =>
-              observeServiceResponse(
-                'ObserveServiceUnavailable',
-                'The Observe command service is temporarily unavailable.',
-              ),
-          }),
-          Effect.map(({ status, body }) => json(response, status, body)),
-        ),
-      ),
-    processCommand: async (response, identity, request) => {
-      const result = executeProcessCommand(database, await body(request), identity)
-      if (result.outcome === 'accepted') publish('ProcessingProjected', stateRepository.state().eventCursor)
-      return json(response, result.outcome === 'accepted' ? 200 : 409, result)
-    },
-    refreshPreflight: async (response, identity, request) => {
-      if (identity.capability !== 'controlCapable')
-        return json(
+      libraryDownload: (response, url) =>
+        downloadAsset(
           response,
-          403,
-          RefreshPreflightResponse.cases.Rejected.make({
-            summary: 'This client is read-only and cannot refresh preflight.',
-          }),
-        )
-      const persistence = preflightPersistenceLayer({
-        activeRun: () => stateRepository.state().run,
-        persist: (snapshot) =>
-          Effect.try({
-            try: () => stateRepository.persistPreflight(snapshot),
-            catch: (cause) => cause,
-          }),
-      })
-      const program = Effect.promise(() => body(request)).pipe(
-        Effect.flatMap(refreshPreflight),
-        Effect.provide(persistence),
-      )
-      const result = await Effect.runPromise(
-        options.preflightProvider === undefined
-          ? program
-          : program.pipe(
-              Effect.provideService(
-                ReadOnlyPreflightProvider,
-                options.preflightProvider,
-              ),
+          database,
+          url,
+          downloadGrants,
+          () => stateRepository.state().snapshotVersion,
+        ),
+      libraryDetail: (response, encodedAssetId) =>
+        libraryDetail(
+          response,
+          database,
+          encodedAssetId,
+          () => stateRepository.state().snapshotVersion,
+        ),
+      libraryPreview: (response, encodedAssetId, identity) =>
+        libraryPreview(
+          response,
+          database,
+          encodedAssetId,
+          identity,
+          () => stateRepository.state().snapshotVersion,
+        ),
+      observeLiveFrameReview: (response, identity) =>
+        observeLiveFrameReview(
+          response,
+          database,
+          () => stateRepository.state().snapshotVersion,
+          () =>
+            Effect.runPromise(
+              stateRepository
+                .bootstrapSnapshot(identity)
+                .pipe(
+                  Effect.map(
+                    (snapshot) => snapshot.observe?.acquire?.liveFrame,
+                  ),
+                ),
             ),
-      )
-      if ('response' in result) {
-        publish('PreflightRefreshed', result.cursor)
-        return json(response, 200, result.response)
-      }
-      return RefreshPreflightResponse.match(result, {
-        Refreshed: (body) => json(response, 200, body),
-        Rejected: (body) => json(response, 409, body),
-        Unavailable: (body) => json(response, 503, body),
-      })
-    },
-    polarCommand: async (response, identity, request) => {
-      if (identity.capability !== 'controlCapable')
-        return json(
-          response,
-          403,
-          AcquireCommandResponse.cases.Unavailable.make({
-            summary:
-              'This client is read-only and cannot record polar evidence.',
-          }),
+        ),
+      libraryReview: (response, identity, request, encodedAssetId) =>
+        libraryReview(response, database, identity, request, encodedAssetId),
+      planCommand: (response, identity, request) =>
+        Effect.runPromise(
+          planCommandFromRequest(
+            body(request),
+            runRepository,
+            stateRepository,
+            identity,
+            publish,
+          ).pipe(
+            Effect.catchTags({
+              'Server.PlanCommandInputInvalid': () =>
+                planInvalidResponse(stateRepository, identity),
+              'Server.PlanServiceUnavailable': () =>
+                planServiceResponse(
+                  'PlanServiceUnavailable',
+                  'The Plan service is temporarily unavailable.',
+                ),
+            }),
+            Effect.map(({ status, body }) => json(response, status, body)),
+          ),
+        ),
+      observeCommand: (response, identity, request) =>
+        Effect.runPromise(
+          observeCommandFromRequest(
+            body(request),
+            runRepository,
+            stateRepository,
+            identity,
+            publish,
+          ).pipe(
+            Effect.catchTags({
+              'Server.ObserveCommandInputInvalid': () =>
+                observeInvalidResponse(stateRepository, identity),
+              'Server.ObserveServiceUnavailable': () =>
+                observeServiceResponse(
+                  'ObserveServiceUnavailable',
+                  'The Observe command service is temporarily unavailable.',
+                ),
+            }),
+            Effect.map(({ status, body }) => json(response, status, body)),
+          ),
+        ),
+      processCommand: async (response, identity, request) => {
+        const result = executeProcessCommand(
+          database,
+          await body(request),
+          identity,
         )
-      const raw = await body(request)
-      let decoded: typeof AcquireCommandRequest.Type | undefined
-      try {
-        decoded = Schema.decodeUnknownSync(AcquireCommandRequest)(raw)
-      } catch {}
-      if (decoded !== undefined) {
-        const prior = acquireRepository.receipt(
-          decoded.intent.idempotencyKey,
-          identity.clientId,
-        )
-        if (prior !== undefined) return json(response, prior.status, prior.body)
-        const current = stateRepository.state()
-        if (
-          current.run === null ||
-          decoded.intent.expectedLeaseRevision !== current.control.revision ||
-          decoded.intent.expectedRunRevision !== current.run.revision
-        )
+        if (result.outcome === 'accepted')
+          publish('ProcessingProjected', stateRepository.state().eventCursor)
+        return json(response, result.outcome === 'accepted' ? 200 : 409, result)
+      },
+      refreshPreflight: async (response, identity, request) => {
+        if (identity.capability !== 'controlCapable')
           return json(
             response,
-            409,
-            AcquireCommandResponse.cases.Rejected.make({
-              summary:
-                'The control lease or active run changed. Read the current Observe projection.',
-              snapshot: Effect.runSync(
-                stateRepository.bootstrapSnapshot(identity),
-              ),
+            403,
+            RefreshPreflightResponse.cases.Rejected.make({
+              summary: 'This client is read-only and cannot refresh preflight.',
             }),
           )
-      }
-      const program = Effect.succeed(raw).pipe(
-        Effect.flatMap((input) =>
-          decoded !== undefined &&
-          (AcquireIntent.guards.CaptureTargetAcquisitionEvidence(
-            decoded.intent,
-          ) ||
-            AcquireIntent.guards.RetryPlateSolveWithParameters(
-              decoded.intent,
-            ) ||
-            AcquireIntent.guards.SkipAcquireTarget(decoded.intent) ||
-            AcquireIntent.guards.AbortAcquire(decoded.intent) ||
-            AcquireIntent.guards.RecordLiveFrameEvidence(decoded.intent) ||
-            AcquireIntent.guards.StartManagedCapture(decoded.intent) ||
-            AcquireIntent.guards.PauseManagedCapture(decoded.intent) ||
-            AcquireIntent.guards.StopManagedCapture(decoded.intent) ||
-            AcquireIntent.guards.RecenterManagedCapture(decoded.intent) ||
-            AcquireIntent.guards.ApprovePointingCorrection(decoded.intent) ||
-            AcquireIntent.guards.RevisePointingCorrection(decoded.intent))
-            ? executeTargetAcquisitionCommand(input)
-            : executePolarCommand(input),
-        ),
-        Effect.provideService(
-          AcquirePersistence,
-          AcquirePersistence.of({
-            current: () => {
-              const run = stateRepository.state().run
-              return run === null
-                ? undefined
-                : acquireRepository.current(run.id)
-            },
-            commit: (session, type) => acquireRepository.commit(session, type),
-          }),
-        ),
-      )
-      const result: PolarCommandResult | TargetAcquisitionCommandResult =
-        await Effect.runPromise(
-          program.pipe(
-            (effect) =>
-              polarMeasurementProvider === undefined
-                ? effect
-                : effect.pipe(
-                    Effect.provideService(
-                      PolarMeasurementProvider,
-                      polarMeasurementProvider,
-                    ),
-                  ),
-            (effect) =>
-              targetAcquisitionProvider === undefined
-                ? effect
-                : effect.pipe(
-                    Effect.provideService(
-                      TargetAcquisitionProvider,
-                      targetAcquisitionProvider,
-                    ),
-                  ),
-          ),
-        )
-      if ('cursor' in result) {
-        publish('AcquireEvidenceUpdated', result.cursor)
-        const resultBody = AcquireCommandResponse.cases.Accepted.make({
-          snapshot: Effect.runSync(stateRepository.bootstrapSnapshot(identity)),
+        const persistence = preflightPersistenceLayer({
+          activeRun: () => stateRepository.state().run,
+          persist: (snapshot) =>
+            Effect.try({
+              try: () => stateRepository.persistPreflight(snapshot),
+              catch: (cause) => cause,
+            }),
         })
-        if (decoded !== undefined)
-          acquireRepository.saveReceipt(
+        const program = Effect.promise(() => body(request)).pipe(
+          Effect.flatMap(refreshPreflight),
+          Effect.provide(persistence),
+        )
+        const result = await Effect.runPromise(
+          options.preflightProvider === undefined
+            ? program
+            : program.pipe(
+                Effect.provideService(
+                  ReadOnlyPreflightProvider,
+                  options.preflightProvider,
+                ),
+              ),
+        )
+        if ('response' in result) {
+          publish('PreflightRefreshed', result.cursor)
+          return json(response, 200, result.response)
+        }
+        return RefreshPreflightResponse.match(result, {
+          Refreshed: (body) => json(response, 200, body),
+          Rejected: (body) => json(response, 409, body),
+          Unavailable: (body) => json(response, 503, body),
+        })
+      },
+      polarCommand: async (response, identity, request) => {
+        if (identity.capability !== 'controlCapable')
+          return json(
+            response,
+            403,
+            AcquireCommandResponse.cases.Unavailable.make({
+              summary:
+                'This client is read-only and cannot record polar evidence.',
+            }),
+          )
+        const raw = await body(request)
+        let decoded: typeof AcquireCommandRequest.Type | undefined
+        try {
+          decoded = Schema.decodeUnknownSync(AcquireCommandRequest)(raw)
+        } catch {}
+        if (decoded !== undefined) {
+          const prior = acquireRepository.receipt(
             decoded.intent.idempotencyKey,
             identity.clientId,
-            { status: 200, body: resultBody },
           )
-        return json(response, 200, resultBody)
-      }
-      return matchPolarCommandResult(
-        result,
-        response,
-        stateRepository,
-        identity,
-      )
-    },
-    webAsset: (response, pathname) =>
-      Effect.runSync(webHost.asset(response, pathname, responseHeaders)),
-    webRoute: (response, pathname) =>
-      Effect.runSync(webHost.route(response, pathname, responseHeaders)),
-    apiNotFound: (response) => json(response, 404, reject('InvalidInput').body),
-    notFound: (response) =>
-      response
-        .writeHead(404, responseHeaders('text/plain; charset=utf-8'))
-        .end(),
-  })
-  const listen = async (port = 0, host = '127.0.0.1') => {
+          if (prior !== undefined)
+            return json(response, prior.status, prior.body)
+          const current = stateRepository.state()
+          if (
+            current.run === null ||
+            decoded.intent.expectedLeaseRevision !== current.control.revision ||
+            decoded.intent.expectedRunRevision !== current.run.revision
+          )
+            return json(
+              response,
+              409,
+              AcquireCommandResponse.cases.Rejected.make({
+                summary:
+                  'The control lease or active run changed. Read the current Observe projection.',
+                snapshot: Effect.runSync(
+                  stateRepository.bootstrapSnapshot(identity),
+                ),
+              }),
+            )
+        }
+        const program = Effect.succeed(raw).pipe(
+          Effect.flatMap((input) =>
+            decoded !== undefined &&
+            (AcquireIntent.guards.CaptureTargetAcquisitionEvidence(
+              decoded.intent,
+            ) ||
+              AcquireIntent.guards.RetryPlateSolveWithParameters(
+                decoded.intent,
+              ) ||
+              AcquireIntent.guards.SkipAcquireTarget(decoded.intent) ||
+              AcquireIntent.guards.AbortAcquire(decoded.intent) ||
+              AcquireIntent.guards.RecordLiveFrameEvidence(decoded.intent) ||
+              AcquireIntent.guards.StartManagedCapture(decoded.intent) ||
+              AcquireIntent.guards.PauseManagedCapture(decoded.intent) ||
+              AcquireIntent.guards.StopManagedCapture(decoded.intent) ||
+              AcquireIntent.guards.RecenterManagedCapture(decoded.intent) ||
+              AcquireIntent.guards.ApprovePointingCorrection(decoded.intent) ||
+              AcquireIntent.guards.RevisePointingCorrection(decoded.intent))
+              ? executeTargetAcquisitionCommand(input)
+              : executePolarCommand(input),
+          ),
+          Effect.provideService(
+            AcquirePersistence,
+            AcquirePersistence.of({
+              current: () => {
+                const run = stateRepository.state().run
+                return run === null
+                  ? undefined
+                  : acquireRepository.current(run.id)
+              },
+              commit: (session, type) =>
+                acquireRepository.commit(session, type),
+            }),
+          ),
+        )
+        const result: PolarCommandResult | TargetAcquisitionCommandResult =
+          await Effect.runPromise(
+            program.pipe(
+              (effect) =>
+                polarMeasurementProvider === undefined
+                  ? effect
+                  : effect.pipe(
+                      Effect.provideService(
+                        PolarMeasurementProvider,
+                        polarMeasurementProvider,
+                      ),
+                    ),
+              (effect) =>
+                targetAcquisitionProvider === undefined
+                  ? effect
+                  : effect.pipe(
+                      Effect.provideService(
+                        TargetAcquisitionProvider,
+                        targetAcquisitionProvider,
+                      ),
+                    ),
+            ),
+          )
+        if ('cursor' in result) {
+          publish('AcquireEvidenceUpdated', result.cursor)
+          const resultBody = AcquireCommandResponse.cases.Accepted.make({
+            snapshot: Effect.runSync(
+              stateRepository.bootstrapSnapshot(identity),
+            ),
+          })
+          if (decoded !== undefined)
+            acquireRepository.saveReceipt(
+              decoded.intent.idempotencyKey,
+              identity.clientId,
+              { status: 200, body: resultBody },
+            )
+          return json(response, 200, resultBody)
+        }
+        return matchPolarCommandResult(
+          result,
+          response,
+          stateRepository,
+          identity,
+        )
+      },
+      webAsset: (response, pathname) =>
+        Effect.runSync(webHost.asset(response, pathname, responseHeaders)),
+      webRoute: (response, pathname) =>
+        Effect.runSync(webHost.route(response, pathname, responseHeaders)),
+      apiNotFound: (response) =>
+        json(response, 404, reject('InvalidInput').body),
+      notFound: (response) =>
+        response
+          .writeHead(404, responseHeaders('text/plain; charset=utf-8'))
+          .end(),
+    })
+  const listen = async (
+    port = 0,
+    host = '127.0.0.1',
+    requestAdmission: RequestAdmission = identityResolver,
+  ) => {
     const scope = Effect.runSync(Scope.make())
+    const requestHandler = handler(requestAdmission)
     const listener = await Effect.runPromise(
       Scope.provide(
         originListener.listen(port, host, (request, response) => {
-          void handler(request, response)
+          void requestHandler(request, response)
         }),
         scope,
       ),
@@ -1130,10 +1172,47 @@ export function createOriginAdmission(
     }),
   })
 }
+export function createRemoteReadOnlyAdmission(
+  config: OriginServerConfig,
+): RequestAdmission {
+  return createRemoteAccessAdmission(config, 'phone')
+}
+export function createRemoteDesktopAdmission(
+  config: OriginServerConfig,
+): RequestAdmission {
+  return createRemoteAccessAdmission(config, 'desktop')
+}
+function createRemoteAccessAdmission(
+  config: OriginServerConfig,
+  clientContext: 'desktop' | 'phone',
+): RequestAdmission {
+  if (config.admission.mode === 'development')
+    return createOriginAdmission(config)
+  return createProductionAccessAdmission({
+    issuer: config.admission.issuer,
+    audience: config.admission.audience,
+    keyResolver: createJwksKeyResolver({
+      url: config.admission.jwksUrl,
+      cacheTtlMs: config.admission.cacheTtlMs,
+    }),
+    databasePath: config.runtime.databasePath,
+    clientContext,
+    bootstrapResolver: createMembershipBootstrapResolver({
+      path: config.admission.bootstrapPath,
+    }),
+  })
+}
+export const createLocalOwnerAdmission = () =>
+  createLocalFixtureAdmission({
+    personId: 'owner-chicks',
+    clientId: 'local-owner',
+    role: 'owner',
+    capability: 'controlCapable',
+  })
 export const startOrigin = () =>
   runExecutable('origin server', async () => {
     const config = await Effect.runPromise(originServerConfig)
-    const admission = createOriginAdmission(config)
+    const admission = createRemoteReadOnlyAdmission(config)
     const issuer = configuredDownloadGrantIssuer(config.downloadGrant)
     const service = createLocalWebService(
       config.runtime.databasePath,
@@ -1150,13 +1229,36 @@ export const startOrigin = () =>
               ),
             }),
         webDistPath: config.runtime.webDistPath,
+        previewRoot: config.runtime.previewRoot,
       },
     )
-    await service
-      .listen(config.runtime.port, config.runtime.host)
-      .then(({ port }) =>
-        console.log(
-          `Astro Console ${config.runtime.release}: http://127.0.0.1:${port}`,
-        ),
+    const remote = await service.listen(
+      config.runtime.port,
+      config.runtime.host,
+    )
+    if (config.admission.mode === 'development') {
+      console.log(
+        `Astro Console ${config.runtime.release}: http://127.0.0.1:${remote.port}`,
       )
+      return
+    }
+    const localOwnerPort = config.runtime.localOwnerPort
+    if (localOwnerPort === undefined)
+      throw new Error('Production origin requires ASTRO_LOCAL_OWNER_PORT')
+    const local = await service.listen(
+      localOwnerPort,
+      config.runtime.host,
+      createLocalOwnerAdmission(),
+    )
+    const remoteDesktop =
+      config.runtime.remoteDesktopPort === undefined
+        ? undefined
+        : await service.listen(
+            config.runtime.remoteDesktopPort,
+            config.runtime.host,
+            createRemoteDesktopAdmission(config),
+          )
+    console.log(
+      `Astro Console ${config.runtime.release}: remote phone http://${config.runtime.host}:${remote.port};${remoteDesktop === undefined ? '' : ` remote desktop http://${config.runtime.host}:${remoteDesktop.port};`} local owner http://${config.runtime.host}:${local.port}`,
+    )
   })

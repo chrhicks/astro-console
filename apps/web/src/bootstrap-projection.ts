@@ -46,6 +46,7 @@ function projectSnapshot(
         }
       : undefined
   const fresh = freshness === 'current'
+  const control = sharedControl(snapshot, fresh)
   const hasEligibleAction = eligibleActionProjected(snapshot)
   const connection = fresh
     ? `Current bootstrap snapshot confirmed at ${snapshot.generatedAt}`
@@ -77,10 +78,13 @@ function projectSnapshot(
     freshness: connection,
     controller: controller(snapshot),
     membership: membership(snapshot),
-    presence: 'Presence unavailable from bootstrap.',
+    remoteAvailability: remoteAvailability(snapshot.health.tunnel),
+    authority: authority(snapshot),
+    presence: control.presence,
     attentionOwner: 'Attention owner unavailable from bootstrap.',
     capability: capability(snapshot, fresh, hasEligibleAction),
     protection,
+    control,
     health,
   }
   return {
@@ -161,10 +165,21 @@ function unavailableProjection(reason: string): Projection {
       freshness: 'No authoritative snapshot',
       controller: 'Controller unknown',
       membership: 'Membership unknown',
+      remoteAvailability:
+        'Remote viewing unavailable from this client; local activity may continue.',
+      authority: 'Authority unavailable without an admitted service snapshot.',
       presence: 'Presence unknown',
       attentionOwner: 'Attention owner unknown',
       capability: 'Capability unknown / mutations unavailable',
       protection: `Protected: ${reason} Commands cannot be sent or replayed.`,
+      control: {
+        revision: 0,
+        state: 'unknown',
+        presence: 'Presence unknown',
+        readOnly: true,
+        requests: [],
+        actions: [],
+      },
       health: [
         {
           label: 'Service',
@@ -358,6 +373,20 @@ function healthFacts(snapshot: BootstrapSnapshot): readonly HealthFact[] {
   }))
 }
 
+function remoteAvailability(health: BootstrapSubsystemHealth) {
+  switch (health.state) {
+    case 'healthy':
+      return 'Remote viewing access admitted by the service.'
+    case 'degraded':
+    case 'stale':
+      return 'Remote viewing is limited; local service activity remains authoritative.'
+    case 'unavailable':
+      return 'Remote viewing unavailable; the local service and active run may continue.'
+    case 'unknown':
+      return 'Remote viewing availability is not currently observed.'
+  }
+}
+
 function healthTone(health: BootstrapSubsystemHealth): StatusTone {
   switch (health.state) {
     case 'healthy':
@@ -392,6 +421,87 @@ function controller(snapshot: BootstrapSnapshot): string {
 
 function membership(snapshot: BootstrapSnapshot): string {
   return `${capitalize(snapshot.membership.role)} member`
+}
+
+function authority(snapshot: BootstrapSnapshot): string {
+  if (snapshot.membership.role === 'viewer')
+    return 'Viewer membership can request shared control but cannot operate until the service grants its lease.'
+  if (snapshot.membership.capability === 'readOnly')
+    return 'Phone clients are read-only, including the owner.'
+  return 'Desktop owner controls remain service-owned and lease-guarded.'
+}
+
+function sharedControl(snapshot: BootstrapSnapshot, fresh: boolean) {
+  const control = snapshot.control
+  const holder = control.holderClientId === snapshot.membership.clientId
+  const requests = (control.pendingRequests ?? []).map((request) => ({
+    requestId: request.requestId,
+    clientId: request.clientId,
+    label: `Desktop ${request.clientId} requested control.`,
+  }))
+  const presence =
+    control.state === 'reconnecting'
+      ? `Controller reconnecting until ${control.reconnectGraceUntil ?? 'the service expires the lease'}.`
+      : control.state === 'held'
+        ? holder
+          ? 'This desktop is the current controller.'
+          : 'Another desktop is the current controller.'
+        : 'No desktop currently holds control.'
+  if (!fresh || snapshot.membership.capability !== 'controlCapable')
+    return {
+      revision: control.revision,
+      state: control.state,
+      presence,
+      readOnly: snapshot.membership.capability !== 'controlCapable',
+      requests,
+      actions: [],
+    } as const
+  if (holder)
+    return {
+      revision: control.revision,
+      state: control.state,
+      presence,
+      readOnly: false,
+      requests,
+      actions: [{ kind: 'release' as const, label: 'Release control' }],
+    }
+  if (snapshot.membership.role === 'owner')
+    return {
+      revision: control.revision,
+      state: control.state,
+      presence,
+      readOnly: false,
+      requests,
+      actions: [
+        ...requests.flatMap((request) => [
+          {
+            kind: 'grant' as const,
+            label: `Grant ${request.clientId}`,
+            requestId: request.requestId,
+            targetClientId: request.clientId,
+          },
+          {
+            kind: 'decline' as const,
+            label: `Decline ${request.clientId}`,
+            requestId: request.requestId,
+          },
+        ]),
+        { kind: 'take' as const, label: 'Take control' },
+      ],
+    }
+  const requested = requests.some(
+    (request) => request.clientId === snapshot.membership.clientId,
+  )
+  return {
+    revision: control.revision,
+    state: control.state,
+    presence,
+    readOnly: false,
+    requests,
+    actions: requested
+      ? []
+      : [{ kind: 'request' as const, label: 'Request control' }],
+  }
 }
 
 function eligibleActionProjected(snapshot: BootstrapSnapshot): boolean {

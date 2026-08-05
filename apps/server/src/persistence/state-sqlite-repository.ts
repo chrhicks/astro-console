@@ -113,6 +113,8 @@ export interface StateSqliteRepositoryShape {
   ) => Effect.Effect<typeof BootstrapSnapshot.Type, Schema.SchemaError>
   readonly readiness: () => ReturnType<typeof projectReadiness>
   readonly operations: () => ReturnType<typeof projectOperations>
+  readonly controllerConnected: (identity: LocalIdentity) => void
+  readonly controllerDisconnected: (identity: LocalIdentity) => void
   readonly expireReconnectGrace: () => void
   readonly sseProjection: (identity: LocalIdentity) => string
   readonly commit: (values: Record<string, unknown>) => void
@@ -288,6 +290,48 @@ export const stateSqliteRepositoryLayer = (
         throw error
       }
     }
+    const controllerConnected = (identity: LocalIdentity) => {
+      const current = state()
+      if (
+        current.control.holderClientId !== identity.clientId ||
+        current.control.state !== 'reconnecting'
+      )
+        return
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        commit({
+          snapshotVersion: current.snapshotVersion + 1,
+          eventCursor: current.eventCursor + 1,
+          leaseState: 'held',
+          reconnectGraceUntil: null,
+        })
+        db.exec('COMMIT')
+      } catch (error) {
+        db.exec('ROLLBACK')
+        throw error
+      }
+    }
+    const controllerDisconnected = (identity: LocalIdentity) => {
+      const current = state()
+      if (
+        current.control.holderClientId !== identity.clientId ||
+        current.control.state !== 'held'
+      )
+        return
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        commit({
+          snapshotVersion: current.snapshotVersion + 1,
+          eventCursor: current.eventCursor + 1,
+          leaseState: 'reconnecting',
+          reconnectGraceUntil: new Date(Date.now() + 60_000).toISOString(),
+        })
+        db.exec('COMMIT')
+      } catch (error) {
+        db.exec('ROLLBACK')
+        throw error
+      }
+    }
     const snapshot = (identity: LocalIdentity): Snapshot => ({
       ...state(),
       generatedAt: new Date().toISOString(),
@@ -442,6 +486,8 @@ export const stateSqliteRepositoryLayer = (
       bootstrapSnapshot,
       readiness,
       operations,
+      controllerConnected,
+      controllerDisconnected,
       expireReconnectGrace,
       sseProjection,
       commit,

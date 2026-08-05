@@ -21,12 +21,16 @@ test('projects a fresh authoritative snapshot with distinct health facts', () =>
   assert.match(projection.shell.freshness, /^Current bootstrap snapshot/)
   assert.equal(projection.shell.membership, 'Owner member')
   assert.equal(
+    projection.shell.remoteAvailability,
+    'Remote viewing availability is not currently observed.',
+  )
+  assert.equal(
     projection.shell.attentionOwner,
     'Attention owner unavailable from bootstrap.',
   )
   assert.equal(
     projection.shell.presence,
-    'Presence unavailable from bootstrap.',
+    'This desktop is the current controller.',
   )
   assert.equal(
     projection.shell.capability,
@@ -46,6 +50,40 @@ test('projects a fresh authoritative snapshot with distinct health facts', () =>
   )
   assert.equal(projection.plan.sequences.length, 0)
   assert.equal('action' in projection.observe, false)
+})
+
+test('shows tunnel failure as remote viewing unavailable without changing active-run truth', () => {
+  const active = Schema.decodeUnknownSync(BootstrapSnapshot)({
+    ...bootstrapFixtures.fresh,
+    activeRun: {
+      _tag: 'Active',
+      run: {
+        runId: 'run-m27',
+        target: 'M27',
+        phase: 'capture',
+        progress: 52,
+        completedSequenceCount: 1,
+        revision: 4,
+      },
+    },
+    health: {
+      ...bootstrapFixtures.fresh.health,
+      tunnel: {
+        state: 'unavailable',
+        reason: 'Access probe failed',
+        observedAt: '2026-08-05T00:00:00Z',
+      },
+    },
+  })
+  const projection = projectBootstrapState(
+    BootstrapClientState.Current({ snapshot: active }),
+  )
+  assert.equal(
+    projection.shell.remoteAvailability,
+    'Remote viewing unavailable; the local service and active run may continue.',
+  )
+  assert.equal(projection.shell.currentRun?.target, 'M27')
+  assert.equal(projection.shell.currentRun?.phase, 'Capture')
 })
 
 test('projects server-owned Plan detail and preserves it as last-confirmed when stale', () => {
@@ -253,8 +291,24 @@ test('projects membership and server capability independently', () => {
     viewer.shell.capability,
     'Control-capable client / no eligible action',
   )
+  assert.equal(
+    viewer.shell.remoteAvailability,
+    'Remote viewing availability is not currently observed.',
+  )
+  assert.equal(
+    viewer.shell.authority,
+    'Viewer membership can request shared control but cannot operate until the service grants its lease.',
+  )
   assert.equal(phone.shell.membership, 'Owner member')
   assert.equal(phone.shell.capability, 'Read-only client / no eligible action')
+  assert.equal(
+    phone.shell.remoteAvailability,
+    'Remote viewing availability is not currently observed.',
+  )
+  assert.equal(
+    phone.shell.authority,
+    'Phone clients are read-only, including the owner.',
+  )
 })
 
 test('projects current controller actions and renders Manage only when eligible', () => {

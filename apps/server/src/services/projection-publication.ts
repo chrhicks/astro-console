@@ -21,12 +21,15 @@ export const projectionPublicationLayer = (dependencies: {
   readonly expire: () => void
   readonly currentCursor: () => number
   readonly eventFor: (identity: LocalIdentity) => string
+  readonly controllerConnected: (identity: LocalIdentity) => void
+  readonly controllerDisconnected: (identity: LocalIdentity) => void
   readonly responseHeaders: (contentType: string) => Record<string, string>
 }) =>
   Layer.effect(
     ProjectionPublication,
     Effect.sync(() => {
       const listeners = new Map<ServerResponse, LocalIdentity>()
+      const controllerStreams = new Map<string, number>()
       const heartbeats = new Map<
         ServerResponse,
         ReturnType<typeof setTimeout>
@@ -72,6 +75,9 @@ export const projectionPublicationLayer = (dependencies: {
       ) =>
         Effect.sync(() => {
           if (closed) return
+          const streamCount = controllerStreams.get(identity.clientId) ?? 0
+          if (streamCount === 0) dependencies.controllerConnected(identity)
+          controllerStreams.set(identity.clientId, streamCount + 1)
           response.writeHead(200, {
             ...dependencies.responseHeaders('text/event-stream'),
             connection: 'keep-alive',
@@ -80,10 +86,16 @@ export const projectionPublicationLayer = (dependencies: {
           listeners.set(response, identity)
           scheduleHeartbeat(response)
           request.on('close', () => {
+            if (closed) return
             const heartbeat = heartbeats.get(response)
             if (heartbeat !== undefined) clearTimeout(heartbeat)
             heartbeats.delete(response)
             listeners.delete(response)
+            const remaining = (controllerStreams.get(identity.clientId) ?? 1) - 1
+            if (remaining <= 0) {
+              controllerStreams.delete(identity.clientId)
+              dependencies.controllerDisconnected(identity)
+            } else controllerStreams.set(identity.clientId, remaining)
           })
         })
       const close = () =>
@@ -94,6 +106,7 @@ export const projectionPublicationLayer = (dependencies: {
           for (const heartbeat of heartbeats.values()) clearTimeout(heartbeat)
           heartbeats.clear()
           listeners.clear()
+          controllerStreams.clear()
         })
       return ProjectionPublication.of({ publish, stream, close })
     }),

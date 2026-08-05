@@ -272,11 +272,11 @@ export function LibraryView({
             ? `${detail.role} · ${detail.format}`
             : (fallback?.name ?? 'No asset selected')}
         </h2>
-        {!readOnly && detail && download?._tag === 'Eligible' ? (
+        {detail && download?._tag === 'Eligible' ? (
           <a
             href={`/api/library/assets/${encodeURIComponent(detail.assetId)}/download`}
           >
-            Download
+            Download original
           </a>
         ) : null}
         {!readOnly && detail && process?._tag === 'Eligible' ? (

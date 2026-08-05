@@ -33,6 +33,10 @@ to override `docs/v2/current/`, accepted gate records, or the UX guidance.
   — completed Library and Frame Review delivery record.
 - [Phase 5 implementation plan](phase-5/implementation-plan-2026-08-04.md)
   — completed Process Workspace delivery record.
+- [Phase 6 implementation plan](phase-6/implementation-plan-2026-08-05.md)
+  — completed remote viewing, shared-control, and deployment record.
+- [V2.0 delivery plan](plans/v2-delivery-plan-2026-08-05.md) — completed
+  V2.0 roadmap retained before the next multi-phase plan is defined.
 - [Phase 2 implementation plan](plans/phase-2-implementation-plan-2026-08-04.md)
   — completed fake-run execution plan retained for historical lookup.
 - [Phase 1 delivery record](phase-1-foundation/delivery-plan-2026-07-29.md)

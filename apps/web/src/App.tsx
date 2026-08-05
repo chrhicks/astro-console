@@ -12,6 +12,11 @@ import {
   type ObserveCommandSubmission,
 } from './observe-command-client'
 import {
+  CommandClient,
+  type CommandSubmission,
+  type ControlIntent,
+} from './command-client'
+import {
   PreflightRefreshClient,
   type PreflightRefreshSubmission,
 } from './preflight-refresh-client'
@@ -73,6 +78,9 @@ export function App() {
         key: typeof IdempotencyKey.Type,
       ) => Promise<ObserveCommandSubmission>)
     | undefined
+  >()
+  const [submitControl, setSubmitControl] = useState<
+    ((intent: ControlIntent) => Promise<CommandSubmission>) | undefined
   >()
   const [refreshPreflight, setRefreshPreflight] = useState<
     (() => Promise<PreflightRefreshSubmission>) | undefined
@@ -306,6 +314,15 @@ export function App() {
           }),
         ),
     )
+    setSubmitControl(
+      () => (intent: ControlIntent) =>
+        runtime.runPromise(
+          Effect.gen(function* () {
+            const client = yield* CommandClient
+            return yield* client.submit(intent)
+          }),
+        ),
+    )
     setRefreshPreflight(
       () => () =>
         runtime.runPromise(
@@ -529,6 +546,7 @@ export function App() {
     return () => {
       setSubmitPlan(undefined)
       setSubmitObserve(undefined)
+      setSubmitControl(undefined)
       setRefreshPreflight(undefined)
       setPolarCommand(undefined)
       setTargetAcquisitionCommand(undefined)
@@ -701,6 +719,7 @@ export function App() {
       view={projection.shell}
       link={link}
       result={undefined}
+      {...(submitControl === undefined ? {} : { submitControl })}
     >
       {content}
     </Shell>

@@ -115,6 +115,7 @@ test('focused executable configurations decode defaults and conditional branches
     port: 0,
     host: '127.0.0.1',
     webDistPath: '../web/dist',
+    previewRoot: '/var/lib/astro-console/previews',
   })
   assert.deepEqual(development.admission, {
     mode: 'development',
@@ -143,6 +144,7 @@ test('focused executable configurations decode defaults and conditional branches
     port: 4711,
     host: '127.0.0.1',
     webDistPath: '../web/dist',
+    previewRoot: '/var/lib/astro-console/previews',
   })
   assert.equal(legacyOrigin.admission.mode, 'development')
   if (legacyOrigin.admission.mode === 'development')
@@ -176,6 +178,7 @@ test('focused executable configurations decode defaults and conditional branches
         CF_ACCESS_AUDIENCE: 'audience',
         CF_ACCESS_JWKS_URL: 'https://access.example/certs',
         ASTRO_MEMBERSHIP_BOOTSTRAP_PATH: '/run/config/members.json',
+        ASTRO_LOCAL_OWNER_PORT: '8081',
         ASTRO_CLIENT_CONTEXT: 'desktop',
       })
     ).runtime.host,
@@ -197,6 +200,7 @@ test('focused executable configurations decode defaults and conditional branches
     CF_ACCESS_AUDIENCE: 'audience',
     CF_ACCESS_JWKS_URL: 'https://access.example/certs',
     ASTRO_MEMBERSHIP_BOOTSTRAP_PATH: '/run/config/members.json',
+    ASTRO_LOCAL_OWNER_PORT: '8081',
     ASTRO_CLIENT_CONTEXT: 'desktop',
   })
   assert.equal(production.admission.mode, 'production')
