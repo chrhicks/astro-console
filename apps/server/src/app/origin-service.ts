@@ -95,6 +95,12 @@ import {
   type ReadOnlyPreflightProviderShape,
 } from '../services/preflight-service.ts'
 import { alpacaPreflightProvider } from '../providers/alpaca-preflight-provider.ts'
+import { alpacaCameraProvider } from '../providers/alpaca-camera-provider.ts'
+import {
+  CameraProvider,
+  executeCameraCommand,
+  type CameraProviderShape,
+} from '../services/camera-command-service.ts'
 import {
   acquireSqliteRepository,
   polarSession,
@@ -117,6 +123,9 @@ import {
   AcquireCommandRequest,
   AcquireCommandResponse,
   AcquireIntent,
+  CameraCommandRequest,
+  CameraCommandResponse,
+  PreflightSnapshot,
   AssetId,
   AttemptId,
   RecoverySeriesId,
@@ -156,6 +165,7 @@ export function createLocalWebService(
     readonly webDistPath?: string
     readonly previewRoot?: string
     readonly preflightProvider?: ReadOnlyPreflightProviderShape
+    readonly cameraProvider?: CameraProviderShape
     readonly polarMeasurementProvider?: PolarMeasurementProviderShape
     readonly targetAcquisitionProvider?: TargetAcquisitionProviderShape
     readonly capturedFrameStorage?: CapturedFrameStorage
@@ -470,6 +480,7 @@ export function createLocalWebService(
     (options.fixture === 'polar'
       ? deterministicPolarMeasurementProvider
       : undefined)
+  const cameraProvider = options.cameraProvider
 
   const handler = (requestAdmission: RequestAdmission = identityResolver) =>
     createOriginRouter({
@@ -696,6 +707,128 @@ export function createLocalWebService(
             }),
           )
         const raw = await body(request)
+        let camera: typeof CameraCommandRequest.Type | undefined
+        try {
+          camera = Schema.decodeUnknownSync(CameraCommandRequest)(raw)
+        } catch {}
+        if (camera !== undefined) {
+          const prior = acquireRepository.receipt(
+            camera.intent.idempotencyKey,
+            identity.clientId,
+          )
+          if (prior !== undefined)
+            return json(response, prior.status, prior.body)
+          const current = stateRepository.state()
+          if (
+            current.run === null ||
+            camera.intent.expectedLeaseRevision !== current.control.revision ||
+            camera.intent.expectedRunRevision !== current.run.revision
+          )
+            return json(
+              response,
+              409,
+              CameraCommandResponse.cases.Rejected.make({
+                summary:
+                  'The control lease or active run changed. Read the current Observe projection.',
+              }),
+            )
+          if (
+            current.run.preflight?.checks.some(
+              (check) =>
+                check.key === 'camera-connected' && check.state === 'ready',
+            ) !== true
+          )
+            return json(
+              response,
+              409,
+              CameraCommandResponse.cases.Rejected.make({
+                summary:
+                  'Current camera connection truth is not ready. Refresh preflight before any camera command.',
+              }),
+            )
+          acquireRepository.saveReceipt(
+            camera.intent.idempotencyKey,
+            identity.clientId,
+            {
+              status: 503,
+              body: CameraCommandResponse.cases.Unavailable.make({
+                summary:
+                  'The camera command outcome is not yet known. Refresh its state; it will not replay.',
+              }),
+            },
+          )
+          const result = await Effect.runPromise(
+            executeCameraCommand(raw).pipe(
+              cameraProvider === undefined
+                ? (effect) => effect
+                : (effect) =>
+                    effect.pipe(
+                      Effect.provideService(CameraProvider, cameraProvider),
+                    ),
+            ),
+          )
+          const body =
+            result._tag === 'Observed'
+              ? CameraCommandResponse.cases.Accepted.make({
+                  observation: result.observation,
+                })
+              : result._tag === 'Rejected'
+                ? CameraCommandResponse.cases.Rejected.make({
+                    summary: result.summary,
+                  })
+                : CameraCommandResponse.cases.Unavailable.make({
+                    summary: result.summary,
+                  })
+          const status = result._tag === 'Observed' ? 202 : 503
+          const observedAt = new Date().toISOString()
+          const previous = current.run.preflight
+          const preflight = Schema.decodeUnknownSync(PreflightSnapshot)({
+            observedAt,
+            verdict:
+              result._tag === 'Observed'
+                ? (previous?.verdict ?? 'unknown')
+                : 'unavailable',
+            nextAction:
+              result._tag === 'Observed'
+                ? (previous?.nextAction ??
+                  'Camera state was read after the command acknowledgement.')
+                : 'Restore the camera provider, then refresh its state. The command will not replay.',
+            checks: previous?.checks ?? [
+              {
+                key: 'camera-provider',
+                state: result._tag === 'Observed' ? 'unknown' : 'unavailable',
+                observedAt,
+                reason:
+                  result._tag === 'Observed'
+                    ? 'No prior full rig inventory is available.'
+                    : result.summary,
+              },
+            ],
+            ...(previous?.rig === undefined ? {} : { rig: previous.rig }),
+            camera:
+              result._tag === 'Observed'
+                ? result.observation
+                : { observedAt, cameraState: 'unknown' },
+          })
+          const persisted = stateRepository.persistPreflight(preflight)
+          publish('CameraObservationRecorded', persisted.cursor)
+          if (result._tag === 'Observed') {
+            database
+              .prepare(
+                'INSERT OR REPLACE INTO camera_observations (run_id,observation) VALUES (?,?)',
+              )
+              .run(current.run.id, JSON.stringify(result.observation))
+          }
+          acquireRepository.saveReceipt(
+            camera.intent.idempotencyKey,
+            identity.clientId,
+            {
+              status,
+              body,
+            },
+          )
+          return json(response, status, body)
+        }
         let decoded: typeof AcquireCommandRequest.Type | undefined
         try {
           decoded = Schema.decodeUnknownSync(AcquireCommandRequest)(raw)
@@ -1231,6 +1364,13 @@ export const startOrigin = () =>
               preflightProvider: alpacaPreflightProvider(
                 config.preflightProvider,
               ),
+              ...(config.preflightProvider.devices.camera === undefined
+                ? {}
+                : {
+                    cameraProvider: alpacaCameraProvider(
+                      config.preflightProvider,
+                    ),
+                  }),
             }),
         webDistPath: config.runtime.webDistPath,
         previewRoot: config.runtime.previewRoot,

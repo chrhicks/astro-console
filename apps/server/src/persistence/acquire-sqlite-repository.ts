@@ -174,7 +174,7 @@ export const acquireSqliteRepository = (database: DatabaseSync) => ({
   ) =>
     database
       .prepare(
-        'INSERT INTO acquire_receipts (idempotency_key,actor_client_id,response) VALUES (?,?,?)',
+        'INSERT OR REPLACE INTO acquire_receipts (idempotency_key,actor_client_id,response) VALUES (?,?,?)',
       )
       .run(key, clientId, JSON.stringify(response)),
 })

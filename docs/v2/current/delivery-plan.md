@@ -91,6 +91,16 @@ lease-less commands fail before the adapter; provider timeout, restart, and
 disconnect become honest Recover state with no command replay. Mount movement
 or park is exercised only when the owner selects a safe physical setup.
 
+Completed 2026-08-05: contracts and the server suite (`90/90`) prove the
+lease, revision, idempotency, current camera-connected eligibility, recovery,
+and no-replay boundaries. On the owner-approved indoor ASCOM Remote Sony
+camera path, the isolated candidate adapter started a 15-second exposure
+(`idle` to `exposing` to `idle`) and separately started then aborted a
+30-second exposure (`idle` to `exposing` to `idle`). ASCOM requires command
+arguments in an `application/x-www-form-urlencoded` PUT body, with
+case-sensitive `Duration` and `Light` form names. The candidate was not
+deployed over the running production image.
+
 ### Phase 3 — Real exposure to Library
 
 Turn a completed Alpaca camera exposure into an immutable local original.

@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
 import { ObservedAt, RunId, RunRevision } from './primitives.js'
+import { CameraExposureObservation } from './camera-command.js'
 
 export const PreflightCheckState = Schema.Literals([
   'ready',
@@ -51,6 +52,7 @@ export const PreflightSnapshot = Schema.Struct({
   nextAction: Schema.NonEmptyString,
   checks: Schema.NonEmptyArray(PreflightCheck),
   rig: Schema.optionalKey(RigInventory),
+  camera: Schema.optionalKey(CameraExposureObservation),
 })
 export interface PreflightSnapshot extends Schema.Schema.Type<
   typeof PreflightSnapshot

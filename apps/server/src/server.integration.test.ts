@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import type { IncomingMessage } from 'node:http'
 import { generateKeyPairSync, sign } from 'node:crypto'
-import { ConfigProvider, Effect, Schema } from 'effect'
+import { Cause, ConfigProvider, Effect, Exit, Schema } from 'effect'
 import {
   AcquireSnapshot,
   AcquireSession,
@@ -48,6 +48,7 @@ import {
 import { createPublisherWorker } from './workers/publisher-worker.ts'
 import { originServerConfig } from './config/environment-config.ts'
 import { alpacaPreflightProvider } from './providers/alpaca-preflight-provider.ts'
+import { alpacaCameraProvider } from './providers/alpaca-camera-provider.ts'
 import { materializeCapturedFrame } from './services/captured-frame-intake.ts'
 
 function createFixtureService(
@@ -973,6 +974,266 @@ test('Alpaca inventory preserves an unavailable optional configured device witho
   assert.ok(
     !requests.some((entry) => entry.url.includes('/focuser/0/connected')),
   )
+})
+
+test('Alpaca camera adapter keeps a provider error message from a non-2xx envelope', async () => {
+  const provider = alpacaCameraProvider(
+    {
+      kind: 'alpaca',
+      rigId: 'recorded-rig',
+      host: '192.168.4.104',
+      port: 11111,
+      devices: { camera: { deviceNumber: 0 } },
+    },
+    async () =>
+      Response.json(
+        {
+          Value: null,
+          ErrorNumber: 1025,
+          ErrorMessage: 'Camera is not connected.',
+        },
+        { status: 400 },
+      ),
+  )
+  const exit = await Effect.runPromiseExit(provider.startExposure(15))
+  assert.equal(exit._tag, 'Failure')
+  if (Exit.isFailure(exit))
+    assert.match(Cause.pretty(exit.cause), /Camera is not connected/)
+})
+
+test('Alpaca camera adapter keeps bounded plain-text non-2xx diagnostics', async () => {
+  const provider = alpacaCameraProvider(
+    {
+      kind: 'alpaca',
+      rigId: 'recorded-rig',
+      host: '192.168.4.104',
+      port: 11111,
+      devices: { camera: { deviceNumber: 0 } },
+    },
+    async () =>
+      new Response('The name or value is not valid for this camera.', {
+        status: 400,
+      }),
+  )
+  const exit = await Effect.runPromiseExit(provider.startExposure(15))
+  if (Exit.isFailure(exit))
+    assert.match(Cause.pretty(exit.cause), /name or value is not valid/)
+  else throw new Error('Expected the recorded 400 response to fail.')
+})
+
+test('Alpaca camera adapter sends exact StartExposure form parameters in its PUT body', async () => {
+  const requests: Array<{
+    readonly url: string
+    readonly method: string
+    readonly body: string
+    readonly contentType: string | undefined
+  }> = []
+  const provider = alpacaCameraProvider(
+    {
+      kind: 'alpaca',
+      rigId: 'recorded-rig',
+      host: '192.168.4.104',
+      port: 11111,
+      devices: { camera: { deviceNumber: 0 } },
+    },
+    async (input, init) => {
+      requests.push({
+        url: String(input),
+        method: init?.method ?? 'GET',
+        body: String(init?.body),
+        contentType:
+          new Headers(init?.headers).get('content-type') ?? undefined,
+      })
+      return Response.json({ Value: null, ErrorNumber: 0 })
+    },
+  )
+  await Effect.runPromise(provider.startExposure(15))
+  assert.deepEqual(requests, [
+    {
+      method: 'PUT',
+      url: 'http://192.168.4.104:11111/api/v1/camera/0/startexposure',
+      body: 'Duration=15&Light=true',
+      contentType: 'application/x-www-form-urlencoded;charset=UTF-8',
+    },
+  ])
+})
+
+const readyCameraPreflightProvider = {
+  observe: () =>
+    Effect.succeed({
+      observedAt: '2026-08-05T10:00:00.000Z',
+      verdict: 'ready' as const,
+      nextAction: 'Camera command eligibility is current.',
+      checks: [
+        {
+          key: 'camera-connected',
+          state: 'ready' as const,
+          observedAt: '2026-08-05T10:00:00.000Z',
+          reason: 'The camera reports an active Alpaca connection.',
+        },
+      ],
+    }),
+}
+
+const refreshCameraPreflight = (
+  base: string,
+  run: { readonly runId: string; readonly revision: number },
+) =>
+  fetch(`${base}/api/observe/preflight`, {
+    method: 'POST',
+    body: JSON.stringify({
+      runId: run.runId,
+      expectedRunRevision: run.revision,
+    }),
+  })
+
+test('camera commands reject stale authority before the provider and retain only reconciled observations', async (t) => {
+  let starts = 0
+  const service = createLocalWebService(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      fixture: 'preflight',
+      preflightProvider: readyCameraPreflightProvider,
+      cameraProvider: {
+        startExposure: () => {
+          starts += 1
+          return Effect.succeed(undefined)
+        },
+        abortExposure: () => Effect.succeed(undefined),
+        readState: () =>
+          Effect.succeed({
+            observedAt: '2026-08-05T10:00:00.000Z',
+            cameraState: 'exposing',
+          }),
+      },
+    },
+  )
+  const listener = await service.listen()
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const base = `http://127.0.0.1:${listener.port}`
+  const started = await startFixtureRun(base, 'camera-command-run')
+  if (started.activeRun._tag !== 'Active') throw new Error('Run unavailable')
+  const activeRun = started.activeRun.run
+  const command = (lease: number, key: string) =>
+    fetch(`${base}/api/acquire/commands`, {
+      method: 'POST',
+      body: JSON.stringify({
+        intent: {
+          _tag: 'StartCameraExposure',
+          expectedLeaseRevision: lease,
+          expectedRunRevision: activeRun.revision,
+          durationSeconds: 2,
+          idempotencyKey: key,
+        },
+      }),
+    })
+  assert.equal((await command(999, 'camera-stale')).status, 409)
+  assert.equal(starts, 0)
+  assert.equal(
+    (await command(started.control.revision, 'camera-no-truth')).status,
+    409,
+  )
+  assert.equal(starts, 0)
+  assert.equal((await refreshCameraPreflight(base, activeRun)).status, 200)
+  const accepted = await command(started.control.revision, 'camera-start')
+  assert.equal(accepted.status, 202)
+  assert.equal(starts, 1)
+  assert.equal(
+    (await bootstrapSnapshot(`${base}/api/snapshot`)).observe?.preflight?.camera
+      ?.cameraState,
+    'exposing',
+  )
+  assert.equal(
+    databaseRow(
+      Schema.Struct({ observation: Schema.String }),
+      service.database
+        .prepare('SELECT observation FROM camera_observations WHERE run_id=?')
+        .get(activeRun.runId),
+    ).observation.includes('exposing'),
+    true,
+  )
+  assert.equal(
+    (await command(started.control.revision, 'camera-start')).status,
+    202,
+  )
+  assert.equal(starts, 1)
+})
+
+test('camera provider failure persists recover truth and the receipt prevents command replay after restart', async (t) => {
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-camera-recover-')),
+    'state.sqlite',
+  )
+  let calls = 0
+  const service = createLocalWebService(
+    databasePath,
+    undefined,
+    undefined,
+    undefined,
+    {
+      fixture: 'preflight',
+      preflightProvider: readyCameraPreflightProvider,
+      cameraProvider: {
+        startExposure: () => {
+          calls += 1
+          return Effect.fail(new Error('recorded timeout'))
+        },
+        abortExposure: () => Effect.fail(new Error('recorded disconnect')),
+        readState: () => Effect.fail(new Error('unreachable')),
+      },
+    },
+  )
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  const started = await startFixtureRun(base, 'camera-recover-run')
+  if (started.activeRun._tag !== 'Active') throw new Error('Run unavailable')
+  assert.equal(
+    (await refreshCameraPreflight(base, started.activeRun.run)).status,
+    200,
+  )
+  const intent = {
+    _tag: 'StartCameraExposure',
+    expectedLeaseRevision: started.control.revision,
+    expectedRunRevision: started.activeRun.run.revision,
+    durationSeconds: 2,
+    idempotencyKey: 'camera-timeout',
+  }
+  const command = () =>
+    fetch(`${base}/api/acquire/commands`, {
+      method: 'POST',
+      body: JSON.stringify({ intent }),
+    })
+  assert.equal((await command()).status, 503)
+  assert.equal((await command()).status, 503)
+  assert.equal(calls, 1)
+  assert.equal(
+    (await bootstrapSnapshot(`${base}/api/snapshot`)).observe?.preflight
+      ?.verdict,
+    'unavailable',
+  )
+  await listener.close()
+  service.close()
+  const recovered = createLocalWebService(databasePath)
+  const recoveredListener = await recovered.listen()
+  t.after(async () => {
+    await recoveredListener.close()
+    recovered.close()
+  })
+  const snapshot = await bootstrapSnapshot(
+    `http://127.0.0.1:${recoveredListener.port}/api/snapshot`,
+  )
+  assert.equal(snapshot.observe?.preflight?.camera?.cameraState, 'unknown')
+  const replay = await fetch(
+    `http://127.0.0.1:${recoveredListener.port}/api/acquire/commands`,
+    { method: 'POST', body: JSON.stringify({ intent }) },
+  )
+  assert.equal(replay.status, 503)
 })
 
 test('target fixtures keep provisional slew acknowledgement separate from deep-sky and lunar image evidence', async (t) => {

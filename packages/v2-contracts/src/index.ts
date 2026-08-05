@@ -1,5 +1,6 @@
 export * from './acquire.js'
 export * from './acquire-command.js'
+export * from './camera-command.js'
 export * from './commands.js'
 export * from './client.js'
 export * from './control.js'
