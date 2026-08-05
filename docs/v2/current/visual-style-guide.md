@@ -8,9 +8,8 @@ product model is already known. It is not permission to change that model.
 ## Authority And Conflict Rule
 
 `apps/web` source and CSS plus accepted screenshot evidence are the production
-visual authority. `docs/v2-ui-final` and Phase 0.5 prototypes remain historical
-Gate and design evidence only, never current palette, type, shape, or
-composition authority.
+visual authority. Retired UI studies are available only through Git history and
+never provide current palette, type, shape, or composition authority.
 
 Read in this order: the [product specification](product-spec.md),
 [UX guidance](../ux-design-guidance.md), accepted contract/gate evidence, this
@@ -141,18 +140,8 @@ operation rail. Study runtime fixtures, local mutation state, theme runtime,
 and button navigation are not production behavior authority.
 
 The operational visual reference is `apps/web` source and CSS, with accepted
-screenshots as visual evidence. `docs/v2-ui-final` records the historical study
-that informed this guide; its source, fixtures, local mutation state, theme
-runtime, and button navigation are not production implementation authority.
-
-The [Composite](../../../prototype/v2-ui/composite-prototype.html),
-[Acquire](../../../prototype/v2-ui/acquire-prototype.html),
-[Run Authority](../../../prototype/v2-ui/run-authority-prototype.html), and
-[Process](../../../prototype/v2-ui/process-prototype.html) references remain
-semantic and historical interaction evidence only. The Phase 0.5 previews and
-component companion are historical and must not supply active visual language.
-The Alignment Aperture V1 mark remains available from the versioned
-[`brand V1 package`](../../../prototype/v2-ui/assets/brand/v1/README.md); it is
-the mark source, not palette, type, material, or composition authority.
+screenshots as visual evidence. Retired UI studies, fixtures, and brand-source
+artifacts are available only through Git history and are not production
+implementation authority.
 The wordmark is currently an approved reference composition pending an outlined
 lettering release; future mark changes require versioned brand governance.

@@ -37,8 +37,7 @@ requires its specific detail.
 | Why Phase 0.5 made a specific visual decision            | [Phase 0.5 design-system archive](archive/phase-0.5/README.md) — historical only; do not use for active implementation authority                                                                                                                 |
 | Accepted interaction evidence or candidate contracts     | The relevant document under [accepted gates](gates/README.md)                                                                                                                                                                                    |
 | Deployment, Cloudflare, storage, security, or operations | [Infrastructure plan](infra/README.md), then only its relevant section                                                                                                                                                                           |
-| Historical visual interaction evidence                   | [Accepted prototype references](../../prototype/v2-ui/index.html)                                                                                                                                                                                |
-| Why an older option was rejected                         | [Documentation archive](archive/README.md) or [prototype archive](../../prototype/v2-ui/archive/index.html)                                                                                                                                      |
+| Why an older option was rejected                         | [Documentation archive](archive/README.md) or Git history                                                                                                                                                                                        |
 
 ## Current Position
 
@@ -83,8 +82,8 @@ bounded remote evidence, and a local-continuity outage drill. Future V2.1
 scope requires owner approval.
 
 `apps/web` source, CSS, and accepted screenshot evidence are the production
-visual authority. `docs/v2-ui-final` and `prototype/v2-ui` are historical Gate
-and design evidence, not runtime implementation authority.
+visual authority. Retired prototype UI artifacts are available only through
+Git history and are not runtime implementation authority.
 
 ## Context Rules
 
@@ -95,8 +94,7 @@ and design evidence, not runtime implementation authority.
   loaded only for decisions that cross that boundary.
 - `archive/` preserves superseded plans, handoffs, and explorations. Archived
   material is non-authoritative and never part of broad default context.
-- `prototype/v2-ui/` exposes accepted visual references. Its `archive/`
-  contains rejected alternatives and earlier studies.
+- Retired prototype UI material is available only through Git history.
 - Accepted gate decisions may be revisited only when new evidence conflicts
   with a product invariant—not for copy polish or implementation convenience.
 

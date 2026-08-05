@@ -32,12 +32,10 @@ table. It is the authority for the default context and task-specific documents.
 
 - Load one accepted gate document or one infrastructure section only when the
   task requires that detail.
-- Do not broadly ingest `docs/v2/archive/` or `prototype/v2-ui/archive/`.
-  Archived material is non-authoritative and is used only to answer a specific
-  historical question.
-- `prototype/v2-ui/` preserves accepted Gate and design evidence; it is not
-  runtime implementation authority. Rejected alternatives and earlier studies
-  live under its `archive/` directory.
+- Do not broadly ingest `docs/v2/archive/`. Archived material is
+  non-authoritative and is used only to answer a specific historical question.
+- Retired SDK, Electron desktop, and prototype UI artifacts are available only
+  through Git history; they are not implementation authority.
 
 ### Documentation maintenance
 

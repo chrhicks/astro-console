@@ -6,8 +6,8 @@ Gate 4 tests whether astrophotography processing can remain visual and
 approachable while execution, recovery, provenance, and storage stay honest.
 The primary interaction is developing an image, not administering jobs.
 
-The prototype is synthetic and non-operational:
-[`process-prototype.html`](../../../prototype/v2-ui/process-prototype.html).
+The retired Process prototype was synthetic and non-operational; it is now
+available only through Git history.
 
 ## Product Model
 

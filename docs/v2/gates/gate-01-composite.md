@@ -2,8 +2,8 @@
 
 Status: **accepted**
 
-Gate 1 selected the shared V2 shell and workspace model represented by the
-[Composite reference](../../../prototype/v2-ui/composite-prototype.html).
+Gate 1 selected the shared V2 shell and workspace model. The retired prototype
+reference is available only through Git history.
 
 ## Accepted Decisions
 

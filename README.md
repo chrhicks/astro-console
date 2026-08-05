@@ -1,47 +1,28 @@
 # Astro Console
 
-TypeScript SDK and Electron desktop app for personal astronomy workflows.
+Astro Console is a web-first personal observatory workspace. The rig-local
+server owns Plan, Observe, Library, and Process state; the web application is
+the version-matched interface it serves.
 
-## Repo Layout
+## Active Workspace Packages
 
-- `sdk/` - Node/TypeScript SDK for Seestar discovery, authentication, and device control
-- `apps/desktop/` - Electron app with Seestar, fake Seestar, and Alpaca rig adapters
-- `docs/` - tracked, portable project documentation
-- `.local/` - ignored machine-, rig-, and evidence-specific notes
+- `apps/server/` — rig-local HTTP, SQLite, SSE, admission, and deployment code
+- `apps/web/` — browser workspace
+- `packages/v2-contracts/` — shared Effect Schema contracts
 
-## Current Focus
+Install once from the repository root, then run a workspace command:
 
-- personal known-rig imaging through the desktop app
-- local-network discovery and typed device adapters
-- bounded capture, local frame library, and safe operator-driven recovery
-
-## Development
-
-SDK:
-
-```bash
-cd sdk
+```sh
 npm install
-npm run build
-```
-
-Desktop app:
-
-```bash
-cd apps/desktop
-npm install
-npm run dev
+npm run build --workspace @astro-console/server
+npm run test --workspace @astro-console/web
 ```
 
 ## Documentation
 
-- [`docs/README.md`](docs/README.md) - documentation index and privacy boundary
-- [`docs/product/current-scope.md`](docs/product/current-scope.md) - supported workflow and exclusions
-- [`docs/architecture/overview.md`](docs/architecture/overview.md) - current application boundaries
-- [`docs/operations/fake-scenario-testing.md`](docs/operations/fake-scenario-testing.md) - deterministic desktop validation
+- [V2 start here](docs/v2/README.md)
+- [Current handoff](docs/v2/current/handoff.md)
+- [Server deployment guide](apps/server/deployment/README.md)
 
-## Notes
-
-- The Seestar PEM key is required for authentication and is intentionally not committed.
-- Set `SEESTAR_PEM_PATH` (or legacy `SEESTAR_PEM`) to point SDK/CLI/desktop flows at your local PEM file.
-- Keep local rig addresses, device identifiers, credentials, and hardware evidence under `.local/`.
+The retired SDK, Electron desktop application, and prototype UI artifacts are
+available only through Git history.

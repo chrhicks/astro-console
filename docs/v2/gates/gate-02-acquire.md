@@ -2,7 +2,7 @@
 
 Status: accepted and completed on July 21, 2026
 
-Prototype: [Acquire gate](../../../prototype/v2-ui/acquire-prototype.html)
+The retired Acquire prototype is available only through Git history.
 
 ## Gate Question
 

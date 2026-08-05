@@ -21,9 +21,9 @@ on selection rather than installed as an unbounded catalog payload.
 
 ## Measurement
 
-The [Gate 6 harness](../../../prototype/v2-ui/archive/gate-06/gate-06-catalog-scale.html)
-generated deterministic assets with representative review status, lineage,
-availability, capture facts, and synthetic preview placeholders. It used a
+The retired Gate 6 harness generated deterministic assets with representative review status, lineage,
+availability, capture facts, and synthetic preview placeholders. It is
+available only through Git history. It used a
 double-`requestAnimationFrame` install-to-paint boundary; filter, render, and
 interaction-sample timings are browser-side harness timings. Heap values are
 directional. The interaction sample applies an accepted filter, sharpest sort,

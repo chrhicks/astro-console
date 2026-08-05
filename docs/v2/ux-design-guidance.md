@@ -9,8 +9,8 @@ This is the semantic UX authority for V2 product work. The longer
 accepted gate records supply scenario evidence. New work should follow these
 rules unless a later gate records why a rule must change. Concrete visual
 composition is implemented in `apps/web` source and CSS, with accepted
-screenshots as evidence. `docs/v2-ui-final` and `prototype/v2-ui` remain
-historical Gate and design evidence, not runtime implementation authority.
+screenshots as evidence. Retired UI studies remain available only through Git
+history and are not runtime implementation authority.
 
 ## Product Philosophy
 

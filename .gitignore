@@ -20,28 +20,10 @@ recordings/
 venv/
 seestar_3.1.2_fw_7.32_interop.pem
 
-# SDK generated/build artifacts
-sdk/node_modules/
-sdk/dist/
-sdk/downloads/
-sdk/output_sdk_test/
-sdk/prototype_output/
-sdk/solar_output/
-sdk/logs/
-
-# SDK Python cache
-sdk/**/__pycache__/
-sdk/**/*.pyc
-
-
 dist/
 node_modules/
-prototype/*
-!prototype/v2-ui/
-!prototype/v2-ui/**
 .local/
 apps/v2-local-web/.astro-local-web/
-apps/desktop/*.tsbuildinfo
 .bak*
 .astro-server/
 .tmp/
