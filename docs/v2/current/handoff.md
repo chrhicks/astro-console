@@ -1,6 +1,6 @@
 # V2 Completion Handoff
 
-Status: **V2.0 complete — Phases 0–6 delivered**
+Status: **V2.0 complete; V2.1 Phase 1 complete**
 
 ## Current Position
 
@@ -23,8 +23,10 @@ capture, external processing-tool execution, or physical image quality.
 
 ## Next Action
 
-V2.1 planning is the next owner decision. Keep the service rig-local; Cloudflare
-remains ingress and identity admission, not observatory authority.
+Review the [V2.1 Phase 1 evidence](delivery-plan.md), then authorize Phase 2
+only when the owner selects its bounded indoor camera command session. Keep
+the service rig-local; Cloudflare remains ingress and identity admission, not
+observatory authority.
 
 ## Historical Records
 

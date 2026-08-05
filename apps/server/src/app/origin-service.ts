@@ -673,7 +673,11 @@ export function createLocalWebService(
         )
         if ('response' in result) {
           publish('PreflightRefreshed', result.cursor)
-          return json(response, 200, result.response)
+          return RefreshPreflightResponse.match(result.response, {
+            Refreshed: (body) => json(response, 200, body),
+            Rejected: (body) => json(response, 409, body),
+            Unavailable: (body) => json(response, 503, body),
+          })
         }
         return RefreshPreflightResponse.match(result, {
           Refreshed: (body) => json(response, 200, body),

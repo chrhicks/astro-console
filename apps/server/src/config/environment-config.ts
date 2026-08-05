@@ -65,9 +65,20 @@ export type OriginServerConfig = {
 
 export type PreflightProviderConfig = {
   readonly kind: 'alpaca'
+  readonly rigId: string
   readonly host: string
   readonly port: number
-  readonly telescopeDeviceNumber: number
+  readonly devices: {
+    readonly camera?: AlpacaDeviceConfig
+    readonly telescope?: AlpacaDeviceConfig
+    readonly focuser?: AlpacaDeviceConfig
+    readonly filterWheel?: AlpacaDeviceConfig
+  }
+}
+
+export type AlpacaDeviceConfig = {
+  readonly deviceNumber: number
+  readonly uniqueId?: string
 }
 
 export const originServerConfig = Config.all({
@@ -99,10 +110,30 @@ export const originServerConfig = Config.all({
   downloadGrantUrl: optional('ASTRO_DOWNLOAD_GRANT_URL'),
   downloadGrantSecretPath: optional('ASTRO_DOWNLOAD_GRANT_SHARED_SECRET_PATH'),
   preflightProvider: text('ASTRO_PREFLIGHT_PROVIDER', 'disabled'),
+  preflightRigId: text('ASTRO_PREFLIGHT_ALPACA_RIG_ID', 'configured-rig'),
   preflightHost: optional('ASTRO_PREFLIGHT_ALPACA_HOST'),
   preflightPort: optional('ASTRO_PREFLIGHT_ALPACA_PORT'),
   preflightTelescopeDeviceNumber: optional(
     'ASTRO_PREFLIGHT_ALPACA_TELESCOPE_DEVICE_NUMBER',
+  ),
+  preflightTelescopeUniqueId: optional(
+    'ASTRO_PREFLIGHT_ALPACA_TELESCOPE_UNIQUE_ID',
+  ),
+  preflightCameraDeviceNumber: optional(
+    'ASTRO_PREFLIGHT_ALPACA_CAMERA_DEVICE_NUMBER',
+  ),
+  preflightCameraUniqueId: optional('ASTRO_PREFLIGHT_ALPACA_CAMERA_UNIQUE_ID'),
+  preflightFocuserDeviceNumber: optional(
+    'ASTRO_PREFLIGHT_ALPACA_FOCUSER_DEVICE_NUMBER',
+  ),
+  preflightFocuserUniqueId: optional(
+    'ASTRO_PREFLIGHT_ALPACA_FOCUSER_UNIQUE_ID',
+  ),
+  preflightFilterWheelDeviceNumber: optional(
+    'ASTRO_PREFLIGHT_ALPACA_FILTER_WHEEL_DEVICE_NUMBER',
+  ),
+  preflightFilterWheelUniqueId: optional(
+    'ASTRO_PREFLIGHT_ALPACA_FILTER_WHEEL_UNIQUE_ID',
   ),
 }).pipe(
   Config.mapOrFail(
@@ -197,9 +228,17 @@ function originServer(input: {
   readonly downloadGrantUrl: Option.Option<string>
   readonly downloadGrantSecretPath: Option.Option<string>
   readonly preflightProvider: string
+  readonly preflightRigId: string
   readonly preflightHost: Option.Option<string>
   readonly preflightPort: Option.Option<string>
   readonly preflightTelescopeDeviceNumber: Option.Option<string>
+  readonly preflightTelescopeUniqueId: Option.Option<string>
+  readonly preflightCameraDeviceNumber: Option.Option<string>
+  readonly preflightCameraUniqueId: Option.Option<string>
+  readonly preflightFocuserDeviceNumber: Option.Option<string>
+  readonly preflightFocuserUniqueId: Option.Option<string>
+  readonly preflightFilterWheelDeviceNumber: Option.Option<string>
+  readonly preflightFilterWheelUniqueId: Option.Option<string>
 }) {
   return Effect.gen(function* () {
     const fixture =
@@ -301,14 +340,14 @@ function originServer(input: {
       runtime: {
         databasePath,
         release,
-          port: Number(input.port),
-          host: input.bind,
-          webDistPath,
-          previewRoot,
-          localOwnerPort: Number(input.localOwnerPort.value),
-          ...(Option.isSome(input.remoteDesktopPort)
-            ? { remoteDesktopPort: Number(input.remoteDesktopPort.value) }
-            : {}),
+        port: Number(input.port),
+        host: input.bind,
+        webDistPath,
+        previewRoot,
+        localOwnerPort: Number(input.localOwnerPort.value),
+        ...(Option.isSome(input.remoteDesktopPort)
+          ? { remoteDesktopPort: Number(input.remoteDesktopPort.value) }
+          : {}),
       },
       admission: {
         mode: 'production' as const,
@@ -335,36 +374,85 @@ function originServer(input: {
 
 function configuredPreflightProvider(input: {
   readonly preflightProvider: string
+  readonly preflightRigId: string
   readonly preflightHost: Option.Option<string>
   readonly preflightPort: Option.Option<string>
   readonly preflightTelescopeDeviceNumber: Option.Option<string>
+  readonly preflightTelescopeUniqueId: Option.Option<string>
+  readonly preflightCameraDeviceNumber: Option.Option<string>
+  readonly preflightCameraUniqueId: Option.Option<string>
+  readonly preflightFocuserDeviceNumber: Option.Option<string>
+  readonly preflightFocuserUniqueId: Option.Option<string>
+  readonly preflightFilterWheelDeviceNumber: Option.Option<string>
+  readonly preflightFilterWheelUniqueId: Option.Option<string>
 }) {
   if (input.preflightProvider === 'disabled') return Effect.succeed(undefined)
   if (input.preflightProvider !== 'alpaca')
     return configFailure('ASTRO_PREFLIGHT_PROVIDER must be disabled or alpaca')
   const host = Option.getOrUndefined(input.preflightHost)
   const port = Option.getOrUndefined(input.preflightPort)
-  const telescopeDeviceNumber = Option.getOrUndefined(
-    input.preflightTelescopeDeviceNumber,
-  )
+  const device = (
+    number: Option.Option<string>,
+    uniqueId: Option.Option<string>,
+  ): AlpacaDeviceConfig | undefined => {
+    const value = Option.getOrUndefined(number)
+    if (value === undefined) return undefined
+    if (!/^\d+$/.test(value)) return { deviceNumber: -1 }
+    const id = Option.getOrUndefined(uniqueId)
+    return id === undefined
+      ? { deviceNumber: Number(value) }
+      : { deviceNumber: Number(value), uniqueId: id }
+  }
+  const devices = {
+    camera: device(
+      input.preflightCameraDeviceNumber,
+      input.preflightCameraUniqueId,
+    ),
+    telescope: device(
+      input.preflightTelescopeDeviceNumber,
+      input.preflightTelescopeUniqueId,
+    ),
+    focuser: device(
+      input.preflightFocuserDeviceNumber,
+      input.preflightFocuserUniqueId,
+    ),
+    filterWheel: device(
+      input.preflightFilterWheelDeviceNumber,
+      input.preflightFilterWheelUniqueId,
+    ),
+  }
   if (
     host === undefined ||
     port === undefined ||
-    telescopeDeviceNumber === undefined ||
     !/^\d+$/.test(port) ||
     Number(port) > 65_535 ||
-    !/^\d+$/.test(telescopeDeviceNumber)
+    Object.values(devices).some((entry) => entry?.deviceNumber === -1) ||
+    Object.values(devices).every((entry) => entry === undefined)
   )
     return configFailure(
-      'Alpaca preflight requires host, port, and telescope device number.',
+      'Alpaca preflight requires host, port, and at least one configured device number.',
     )
   return Effect.gen(function* () {
     const validHost = yield* validText(host, 'Alpaca preflight host is invalid')
+    const rigId = yield* validText(
+      input.preflightRigId,
+      'Alpaca rig ID is invalid',
+    )
     return {
       kind: 'alpaca' as const,
+      rigId,
       host: validHost,
       port: Number(port),
-      telescopeDeviceNumber: Number(telescopeDeviceNumber),
+      devices: {
+        ...(devices.camera === undefined ? {} : { camera: devices.camera }),
+        ...(devices.telescope === undefined
+          ? {}
+          : { telescope: devices.telescope }),
+        ...(devices.focuser === undefined ? {} : { focuser: devices.focuser }),
+        ...(devices.filterWheel === undefined
+          ? {}
+          : { filterWheel: devices.filterWheel }),
+      },
     }
   })
 }

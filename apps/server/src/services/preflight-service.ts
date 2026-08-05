@@ -7,6 +7,7 @@ import {
 
 export interface ReadOnlyPreflightProviderShape {
   readonly observe: () => Effect.Effect<unknown, unknown>
+  readonly unavailableSnapshot?: () => typeof PreflightSnapshot.Type
 }
 export class ReadOnlyPreflightProvider extends Context.Service<
   ReadOnlyPreflightProvider,
@@ -68,10 +69,7 @@ export const refreshPreflight = Effect.fn('PreflightService.refresh')(
         Effect.option,
       )
     if (Option.isNone(observed))
-      return RefreshPreflightResponse.cases.Unavailable.make({
-        summary:
-          'The read-only rig provider is unavailable. Preflight cannot report a safe verdict.',
-      })
+      return yield* unavailableProviderSnapshot(provider.value, persistence)
     const persisted = yield* persistence.persist(observed.value)
     return {
       response: RefreshPreflightResponse.cases.Refreshed.make({
@@ -81,3 +79,26 @@ export const refreshPreflight = Effect.fn('PreflightService.refresh')(
     }
   },
 )
+
+function unavailableProviderSnapshot(
+  provider: ReadOnlyPreflightProviderShape,
+  persistence: PreflightPersistenceShape,
+) {
+  if (provider.unavailableSnapshot === undefined)
+    return Effect.succeed(
+      RefreshPreflightResponse.cases.Unavailable.make({
+        summary:
+          'The read-only rig provider is unavailable. Preflight cannot report a safe verdict.',
+      }),
+    )
+  const snapshot = provider.unavailableSnapshot()
+  return persistence.persist(snapshot).pipe(
+    Effect.map((persisted) => ({
+      response: RefreshPreflightResponse.cases.Unavailable.make({
+        summary:
+          'The read-only rig provider is unavailable. Preflight cannot report a safe verdict.',
+      }),
+      cursor: persisted.cursor,
+    })),
+  )
+}

@@ -79,36 +79,87 @@ test('Process HTTP workflow durably builds, fails locally, retries, and resumes 
   let base = `http://127.0.0.1:${listener.port}`
   const command = async (value: object) => {
     const response = await fetch(`${base}/api/process/commands`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ commandId: crypto.randomUUID(), command: value }),
     })
     assert.equal(response.status, 200)
     return response.json()
   }
-  const catalog = await fetch(`${base}/api/library?queryId=process-proof&pageSize=40`)
-  const assets = (await catalog.json()).results as Array<{ assetId: string; role: string }>
+  const catalog = await fetch(
+    `${base}/api/library?queryId=process-proof&pageSize=40`,
+  )
+  const assets = (await catalog.json()).results as Array<{
+    assetId: string
+    role: string
+  }>
   const source = assets.find((asset) => asset.role === 'original')
   assert.ok(source)
-  await command({ _tag: 'StartProcessingSession', sourceAssetIds: [source.assetId], idempotencyKey: 'process-start' })
-  let workspace = await (await fetch(`${base}/api/workspaces/process`)).json() as { sessions: Array<{ sessionId: string; revision: number; phase: string; historyPosition: number; preview?: { previewId: string }; failedAttempt?: { attemptId: string; checkpointId: string } }> }
+  await command({
+    _tag: 'StartProcessingSession',
+    sourceAssetIds: [source.assetId],
+    idempotencyKey: 'process-start',
+  })
+  let workspace = (await (
+    await fetch(`${base}/api/workspaces/process`)
+  ).json()) as {
+    sessions: Array<{
+      sessionId: string
+      revision: number
+      phase: string
+      historyPosition: number
+      preview?: { previewId: string }
+      failedAttempt?: { attemptId: string; checkpointId: string }
+    }>
+  }
   let session = workspace.sessions[0]
   assert.equal(session?.phase, 'develop')
   assert.ok(session)
-  await command({ _tag: 'SyncProcessingPreview', sessionId: session.sessionId, expectedProcessingRevision: session.revision, operation: 'stretch', toolId: 'deterministic-fail', parameters: [], baseHistoryPosition: session.historyPosition, clientPreviewSequence: 1 })
+  await command({
+    _tag: 'SyncProcessingPreview',
+    sessionId: session.sessionId,
+    expectedProcessingRevision: session.revision,
+    operation: 'stretch',
+    toolId: 'deterministic-fail',
+    parameters: [],
+    baseHistoryPosition: session.historyPosition,
+    clientPreviewSequence: 1,
+  })
   workspace = await (await fetch(`${base}/api/workspaces/process`)).json()
   session = workspace.sessions[0]
   assert.ok(session?.preview)
-  await command({ _tag: 'ApplyProcessingPreview', sessionId: session.sessionId, expectedProcessingRevision: session.revision, previewId: session.preview?.previewId, idempotencyKey: 'process-apply-fail' })
+  await command({
+    _tag: 'ApplyProcessingPreview',
+    sessionId: session.sessionId,
+    expectedProcessingRevision: session.revision,
+    previewId: session.preview?.previewId,
+    idempotencyKey: 'process-apply-fail',
+  })
   workspace = await (await fetch(`${base}/api/workspaces/process`)).json()
   session = workspace.sessions[0]
   assert.ok(session?.failedAttempt)
-  await command({ _tag: 'RetryProcessingStep', sessionId: session.sessionId, expectedProcessingRevision: session.revision, failedAttemptId: session.failedAttempt?.attemptId, checkpointId: session.failedAttempt?.checkpointId, idempotencyKey: 'process-retry' })
+  await command({
+    _tag: 'RetryProcessingStep',
+    sessionId: session.sessionId,
+    expectedProcessingRevision: session.revision,
+    failedAttemptId: session.failedAttempt?.attemptId,
+    checkpointId: session.failedAttempt?.checkpointId,
+    idempotencyKey: 'process-retry',
+  })
   await listener.close()
   service.close()
   const resumed = createFixtureService(databasePath)
   listener = await resumed.listen()
   base = `http://127.0.0.1:${listener.port}`
-  const recovered = await (await fetch(`${base}/api/workspaces/process`)).json() as { sessions: Array<{ phase: string; history: unknown[]; failedAttempt?: unknown }> }
+  const recovered = (await (
+    await fetch(`${base}/api/workspaces/process`)
+  ).json()) as {
+    sessions: Array<{
+      phase: string
+      history: unknown[]
+      failedAttempt?: unknown
+    }>
+  }
   assert.equal(recovered.sessions[0]?.phase, 'develop')
   assert.equal(recovered.sessions[0]?.history.length, 1)
   assert.equal(recovered.sessions[0]?.failedAttempt, undefined)
@@ -818,21 +869,33 @@ test('Alpaca preflight adapter emits only GET reads and derives a blocked mount 
   const request: typeof fetch = async (input, init) => {
     const url = String(input)
     requests.push({ url, method: init?.method ?? 'GET' })
-    const value = url.endsWith('/connected')
-      ? true
-      : url.endsWith('/atpark')
+    const value = url.endsWith('/configureddevices')
+      ? [
+          {
+            DeviceName: 'Recorded mount',
+            DeviceNumber: 0,
+            DeviceType: 'Telescope',
+            UniqueID: 'recorded-mount-001',
+          },
+        ]
+      : url.endsWith('/connected')
         ? true
-        : url.endsWith('/slewing')
-          ? false
-          : true
+        : url.endsWith('/atpark')
+          ? true
+          : url.endsWith('/slewing')
+            ? false
+            : url.endsWith('/canpark')
+              ? true
+              : 'Recorded mount'
     return Response.json({ Value: value, ErrorNumber: 0 })
   }
   const provider = alpacaPreflightProvider(
     {
       kind: 'alpaca',
+      rigId: 'fixture-rig',
       host: '192.168.4.63',
       port: 32323,
-      telescopeDeviceNumber: 0,
+      devices: { telescope: { deviceNumber: 0 } },
     },
     request,
   )
@@ -842,20 +905,73 @@ test('Alpaca preflight adapter emits only GET reads and derives a blocked mount 
   )
 
   assert.equal(snapshot.verdict, 'blocked')
-  assert.equal(snapshot.checks[1]?.key, 'mount-parked')
-  assert.equal(snapshot.checks[1]?.state, 'blocked')
+  assert.equal(snapshot.checks[1]?.key, 'telescope-parked')
+  assert.equal(snapshot.rig?.devices[0]?.uniqueId, 'recorded-mount-001')
+  assert.equal(snapshot.rig?.devices[0]?.capabilities[0], 'park')
   assert.deepEqual(
     requests.map((entry) => entry.method),
-    ['GET', 'GET', 'GET', 'GET'],
+    ['GET', 'GET', 'GET', 'GET', 'GET', 'GET'],
   )
   assert.deepEqual(
     requests.map((entry) => entry.url),
     [
+      'http://192.168.4.63:32323/management/v1/configureddevices',
       'http://192.168.4.63:32323/api/v1/telescope/0/connected',
+      'http://192.168.4.63:32323/api/v1/telescope/0/name',
       'http://192.168.4.63:32323/api/v1/telescope/0/atpark',
       'http://192.168.4.63:32323/api/v1/telescope/0/slewing',
-      'http://192.168.4.63:32323/api/v1/telescope/0/tracking',
+      'http://192.168.4.63:32323/api/v1/telescope/0/canpark',
     ],
+  )
+})
+
+test('Alpaca inventory preserves an unavailable optional configured device without inventing capability', async () => {
+  const requests: Array<{ readonly url: string; readonly method: string }> = []
+  const request: typeof fetch = async (input, init) => {
+    const url = String(input)
+    requests.push({ url, method: init?.method ?? 'GET' })
+    const value = url.endsWith('/configureddevices')
+      ? [
+          {
+            DeviceName: 'Recorded camera',
+            DeviceNumber: 0,
+            DeviceType: 'Camera',
+            UniqueID: 'camera-001',
+          },
+        ]
+      : url.endsWith('/connected')
+        ? true
+        : url.endsWith('/name')
+          ? 'Recorded camera'
+          : url.endsWith('/canabortexposure')
+            ? true
+            : false
+    return Response.json({ Value: value, ErrorNumber: 0 })
+  }
+  const provider = alpacaPreflightProvider(
+    {
+      kind: 'alpaca',
+      rigId: 'recorded-rig',
+      host: '192.168.4.104',
+      port: 11111,
+      devices: {
+        camera: { deviceNumber: 0, uniqueId: 'camera-001' },
+        focuser: { deviceNumber: 0 },
+      },
+    },
+    request,
+  )
+
+  const snapshot = Schema.decodeUnknownSync(PreflightSnapshot)(
+    await Effect.runPromise(provider.observe()),
+  )
+  assert.equal(snapshot.rig?.rigId, 'recorded-rig')
+  assert.equal(snapshot.rig?.devices[0]?.capabilities[0], 'abort exposure')
+  assert.equal(snapshot.rig?.devices[1]?.state, 'unavailable')
+  assert.deepEqual(snapshot.rig?.devices[1]?.capabilities, [])
+  assert.ok(requests.every((entry) => entry.method === 'GET'))
+  assert.ok(
+    !requests.some((entry) => entry.url.includes('/focuser/0/connected')),
   )
 })
 
@@ -1876,6 +1992,93 @@ test('read-only preflight persists configured provider facts, survives restart, 
       ._tag,
     'Unavailable',
   )
+})
+
+test('configured provider failure persists an unavailable preflight snapshot before its 503 response', async (t) => {
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-preflight-unavailable-')),
+    'state.sqlite',
+  )
+  const service = createLocalWebService(
+    databasePath,
+    undefined,
+    undefined,
+    undefined,
+    {
+      fixture: 'preflight',
+      preflightProvider: {
+        observe: () => Effect.fail(new Error('recorded provider outage')),
+        unavailableSnapshot: () => ({
+          observedAt: '2026-08-05T10:00:00.000Z',
+          verdict: 'unavailable' as const,
+          nextAction: 'Restore the configured rig provider before any command.',
+          checks: [
+            {
+              key: 'camera-available',
+              state: 'unavailable' as const,
+              observedAt: '2026-08-05T10:00:00.000Z',
+              reason: 'Alpaca did not return a read-only observation.',
+            },
+          ],
+          rig: {
+            rigId: 'recorded-rig',
+            observedAt: '2026-08-05T10:00:00.000Z',
+            devices: [
+              {
+                kind: 'camera' as const,
+                state: 'unavailable' as const,
+                observedAt: '2026-08-05T10:00:00.000Z',
+                capabilities: [],
+                safety: [
+                  {
+                    key: 'camera-available',
+                    state: 'unavailable' as const,
+                    observedAt: '2026-08-05T10:00:00.000Z',
+                    reason: 'Alpaca did not return a read-only observation.',
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      },
+    },
+  )
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  const started = await startFixtureRun(base, 'preflight-unavailable-start')
+  if (started.activeRun._tag !== 'Active') throw new Error('Run unavailable')
+  const response = await fetch(`${base}/api/observe/preflight`, {
+    method: 'POST',
+    body: JSON.stringify({
+      runId: started.activeRun.run.runId,
+      expectedRunRevision: started.activeRun.run.revision,
+    }),
+  })
+  assert.equal(response.status, 503)
+  assert.equal(
+    Schema.decodeUnknownSync(RefreshPreflightResponse)(await response.json())
+      ._tag,
+    'Unavailable',
+  )
+  assert.equal(
+    (await bootstrapSnapshot(`${base}/api/snapshot`)).observe?.preflight
+      ?.verdict,
+    'unavailable',
+  )
+  await listener.close()
+  service.close()
+  const recovered = createLocalWebService(databasePath)
+  const recoveredListener = await recovered.listen()
+  t.after(async () => {
+    await recoveredListener.close()
+    recovered.close()
+  })
+  const snapshot = await bootstrapSnapshot(
+    `http://127.0.0.1:${recoveredListener.port}/api/snapshot`,
+  )
+  assert.equal(snapshot.observe?.preflight?.rig?.rigId, 'recorded-rig')
+  assert.equal(snapshot.observe?.preflight?.checks[0]?.state, 'unavailable')
 })
 
 test('polar inspect fixture records deterministic guidance with acceptance available', async (t) => {
@@ -3004,9 +3207,13 @@ test('origin configuration enables the real preflight adapter only with complete
         ConfigProvider.layer(
           ConfigProvider.fromUnknown({
             ASTRO_PREFLIGHT_PROVIDER: 'alpaca',
+            ASTRO_PREFLIGHT_ALPACA_RIG_ID: 'seestar-indoor',
             ASTRO_PREFLIGHT_ALPACA_HOST: '192.168.4.63',
             ASTRO_PREFLIGHT_ALPACA_PORT: '32323',
             ASTRO_PREFLIGHT_ALPACA_TELESCOPE_DEVICE_NUMBER: '0',
+            ASTRO_PREFLIGHT_ALPACA_TELESCOPE_UNIQUE_ID: 'scope-001',
+            ASTRO_PREFLIGHT_ALPACA_CAMERA_DEVICE_NUMBER: '0',
+            ASTRO_PREFLIGHT_ALPACA_CAMERA_UNIQUE_ID: 'camera-001',
           }),
         ),
       ),
@@ -3014,9 +3221,13 @@ test('origin configuration enables the real preflight adapter only with complete
   )
   assert.deepEqual(config.preflightProvider, {
     kind: 'alpaca',
+    rigId: 'seestar-indoor',
     host: '192.168.4.63',
     port: 32323,
-    telescopeDeviceNumber: 0,
+    devices: {
+      camera: { deviceNumber: 0, uniqueId: 'camera-001' },
+      telescope: { deviceNumber: 0, uniqueId: 'scope-001' },
+    },
   })
   const incomplete = await Effect.runPromiseExit(
     originServerConfig.pipe(

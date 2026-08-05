@@ -18,11 +18,39 @@ export interface PreflightCheck extends Schema.Schema.Type<
   typeof PreflightCheck
 > {}
 
+export const RigDeviceKind = Schema.Literals([
+  'camera',
+  'telescope',
+  'focuser',
+  'filterWheel',
+])
+
+export const RigDeviceObservation = Schema.Struct({
+  kind: RigDeviceKind,
+  state: PreflightCheckState,
+  observedAt: ObservedAt,
+  name: Schema.optionalKey(Schema.NonEmptyString),
+  uniqueId: Schema.optionalKey(Schema.NonEmptyString),
+  capabilities: Schema.Array(Schema.NonEmptyString),
+  safety: Schema.Array(PreflightCheck),
+})
+export interface RigDeviceObservation extends Schema.Schema.Type<
+  typeof RigDeviceObservation
+> {}
+
+export const RigInventory = Schema.Struct({
+  rigId: Schema.NonEmptyString,
+  observedAt: ObservedAt,
+  devices: Schema.NonEmptyArray(RigDeviceObservation),
+})
+export interface RigInventory extends Schema.Schema.Type<typeof RigInventory> {}
+
 export const PreflightSnapshot = Schema.Struct({
   observedAt: ObservedAt,
   verdict: PreflightCheckState,
   nextAction: Schema.NonEmptyString,
   checks: Schema.NonEmptyArray(PreflightCheck),
+  rig: Schema.optionalKey(RigInventory),
 })
 export interface PreflightSnapshot extends Schema.Schema.Type<
   typeof PreflightSnapshot
