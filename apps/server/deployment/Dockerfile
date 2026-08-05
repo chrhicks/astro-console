@@ -17,6 +17,10 @@ RUN npm run build --workspace @astro-console/server
 FROM node:22.22.2-bookworm-slim@sha256:9f6d5975c7dca860947d3915877f85607946403fc55349f39b4bc3688448bb6e
 WORKDIR /app
 
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends astrometry.net \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY package.json package-lock.json ./
 COPY apps/server/package.json ./apps/server/package.json
 COPY packages/v2-contracts/package.json ./packages/v2-contracts/package.json

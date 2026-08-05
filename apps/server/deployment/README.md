@@ -23,6 +23,16 @@ keys.
 Do not add router forwarding, home-directory mounts, device credentials, or
 tunnel tokens to this folder.
 
+## Local plate solver
+
+The origin image includes Debian's `astrometry.net` package. The origin service
+uses `/usr/bin/solve-field` by default and reads indexes from
+`ASTRO_PLATE_SOLVE_INDEXES_ROOT`. Set the matching host directory as
+`ASTRO_PLATE_SOLVE_INDEXES_HOST_PATH` in the Compose interpolation file; Compose
+mounts it read-only at `/var/lib/astro-console/astrometry-indexes`. Set the same
+container path in `config.env`. The index bind is the only new Phase 4 mount;
+do not mount `/home/chicks` into the container.
+
 Production admission is fail-closed: set `ASTRO_ADMISSION_MODE=production`,
 provide the verified Access issuer/audience, HTTPS JWKS/certificate URL,
 bounded JWKS cache TTL, bootstrap path, and local owner port. The bootstrap file is

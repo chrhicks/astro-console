@@ -23,6 +23,10 @@ services:
         source: astro_console_state
         target: /var/lib/astro-console
       - type: bind
+        source: ${ASTRO_PLATE_SOLVE_INDEXES_HOST_PATH:?Set the read-only Astrometry index directory in the Compose environment file}
+        target: /var/lib/astro-console/astrometry-indexes
+        read_only: true
+      - type: bind
         source: ${ASTRO_DOWNLOAD_GRANT_SHARED_SECRET_HOST_PATH:?Set shared signer secret path in the Compose environment file}
         target: /run/secrets/download-grant-shared-secret
         read_only: true

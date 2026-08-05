@@ -1,6 +1,6 @@
 # V2.1 Delivery Plan — Real Alpaca Rig Operation
 
-Status: **accepted — Phases 1–3 complete**
+Status: **accepted — Phases 1–4 complete**
 
 V2.1 moves the V2.0 service from deterministic provider proof to one bounded,
 real-rig operation path. Alpaca is the only hardware integration boundary for
@@ -142,6 +142,17 @@ Exit evidence: an owner-supplied successful real frame produces stored solve
 evidence, and an owner-supplied obstructed real frame produces an honest typed
 no-solution result. Solver failure leaves the source asset intact; the service
 records solver identity, inputs, output facts, and retry scope.
+
+Completed 2026-08-05: the runtime image contains Astrometry.net `solve-field`
+and mounts its selected indexes read-only. The separate solve-only worker reads
+one retained FITS source, uses its numeric FITS RA/Dec cards plus declared
+20–30 degree field and 15-degree search bounds, and records sanitized solver
+facts. It has no mount or correction provider. An isolated candidate solved
+the owner-supplied `m101_spcc.fit` with Astrometry.net 0.93 and stored typed
+`Solved` evidence at RA 210.010579, Dec 54.362347. The haze/cloud-rejected
+`22-57-25_15.00s_0053.fits` stored non-retryable typed `NoSolution` evidence.
+Both originals remained intact; the solved original and stored evidence also
+survived candidate restart. The candidate did not replace production.
 
 ### Phase 5 — Outdoor acquired target and modest capture
 

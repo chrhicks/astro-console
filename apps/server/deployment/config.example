@@ -10,6 +10,14 @@ ASTRO_RELEASE=REPLACE_WITH_RELEASE
 # for an intentionally different mounted web bundle.
 ASTRO_WEB_DIST=../web/dist
 ASTRO_PREVIEW_ROOT=/var/lib/astro-console/previews
+# Local Astrometry.net solve worker. Compose mounts this index directory read-only.
+ASTRO_PLATE_SOLVE_EXECUTABLE=/usr/bin/solve-field
+ASTRO_PLATE_SOLVE_INDEXES_ROOT=/var/lib/astro-console/astrometry-indexes
+ASTRO_PLATE_SOLVE_TIMEOUT_MS=90000
+ASTRO_PLATE_SOLVE_SOLVER_VERSION=0.93
+ASTRO_PLATE_SOLVE_SCALE_LOW_DEG=20
+ASTRO_PLATE_SOLVE_SCALE_HIGH_DEG=30
+ASTRO_PLATE_SOLVE_SEARCH_RADIUS_DEG=15
 # Development fixture admission is loopback-only. Production requires the
 # following non-secret identifiers and host-managed file paths.
 ASTRO_ADMISSION_MODE=production

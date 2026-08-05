@@ -120,6 +120,10 @@ import {
   type TargetAcquisitionProviderShape,
 } from '../services/target-acquisition-service.ts'
 import {
+  createPlateSolveWorker,
+  type PlateSolveWorkerConfig,
+} from '../workers/plate-solve-worker.ts'
+import {
   AcquireCommandRequest,
   AcquireCommandResponse,
   AcquireIntent,
@@ -170,6 +174,7 @@ export function createLocalWebService(
     readonly targetAcquisitionProvider?: TargetAcquisitionProviderShape
     readonly capturedFrameStorage?: CapturedFrameStorage
     readonly frameInspectionStorage?: FrameInspectionStorage
+    readonly plateSolveWorker?: PlateSolveWorkerConfig
   } = {},
 ) {
   const database = openOriginDatabase(databasePath)
@@ -1140,6 +1145,17 @@ export function createLocalWebService(
             assetId,
           ),
         )
+  const solveRetainedFrame = async (assetId: string) => {
+    if (options.plateSolveWorker === undefined)
+      return { outcome: 'rejected' as const, reason: 'SourceUnavailable' as const }
+    const result = await createPlateSolveWorker(
+      database,
+      options.plateSolveWorker,
+    ).solve(assetId)
+    if (result.outcome === 'recorded')
+      publish('AcquireEvidenceUpdated', result.cursor)
+    return result
+  }
   const advanceFakeRun = () => {
     const result = runRepository.advance(projectionIdentity())
     if (result?.event !== undefined)
@@ -1156,6 +1172,7 @@ export function createLocalWebService(
     ingestCapturedFrame,
     ingestCompletedCameraExposure,
     inspectFrame,
+    solveRetainedFrame,
     cleanupSavedOrphans,
     advanceFakeRun,
   }
@@ -1470,6 +1487,16 @@ export const startOrigin = () =>
         frameInspectionStorage: {
           originalsRoot: '/var/lib/astro-console/originals',
           previewsRoot: config.runtime.previewRoot,
+        },
+        plateSolveWorker: {
+          originalsRoot: '/var/lib/astro-console/originals',
+          executable: config.plateSolve.executable,
+          indexesRoot: config.plateSolve.indexesRoot,
+          timeoutMs: config.plateSolve.timeoutMs,
+          solverVersion: config.plateSolve.solverVersion,
+          scaleLowDeg: config.plateSolve.scaleLowDeg,
+          scaleHighDeg: config.plateSolve.scaleHighDeg,
+          searchRadiusDeg: config.plateSolve.searchRadiusDeg,
         },
       },
     )

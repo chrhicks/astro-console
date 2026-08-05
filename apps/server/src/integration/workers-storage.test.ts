@@ -121,6 +121,15 @@ test('focused executable configurations decode defaults and conditional branches
     mode: 'development',
     client: 'owner',
   })
+  assert.deepEqual(development.plateSolve, {
+    executable: '/usr/bin/solve-field',
+    indexesRoot: '/var/lib/astro-console/astrometry-indexes',
+    timeoutMs: 90_000,
+    solverVersion: '0.93',
+    scaleLowDeg: 20,
+    scaleHighDeg: 30,
+    searchRadiusDeg: 15,
+  })
   assert.equal(
     (await read(originServerConfig, { ASTRO_LOCAL_WEB_FIXTURE: 'plan-draft' }))
       .fixture,

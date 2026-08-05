@@ -1,6 +1,6 @@
 # V2 Completion Handoff
 
-Status: **V2.0 complete; V2.1 Phase 3 complete**
+Status: **V2.0 complete; V2.1 Phase 4 complete**
 
 ## Current Position
 
@@ -22,16 +22,20 @@ command and Library-intake path through isolated candidate images on Arch: a
 real Sony 15-second indoor exposure produced a 48,481,196-byte Alpaca
 ImageBytes original, stored with checksum and provenance. The Library record
 survived service restart, showed an explicit unavailable-preview state, and
-downloaded the retained original locally. The candidate did not replace the
-running production service. This does not prove production deployment, mount
-movement, external processing-tool execution, or physical image quality.
+downloaded the retained original locally. V2.1 Phase 4 also proves a local
+containerized Astrometry.net solve-only worker against owner-supplied real
+FITS: the solved M101 frame produced durable typed solve evidence, while the
+haze/cloud-rejected frame produced durable typed no-solution evidence. Neither
+path can move a mount. Candidates did not replace the running production
+service. This does not prove production deployment, mount movement, RCAstro
+processing, or physical image quality.
 
 ## Next Action
 
-Review the [V2.1 Phase 3 evidence](delivery-plan.md), then begin Phase 4 with
-the owner-supplied successful and obstructed historical frames. Keep the
-service rig-local; Cloudflare remains ingress and identity admission, not
-observatory authority.
+Review the [V2.1 Phase 4 evidence](delivery-plan.md), then plan the
+owner-present Phase 5 outdoor acquire and modest capture. Keep the service
+rig-local; Cloudflare remains ingress and identity admission, not observatory
+authority.
 
 ## Historical Records
 

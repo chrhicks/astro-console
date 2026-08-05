@@ -61,6 +61,15 @@ export type OriginServerConfig = {
   readonly downloadGrant:
     { readonly url: string; readonly secretPath: string } | undefined
   readonly preflightProvider: PreflightProviderConfig | undefined
+  readonly plateSolve: {
+    readonly executable: string
+    readonly indexesRoot: string
+    readonly timeoutMs: number
+    readonly solverVersion: string
+    readonly scaleLowDeg: number
+    readonly scaleHighDeg: number
+    readonly searchRadiusDeg: number
+  }
 }
 
 export type PreflightProviderConfig = {
@@ -107,6 +116,16 @@ export const originServerConfig = Config.all({
   release: text('ASTRO_RELEASE', 'server'),
   webDistPath: text('ASTRO_WEB_DIST', '../web/dist'),
   previewRoot: text('ASTRO_PREVIEW_ROOT', '/var/lib/astro-console/previews'),
+  plateSolveExecutable: text('ASTRO_PLATE_SOLVE_EXECUTABLE', '/usr/bin/solve-field'),
+  plateSolveIndexesRoot: text(
+    'ASTRO_PLATE_SOLVE_INDEXES_ROOT',
+    '/var/lib/astro-console/astrometry-indexes',
+  ),
+  plateSolveTimeoutMs: text('ASTRO_PLATE_SOLVE_TIMEOUT_MS', '90000'),
+  plateSolveSolverVersion: text('ASTRO_PLATE_SOLVE_SOLVER_VERSION', '0.93'),
+  plateSolveScaleLowDeg: text('ASTRO_PLATE_SOLVE_SCALE_LOW_DEG', '20'),
+  plateSolveScaleHighDeg: text('ASTRO_PLATE_SOLVE_SCALE_HIGH_DEG', '30'),
+  plateSolveSearchRadiusDeg: text('ASTRO_PLATE_SOLVE_SEARCH_RADIUS_DEG', '15'),
   downloadGrantUrl: optional('ASTRO_DOWNLOAD_GRANT_URL'),
   downloadGrantSecretPath: optional('ASTRO_DOWNLOAD_GRANT_SHARED_SECRET_PATH'),
   preflightProvider: text('ASTRO_PREFLIGHT_PROVIDER', 'disabled'),
@@ -225,6 +244,13 @@ function originServer(input: {
   readonly release: string
   readonly webDistPath: string
   readonly previewRoot: string
+  readonly plateSolveExecutable: string
+  readonly plateSolveIndexesRoot: string
+  readonly plateSolveTimeoutMs: string
+  readonly plateSolveSolverVersion: string
+  readonly plateSolveScaleLowDeg: string
+  readonly plateSolveScaleHighDeg: string
+  readonly plateSolveSearchRadiusDeg: string
   readonly downloadGrantUrl: Option.Option<string>
   readonly downloadGrantSecretPath: Option.Option<string>
   readonly preflightProvider: string
@@ -273,6 +299,37 @@ function originServer(input: {
       input.previewRoot,
       'Runtime configuration contains an invalid non-secret value',
     )
+    const plateSolveExecutable = yield* validText(
+      input.plateSolveExecutable,
+      'Runtime configuration contains an invalid non-secret value',
+    )
+    const plateSolveIndexesRoot = yield* validText(
+      input.plateSolveIndexesRoot,
+      'Runtime configuration contains an invalid non-secret value',
+    )
+    const plateSolveTimeoutMs = Number(input.plateSolveTimeoutMs)
+    if (!Number.isInteger(plateSolveTimeoutMs) || plateSolveTimeoutMs < 1_000 || plateSolveTimeoutMs > 300_000)
+      return yield* configFailure(
+        'ASTRO_PLATE_SOLVE_TIMEOUT_MS must be an integer between 1000 and 300000',
+      )
+    const plateSolveSolverVersion = yield* validText(
+      input.plateSolveSolverVersion,
+      'Runtime configuration contains an invalid non-secret value',
+    )
+    const scaleLowDeg = Number(input.plateSolveScaleLowDeg)
+    const scaleHighDeg = Number(input.plateSolveScaleHighDeg)
+    const searchRadiusDeg = Number(input.plateSolveSearchRadiusDeg)
+    if (
+      !Number.isFinite(scaleLowDeg) ||
+      !Number.isFinite(scaleHighDeg) ||
+      !Number.isFinite(searchRadiusDeg) ||
+      scaleLowDeg <= 0 ||
+      scaleHighDeg < scaleLowDeg ||
+      searchRadiusDeg <= 0
+    )
+      return yield* configFailure(
+        'Plate-solve scale and radius values must be positive finite bounds',
+      )
     const preflightProvider = yield* configuredPreflightProvider(input)
     if (input.admissionMode === 'development') {
       if (input.bind !== '127.0.0.1')
@@ -299,6 +356,15 @@ function originServer(input: {
               }
             : undefined,
         preflightProvider,
+        plateSolve: {
+          executable: plateSolveExecutable,
+          indexesRoot: plateSolveIndexesRoot,
+          timeoutMs: plateSolveTimeoutMs,
+          solverVersion: plateSolveSolverVersion,
+          scaleLowDeg,
+          scaleHighDeg,
+          searchRadiusDeg,
+        },
       })
     }
     if (input.admissionMode !== 'production')
@@ -368,6 +434,15 @@ function originServer(input: {
             }
           : undefined,
       preflightProvider,
+      plateSolve: {
+        executable: plateSolveExecutable,
+        indexesRoot: plateSolveIndexesRoot,
+        timeoutMs: plateSolveTimeoutMs,
+        solverVersion: plateSolveSolverVersion,
+        scaleLowDeg,
+        scaleHighDeg,
+        searchRadiusDeg,
+      },
     })
   })
 }

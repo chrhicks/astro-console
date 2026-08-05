@@ -50,6 +50,7 @@ import { originServerConfig } from './config/environment-config.ts'
 import { alpacaPreflightProvider } from './providers/alpaca-preflight-provider.ts'
 import { alpacaCameraProvider } from './providers/alpaca-camera-provider.ts'
 import { materializeCapturedFrame } from './services/captured-frame-intake.ts'
+import { createPlateSolveWorker } from './workers/plate-solve-worker.ts'
 
 function createFixtureService(
   databasePath?: Parameters<typeof createLocalWebService>[0],
@@ -70,6 +71,14 @@ async function bootstrapSnapshot(url: string, init?: RequestInit) {
   const response = await fetch(url, init)
   const body: unknown = await response.json()
   return Schema.decodeUnknownSync(BootstrapHttpSuccessEnvelope)(body).data
+}
+
+function retainedFitsWithHints() {
+  const card = (key: string, value: string) =>
+    `${key.padEnd(8)}= ${value}`.padEnd(80, ' ')
+  return new TextEncoder().encode(
+    `${card('RA', '210.0')}${card('DEC', '54.0')}${'END'.padEnd(80, ' ')}`,
+  )
 }
 
 test('Process HTTP workflow durably builds, fails locally, retries, and resumes after restart', async (t) => {
@@ -166,6 +175,181 @@ test('Process HTTP workflow durably builds, fails locally, retries, and resumes 
   assert.equal(recovered.sessions[0]?.failedAttempt, undefined)
   await listener.close()
   resumed.close()
+})
+
+test('local plate solver records solved and no-solution evidence without a mount path', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-plate-solve-'))
+  const databasePath = join(root, 'state.sqlite')
+  const originalsRoot = join(root, 'originals')
+  let calls = 0
+  const service = createLocalWebService(
+    databasePath,
+    undefined,
+    undefined,
+    undefined,
+    {
+      fixture: 'target-deep-sky',
+      capturedFrameStorage: { originalsRoot },
+      plateSolveWorker: {
+        originalsRoot,
+        executable: '/usr/bin/solve-field',
+        indexesRoot: '/home/chicks/.local/share/astrometry/indexes',
+        timeoutMs: 45_000,
+        solverVersion: '0.97',
+        scaleLowDeg: 20,
+        scaleHighDeg: 30,
+        searchRadiusDeg: 15,
+        execute: async ({ args }) => {
+          calls += 1
+          assert.deepEqual(args.slice(2, 8), [
+            '--dir', args[3], '--no-plots', '--overwrite', '--cpulimit', '45',
+          ])
+          assert.equal(
+            readFileSync(args[1]!, 'utf8'),
+            'add_path /home/chicks/.local/share/astrometry/indexes\nautoindex\n',
+          )
+          assert.deepEqual(args.slice(8, 20), [
+            '--scale-units', 'degwidth', '--scale-low', '20', '--scale-high',
+            '30', '--ra', '210', '--dec', '54', '--radius', '15',
+          ])
+          return {
+            exitCode: 0,
+            stdout: `${'verbose solver output '.repeat(200)}Field center: (299.901, 22.721)`,
+            stderr: '',
+          }
+        },
+      },
+    },
+  )
+  const intake = {
+    assetId: 'asset-capture-plate-solve-001',
+    frameId: 'plate-solve-001',
+    capturedAt: '2026-08-05T10:00:00.000Z',
+    format: 'fits' as const,
+    capture: { exposureSeconds: 30, filter: 'L', binning: 1, frameType: 'light' as const },
+    lineage: { runId: 'run-m27', sequenceId: 'plate-solve', acquisitionId: 'plate-solve-001' },
+    idempotencyKey: 'plate-solve-001',
+  }
+  assert.equal(
+    service.ingestCapturedFrame(intake, retainedFitsWithHints())
+      .outcome,
+    'accepted',
+  )
+  const solved = await service.solveRetainedFrame(intake.assetId)
+  assert.deepEqual(solved.outcome, 'recorded')
+  if (solved.outcome !== 'recorded') throw new Error('solve was not recorded')
+  assert.equal(solved.result, 'Solved')
+  assert.equal(calls, 1)
+  assert.equal(existsSync(join(originalsRoot, `${intake.assetId}.fits`)), true)
+  const evidence = service.database
+    .prepare('SELECT evidence FROM plate_solve_runs')
+    .get() as { evidence: string }
+  assert.match(evidence.evidence, /astrometry.net/)
+  assert.match(evidence.evidence, /asset-capture-plate-solve-001/)
+  const session = service.database
+    .prepare('SELECT session FROM acquire_sessions')
+    .get() as { session: string }
+  assert.match(session.session, /SolveAttempt/)
+  assert.doesNotMatch(session.session, /CorrectionAccepted/)
+
+  service.close()
+  const resumed = createLocalWebService(databasePath)
+  t.after(() => resumed.close())
+  assert.equal(
+    (resumed.database.prepare('SELECT evidence FROM plate_solve_runs').get() as {
+      evidence: string
+    }).evidence,
+    evidence.evidence,
+  )
+  assert.equal(existsSync(join(originalsRoot, `${intake.assetId}.fits`)), true)
+})
+
+test('local plate solver records a bounded failure as typed no-solution and retains its source', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-plate-solve-failure-'))
+  const originalsRoot = join(root, 'originals')
+  const service = createLocalWebService(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'target-deep-sky', capturedFrameStorage: { originalsRoot } },
+  )
+  t.after(() => service.close())
+  const assetId = 'asset-capture-plate-solve-timeout'
+  service.ingestCapturedFrame(
+    {
+      assetId,
+      frameId: 'plate-solve-timeout',
+      capturedAt: '2026-08-05T10:00:00.000Z',
+      format: 'fits',
+      capture: { exposureSeconds: 30, filter: 'L', binning: 1, frameType: 'light' },
+      lineage: { runId: 'run-m27', sequenceId: 'plate-solve', acquisitionId: 'plate-timeout' },
+      idempotencyKey: 'plate-solve-timeout',
+    },
+    retainedFitsWithHints(),
+  )
+  const outcome = await createPlateSolveWorker(service.database, {
+    originalsRoot,
+    executable: '/usr/bin/solve-field',
+    indexesRoot: '/home/chicks/.local/share/astrometry/indexes',
+    timeoutMs: 45_000,
+    solverVersion: '0.97',
+    scaleLowDeg: 20,
+    scaleHighDeg: 30,
+    searchRadiusDeg: 15,
+    execute: async () => ({ exitCode: -1, stdout: '', stderr: 'timed out after 45 seconds' }),
+  }).solve(assetId)
+  assert.equal(outcome.outcome, 'recorded')
+  if (outcome.outcome !== 'recorded') throw new Error('solve was not recorded')
+  assert.equal(outcome.result, 'NoSolution')
+  assert.equal(existsSync(join(originalsRoot, `${assetId}.fits`)), true)
+  const session = service.database
+    .prepare('SELECT session FROM acquire_sessions')
+    .get() as { session: string }
+  assert.match(session.session, /solver-failure/)
+})
+
+test('local plate solver records normal solve-field exit 1 as no-solution', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-plate-solve-none-'))
+  const originalsRoot = join(root, 'originals')
+  const service = createLocalWebService(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'target-deep-sky', capturedFrameStorage: { originalsRoot } },
+  )
+  t.after(() => service.close())
+  const assetId = 'asset-capture-plate-solve-none'
+  service.ingestCapturedFrame(
+    {
+      assetId,
+      frameId: 'plate-solve-none',
+      capturedAt: '2026-08-05T10:00:00.000Z',
+      format: 'fits',
+      capture: { exposureSeconds: 30, filter: 'L', binning: 1, frameType: 'light' },
+      lineage: { runId: 'run-m27', sequenceId: 'plate-solve', acquisitionId: 'plate-none' },
+      idempotencyKey: 'plate-solve-none',
+    },
+    retainedFitsWithHints(),
+  )
+  const result = await createPlateSolveWorker(service.database, {
+    originalsRoot,
+    executable: '/usr/bin/solve-field',
+    indexesRoot: '/home/chicks/.local/share/astrometry/indexes',
+    timeoutMs: 90_000,
+    solverVersion: '0.97',
+    scaleLowDeg: 20,
+    scaleHighDeg: 30,
+    searchRadiusDeg: 15,
+    execute: async () => ({ exitCode: 1, stdout: 'no match', stderr: '' }),
+  }).solve(assetId)
+  assert.equal(result.outcome, 'recorded')
+  const session = service.database
+    .prepare('SELECT session FROM acquire_sessions')
+    .get() as { session: string }
+  assert.match(session.session, /no-solution/)
+  assert.doesNotMatch(session.session, /solver-failure/)
 })
 
 test('materializes deterministic captured bytes as an immutable Library asset with restart, HTTP, and SSE projection', async (t) => {
