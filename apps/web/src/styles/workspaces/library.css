@@ -24,6 +24,28 @@
 .library-controls select {
   min-height: var(--control-min-height);
   max-width: 12rem;
+  padding: var(--space-4) 2rem var(--space-4) var(--space-8);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-frame);
+  background: var(--color-surface);
+  font: inherit;
+}
+.library-controls select:focus-visible {
+  outline: 0.125rem solid var(--color-focus);
+  outline-offset: 0.125rem;
+}
+.library-provenance {
+  margin-top: var(--space-12);
+  color: var(--color-text-secondary);
+}
+.library-provenance summary {
+  cursor: pointer;
+  color: var(--color-secondary);
+  font-weight: 700;
+}
+.library-provenance p {
+  overflow-wrap: anywhere;
 }
 .library-lineage {
   grid-row: 2 / 5;

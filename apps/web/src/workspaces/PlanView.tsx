@@ -103,7 +103,7 @@ export function PlanView({
             <strong>0{index + 1}</strong>
             <b>{item.target}</b>
             <small>
-              {item.capture} · {item.window}
+              {item.capture} · {compactWindow(item.window)}
             </small>
           </button>
         ))}
@@ -353,6 +353,12 @@ export function planDraftStatus(revision: number, draftChanged: boolean) {
   return draftChanged
     ? 'Unsaved draft changes'
     : `Saved draft revision ${revision}`
+}
+
+function compactWindow(window: string) {
+  const [startsAt, endsAt] = window.split(' – ')
+  if (startsAt === undefined || endsAt === undefined) return window
+  return `${startsAt.slice(11, 16)}–${endsAt.slice(11, 16)} UTC`
 }
 
 function ineligibilityExplanation(reason: PlanIneligibilityReason) {

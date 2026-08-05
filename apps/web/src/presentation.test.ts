@@ -341,6 +341,8 @@ test('status and shell environment preserve semantic and projected facts', () =>
   )
   assert.match(status, /role="status"/)
   assert.match(shell, /Authoritative projection/)
+  assert.match(shell, /Open current run status details/)
+  assert.match(shell, /Full status and service detail/)
   assert.match(shell, /Remote viewing unavailable from this client/)
   assert.match(
     shell,

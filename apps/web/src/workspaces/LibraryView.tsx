@@ -152,13 +152,10 @@ export function LibraryView({
             fallback?.lineage}
         </b>
         <small>
-          Source IDs:{' '}
-          {detail?.lineage.sourceAssetIds.join(', ') ?? 'Loading detail'}
+          Sources: {detail?.lineage.sourceAssetIds.length ?? 'Loading detail'}
         </small>
-        <small>Run: {detail?.lineage.runId ?? 'Loading detail'}</small>
-        <small>
-          Solve: {detail?.lineage.solveAttemptId ?? 'Loading detail'}
-        </small>
+        <small>Run evidence available</small>
+        <small>Solve evidence available</small>
         <p>Originals are immutable. Related saved outputs are peers.</p>
       </aside>
       <section className="library-comparison" aria-label="Transient comparison">
@@ -336,6 +333,28 @@ export function LibraryView({
             )
             .join(' · ') ?? 'Representation detail unavailable.'}
         </p>
+        <details className="library-provenance">
+          <summary>Provenance details</summary>
+          <p>Source: {detail?.provenance?.source ?? 'Unavailable'}</p>
+          <p>Checksum: {detail?.provenance?.checksum ?? 'Unavailable'}</p>
+          {detail?.provenance?.fitsHeader ? (
+            <p>
+              FITS facts: {Object.entries(detail.provenance.fitsHeader)
+                .map(([key, value]) => `${key}=${value}`)
+                .join(' · ')}
+            </p>
+          ) : null}
+          {detail?.provenance?.imageBytesHeader ? (
+            <p>
+              ImageBytes facts: {Object.entries(detail.provenance.imageBytesHeader)
+                .map(([key, value]) => `${key}=${value}`)
+                .join(' · ')}
+            </p>
+          ) : null}
+          <p>Source IDs: {detail?.lineage.sourceAssetIds.join(', ') ?? 'Unavailable'}</p>
+          <p>Run: {detail?.lineage.runId ?? 'Unavailable'}</p>
+          <p>Solve: {detail?.lineage.solveAttemptId ?? 'Unavailable'}</p>
+        </details>
         <dl>
           <div>
             <dt>Stable asset</dt>

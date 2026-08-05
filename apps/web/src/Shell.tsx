@@ -1,4 +1,4 @@
-import { useState, type PropsWithChildren } from 'react'
+import { useEffect, useState, type PropsWithChildren } from 'react'
 import { CommandId, IdempotencyKey } from '@astro-console/v2-contracts'
 import type { ControlIntent } from './command-client'
 import {
@@ -74,7 +74,7 @@ export function Shell({
         className="status-anchor"
         aria-label="Current run monitoring register"
       >
-        <div className="status-anchor__identity">
+        <div className="status-anchor__summary">
           <Status
             tone={
               view.attention === 'danger'
@@ -90,15 +90,16 @@ export function Shell({
             <>
               <b>{view.currentRun.target}</b>
               <span>{view.currentRun.phase}</span>
-              {workspace !== 'observe' && (
-                <a
-                  className="return-to-observe"
-                  {...link({ kind: 'workspace', workspace: 'observe' })}
-                >
-                  Return to Observe
-                </a>
-              )}
             </>
+          )}
+          <span>{view.controller}</span>
+          <span className="status-anchor__health-glance">
+            {view.health.map((fact) => fact.summary).join(' · ')}
+          </span>
+          {workspace !== 'observe' && view.currentRun && (
+            <a className="return-to-observe" {...link({ kind: 'workspace', workspace: 'observe' })}>
+              Return to Observe
+            </a>
           )}
         </div>
         {view.currentRun && (
@@ -114,40 +115,26 @@ export function Shell({
             <span>{view.currentRun.estimatedCompletion}</span>
           </div>
         )}
-        <div className="status-anchor__authority">
-          <span className="status-anchor__controller">{view.controller}</span>
-          <span className="status-anchor__membership">{view.membership}</span>
-          <span className="status-anchor__remote">
-            {view.remoteAvailability}
-          </span>
-          <span className="status-anchor__authority-reason">
-            {view.authority}
-          </span>
-          <span className="status-anchor__presence">{view.presence}</span>
-          <span className="status-anchor__attention-owner">
-            {view.attentionOwner}
-          </span>
-          <span className="status-anchor__service">{view.service}</span>
-          <span className="status-anchor__capability">{view.capability}</span>
-          <span className="status-anchor__protection">{view.protection}</span>
-        </div>
-        <div className="status-anchor__health" aria-label="Service health">
-          {view.health.map((fact) => (
-            <Status key={fact.label} tone={fact.tone}>
-              <span className="status-anchor__health-summary">
-                {fact.summary}
-              </span>
-              <span className="status-anchor__health-detail">
+        <details className="status-anchor__details">
+          <summary aria-label="Open current run status details">
+            Full status and service detail
+          </summary>
+          <div className="status-anchor__authority">
+            <span>{view.membership}</span><span>{view.remoteAvailability}</span>
+            <span>{view.authority}</span><span>{view.presence}</span>
+            <span>{view.attentionOwner}</span><span>{view.service}</span>
+            <span>{view.capability}</span><span>{view.protection}</span>
+          </div>
+          <div className="status-anchor__health" aria-label="Service health details">
+            {view.health.map((fact) => (
+              <Status key={fact.label} tone={fact.tone}>
                 {fact.detail}
-              </span>
-            </Status>
-          ))}
-        </div>
+              </Status>
+            ))}
+          </div>
+        </details>
       </section>
-      <SharedControl
-        control={view.control}
-        submit={submitControl}
-      />
+      <SharedControl control={view.control} submit={submitControl} />
       {result && (
         <p className="action-result" role="status">
           {ActionResult.$match(result, {
@@ -174,6 +161,7 @@ function SharedControl({
     readonly failure?: { readonly summary: string }
   }>) | undefined
 }) {
+  const phone = usePhoneReadOnly()
   const [pending, setPending] = useState(false)
   const [message, setMessage] = useState<string | undefined>()
   const action = (value: (typeof control.actions)[number]) => {
@@ -229,7 +217,10 @@ function SharedControl({
         <p>{control.requests.map((request) => request.label).join(' ')}</p>
       )}
       {!control.readOnly && control.actions.length > 0 && (
-        <div className="shared-control__actions">
+        phone ? (
+          <p>Read-only phone monitoring. {control.state}</p>
+        ) : (
+          <div className="shared-control__actions">
           {control.actions.map((value) => (
             <button
               key={`${value.kind}-${'requestId' in value ? value.requestId : ''}`}
@@ -240,10 +231,23 @@ function SharedControl({
               {value.label}
             </button>
           ))}
-        </div>
+          </div>
+        )
       )}
       {control.readOnly && <p>This client is read-only; control actions are unavailable.</p>}
       {message && <p role="status">{message}</p>}
     </section>
   )
+}
+
+function usePhoneReadOnly() {
+  const [phone, setPhone] = useState(false)
+  useEffect(() => {
+    const query = matchMedia('(max-width: 600px)')
+    const update = () => setPhone(query.matches)
+    update()
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+  return phone
 }

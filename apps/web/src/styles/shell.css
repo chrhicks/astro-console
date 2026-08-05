@@ -90,7 +90,7 @@
 }
 .status-anchor {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.5fr);
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) max-content;
   min-height: 2.5rem;
   align-items: center;
   gap: var(--space-16);
@@ -99,7 +99,7 @@
   color: var(--color-text-secondary);
   font-size: 0.8125rem;
 }
-.status-anchor__identity,
+.status-anchor__summary,
 .status-anchor__progress,
 .status-anchor__authority,
 .status-anchor__health {
@@ -108,10 +108,36 @@
   gap: var(--space-12);
   min-width: 0;
 }
+.status-anchor__summary {
+  flex-wrap: wrap;
+}
+.status-anchor__summary > span {
+  min-width: 0;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.status-anchor__health-glance {
+  flex: 1 1 14rem;
+}
 .status-anchor__authority {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   font-size: 0.75rem;
+}
+.status-anchor__details {
+  min-width: 0;
+}
+.status-anchor__details summary {
+  color: var(--color-secondary);
+  cursor: pointer;
+  font-weight: 700;
+}
+.status-anchor__details[open] {
+  grid-column: 1 / -1;
+}
+.status-anchor__details[open] .status-anchor__authority,
+.status-anchor__details[open] .status-anchor__health {
+  margin-top: var(--space-8);
 }
 .status-anchor__health {
   display: grid;
@@ -122,25 +148,10 @@
 .status-anchor__health .semantic-status {
   font-size: 0.75rem;
 }
-.status-anchor__health-summary {
-  display: inline;
-}
-.status-anchor__health-detail {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
 .status-anchor span,
 .status-anchor b {
   min-width: 0;
-  overflow-wrap: normal;
-  word-break: normal;
+  overflow-wrap: anywhere;
 }
 .status-anchor b {
   color: var(--color-text);
@@ -230,7 +241,7 @@
     gap: var(--space-8) var(--space-16);
     padding: var(--space-8) var(--space-16);
   }
-  .status-anchor__identity,
+  .status-anchor__summary,
   .status-anchor__progress,
   .status-anchor__authority {
     flex-wrap: wrap;
@@ -272,12 +283,20 @@
     font-size: 0.75rem;
     min-height: 0;
   }
-  .status-anchor__identity {
+  .status-anchor__summary {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) max-content;
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
   }
-  .status-anchor__identity .semantic-status {
-    grid-column: 1 / -1;
+  .status-anchor__summary > span {
+    grid-column: auto;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .status-anchor__health-glance {
+    min-width: 0;
   }
   .status-anchor__progress {
     grid-column: 1 / -1;
@@ -292,12 +311,6 @@
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-4);
     text-align: left;
-  }
-  .status-anchor__presence,
-  .status-anchor__attention-owner,
-  .status-anchor__service,
-  .status-anchor__protection {
-    display: none;
   }
   .status-anchor__health {
     display: grid;
