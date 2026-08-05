@@ -10,13 +10,21 @@ the version-matched interface it serves.
 - `apps/web/` — browser workspace
 - `packages/v2-contracts/` — shared Effect Schema contracts
 
-Install once from the repository root, then run a workspace command:
+Use Node 22.13 or later. On a first checkout, install and prepare the
+workspaces from the repository root:
 
 ```sh
-npm install
-npm run build --workspace @astro-console/server
-npm run test --workspace @astro-console/web
+npm ci
+npm run setup
+npm run dev:inspect -- --path=/plan
 ```
+
+The inspector starts a dedicated Chrome profile with CDP on port 9223. Install
+Google Chrome first, and stop an earlier inspector runner if that port is in
+use. Set `ASTRO_SERVER_CHROME` when Chrome is in a non-default location.
+
+After setup, run any workspace command, for example
+`npm run test --workspace @astro-console/web`.
 
 ## Documentation
 

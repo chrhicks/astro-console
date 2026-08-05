@@ -1,6 +1,8 @@
 # Server development and inspection
 
-`apps/server` is the production server implementation target. Run `npm run dev:inspect` for owner, `npm run dev:inspect -- --client=friend`,
+`apps/server` is the production server implementation target. From the
+repository root, first run `npm ci` and `npm run setup` with Node 22.13 or
+later. Then run `npm run dev:inspect` for owner, `npm run dev:inspect -- --client=friend`,
 or `npm run dev:inspect -- --client=phone`. Use
 `npm run dev:inspect -- --scenario=plan-draft` for the Plan browser proof:
 it installs the M27 Plan, Library, and workspace data without the preaccepted
@@ -23,6 +25,14 @@ Chrome-profile suffixes, preserving their state across runner restarts.
 ordinary origin and worker database paths run migrations only; they do not seed
 the fixture's Plan, Library, or Process data. The runner never attaches to or
 closes a user's normal Chrome profile.
+
+The inspector requires Google Chrome. On macOS it uses the normal Chrome app
+location; on Linux it uses `google-chrome`. Set `ASTRO_SERVER_CHROME` to use a
+different executable. Run the root wrapper so the shared contracts are built:
+
+```sh
+npm run dev:inspect -- --path=/plan
+```
 
 In another terminal:
 

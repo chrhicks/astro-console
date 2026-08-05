@@ -15,6 +15,8 @@
   "scripts": {
     "build": "npm run build --workspaces",
     "check": "npm run check --workspaces",
-    "test": "npm run test --workspaces"
+    "test": "npm run test --workspaces",
+    "setup": "npm run build --workspace @astro-console/v2-contracts",
+    "dev:inspect": "npm run setup && npm run dev:inspect --workspace @astro-console/server --"
   }
 }
