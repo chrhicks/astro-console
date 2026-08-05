@@ -161,10 +161,16 @@ export function createLibraryPreviewHandler(previewsRoot: string) {
   ) {
     const assetId = decodedAssetId(encodedAssetId)
     if (!/^[A-Za-z0-9-]+$/.test(assetId))
-      return json(response, 400, { outcome: 'rejected', reason: 'InvalidInput' })
+      return json(response, 400, {
+        outcome: 'rejected',
+        reason: 'InvalidInput',
+      })
     const now = Date.now()
     if ((lastDelivered.get(identity.clientId) ?? 0) + previewRefreshMs > now)
-      return json(response, 429, { outcome: 'rejected', reason: 'PreviewRefreshLimited' })
+      return json(response, 429, {
+        outcome: 'rejected',
+        reason: 'PreviewRefreshLimited',
+      })
     if (active >= previewConcurrentLimit)
       return json(response, 429, { outcome: 'rejected', reason: 'PreviewBusy' })
     active += 1
@@ -176,11 +182,17 @@ export function createLibraryPreviewHandler(previewsRoot: string) {
         ),
       )
       if (detail.inspection?._tag !== 'Available')
-        return json(response, 409, { outcome: 'rejected', reason: 'PreviewUnavailable' })
+        return json(response, 409, {
+          outcome: 'rejected',
+          reason: 'PreviewUnavailable',
+        })
       const path = join(previewsRoot, `${assetId}.png`)
       const metadata = await stat(path)
       if (metadata.size > previewLimitBytes)
-        return json(response, 413, { outcome: 'rejected', reason: 'PreviewTooLarge' })
+        return json(response, 413, {
+          outcome: 'rejected',
+          reason: 'PreviewTooLarge',
+        })
       const bytes = await readFile(path)
       lastDelivered.set(identity.clientId, now)
       return response
@@ -193,7 +205,10 @@ export function createLibraryPreviewHandler(previewsRoot: string) {
         })
         .end(bytes)
     } catch {
-      return json(response, 409, { outcome: 'rejected', reason: 'PreviewUnavailable' })
+      return json(response, 409, {
+        outcome: 'rejected',
+        reason: 'PreviewUnavailable',
+      })
     } finally {
       active -= 1
     }
@@ -389,22 +404,63 @@ export async function downloadAsset(
   url: URL,
   grants: DownloadGrantConfig | undefined,
   snapshotVersion: () => number,
+  localOriginalsRoot?: string,
 ) {
-  if (grants === undefined)
-    return json(response, 503, {
-      outcome: 'rejected',
-      reason: 'DownloadUnavailable',
-    })
   const encodedAssetId = /^\/api\/library\/assets\/(.+)\/download$/.exec(
     url.pathname,
   )?.[1]
   if (encodedAssetId === undefined)
     return json(response, 400, { outcome: 'rejected', reason: 'InvalidInput' })
+  const assetId = decodedAssetId(encodedAssetId)
+  if (localOriginalsRoot !== undefined) {
+    const local = Schema.decodeUnknownSync(
+      Schema.optional(
+        Schema.Struct({
+          format: Schema.Literals(['cameraRaw', 'fits', 'tiff', 'png', 'jpeg']),
+          availability: Schema.String,
+        }),
+      ),
+    )(
+      db
+        .prepare(
+          'SELECT format,availability FROM library_assets WHERE asset_id=?',
+        )
+        .get(assetId),
+    )
+    if (local?.availability === 'availableLocally') {
+      const path = join(localOriginalsRoot, `${assetId}.${local.format}`)
+      try {
+        const size = (await stat(path)).size
+        if (size > 64 * 1024 * 1024) throw new Error('original too large')
+        const bytes = await readFile(path)
+        return response
+          .writeHead(200, {
+            ...responseHeaders(
+              local.format === 'fits'
+                ? 'application/fits'
+                : 'application/octet-stream',
+              'private, no-store',
+            ),
+            'content-disposition': `attachment; filename="${assetId}.${local.format}"`,
+            'content-length': String(bytes.byteLength),
+          })
+          .end(bytes)
+      } catch {
+        return json(response, 503, {
+          outcome: 'rejected',
+          reason: 'DownloadUnavailable',
+        })
+      }
+    }
+  }
+  if (grants === undefined)
+    return json(response, 503, {
+      outcome: 'rejected',
+      reason: 'DownloadUnavailable',
+    })
   const asset = await Effect.runPromise(
     LibraryService.pipe(
-      Effect.flatMap((library) =>
-        library.download(decodedAssetId(encodedAssetId)),
-      ),
+      Effect.flatMap((library) => library.download(assetId)),
       Effect.map((asset) => ({ status: 200 as const, asset })),
       Effect.catchTags({
         'Server.LibraryInputInvalid': () =>

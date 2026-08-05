@@ -124,6 +124,16 @@ export function materializeCapturedFrame(
         acquisitionId: input.lineage.acquisitionId,
       },
       capture: { frameId: input.frameId, ...input.capture },
+      provenance: {
+        source: 'alpaca-imagearray',
+        checksum,
+        ...(input.format === 'fits'
+          ? { fitsHeader: safeFitsHeader(bytes) }
+          : {}),
+        ...(input.format === 'cameraRaw'
+          ? { imageBytesHeader: safeImageBytesHeader(bytes) }
+          : {}),
+      },
       representations: [
         { label: 'Immutable captured original retained', state: 'available' },
       ],
@@ -176,6 +186,48 @@ export function materializeCapturedFrame(
         .run(finalPath, checksum, new Date().toISOString())
     } catch {}
     return { outcome: 'rejected', reason: 'MaterializationFailed' }
+  }
+}
+
+function safeFitsHeader(bytes: Uint8Array) {
+  const text = new TextDecoder('ascii').decode(bytes.slice(0, 64 * 1024))
+  const facts: Record<string, string | number | boolean> = {}
+  for (let offset = 0; offset + 80 <= text.length; offset += 80) {
+    const card = text.slice(offset, offset + 80)
+    const key = card.slice(0, 8).trim()
+    if (key === 'END') break
+    if (
+      ![
+        'SIMPLE',
+        'BITPIX',
+        'NAXIS',
+        'NAXIS1',
+        'NAXIS2',
+        'EXPTIME',
+        'DATE-OBS',
+        'INSTRUME',
+        'FILTER',
+      ].includes(key) ||
+      card[8] !== '='
+    )
+      continue
+    const value = card.slice(10, 80).split('/')[0]?.trim().replace(/^'|'$/g, '')
+    if (value === undefined || value.length === 0 || value.length > 80) continue
+    if (/^-?\d+(?:\.\d+)?$/.test(value)) facts[key] = Number(value)
+    else if (value === 'T' || value === 'F') facts[key] = value === 'T'
+    else facts[key] = value
+  }
+  return facts
+}
+
+function safeImageBytesHeader(bytes: Uint8Array) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  return {
+    headerVersion: view.getUint32(0, true),
+    dataStart: view.getUint32(12, true),
+    imageElementType: view.getUint32(16, true),
+    transmissionElementType: view.getUint32(20, true),
+    rank: view.getUint32(24, true),
   }
 }
 

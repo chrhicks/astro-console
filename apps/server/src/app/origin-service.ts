@@ -565,6 +565,7 @@ export function createLocalWebService(
           url,
           downloadGrants,
           () => stateRepository.state().snapshotVersion,
+          options.capturedFrameStorage?.originalsRoot,
         ),
       libraryDetail: (response, encodedAssetId) =>
         libraryDetail(
@@ -746,6 +747,56 @@ export function createLocalWebService(
                   'Current camera connection truth is not ready. Refresh preflight before any camera command.',
               }),
             )
+          if (
+            CameraCommandRequest.fields.intent.guards.CompleteCameraExposure(
+              camera.intent,
+            )
+          ) {
+            acquireRepository.saveReceipt(
+              camera.intent.idempotencyKey,
+              identity.clientId,
+              {
+                status: 503,
+                body: CameraCommandResponse.cases.Unavailable.make({
+                  summary:
+                    'The camera image read outcome is not yet known. It will not replay.',
+                }),
+              },
+            )
+            const completed = await ingestCompletedCameraExposure({
+              assetId: `asset-capture-${camera.intent.idempotencyKey}`,
+              frameId: camera.intent.frameId,
+              capturedAt: camera.intent.capturedAt,
+              capture: {
+                exposureSeconds: camera.intent.exposureSeconds,
+                filter: camera.intent.filter,
+                binning: camera.intent.binning,
+                frameType: camera.intent.frameType,
+              },
+              lineage: {
+                runId: current.run.id,
+                sequenceId: 'camera-exposure',
+                acquisitionId: 'camera-exposure',
+              },
+              idempotencyKey: camera.intent.idempotencyKey,
+            })
+            const body =
+              completed.outcome === 'accepted'
+                ? CameraCommandResponse.cases.Completed.make({
+                    assetId: completed.assetId,
+                  })
+                : CameraCommandResponse.cases.Unavailable.make({
+                    summary:
+                      'The completed camera image could not be retained.',
+                  })
+            const status = completed.outcome === 'accepted' ? 202 : 503
+            acquireRepository.saveReceipt(
+              camera.intent.idempotencyKey,
+              identity.clientId,
+              { status, body },
+            )
+            return json(response, status, body)
+          }
           acquireRepository.saveReceipt(
             camera.intent.idempotencyKey,
             identity.clientId,
@@ -1041,6 +1092,44 @@ export function createLocalWebService(
       publish('CapturedFrameMaterialized', result.cursor)
     return result
   }
+  const ingestCompletedCameraExposure = async (raw: unknown) => {
+    if (
+      options.cameraProvider?.readImageArray === undefined ||
+      options.capturedFrameStorage === undefined
+    )
+      return {
+        outcome: 'rejected' as const,
+        reason: 'MaterializationFailed' as const,
+      }
+    const image = await Effect.runPromiseExit(
+      options.cameraProvider.readImageArray(),
+    )
+    if (Exit.isFailure(image))
+      return {
+        outcome: 'rejected' as const,
+        reason: 'MaterializationFailed' as const,
+      }
+    const result = ingestCapturedFrame(
+      { ...(raw as object), format: image.value.format },
+      image.value.bytes,
+    )
+    if (result.outcome === 'accepted') {
+      const row = database
+        .prepare('SELECT detail FROM library_assets WHERE asset_id=?')
+        .get(result.assetId) as { detail: string }
+      const detail = JSON.parse(row.detail) as {
+        representations: Array<unknown>
+      }
+      detail.representations.push({
+        label: 'Preview unavailable for this retained camera original',
+        state: 'unavailable',
+      })
+      database
+        .prepare('UPDATE library_assets SET detail=? WHERE asset_id=?')
+        .run(JSON.stringify(detail), result.assetId)
+    }
+    return result
+  }
   const inspectFrame = (assetId: string) =>
     options.frameInspectionStorage === undefined
       ? undefined
@@ -1065,6 +1154,7 @@ export function createLocalWebService(
     ingestObservation,
     saveProcess,
     ingestCapturedFrame,
+    ingestCompletedCameraExposure,
     inspectFrame,
     cleanupSavedOrphans,
     advanceFakeRun,
@@ -1374,6 +1464,13 @@ export const startOrigin = () =>
             }),
         webDistPath: config.runtime.webDistPath,
         previewRoot: config.runtime.previewRoot,
+        capturedFrameStorage: {
+          originalsRoot: '/var/lib/astro-console/originals',
+        },
+        frameInspectionStorage: {
+          originalsRoot: '/var/lib/astro-console/originals',
+          previewsRoot: config.runtime.previewRoot,
+        },
       },
     )
     const remote = await service.listen(

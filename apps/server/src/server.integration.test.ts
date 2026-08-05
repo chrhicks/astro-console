@@ -1058,6 +1058,33 @@ test('Alpaca camera adapter sends exact StartExposure form parameters in its PUT
   ])
 })
 
+test('Alpaca camera adapter retains bounded ImageBytes binary as cameraRaw', async () => {
+  const bytes = new Uint8Array(32)
+  new DataView(bytes.buffer).setUint32(0, 1, true)
+  new DataView(bytes.buffer).setUint32(12, 8, true)
+  const provider = alpacaCameraProvider(
+    {
+      kind: 'alpaca',
+      rigId: 'recorded-rig',
+      host: '192.168.4.104',
+      port: 11111,
+      devices: { camera: { deviceNumber: 0 } },
+    },
+    async () =>
+      new Response(bytes, {
+        headers: {
+          'content-type': 'application/imagebytes',
+          'content-length': '32',
+        },
+      }),
+  )
+  const image = await Effect.runPromise(
+    provider.readImageArray?.() ?? Effect.die('missing image reader'),
+  )
+  assert.equal(image.format, 'cameraRaw')
+  assert.deepEqual([...image.bytes], [...bytes])
+})
+
 const readyCameraPreflightProvider = {
   observe: () =>
     Effect.succeed({
@@ -1234,6 +1261,101 @@ test('camera provider failure persists recover truth and the receipt prevents co
     { method: 'POST', body: JSON.stringify({ intent }) },
   )
   assert.equal(replay.status, 503)
+})
+
+test('completed camera image becomes a durable Library original and duplicate completion does not reread it', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-camera-library-'))
+  const databasePath = join(root, 'state.sqlite')
+  let reads = 0
+  const service = createLocalWebService(
+    databasePath,
+    undefined,
+    undefined,
+    undefined,
+    {
+      fixture: 'preflight',
+      preflightProvider: readyCameraPreflightProvider,
+      cameraProvider: {
+        startExposure: () => Effect.succeed(undefined),
+        abortExposure: () => Effect.succeed(undefined),
+        readState: () =>
+          Effect.succeed({
+            observedAt: '2026-08-05T10:00:00.000Z',
+            cameraState: 'idle',
+          }),
+        readImageArray: () => {
+          reads += 1
+          return Effect.succeed({
+            bytes: new TextEncoder().encode(
+              'SIMPLE  =                    T                                                  END                                                                             ',
+            ),
+            format: 'fits' as const,
+          })
+        },
+      },
+      capturedFrameStorage: { originalsRoot: join(root, 'originals') },
+      frameInspectionStorage: {
+        originalsRoot: join(root, 'originals'),
+        previewsRoot: join(root, 'previews'),
+      },
+    },
+  )
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  const started = await startFixtureRun(base, 'camera-library-run')
+  if (started.activeRun._tag !== 'Active') throw new Error('Run unavailable')
+  await refreshCameraPreflight(base, started.activeRun.run)
+  const intent = {
+    _tag: 'CompleteCameraExposure',
+    expectedLeaseRevision: started.control.revision,
+    expectedRunRevision: started.activeRun.run.revision,
+    idempotencyKey: 'camera-library-complete',
+    frameId: 'camera-frame-001',
+    capturedAt: '2026-08-05T10:00:00.000Z',
+    exposureSeconds: 15,
+    filter: 'L',
+    binning: 1,
+    frameType: 'light',
+  }
+  const complete = () =>
+    fetch(`${base}/api/acquire/commands`, {
+      method: 'POST',
+      body: JSON.stringify({ intent }),
+    })
+  assert.equal((await complete()).status, 202)
+  assert.equal((await complete()).status, 202)
+  assert.equal(reads, 1)
+  const assetId = 'asset-capture-camera-library-complete'
+  assert.ok(existsSync(join(root, 'originals', `${assetId}.fits`)))
+  const detail = await fetch(`${base}/api/library/assets/${assetId}`)
+  assert.equal(detail.status, 200)
+  const detailText = JSON.stringify(await detail.json())
+  assert.match(detailText, /alpaca-imagearray/)
+  assert.match(detailText, /SIMPLE/)
+  assert.match(detailText, /Preview unavailable/)
+  const download = await fetch(`${base}/api/library/assets/${assetId}/download`)
+  assert.equal(download.status, 200)
+  assert.equal(download.headers.get('content-type'), 'application/fits')
+  assert.match(
+    new TextDecoder().decode(await download.arrayBuffer()),
+    /^SIMPLE/,
+  )
+  await listener.close()
+  service.close()
+  const recovered = createLocalWebService(databasePath)
+  const recoveredListener = await recovered.listen()
+  t.after(async () => {
+    await recoveredListener.close()
+    recovered.close()
+  })
+  assert.equal(
+    (
+      await fetch(
+        `http://127.0.0.1:${recoveredListener.port}/api/library/assets/${assetId}`,
+      )
+    ).status,
+    200,
+  )
 })
 
 test('target fixtures keep provisional slew acknowledgement separate from deep-sky and lunar image evidence', async (t) => {

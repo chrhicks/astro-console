@@ -1,6 +1,6 @@
 # V2 Completion Handoff
 
-Status: **V2.0 complete; V2.1 Phase 2 complete**
+Status: **V2.0 complete; V2.1 Phase 3 complete**
 
 ## Current Position
 
@@ -17,19 +17,21 @@ wide, compact, and 390 px phone layouts.
 
 This proves the deterministic service, local SQLite/HTTP/SSE behavior, browser
 presentation, Cloudflare Access ingress, public desktop lease action, and a
-brief Tunnel outage with local service continuity. V2.1 also proves the
-service command boundary locally and a real ASCOM Remote camera command path
-through an isolated candidate image on Arch: a 15-second exposure completed,
-and a separate 30-second exposure was aborted. It does not prove production
-deployment of that candidate, Library intake, mount movement, external
-processing-tool execution, or physical image quality.
+brief Tunnel outage with local service continuity. V2.1 also proves its camera
+command and Library-intake path through isolated candidate images on Arch: a
+real Sony 15-second indoor exposure produced a 48,481,196-byte Alpaca
+ImageBytes original, stored with checksum and provenance. The Library record
+survived service restart, showed an explicit unavailable-preview state, and
+downloaded the retained original locally. The candidate did not replace the
+running production service. This does not prove production deployment, mount
+movement, external processing-tool execution, or physical image quality.
 
 ## Next Action
 
-Review the [V2.1 Phase 2 evidence](delivery-plan.md), then authorize Phase 3
-only when the owner selects one bounded indoor exposure-to-Library session.
-Keep the service rig-local; Cloudflare remains ingress and identity admission,
-not observatory authority.
+Review the [V2.1 Phase 3 evidence](delivery-plan.md), then begin Phase 4 with
+the owner-supplied successful and obstructed historical frames. Keep the
+service rig-local; Cloudflare remains ingress and identity admission, not
+observatory authority.
 
 ## Historical Records
 

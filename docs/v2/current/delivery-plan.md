@@ -1,6 +1,6 @@
 # V2.1 Delivery Plan — Real Alpaca Rig Operation
 
-Status: **accepted — Phase 1 complete**
+Status: **accepted — Phases 1–3 complete**
 
 V2.1 moves the V2.0 service from deterministic provider proof to one bounded,
 real-rig operation path. Alpaca is the only hardware integration boundary for
@@ -117,6 +117,18 @@ Exit evidence: an indoor real exposure appears in Library after a service
 restart with stable provenance, an authorized download path, and a usable
 preview or an explicit unsupported-preview result. Abort, image-read failure,
 and duplicate completion have deterministic recovery tests.
+
+Completed 2026-08-05: contracts and server tests cover bounded ImageBytes
+transfer, FITS and raw representation handling, read failure, duplicate
+completion, and retained-original behavior. An isolated candidate on
+`chicks-arch` completed a real owner-approved 15-second Sony indoor exposure
+and read `camera/0/imagearray` with `Accept: application/imagebytes`. ASCOM
+Remote returned a 48,481,196-byte binary ImageBytes payload rather than FITS;
+the service retained it as `cameraRaw`, with `alpaca-imagearray` provenance,
+checksum, and decoded ImageBytes header facts. After candidate service restart,
+the Library record remained available with explicit unavailable-preview
+evidence, and its local download endpoint returned the same 48,481,196 bytes
+with HTTP 200. The candidate did not replace the running production service.
 
 ### Phase 4 — Local plate-solve boundary
 

@@ -45,6 +45,7 @@ export const alpacaCameraProvider = (
               : 'unknown',
         })),
       ),
+    readImageArray: () => readImageArray(request, `${base}/imagearray`),
   }
 }
 function command(request: typeof fetch, url: string, body?: URLSearchParams) {
@@ -121,4 +122,88 @@ function boundedProviderText(text: string, status: number) {
       return decoded.ErrorMessage.slice(0, 240)
   } catch {}
   return trimmed.slice(0, 240)
+}
+
+function readImageArray(request: typeof fetch, url: string) {
+  return Effect.tryPromise({
+    try: (signal) =>
+      request(url, { headers: { accept: 'application/imagebytes' }, signal }),
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.flatMap((response) => {
+      if (!response.ok)
+        return decode(response).pipe(Effect.as(undefined as never))
+      const contentType =
+        response.headers.get('content-type')?.toLowerCase() ?? ''
+      if (
+        contentType.includes('application/imagebytes') ||
+        contentType.includes('application/octet-stream')
+      ) {
+        const declaredLength = Number(response.headers.get('content-length'))
+        if (
+          Number.isFinite(declaredLength) &&
+          declaredLength > 64 * 1024 * 1024
+        )
+          return Effect.fail(
+            new Error('Alpaca image response is outside the supported size.'),
+          )
+        return Effect.tryPromise({
+          try: () => response.arrayBuffer(),
+          catch: (cause) => cause,
+        }).pipe(
+          Effect.map((buffer) => new Uint8Array(buffer)),
+          Effect.flatMap(imageBytes),
+        )
+      }
+      return Effect.tryPromise({
+        try: () => response.json(),
+        catch: (cause) => cause,
+      }).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(Envelope)),
+        Effect.flatMap((envelope) =>
+          envelope.ErrorNumber === 0
+            ? jsonImageBytes(envelope.Value)
+            : Effect.fail(
+                new Error(envelope.ErrorMessage ?? 'Alpaca image read failed.'),
+              ),
+        ),
+      )
+    }),
+  )
+}
+
+function jsonImageBytes(value: unknown) {
+  if (typeof value === 'string')
+    return imageBytes(new Uint8Array(Buffer.from(value, 'base64')))
+  if (
+    Array.isArray(value) &&
+    value.every(
+      (entry) =>
+        typeof entry === 'number' &&
+        Number.isInteger(entry) &&
+        entry >= 0 &&
+        entry <= 255,
+    )
+  )
+    return imageBytes(Uint8Array.from(value))
+  return Effect.fail(
+    new Error('Alpaca image response has an unsupported JSON representation.'),
+  )
+}
+function imageBytes(
+  bytes: Uint8Array,
+): Effect.Effect<
+  { readonly bytes: Uint8Array; readonly format: 'fits' | 'cameraRaw' },
+  Error
+> {
+  if (bytes.byteLength === 0 || bytes.byteLength > 64 * 1024 * 1024)
+    return Effect.fail(
+      new Error('Alpaca image response is outside the supported size.'),
+    )
+  const signature = new TextDecoder().decode(bytes.slice(0, 6))
+  if (signature === 'SIMPLE')
+    return Effect.succeed({ bytes, format: 'fits' as const })
+  if (bytes.byteLength < 32)
+    return Effect.fail(new Error('Alpaca ImageBytes response is too short.'))
+  return Effect.succeed({ bytes, format: 'cameraRaw' as const })
 }

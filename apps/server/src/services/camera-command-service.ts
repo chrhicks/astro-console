@@ -10,6 +10,10 @@ export interface CameraProviderShape {
   ) => Effect.Effect<unknown, unknown>
   readonly abortExposure: () => Effect.Effect<unknown, unknown>
   readonly readState: () => Effect.Effect<unknown, unknown>
+  readonly readImageArray?: () => Effect.Effect<
+    { readonly bytes: Uint8Array; readonly format: 'cameraRaw' | 'fits' | 'tiff' },
+    unknown
+  >
 }
 export class CameraProvider extends Context.Service<
   CameraProvider,

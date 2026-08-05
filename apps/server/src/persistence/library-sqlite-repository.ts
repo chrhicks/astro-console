@@ -84,6 +84,34 @@ const LibraryDetail = Schema.Struct({
       frameType: Schema.Literals(['light', 'dark', 'flat', 'bias']),
     }),
   ),
+  provenance: Schema.optionalKey(
+    Schema.Struct({
+      source: Schema.Literal('alpaca-imagearray'),
+      checksum: Schema.String,
+      fitsHeader: Schema.optionalKey(
+        Schema.Struct({
+          SIMPLE: Schema.optionalKey(Schema.Boolean),
+          BITPIX: Schema.optionalKey(Schema.Number),
+          NAXIS: Schema.optionalKey(Schema.Number),
+          NAXIS1: Schema.optionalKey(Schema.Number),
+          NAXIS2: Schema.optionalKey(Schema.Number),
+          EXPTIME: Schema.optionalKey(Schema.Number),
+          'DATE-OBS': Schema.optionalKey(Schema.String),
+          INSTRUME: Schema.optionalKey(Schema.String),
+          FILTER: Schema.optionalKey(Schema.String),
+        }),
+      ),
+      imageBytesHeader: Schema.optionalKey(
+        Schema.Struct({
+          headerVersion: Schema.Number,
+          dataStart: Schema.Number,
+          imageElementType: Schema.Number,
+          transmissionElementType: Schema.Number,
+          rank: Schema.Number,
+        }),
+      ),
+    }),
+  ),
   inspection: Schema.optionalKey(FrameInspection),
   review: Schema.optionalKey(AssetReview),
   representations: Schema.Array(

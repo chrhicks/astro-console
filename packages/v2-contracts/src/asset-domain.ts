@@ -30,7 +30,7 @@ export const CapturedFrameIntake = Schema.Struct({
   assetId: AssetId,
   frameId: Schema.NonEmptyString,
   capturedAt: Schema.NonEmptyString,
-  format: Schema.Literals(['fits', 'tiff']),
+  format: Schema.Literals(['cameraRaw', 'fits', 'tiff']),
   capture: Schema.Struct({
     exposureSeconds: PositiveNumber,
     filter: Schema.NonEmptyString,
