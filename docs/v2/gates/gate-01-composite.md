@@ -21,6 +21,7 @@ reference is available only through Git history.
 
 ## Role In Later Gates
 
-Gates 2–4 refined workspace-specific behavior without replacing this shell.
-The shared rules are consolidated in
-[V2 UX and design guidance](../ux-design-guidance.md).
+Gates 2–4 refined workspace-specific behavior without replacing the product
+ownership model. For current composition and visual treatment, use the
+[UI and UX direction](../current/ui-ux.md); this gate's layout language is
+historical decision evidence.

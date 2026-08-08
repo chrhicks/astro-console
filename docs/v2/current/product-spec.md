@@ -23,9 +23,10 @@ It does not accumulate prototype experiments, rejected alternatives,
 walkthrough history, implementation plans, schema details, or copy polish.
 Those belong in accepted [gate records](../gates/README.md), the
 [documentation archive](../archive/README.md), the contract harness, or the
-[delivery plan](delivery-plan.md). The
-[UX and design guidance](../ux-design-guidance.md) remains the authority for
-how design decisions are made.
+[delivery plan](delivery-plan.md). The [UI and UX direction](ui-ux.md) defines
+the current presentation source and working method. This specification supplies
+domain truth, ownership, and product behavior; its layout examples do not
+override the official Nightbook demo.
 
 ## 1. Product Definition
 
@@ -557,9 +558,9 @@ Process transforms selected evidence while remaining independent of live rig
 control.
 
 Its accepted interaction model is recorded in the
-[Gate 4 Process reference](../gates/gate-04-process.md). Shared placement,
-hierarchy, and language rules live in
-[V2 UX and design guidance](../ux-design-guidance.md).
+[Gate 4 Process reference](../gates/gate-04-process.md). Current composition and
+interaction authority lives in the [UI and UX direction](ui-ux.md) and the
+external Nightbook demo it names.
 
 ### Responsibilities
 

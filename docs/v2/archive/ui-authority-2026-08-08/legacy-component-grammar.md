@@ -1,4 +1,10 @@
-# Nightbook Component Grammar
+# Retired Astro Console Component Grammar
+
+Status: **historical and non-authoritative as of August 8, 2026**
+
+This was `apps/web/src/components/PATTERNS.md` for the non-beta production UI.
+It is preserved as implementation history and must not guide the official
+Nightbook beta or `@nightbook/ui` work.
 
 The pattern layer between `styles/tokens.css` (values) and the workspaces
 (composition). A component here exists so a workspace **cannot** drift on the

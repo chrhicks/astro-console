@@ -1,6 +1,6 @@
 # V2 UI Component Library
 
-Status: **Nightbook final visual implementation authority**
+Status: **historical Astro Console-local component authority**
 
 This is a semantic pattern library, not a generic catalog. Promote a component
 only when it has one stable product role, owner/evidence/freshness boundary,

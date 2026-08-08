@@ -20,7 +20,7 @@ was issued during this bundle.
 ## Next: Complexity Audit
 
 The next bounded activity is the
-[Phase 1 complexity audit](../../current/phase-1-complexity-audit.md). It is a
+[Phase 1 complexity audit](../phase-1-foundation/phase-1-complexity-audit.md). It is a
 deletion-oriented review of code, deployment, tests, and active documentation;
 it does not reopen accepted V2 product semantics or authorize new features.
 

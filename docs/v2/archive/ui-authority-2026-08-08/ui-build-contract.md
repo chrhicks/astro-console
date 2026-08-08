@@ -1,6 +1,6 @@
 # V2 UI Build Contract
 
-Status: **Nightbook final visual implementation authority**
+Status: **historical Astro Console-local UI build contract**
 
 Use this document with the product specification and the visual style guide to
 build production V2 UI from backing data. It defines the boundary between data,

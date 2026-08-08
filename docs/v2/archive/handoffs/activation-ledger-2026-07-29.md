@@ -37,4 +37,4 @@ The interim July 27 ledger is archived in
 
 Use the [current handoff](../../current/handoff.md) for proven details and
 deferred work. The next code activity is the
-[complexity audit](../../current/phase-1-complexity-audit.md).
+[complexity audit](../phase-1-foundation/phase-1-complexity-audit.md).

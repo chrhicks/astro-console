@@ -1,11 +1,11 @@
 # V2 UX And Design Guidance
 
-Status: **accepted baseline through Gate 4**
+Status: **historical and non-authoritative as of August 8, 2026**
 
 Updated: July 21, 2026
 
 This is the semantic UX authority for V2 product work. The longer
-[current product specification](current/product-spec.md) supplies domain detail;
+[current product specification](../../current/product-spec.md) supplies domain detail;
 accepted gate records supply scenario evidence. New work should follow these
 rules unless a later gate records why a rule must change. Concrete visual
 composition is implemented in `apps/web` source and CSS, with accepted

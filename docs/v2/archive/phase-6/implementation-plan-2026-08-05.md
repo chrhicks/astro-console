@@ -30,7 +30,7 @@ control lease.
 
 This plan follows the selected [infrastructure plan](../infra/README.md), its
 [security model](../infra/security.md), and the accepted V2
-[UX guidance](../ux-design-guidance.md). It uses the existing typed admission
+[UX guidance](../ui-authority-2026-08-08/ux-design-guidance.md). It uses the existing typed admission
 and control seam; it does not replace it with browser presence or identity
 provider roles.
 

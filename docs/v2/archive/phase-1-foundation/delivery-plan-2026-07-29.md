@@ -19,9 +19,9 @@ Status: **active implementation boundary**
 - Two local browsers observe the same authoritative state.
 - Only the control lease holder can mutate observing state.
 - Catalog scale stays behind bounded server query/pagination and virtualization.
-- The accepted [visual style guide](../../current/visual-style-guide.md),
-  [UI component library](../../current/ui-component-library.md), and
-  [UI build contract](../../current/ui-build-contract.md) guide implementation.
+- The then-accepted [visual style guide](../ui-authority-2026-08-08/visual-style-guide.md),
+  [UI component library](../ui-authority-2026-08-08/ui-component-library.md), and
+  [UI build contract](../ui-authority-2026-08-08/ui-build-contract.md) guided implementation.
 
 ## First Vertical Slice
 

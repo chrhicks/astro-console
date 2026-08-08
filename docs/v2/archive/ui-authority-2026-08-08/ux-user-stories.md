@@ -1,6 +1,6 @@
 # V2 UX User Stories
 
-Status: **living UX catalog — not implementation authorization**
+Status: **historical UX catalog — not current implementation authority**
 
 Updated: August 5, 2026
 

@@ -1,62 +1,57 @@
-# V2 Completion Handoff
+# V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phase 4 complete**
+Status: **V2.0 complete; V2.1 Phase 4 complete; Nightbook UI migration is the next product-facing preparation**
 
 ## Current Position
 
-V2 now provides a rig-local service and web workspace for Plan, Observe,
-Library, and Process. Phase 6 adds Cloudflare Access remote viewing, a separate
-desktop shared-control hostname, a service-owned reconnecting lease, bounded
-previews, deliberate original downloads, and remote-only outage status.
+Astro Console provides a rig-local service and web workspaces for Plan,
+Observe, Library, and Process. V2.0 includes remote viewing, bounded shared
+desktop control, durable service-owned state, and reconnect behavior. V2.1
+Phases 1–4 add one configured Alpaca rig boundary, bounded camera exposure and
+abort, immutable original intake, and local solve evidence.
 
-Final Phase 6 validation is server **83/83**, web **65/65**, production builds,
-Docker release builds, functional browser control proof, and Designer PASS at
-wide, compact, and 390 px phone layouts.
+The existing workspace presentation remains the default route. It is retained
+only until the newer beta presentation is ready to replace it; its local visual
+system and component grammar are no longer UI authority.
+
+## UI Direction
+
+The official UI and UX reference is the composed React demo in:
+
+`/Users/chicks/dev/personal/kimi_workspace/nightbook-prototype/apps/nightbook-demo`
+
+The same workspace owns the `@nightbook/ui` source, component Gallery, and
+package verification. Astro Console's `?ui=beta` workspaces are a high-level
+integration pass that validated the package and supplied feedback. They are not
+the source design authority.
+
+The desired outcome is to align the beta with real Astro Console projections
+and then promote it as the main UI. Follow the lightweight
+[UI and UX direction](ui-ux.md). Former Astro Console visual guides, UX
+catalogs, component grammar, and Phase 0.5 material are archived.
+
+## Known Beta Alignment Gaps
+
+1. Process needs service-owned per-action eligibility and typed denial reasons.
+2. Process-created Library outputs need complete asset-detail projections.
+3. Unfinished Process sessions need a deterministic restart-to-resume journey.
+
+Do not hide these gaps with client fixtures, inferred eligibility, or
+Astro Console-specific logic inside `@nightbook/ui`.
 
 ## Proof Boundary
 
-This proves the deterministic service, local SQLite/HTTP/SSE behavior, browser
-presentation, Cloudflare Access ingress, public desktop lease action, and a
-brief Tunnel outage with local service continuity. V2.1 also proves its camera
-command and Library-intake path through isolated candidate images on Arch: a
-real Sony 15-second indoor exposure produced a 48,481,196-byte Alpaca
-ImageBytes original, stored with checksum and provenance. The Library record
-survived service restart, showed an explicit unavailable-preview state, and
-downloaded the retained original locally. V2.1 Phase 4 also proves a local
-containerized Astrometry.net solve-only worker against owner-supplied real
-FITS: the solved M101 frame produced durable typed solve evidence, while the
-haze/cloud-rejected frame produced durable typed no-solution evidence. Neither
-path can move a mount. Candidates did not replace the running production
-service. This does not prove production deployment, mount movement, RCAstro
-processing, or physical image quality.
+Completed evidence covers local contracts, service behavior, SQLite/HTTP/SSE,
+browser presentation, the opt-in beta integration, remote ingress and control,
+one isolated real camera-original intake, and local solve-only evidence. It does
+not prove beta route promotion, production deployment of the beta, mount
+movement, production processing tools, or physical image quality.
 
 ## Next Action
 
-Review the [V2.1 Phase 4 evidence](delivery-plan.md), then plan the
-owner-present Phase 5 outdoor acquire and modest capture. Keep the service
-rig-local; Cloudflare remains ingress and identity admission, not observatory
-authority.
+Use one exact Nightbook demo workflow at a time to prepare the projection and
+integration plan. Start with the three known alignment gaps, then compare every
+workspace against the current demo before requesting main-route promotion.
 
-## Nightbook UI Adoption Boundary
-
-A separate, opt-in beta presentation now composes Plan, Observe, Library, and
-Process from the locally packed `@nightbook/ui` component library. This is a
-completed local UI-adoption proof, not a production-route migration. Existing
-workspaces remain the default, and no service, schema, contract, deployment,
-Arch host, provider, hardware, or physical-capture behavior changed.
-
-The remaining adoption gaps are service projections: authoritative per-action
-Process eligibility, complete Library detail for Process-created output, and a
-deterministic unfinished-session recovery journey. Address those only in a
-separately approved backend-alignment pass; do not approximate them with client
-fixtures or package-specific product logic. See the historical closeout record
-below for the full strategy, artifact identity, proof, and extension rules.
-
-## Historical Records
-
-- [Phase 3–5 closeout record](../archive/handoffs/phase-3-to-5-closeout-2026-08-04.md)
-- [Phase 3 execution archive](../archive/phase-3/README.md)
-- [Phase 4 implementation plan](../archive/phase-4/implementation-plan-2026-08-04.md)
-- [Phase 5 implementation plan](../archive/phase-5/implementation-plan-2026-08-04.md)
-- [Phase 6 implementation and deployment record](../archive/phase-6/implementation-plan-2026-08-05.md)
-- [Nightbook beta adoption closeout](../archive/handoffs/nightbook-beta-adoption-2026-08-08.md)
+Completed chronology and former authority are indexed in the
+[documentation archive](../archive/README.md).

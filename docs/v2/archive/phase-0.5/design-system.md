@@ -7,7 +7,7 @@ Updated: July 23, 2026
 This guide turns the frozen V2 product, contract, and prototype references into
 an implementation visual and interaction-design authority. It complements the
 [product specification](../../current/product-spec.md) and
-[UX and design guidance](../../ux-design-guidance.md); it does not replace either.
+[UX and design guidance](../ui-authority-2026-08-08/ux-design-guidance.md); it does not replace either.
 
 Phase 1 may use this draft for planning and critique, but the guide becomes
 binding implementation authority only after explicit owner acceptance.
@@ -655,7 +655,7 @@ limitation, visual trend, or desire for uniformity is not sufficient.
 ## 17. Accepted References
 
 - [V2 product specification](../../current/product-spec.md)
-- [V2 UX and design guidance](../../ux-design-guidance.md)
+- [V2 UX and design guidance](../ui-authority-2026-08-08/ux-design-guidance.md)
 - [Gate 7 walkthrough and decision log](../phase-1-foundation/gate-07-walkthrough.md)
 - [Accepted prototype hub](../../../../prototype/v2-ui/index.html)
 - [Phase 0.5 brief](phase-0.5-design-system-brief.md)

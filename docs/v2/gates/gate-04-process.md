@@ -215,5 +215,6 @@ discard, and source-switch flows. Browser validation covered 1600 px and
 page overflow or console error; suggestion preview, failure diagnostics, and
 responsive context behavior matched the model above.
 
-The shared rules derived from Gates 1–4 now live in
-[V2 UX and design guidance](../ux-design-guidance.md).
+For current composition and visual treatment, use the
+[UI and UX direction](../current/ui-ux.md). This gate remains product and
+workflow evidence rather than visual authority.

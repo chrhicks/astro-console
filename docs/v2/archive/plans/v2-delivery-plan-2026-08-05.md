@@ -30,7 +30,7 @@ desktop, and the read-only phone projection for UI changes.
 Accepted gates established the workspace/run model, canonical ownership,
 snapshot/event/error contracts, deterministic scenarios, and the frozen V2
 reference. The authoritative design rules remain in
-[UX and design guidance](../ux-design-guidance.md).
+[UX and design guidance](../ui-authority-2026-08-08/ux-design-guidance.md).
 
 ## Phase 0.5: Design-System Finalization — Complete
 

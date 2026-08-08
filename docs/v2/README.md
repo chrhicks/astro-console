@@ -1,112 +1,69 @@
 # Astro Console V2 — Start Here
 
-Status: **V2.0 complete — Phases 0, 0.5, 1, 2, 3, 4, 5, and 6 delivered**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; UI migration preparation active**
 
-This directory is organized to keep normal working context small. Do not read
-the entire V2 tree by default.
+Keep normal working context small. Do not read the complete V2 tree.
 
 ## Default Reading Set
 
 Read these in order when starting or resuming V2 work:
 
-1. [UX and design guidance](ux-design-guidance.md) — durable product and design
-   rules accepted through Gate 4.
-2. [Current handoff](current/handoff.md) — current V2 status, proof boundary,
-   and next owner action.
-3. [Next delivery-plan stub](current/delivery-plan.md) — placeholder for the
-   next owner-approved multi-phase plan.
+1. [Current handoff](current/handoff.md) — current status, proof boundary, and
+   next owner action.
+2. [Current delivery plan](current/delivery-plan.md) — accepted V2.1 work and
+   remaining phase boundary.
 
-That is the complete default context. Load another document only when the task
-requires its specific detail.
+That is the default context. Load another document only when the task needs its
+specific detail.
 
 ## Load On Demand
 
-| Need                                                     | Read                                                                                                                                                                                                                                             |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Workspace behavior or product entities                   | [Current product specification](current/product-spec.md)                                                                                                                                                                                         |
-| Future UX planning and interaction stories               | [Current UX user stories](current/ux-user-stories.md)                                                                                                                                                                                             |
-| Why a completed convergence decision was made            | [Phase 1 foundation archive](archive/phase-1-foundation/README.md)                                                                                                                                                                               |
-| Accepted Gate 5 scenarios and ownership                  | [Gate 5 baseline](current/gate-05-scenarios.md)                                                                                                                                                                                                  |
-| Accepted Gate 5 consequential actions                    | [Gate 5 action map](current/gate-05-action-map.md)                                                                                                                                                                                               |
-| Accepted canonical Gate 5 contract language              | [Gate 5 contract vocabulary](current/gate-05-contract-vocabulary.md)                                                                                                                                                                             |
-| Executable Effect Schema candidates and fixtures         | [V2 contracts package](../../packages/v2-contracts/README.md)                                                                                                                                                                                    |
-| Completed V2.0 scope, phases, and exit criteria          | [V2 delivery-plan archive](archive/plans/v2-delivery-plan-2026-08-05.md)                                                                                                                                                                        |
-| Completed Phase 2 execution history                      | [Phase 2 implementation plan archive](archive/plans/phase-2-implementation-plan-2026-08-04.md)                                                                                                                                                  |
-| Completed Phase 3–5 execution history                    | [Phase 3 archive](archive/phase-3/README.md), [Phase 4 plan](archive/phase-4/implementation-plan-2026-08-04.md), and [Phase 5 plan](archive/phase-5/implementation-plan-2026-08-04.md)                                                       |
-| Ideas outside V2.0                                       | [Post-V2.0 notes](current/v2-post-v2.0-notes.md)                                                                                                                                                                                                 |
-| Production UI visual implementation                      | `apps/web` source and CSS, the owner-corrected [visual style guide](current/visual-style-guide.md), [UI component library](current/ui-component-library.md), [UI build contract](current/ui-build-contract.md), and accepted screenshot evidence |
-| Why Phase 0.5 made a specific visual decision            | [Phase 0.5 design-system archive](archive/phase-0.5/README.md) — historical only; do not use for active implementation authority                                                                                                                 |
-| Accepted interaction evidence or candidate contracts     | The relevant document under [accepted gates](gates/README.md)                                                                                                                                                                                    |
-| Deployment, Cloudflare, storage, security, or operations | [Infrastructure plan](infra/README.md), then only its relevant section                                                                                                                                                                           |
-| Why an older option was rejected                         | [Documentation archive](archive/README.md) or Git history                                                                                                                                                                                        |
+| Need                                                      | Read                                                                                                         |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| UI or UX work, beta alignment, or route promotion         | [Current UI and UX direction](current/ui-ux.md), then the external Nightbook demo it names                   |
+| Workspace behavior or product entities                    | [Current product specification](current/product-spec.md); use it for domain truth, not visual composition    |
+| Accepted Gate 5 scenarios and ownership                   | [Gate 5 baseline](current/gate-05-scenarios.md)                                                              |
+| Accepted consequential actions                            | [Gate 5 action map](current/gate-05-action-map.md)                                                           |
+| Accepted contract language                                | [Gate 5 contract vocabulary](current/gate-05-contract-vocabulary.md)                                         |
+| Executable schemas and fixtures                           | [V2 contracts package](../../packages/v2-contracts/README.md)                                                |
+| Accepted interaction or ownership evidence                | One relevant document under [accepted gates](gates/README.md); gate layouts are not current visual authority |
+| Deployment, Cloudflare, storage, security, or operations  | [Infrastructure plan](infra/README.md), then only its relevant section                                       |
+| Completed plans, former UI authority, or rejected options | [Documentation archive](archive/README.md) or Git history                                                    |
+| Ideas outside current delivery                            | [Post-V2.0 notes](current/v2-post-v2.0-notes.md)                                                             |
 
 ## Current Position
 
-Gates 1–5 are accepted, Gate 6 technical spikes are complete, Gate 7 has
-frozen the V2 reference, and Phase 0.5 has issued the accepted Phase 1 visual
-implementation authorities:
+V2 provides a rig-local service and web workspaces for Plan, Observe, Library,
+and Process. V2.0 delivery is complete. V2.1 Phases 1–4 provide one configured
+Alpaca rig boundary, bounded camera exposure and abort, immutable original
+Library intake, and local solve evidence. The current delivery plan retains the
+remaining hardware-facing work and its proof limits.
 
-1. Composite workspace model.
-2. Acquire evidence workflows.
-3. Run mutation, reconnect, and control ownership.
-4. Process workspace.
-5. Contract harness and deterministic future-server proofs.
-
-Gate 5 was reopened and hardened after a future-server walkthrough found that
-several passing fixtures proved only schema shape or a partial workflow. The
-completed regrade is recorded in the
-[server-perspective audit](current/gate-05-server-audit.md). The accepted
-[Gate 7 walkthrough and decision log](archive/phase-1-foundation/gate-07-walkthrough.md) freezes
-the selected V2 reference.
-
-Phase 1 is closed: the local-web and host-verification evidence are recorded,
-and the branch-wide quality regression has landed its bounded fixes. Phase 2
-(Plan and Managed Runs) is also closed with fake-only managed-run evidence.
-Production Convergence has promoted that infrastructure and the accepted
-Nightbook UI into `apps/server` and `apps/web`. All five sequential Continuum
-Epics, `tkt-ezxr1fsb`, `tkt-n9yoieoz`, `tkt-uuom4upo`, `tkt-qffwfa47`, and
-`tkt-zcsucxyx`, are complete. The final production architecture serves the
-version-matched web bundle from the rig-local server origin and has migrated
-the Plan, fake managed-run Observe, Library delivery, and current Process
-handoff boundaries while retiring experimental runtime paths.
-Phase 3 (Observe, Acquire, and Capture) and Phase 4 (Library and Frame Review)
-are complete with deterministic local
-proof. Its opt-in Alpaca preflight adapter makes only declared GET reads; its
-Acquire and Capture workflows persist server-owned evidence, actions, and
-recovery truth. A real rig has not yet been contacted. Phase 4 Library and
-Frame Review now provides immutable captured-frame intake, inspection, durable
-review, comparison, and Observe handoff with local deterministic proof. Phase 5
-Process Workspace is also complete with durable session, deterministic Build,
-history, recovery, and restart proof. Phase 6 completes V2.0 with
-Access-protected remote viewing, a separate desktop shared-control route,
-bounded remote evidence, and a local-continuity outage drill. Future V2.1
-scope requires owner approval.
-
-`apps/web` source, CSS, and accepted screenshot evidence are the production
-visual authority. Retired prototype UI artifacts are available only through
-Git history and are not runtime implementation authority.
+The official future presentation is the Nightbook React demo and
+`@nightbook/ui` package in the external Nightbook workspace. Astro Console has
+an opt-in `?ui=beta` integration for all four workspaces. It remains an
+integration and feedback surface until projection alignment and explicit route
+promotion are complete. Existing non-beta pages remain the default, but their
+local visual system is not current design authority.
 
 ## Context Rules
 
-- `current/` contains active product, delivery, handoff, contract, and visual
-  implementation material.
-- `gates/` contains accepted decision evidence. Consult one gate at a time.
-- `infra/` is the current infrastructure reference, but infrastructure is
-  loaded only for decisions that cross that boundary.
-- `archive/` preserves superseded plans, handoffs, and explorations. Archived
-  material is non-authoritative and never part of broad default context.
-- Retired prototype UI material is available only through Git history.
-- Accepted gate decisions may be revisited only when new evidence conflicts
-  with a product invariant—not for copy polish or implementation convenience.
+- `current/` contains only live product, delivery, handoff, contract, and UI
+  direction.
+- `gates/` contains accepted product and ownership evidence. Consult one gate
+  at a time; do not use its prototype composition as visual authority.
+- `infra/` is loaded only for work that crosses that boundary.
+- `archive/` preserves superseded plans, handoffs, visual systems, UX catalogs,
+  and explorations. It is historical and non-authoritative.
+- Product and service invariants still apply to the new UI. Old Astro Console
+  visual rules, component grammar, and screenshots do not.
 
 ## Product Thesis
 
 V2 is a web-first personal observatory workspace over a durable rig-local
-service. It helps an operator decide what to observe, acquire it safely,
-evaluate the evidence, and develop the result. The interface answers:
+service. It helps an operator decide what to observe, acquire it, evaluate the
+evidence, and develop the result. The interface should answer:
 
 1. What is the observatory doing, and is it healthy?
 2. What decision or intervention is useful now?
 3. What evidence explains that recommendation?
-
-Information density is expected. Equal visual weight is not.

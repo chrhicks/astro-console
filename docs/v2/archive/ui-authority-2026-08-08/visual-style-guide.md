@@ -1,6 +1,6 @@
 # V2 Visual Style Guide
 
-Status: **Nightbook final visual implementation authority**
+Status: **historical Astro Console-local visual authority**
 
 This guide tells an implementation agent how V2 should look and read after the
 product model is already known. It is not permission to change that model.
@@ -11,8 +11,8 @@ product model is already known. It is not permission to change that model.
 visual authority. Retired UI studies are available only through Git history and
 never provide current palette, type, shape, or composition authority.
 
-Read in this order: the [product specification](product-spec.md),
-[UX guidance](../ux-design-guidance.md), accepted contract/gate evidence, this
+Read in this order: the [product specification](../../current/product-spec.md),
+[UX guidance](ux-design-guidance.md), accepted contract/gate evidence, this
 guide, then the [component library](ui-component-library.md) and
 [build contract](ui-build-contract.md). If a visual rule conflicts with owner,
 freshness, consequence, recovery, or access semantics, preserve the semantic

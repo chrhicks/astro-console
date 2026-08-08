@@ -11,8 +11,8 @@ Current working artifacts:
 [outer-shell study](phase-0.5-shell-study.md), then the
 [workspace-language study](../../../../prototype/v2-ui/archive/phase-0.5/phase-0.5-workspace-language-study.html), then the
 [awkward-state audit](phase-0.5-awkward-state-audit.md), then the
-[visual style guide](../../current/visual-style-guide.md), [UI component library](../../current/ui-component-library.md),
-and [UI build contract](../../current/ui-build-contract.md). The earlier
+[visual style guide](../ui-authority-2026-08-08/visual-style-guide.md), [UI component library](../ui-authority-2026-08-08/ui-component-library.md),
+and [UI build contract](../ui-authority-2026-08-08/ui-build-contract.md). The earlier
 [design-system.md](design-system.md) is a superseded Phase 0.5 bridge draft;
 use it only for historical rationale, not implementation authority.
 
@@ -23,9 +23,9 @@ Phase 0.5 is accepted and complete. Its acceptance criteria are evidenced by:
 | Criterion | Accepted evidence |
 | --- | --- |
 | Product-faithful, non-generic visual language | [reference audit](phase-0.5-reference-audit.md), [outer-shell study](phase-0.5-shell-study.md), and [accepted prototype hub](../../../../prototype/v2-ui/index.html) |
-| Visual and interaction implementation rules | [visual style guide](../../current/visual-style-guide.md) |
-| Reusable product patterns, states, responsive, and accessibility behavior | [UI component library](../../current/ui-component-library.md) and its visual companion |
-| Data-to-UI and semantic implementation boundary | [UI build contract](../../current/ui-build-contract.md) |
+| Visual and interaction implementation rules | [visual style guide](../ui-authority-2026-08-08/visual-style-guide.md) |
+| Reusable product patterns, states, responsive, and accessibility behavior | [UI component library](../ui-authority-2026-08-08/ui-component-library.md) and its visual companion |
+| Data-to-UI and semantic implementation boundary | [UI build contract](../ui-authority-2026-08-08/ui-build-contract.md) |
 | Selected identity and governed release assets | [brand foundation](../../../../prototype/v2-ui/phase-0.5-brand-style-guide.html) and [Brand V1 package](../../../../prototype/v2-ui/assets/brand/v1/README.md) |
 
 These are Phase 1's accepted visual implementation authorities. The frozen
@@ -172,7 +172,7 @@ Phase 0.5 is complete only when:
 
 ## Reference Set
 
-- [V2 UX and design guidance](../../ux-design-guidance.md)
+- [V2 UX and design guidance](../ui-authority-2026-08-08/ux-design-guidance.md)
 - [Current product specification](../../current/product-spec.md)
 - [Gate 7 walkthrough and decision log](../phase-1-foundation/gate-07-walkthrough.md)
 - [Current delivery plan](../../current/delivery-plan.md)
