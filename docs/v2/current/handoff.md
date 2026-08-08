@@ -47,13 +47,41 @@ The first local bundle now provides:
 - a checksum-pinned five-file M101 and NGC 7000 local corpus;
 - a bounded deterministic Alpaca simulator with real FITS-derived ImageBytes;
 - a simulated real exposure through Acquire, Library intake, restart, and
-  no-replay proof; and
-- passing Designer review against Nightbook at wide, 768 px, and 390 px.
-- a live GET-only `ready` projection for the ASI2600MC Pro, ASI Mount, and ZWO
+  no-replay proof;
+- passing Designer review against Nightbook at wide, 768 px, and 390 px;
+- and a live GET-only `ready` projection for the ASI2600MC Pro, ASI Mount, and ZWO
   EAF after matching current device numbers and `UniqueID` values.
 
-The corpus remains ignored and local. The implementation is not staged or
-committed.
+The corpus remains ignored and local. The first foundation is committed as
+`10e5b34` (`feat: add beta real-truth foundation`).
+
+## Development Simulation Inspection
+
+From `apps/server`, `npm run dev:sim:inspect` starts the bounded Alpaca
+simulator, an isolated Astro Console origin, the beta web app, and a dedicated
+inspection browser. Before startup, it enumerates the evidence from every
+declared scenario, restores the requested scenario, and verifies the four
+referenced local FITS copies against the committed SHA-256 manifest.
+
+All beta workspaces show a persistent **Simulation - not live hardware** strip.
+Desktop owners can select and reset scenarios and advance deterministic time.
+**Load** changes simulator state only. `ready-rig` and
+`optional-device-unavailable` provide **Run preflight test**, which starts the
+accepted fixture run when needed and runs the normal Observe preflight.
+`exposure-success` provides **Capture test frame**, which runs one 15-second
+M101 exposure through the normal Plan, Preflight, camera command, immutable
+original, and Library paths. Every other selectable scenario says that its
+beta UI driver is not implemented yet and keeps capture disabled; those states
+remain available for direct simulator and adapter tests. Phone and read-only
+clients see the same context without mutation controls. NGC 7000 test capture
+also remains disabled because its truthful 120-second exposure is outside the
+current 60-second camera-command boundary.
+
+Current automated proof is green: server 121/121 and web 126/126. Functional
+and Designer browser review covered the supported preflight and
+capture-to-Library paths, unsupported-driver guidance, and Library preview
+containment at wide, 768 px, and 390 px widths. This inspection work contacted
+no provider or hardware.
 
 ## Proof Boundary
 
@@ -68,11 +96,12 @@ tools, a new physical exposure, or physical image quality.
 
 ## Next Action
 
-Continue with the supervised execution spine in the accepted plan: replace
-presentation-only acquisition and capture strings with structured facts, add
-durable service-owned work, and reconcile accepted work after restart without
-replay. Keep hardware commands behind a separate owner-approved indoor or
-outdoor proof step.
+Use the one-command simulator inspection for the next supervised execution
+spine: replace presentation-only acquisition and capture strings with
+structured facts, add durable service-owned work, and reconcile accepted work
+after restart without replay. The owner has approved small, bounded slews,
+focus adjustments, and camera use for endpoint and behavior verification. Ask
+before any larger action so the owner can monitor it in person.
 
 Completed chronology and former authority are indexed in the
 [documentation archive](../archive/README.md).

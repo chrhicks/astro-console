@@ -1,5 +1,5 @@
 import { Effect, Exit, Match, Schema, Scope } from 'effect'
-import type { ServerResponse } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
   BootstrapHttpSuccessEnvelope,
   CommandHttpFailureEnvelope,
@@ -70,6 +70,12 @@ import {
 import { AdapterObservation, isOwner, reject } from '../http/origin-handlers.ts'
 import { BodyTooLarge, body } from '../http/request-body.ts'
 import { json, responseHeaders, unauthenticated } from '../http/response.ts'
+import {
+  controlDevelopmentSimulation,
+  DevelopmentSimulationControlRejected,
+  readDevelopmentSimulation,
+  type DevelopmentSimulationConfig,
+} from '../http/development-simulation.ts'
 import {
   commandFailureStatuses,
   observeCommandFromRequest,
@@ -176,6 +182,7 @@ export function createLocalWebService(
     readonly capturedFrameStorage?: CapturedFrameStorage
     readonly frameInspectionStorage?: FrameInspectionStorage
     readonly plateSolveWorker?: PlateSolveWorkerConfig
+    readonly simulation?: DevelopmentSimulationConfig
   } = {},
 ) {
   const database = openOriginDatabase(databasePath)
@@ -488,6 +495,7 @@ export function createLocalWebService(
       ? deterministicPolarMeasurementProvider
       : undefined)
   const cameraProvider = options.cameraProvider
+  const developmentSimulation = options.simulation
 
   const handler = (requestAdmission: RequestAdmission = identityResolver) =>
     createOriginRouter({
@@ -548,6 +556,61 @@ export function createLocalWebService(
             }),
           ),
         ).then(({ status, body }) => json(response, status, body)),
+      ...(developmentSimulation === undefined
+        ? {}
+        : {
+            simulationProjection: async (response: ServerResponse) => {
+              try {
+                return json(
+                  response,
+                  200,
+                  await readDevelopmentSimulation(developmentSimulation),
+                )
+              } catch {
+                return json(response, 503, {
+                  mode: 'alpaca',
+                  notice: 'SIMULATION · NOT LIVE HARDWARE',
+                  state: 'unavailable',
+                  launchScenario: developmentSimulation.launchScenario,
+                  message: 'The development simulator is unavailable.',
+                })
+              }
+            },
+            simulationControl: async (
+              response: ServerResponse,
+              identity: LocalIdentity,
+              request: IncomingMessage,
+            ) => {
+              try {
+                return json(
+                  response,
+                  200,
+                  await controlDevelopmentSimulation(
+                    developmentSimulation,
+                    identity,
+                    await body(request),
+                  ),
+                )
+              } catch (cause) {
+                const rejected =
+                  cause instanceof DevelopmentSimulationControlRejected
+                    ? cause
+                    : undefined
+                return json(response, rejected?.status ?? 503, {
+                  outcome: 'rejected',
+                  reason:
+                    rejected?.status === 403
+                      ? 'ControlRequired'
+                      : rejected?.status === 400
+                        ? 'InvalidInput'
+                        : 'SimulatorUnavailable',
+                  message:
+                    rejected?.message ??
+                    'The development simulator is unavailable.',
+                })
+              }
+            },
+          }),
       planWorkspace: (response) => workspace(response, database, 'plan'),
       processWorkspace: (response, url, identity) =>
         url.searchParams.has('sourceAssetId')
@@ -1487,14 +1550,14 @@ export const startOrigin = () =>
         webDistPath: config.runtime.webDistPath,
         previewRoot: config.runtime.previewRoot,
         capturedFrameStorage: {
-          originalsRoot: '/var/lib/astro-console/originals',
+          originalsRoot: config.runtime.originalsRoot,
         },
         frameInspectionStorage: {
-          originalsRoot: '/var/lib/astro-console/originals',
+          originalsRoot: config.runtime.originalsRoot,
           previewsRoot: config.runtime.previewRoot,
         },
         plateSolveWorker: {
-          originalsRoot: '/var/lib/astro-console/originals',
+          originalsRoot: config.runtime.originalsRoot,
           executable: config.plateSolve.executable,
           indexesRoot: config.plateSolve.indexesRoot,
           timeoutMs: config.plateSolve.timeoutMs,
@@ -1503,6 +1566,9 @@ export const startOrigin = () =>
           scaleHighDeg: config.plateSolve.scaleHighDeg,
           searchRadiusDeg: config.plateSolve.searchRadiusDeg,
         },
+        ...(config.simulation === undefined
+          ? {}
+          : { simulation: config.simulation }),
       },
     )
     const remote = await service.listen(

@@ -1,6 +1,10 @@
 import { Config, ConfigProvider, Effect, Option } from 'effect'
 import type { ProcessorConfig } from './processor-config.ts'
 import type { R2PublisherConfig } from './publisher-config.ts'
+import {
+  alpacaSimulationScenarios,
+  type AlpacaSimulationScenario,
+} from '../simulator/alpaca-simulator.ts'
 
 const optional = (name: string) => Config.option(Config.string(name))
 const text = (name: string, fallback?: string) =>
@@ -30,6 +34,7 @@ export type OriginServerConfig = {
     readonly host: string
     readonly webDistPath: string
     readonly previewRoot: string
+    readonly originalsRoot: string
     readonly localOwnerPort?: number
     readonly remoteDesktopPort?: number
   }
@@ -46,6 +51,7 @@ export type OriginServerConfig = {
       }
   readonly fixture:
     | 'm27'
+    | 'preflight'
     | 'polar'
     | 'target-deep-sky'
     | 'target-lunar'
@@ -61,6 +67,7 @@ export type OriginServerConfig = {
   readonly downloadGrant:
     { readonly url: string; readonly secretPath: string } | undefined
   readonly preflightProvider: PreflightProviderConfig | undefined
+  readonly simulation: DevelopmentSimulationEnvironment | undefined
   readonly plateSolve: {
     readonly executable: string
     readonly indexesRoot: string
@@ -70,6 +77,11 @@ export type OriginServerConfig = {
     readonly scaleHighDeg: number
     readonly searchRadiusDeg: number
   }
+}
+
+export type DevelopmentSimulationEnvironment = {
+  readonly origin: string
+  readonly launchScenario: AlpacaSimulationScenario
 }
 
 export type PreflightProviderConfig = {
@@ -116,7 +128,14 @@ export const originServerConfig = Config.all({
   release: text('ASTRO_RELEASE', 'server'),
   webDistPath: text('ASTRO_WEB_DIST', '../web/dist'),
   previewRoot: text('ASTRO_PREVIEW_ROOT', '/var/lib/astro-console/previews'),
-  plateSolveExecutable: text('ASTRO_PLATE_SOLVE_EXECUTABLE', '/usr/bin/solve-field'),
+  originalsRoot: text(
+    'ASTRO_ORIGINALS_ROOT',
+    '/var/lib/astro-console/originals',
+  ),
+  plateSolveExecutable: text(
+    'ASTRO_PLATE_SOLVE_EXECUTABLE',
+    '/usr/bin/solve-field',
+  ),
   plateSolveIndexesRoot: text(
     'ASTRO_PLATE_SOLVE_INDEXES_ROOT',
     '/var/lib/astro-console/astrometry-indexes',
@@ -154,6 +173,9 @@ export const originServerConfig = Config.all({
   preflightFilterWheelUniqueId: optional(
     'ASTRO_PREFLIGHT_ALPACA_FILTER_WHEEL_UNIQUE_ID',
   ),
+  simulationMode: text('ASTRO_SIMULATION_MODE', 'disabled'),
+  simulatorOrigin: optional('ASTRO_SIMULATOR_ORIGIN'),
+  simulatorScenario: optional('ASTRO_SIMULATOR_SCENARIO'),
 }).pipe(
   Config.mapOrFail(
     (input): Effect.Effect<OriginServerConfig, Config.ConfigError> => {
@@ -188,6 +210,7 @@ export const originServerConfig = Config.all({
       if (
         Option.isSome(input.fixture) &&
         input.fixture.value !== 'm27' &&
+        input.fixture.value !== 'preflight' &&
         input.fixture.value !== 'polar' &&
         input.fixture.value !== 'target-deep-sky' &&
         input.fixture.value !== 'target-lunar' &&
@@ -201,7 +224,7 @@ export const originServerConfig = Config.all({
         input.fixture.value !== 'library-published'
       )
         return configFailure(
-          'ASTRO_SERVER_FIXTURE must be m27, polar, target-deep-sky, target-lunar, target-correction, target-verification, live-frame, live-frame-library, managed-capture, acquire-recovery, plan-draft, or library-published when set',
+          'ASTRO_SERVER_FIXTURE must be m27, preflight, polar, target-deep-sky, target-lunar, target-correction, target-verification, live-frame, live-frame-library, managed-capture, acquire-recovery, plan-draft, or library-published when set',
         )
       if (
         Option.isNone(input.downloadGrantUrl) &&
@@ -244,6 +267,7 @@ function originServer(input: {
   readonly release: string
   readonly webDistPath: string
   readonly previewRoot: string
+  readonly originalsRoot: string
   readonly plateSolveExecutable: string
   readonly plateSolveIndexesRoot: string
   readonly plateSolveTimeoutMs: string
@@ -265,11 +289,15 @@ function originServer(input: {
   readonly preflightFocuserUniqueId: Option.Option<string>
   readonly preflightFilterWheelDeviceNumber: Option.Option<string>
   readonly preflightFilterWheelUniqueId: Option.Option<string>
+  readonly simulationMode: string
+  readonly simulatorOrigin: Option.Option<string>
+  readonly simulatorScenario: Option.Option<string>
 }) {
   return Effect.gen(function* () {
     const fixture =
       Option.isSome(input.fixture) &&
       (input.fixture.value === 'm27' ||
+        input.fixture.value === 'preflight' ||
         input.fixture.value === 'polar' ||
         input.fixture.value === 'target-deep-sky' ||
         input.fixture.value === 'target-lunar' ||
@@ -299,6 +327,10 @@ function originServer(input: {
       input.previewRoot,
       'Runtime configuration contains an invalid non-secret value',
     )
+    const originalsRoot = yield* validText(
+      input.originalsRoot,
+      'Runtime configuration contains an invalid originals root',
+    )
     const plateSolveExecutable = yield* validText(
       input.plateSolveExecutable,
       'Runtime configuration contains an invalid non-secret value',
@@ -308,7 +340,11 @@ function originServer(input: {
       'Runtime configuration contains an invalid non-secret value',
     )
     const plateSolveTimeoutMs = Number(input.plateSolveTimeoutMs)
-    if (!Number.isInteger(plateSolveTimeoutMs) || plateSolveTimeoutMs < 1_000 || plateSolveTimeoutMs > 300_000)
+    if (
+      !Number.isInteger(plateSolveTimeoutMs) ||
+      plateSolveTimeoutMs < 1_000 ||
+      plateSolveTimeoutMs > 300_000
+    )
       return yield* configFailure(
         'ASTRO_PLATE_SOLVE_TIMEOUT_MS must be an integer between 1000 and 300000',
       )
@@ -336,6 +372,7 @@ function originServer(input: {
         return yield* configFailure(
           'Fixture admission requires loopback development binding',
         )
+      const simulation = yield* configuredDevelopmentSimulation(input)
       return yield* Effect.succeed<OriginServerConfig>({
         runtime: {
           databasePath,
@@ -344,6 +381,7 @@ function originServer(input: {
           host: input.bind,
           webDistPath,
           previewRoot,
+          originalsRoot,
         },
         admission: { mode: 'development' as const, client: input.client },
         fixture,
@@ -356,6 +394,7 @@ function originServer(input: {
               }
             : undefined,
         preflightProvider,
+        simulation,
         plateSolve: {
           executable: plateSolveExecutable,
           indexesRoot: plateSolveIndexesRoot,
@@ -410,6 +449,7 @@ function originServer(input: {
         host: input.bind,
         webDistPath,
         previewRoot,
+        originalsRoot,
         localOwnerPort: Number(input.localOwnerPort.value),
         ...(Option.isSome(input.remoteDesktopPort)
           ? { remoteDesktopPort: Number(input.remoteDesktopPort.value) }
@@ -434,6 +474,7 @@ function originServer(input: {
             }
           : undefined,
       preflightProvider,
+      simulation: undefined,
       plateSolve: {
         executable: plateSolveExecutable,
         indexesRoot: plateSolveIndexesRoot,
@@ -445,6 +486,52 @@ function originServer(input: {
       },
     })
   })
+}
+
+function configuredDevelopmentSimulation(input: {
+  readonly simulationMode: string
+  readonly simulatorOrigin: Option.Option<string>
+  readonly simulatorScenario: Option.Option<string>
+}) {
+  if (input.simulationMode === 'disabled') return Effect.succeed(undefined)
+  if (input.simulationMode !== 'alpaca')
+    return configFailure('ASTRO_SIMULATION_MODE must be disabled or alpaca')
+  const origin = Option.getOrUndefined(input.simulatorOrigin)
+  const launchScenario = Option.getOrUndefined(input.simulatorScenario)
+  if (
+    origin === undefined ||
+    launchScenario === undefined ||
+    !URL.canParse(origin) ||
+    !isSimulationScenario(launchScenario)
+  )
+    return configFailure(
+      'Alpaca simulation requires a loopback simulator origin and known scenario.',
+    )
+  const url = new URL(origin)
+  if (
+    url.protocol !== 'http:' ||
+    (url.hostname !== '127.0.0.1' &&
+      url.hostname !== 'localhost' &&
+      url.hostname !== '[::1]') ||
+    url.username !== '' ||
+    url.password !== '' ||
+    url.pathname !== '/' ||
+    url.search !== '' ||
+    url.hash !== ''
+  )
+    return configFailure(
+      'Alpaca simulation requires a plain HTTP loopback origin without credentials or a path.',
+    )
+  return Effect.succeed({
+    origin: url.origin,
+    launchScenario,
+  })
+}
+
+function isSimulationScenario(
+  value: string,
+): value is AlpacaSimulationScenario {
+  return alpacaSimulationScenarios.some((scenario) => scenario === value)
 }
 
 function configuredPreflightProvider(input: {

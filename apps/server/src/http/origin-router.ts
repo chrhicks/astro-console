@@ -31,6 +31,15 @@ export type OriginRouterDependencies = {
     identity: LocalIdentity,
     request: IncomingMessage,
   ) => RouteResult
+  readonly simulationProjection?: (
+    response: ServerResponse,
+    identity: LocalIdentity,
+  ) => RouteResult
+  readonly simulationControl?: (
+    response: ServerResponse,
+    identity: LocalIdentity,
+    request: IncomingMessage,
+  ) => RouteResult
   readonly planWorkspace: (response: ServerResponse) => RouteResult
   readonly processWorkspace: (
     response: ServerResponse,
@@ -113,6 +122,18 @@ export const createOriginRouter =
       return dependencies.events(request, response, identity)
     if (request.method === 'POST' && url.pathname === '/api/commands/control')
       return dependencies.control(response, identity, request)
+    if (
+      request.method === 'GET' &&
+      url.pathname === '/api/simulation' &&
+      dependencies.simulationProjection !== undefined
+    )
+      return dependencies.simulationProjection(response, identity)
+    if (
+      request.method === 'POST' &&
+      url.pathname === '/api/simulation' &&
+      dependencies.simulationControl !== undefined
+    )
+      return dependencies.simulationControl(response, identity, request)
     if (request.method === 'GET' && url.pathname === '/api/workspaces/plan')
       return dependencies.planWorkspace(response)
     if (request.method === 'GET' && url.pathname === '/api/workspaces/process')

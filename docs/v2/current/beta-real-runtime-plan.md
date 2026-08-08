@@ -109,6 +109,13 @@ representations.
 - Prove checksum, intake, preview or explicit preview limitation, restart, and
   browser projection.
 
+The development inspection path is now `npm run dev:sim:inspect` from
+`apps/server`. It verifies all scenario-selected FITS copies before startup and
+opens the Nightbook beta with a persistent simulation context strip. Its first
+interactive capture is deliberately limited to truthful 15-second M101 frames;
+the 120-second NGC 7000 frames remain display and workflow evidence until the
+camera command accepts that duration.
+
 ### 3. Live configured-rig truth
 
 - Activate reviewed host-managed Alpaca endpoint, device-number, and

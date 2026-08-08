@@ -116,6 +116,7 @@ test('focused executable configurations decode defaults and conditional branches
     host: '127.0.0.1',
     webDistPath: '../web/dist',
     previewRoot: '/var/lib/astro-console/previews',
+    originalsRoot: '/var/lib/astro-console/originals',
   })
   assert.deepEqual(development.admission, {
     mode: 'development',
@@ -131,6 +132,14 @@ test('focused executable configurations decode defaults and conditional branches
     searchRadiusDeg: 15,
   })
   assert.equal(
+    (
+      await read(originServerConfig, {
+        ASTRO_ORIGINALS_ROOT: '/tmp/astro-simulation-originals',
+      })
+    ).runtime.originalsRoot,
+    '/tmp/astro-simulation-originals',
+  )
+  assert.equal(
     (await read(originServerConfig, { ASTRO_LOCAL_WEB_FIXTURE: 'plan-draft' }))
       .fixture,
     'plan-draft',
@@ -139,6 +148,11 @@ test('focused executable configurations decode defaults and conditional branches
     (await read(originServerConfig, { ASTRO_SERVER_FIXTURE: 'plan-draft' }))
       .fixture,
     'plan-draft',
+  )
+  assert.equal(
+    (await read(originServerConfig, { ASTRO_SERVER_FIXTURE: 'preflight' }))
+      .fixture,
+    'preflight',
   )
   const legacyOrigin = await read(originServerConfig, {
     ASTRO_LOCAL_WEB_BIND: '127.0.0.1',
@@ -154,6 +168,7 @@ test('focused executable configurations decode defaults and conditional branches
     host: '127.0.0.1',
     webDistPath: '../web/dist',
     previewRoot: '/var/lib/astro-console/previews',
+    originalsRoot: '/var/lib/astro-console/originals',
   })
   assert.equal(legacyOrigin.admission.mode, 'development')
   if (legacyOrigin.admission.mode === 'development')
@@ -205,6 +220,9 @@ test('focused executable configurations decode defaults and conditional branches
     ASTRO_ADMISSION_MODE: 'production',
     ASTRO_SERVER_BIND: '0.0.0.0',
     ASTRO_SERVER_DB: '/var/lib/astro-console/state.sqlite',
+    ASTRO_SIMULATION_MODE: 'alpaca',
+    ASTRO_SIMULATOR_ORIGIN: 'http://127.0.0.1:32324',
+    ASTRO_SIMULATOR_SCENARIO: 'exposure-success',
     CF_ACCESS_ISSUER: 'https://access.example',
     CF_ACCESS_AUDIENCE: 'audience',
     CF_ACCESS_JWKS_URL: 'https://access.example/certs',
@@ -214,6 +232,7 @@ test('focused executable configurations decode defaults and conditional branches
   })
   assert.equal(production.admission.mode, 'production')
   assert.equal(production.admission.cacheTtlMs, 300000)
+  assert.equal(production.simulation, undefined)
   assert.deepEqual(
     (
       await read(originServerConfig, {

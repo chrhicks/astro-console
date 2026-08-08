@@ -25,6 +25,7 @@ import type {
   ShellView,
   StatusTone,
 } from '../presentation'
+import { DevelopmentSimulationStrip } from './development-simulation'
 import '@nightbook/ui/styles.css'
 import './beta-observe.css'
 
@@ -856,64 +857,67 @@ function BetaCommandBar({
     workspace === 'observe' &&
     projection.observe.source?.acquire?.acquisitionMethod !== undefined
   return (
-    <header className="beta-command-bar">
-      <a
-        className="beta-brand"
-        href={`/${workspace}?ui=beta`}
-        aria-label={`Nightbook beta ${workspaceLabel}`}
-      >
-        <span aria-hidden="true">N</span>
-        <span>
-          <strong>Nightbook</strong>
-          <small>Backyard observatory · beta</small>
-        </span>
-      </a>
-      <nav aria-label="Workspaces">
+    <div className="beta-shell-header">
+      <header className="beta-command-bar">
         <a
-          href="/plan?ui=beta"
-          aria-current={workspace === 'plan' ? 'page' : undefined}
+          className="beta-brand"
+          href={`/${workspace}?ui=beta`}
+          aria-label={`Nightbook beta ${workspaceLabel}`}
         >
-          Plan
+          <span aria-hidden="true">N</span>
+          <span>
+            <strong>Nightbook</strong>
+            <small>Backyard observatory · beta</small>
+          </span>
         </a>
-        <a
-          href="/observe?ui=beta"
-          aria-current={workspace === 'observe' ? 'page' : undefined}
-        >
-          Observe
-        </a>
-        <a
-          href="/library?ui=beta"
-          aria-current={workspace === 'library' ? 'page' : undefined}
-        >
-          Library
-        </a>
-        <a
-          href="/process?ui=beta"
-          aria-current={workspace === 'process' ? 'page' : undefined}
-        >
-          Process
-        </a>
-      </nav>
-      <div className="beta-run-capsule" aria-label="Current run">
-        <i
-          data-active={run === undefined ? 'false' : 'true'}
-          aria-hidden="true"
+        <nav aria-label="Workspaces">
+          <a
+            href="/plan?ui=beta"
+            aria-current={workspace === 'plan' ? 'page' : undefined}
+          >
+            Plan
+          </a>
+          <a
+            href="/observe?ui=beta"
+            aria-current={workspace === 'observe' ? 'page' : undefined}
+          >
+            Observe
+          </a>
+          <a
+            href="/library?ui=beta"
+            aria-current={workspace === 'library' ? 'page' : undefined}
+          >
+            Library
+          </a>
+          <a
+            href="/process?ui=beta"
+            aria-current={workspace === 'process' ? 'page' : undefined}
+          >
+            Process
+          </a>
+        </nav>
+        <div className="beta-run-capsule" aria-label="Current run">
+          <i
+            data-active={run === undefined ? 'false' : 'true'}
+            aria-hidden="true"
+          />
+          <b>{run?.target ?? (loading ? 'WAIT' : 'NONE')}</b>
+          <span>
+            {targetAcquisition
+              ? lifecycleLabel(projection.observe)
+              : (run?.phase ?? (loading ? 'Loading' : 'No run'))}
+          </span>
+          <strong>{percent === undefined ? '—' : `${percent}%`}</strong>
+        </div>
+        <BetaHealth health={projection.shell.health} />
+        <BetaControl
+          shell={projection.shell}
+          loading={loading}
+          presentation={controlPresentation}
         />
-        <b>{run?.target ?? (loading ? 'WAIT' : 'NONE')}</b>
-        <span>
-          {targetAcquisition
-            ? lifecycleLabel(projection.observe)
-            : (run?.phase ?? (loading ? 'Loading' : 'No run'))}
-        </span>
-        <strong>{percent === undefined ? '—' : `${percent}%`}</strong>
-      </div>
-      <BetaHealth health={projection.shell.health} />
-      <BetaControl
-        shell={projection.shell}
-        loading={loading}
-        presentation={controlPresentation}
-      />
-    </header>
+      </header>
+      <DevelopmentSimulationStrip readOnly={projection.shell.readOnly} />
+    </div>
   )
 }
 

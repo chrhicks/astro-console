@@ -40,5 +40,49 @@ exposure and abort, provider and reconciliation failures, bounded image
 retrieval, restart without replay, target-evidence progression, solve/no-solve
 inputs, and pinned focus-quality facts.
 
+## Inspect the beta UI
+
+After preparing the current four FITS files, start the complete local
+simulation, Astro Console origin, beta web app, and isolated inspection browser
+with one command:
+
+```sh
+npm run dev:sim:inspect
+```
+
+The default opens `/observe?ui=beta` as the desktop owner with the
+`exposure-success` scenario. The runner verifies every FITS file used by every
+selectable scenario against the committed checksums before it starts Astro
+Console. It keeps its database, retained originals, previews, and Chrome
+profile under ignored `.astro-server/` paths.
+
+Use bounded options when a focused state is needed:
+
+```sh
+npm run dev:sim:inspect -- \
+  --scenario=focus-quality-degradation \
+  --client=phone \
+  --path=/library?ui=beta
+```
+
+The beta simulation strip identifies the app as simulated, selects or resets a
+scenario, advances the deterministic clock, and shows the pinned FITS filename
+and checksum. **Load** changes simulator state; it does not run the named
+workflow. The current UI drivers are:
+
+- `ready-rig` and `optional-device-unavailable`: **Run preflight test** starts
+  the accepted fixture run when needed, runs the normal Observe preflight, and
+  lets the service projection update through the normal snapshot and SSE path;
+- `exposure-success`: **Capture test frame** uses the normal Plan, Preflight,
+  camera command, captured-original, and Library routes, then links to the
+  retained Library asset; and
+- every other scenario: the strip names that its beta UI driver is not yet
+  implemented and leaves capture disabled. The scenario remains available for
+  direct simulator and adapter tests.
+
+The capture driver does not insert a Library fixture. Phone and read-only
+clients show the simulation context without mutation controls. None of these
+development controls contacts live hardware.
+
 The corpus manifest records source paths and SHA-256 values. Prepared files and
 generated payloads remain under ignored `.tmp/alpaca-simulation-corpus/`.

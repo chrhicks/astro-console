@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   LibraryAssetDetail as LibraryAssetDetailSchema,
@@ -252,6 +253,56 @@ test('keeps desktop review controls disabled for a read-only or stale projection
   assert.match(markup, /Desktop control is required/)
   assert.match(markup, /<button[^>]*disabled=""[^>]*>Accept<\/button>/)
   assert.match(markup, /<button[^>]*disabled=""[^>]*>Reject<\/button>/)
+})
+
+test('contains the wide review grid inside the available shell height', () => {
+  const styles = readFileSync(
+    new URL('./beta-library.css', import.meta.url),
+    'utf8',
+  )
+  const wideRule = styles.match(
+    /\.beta-library-review-grid\s*\{([^}]*)\}/s,
+  )?.[1]
+  assert.ok(wideRule)
+  assert.match(wideRule, /height:\s*100%/)
+  assert.match(wideRule, /min-height:\s*0/)
+  assert.doesNotMatch(wideRule, /100vh/)
+  assert.match(
+    styles,
+    /@media \(max-width: 1050px\)[\s\S]*?\.beta-library-review-grid\s*\{[^}]*height:\s*auto/,
+  )
+})
+
+test('keeps both Library preview modes inside the bounded wide review row', () => {
+  const styles = readFileSync(
+    new URL('./beta-library.css', import.meta.url),
+    'utf8',
+  )
+  const evidenceRule = Array.from(
+    styles.matchAll(/\.beta-library-evidence\s*\{([^}]*)\}/gs),
+  )
+    .map((match) => match[1])
+    .find((rule) => rule?.includes('height: 100%'))
+  const canvasRule = styles.match(
+    /\.beta-library-evidence \.nb-evidence-canvas\s*\{([^}]*)\}/s,
+  )?.[1]
+  assert.ok(evidenceRule)
+  assert.ok(canvasRule)
+  assert.match(evidenceRule, /height:\s*100%/)
+  assert.match(
+    evidenceRule,
+    /grid-template-rows:\s*minmax\(0,\s*1fr\) auto auto/,
+  )
+  assert.match(canvasRule, /height:\s*100%/)
+  assert.match(canvasRule, /aspect-ratio:\s*auto/)
+  assert.match(
+    styles,
+    /\.beta-library-evidence\[data-fit='aspect'\] \.nb-evidence-canvas > img\s*\{[^}]*object-fit:\s*contain/,
+  )
+  assert.match(
+    styles,
+    /\.beta-library-evidence\[data-fit='fill'\] \.nb-evidence-canvas > img\s*\{[^}]*object-fit:\s*cover/,
+  )
 })
 
 test('names loading and not-found detail states without exposing review actions', () => {
