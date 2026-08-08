@@ -35,6 +35,10 @@ to override `docs/v2/current/`, accepted gate records, or the UX guidance.
   — completed Process Workspace delivery record.
 - [Phase 6 implementation plan](phase-6/implementation-plan-2026-08-05.md)
   — completed remote viewing, shared-control, and deployment record.
+- [Nightbook beta adoption closeout](handoffs/nightbook-beta-adoption-2026-08-08.md)
+  — completed local proof that the packaged Nightbook component grammar can
+  compose Astro Console's Plan, Observe, Library, and Process workspaces while
+  production routes remain unchanged.
 - [V2.0 delivery plan](plans/v2-delivery-plan-2026-08-05.md) — completed
   V2.0 roadmap retained before the next multi-phase plan is defined.
 - [Phase 2 implementation plan](plans/phase-2-implementation-plan-2026-08-04.md)

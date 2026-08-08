@@ -37,6 +37,21 @@ owner-present Phase 5 outdoor acquire and modest capture. Keep the service
 rig-local; Cloudflare remains ingress and identity admission, not observatory
 authority.
 
+## Nightbook UI Adoption Boundary
+
+A separate, opt-in beta presentation now composes Plan, Observe, Library, and
+Process from the locally packed `@nightbook/ui` component library. This is a
+completed local UI-adoption proof, not a production-route migration. Existing
+workspaces remain the default, and no service, schema, contract, deployment,
+Arch host, provider, hardware, or physical-capture behavior changed.
+
+The remaining adoption gaps are service projections: authoritative per-action
+Process eligibility, complete Library detail for Process-created output, and a
+deterministic unfinished-session recovery journey. Address those only in a
+separately approved backend-alignment pass; do not approximate them with client
+fixtures or package-specific product logic. See the historical closeout record
+below for the full strategy, artifact identity, proof, and extension rules.
+
 ## Historical Records
 
 - [Phase 3–5 closeout record](../archive/handoffs/phase-3-to-5-closeout-2026-08-04.md)
@@ -44,3 +59,4 @@ authority.
 - [Phase 4 implementation plan](../archive/phase-4/implementation-plan-2026-08-04.md)
 - [Phase 5 implementation plan](../archive/phase-5/implementation-plan-2026-08-04.md)
 - [Phase 6 implementation and deployment record](../archive/phase-6/implementation-plan-2026-08-05.md)
+- [Nightbook beta adoption closeout](../archive/handoffs/nightbook-beta-adoption-2026-08-08.md)
