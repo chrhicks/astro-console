@@ -125,6 +125,7 @@ export function saveProcessOutputs(
       : { outcome: 'rejected', reason: 'InvalidInput' }
   const staged: Array<{
     readonly assetId: string
+    readonly sourceId: string
     readonly representation: 'linearMaster' | 'final'
     readonly finalPath: string
     readonly checksum: string
@@ -147,6 +148,7 @@ export function saveProcessOutputs(
       temporary = undefined
       staged.push({
         assetId,
+        sourceId: output.sourceId,
         representation: output.representation,
         finalPath,
         checksum,
@@ -170,6 +172,7 @@ export function saveProcessOutputs(
         revision: 1,
         role: output.representation,
         format: output.representation === 'final' ? 'tiff' : 'fits',
+        checksum: output.checksum,
         availability: 'availableLocally',
         capturedAt: new Date().toISOString(),
         comparisonGroupId: input.metadata?.comparisonGroupId ?? 'm27-stack-1',
@@ -177,6 +180,9 @@ export function saveProcessOutputs(
           sourceAssetIds: input.metadata?.sourceAssetIds ?? ['asset-m27-001'],
           runId: input.metadata?.runId ?? 'run-m27-001',
           solveAttemptId: input.metadata?.solveAttemptId ?? 'solve-m27-001',
+          processingSessionId: input.sessionId,
+          processingOutputId: output.sourceId,
+          operationIds: [],
         },
         representations: [
           { label: 'Permanent local output retained', state: 'available' },

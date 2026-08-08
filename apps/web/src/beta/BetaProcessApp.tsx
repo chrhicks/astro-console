@@ -35,6 +35,12 @@ import './beta-process.css'
 
 export type ProcessWorkspace = typeof ProcessingProjection.Type
 type Session = ProcessWorkspace['sessions'][number]
+type ProcessAction = ProcessWorkspace['actions'][number]
+type ProcessActionName = ProcessAction['action']
+type ProcessDenialReason = Extract<
+  ProcessAction,
+  { _tag: 'Ineligible' }
+>['reason']
 type HandoffState = 'loading' | 'not-found' | 'not-local' | 'unavailable'
 
 export type BetaProcessAppProps = {
@@ -160,6 +166,48 @@ const currentOutputId = (session: Session) => {
   return session.baseImage?._tag === 'DerivedOutput'
     ? session.baseImage.outputId
     : undefined
+}
+
+const processDenialMessages: Record<ProcessDenialReason, string> = {
+  ownerRequired: 'The current member must be an owner.',
+  readOnlyClient: 'A control-capable desktop client is required.',
+  sourceRequired: 'Select a supported local Library source.',
+  sessionActiveRequired: 'Resume the unfinished session first.',
+  sessionUnfinishedRequired: 'Only an unfinished session can resume.',
+  sessionDiscarded: 'The discarded session cannot change.',
+  currentImageRequired: 'A durable current image is required.',
+  previewReadyRequired: 'Compute an exact ready preview first.',
+  processingAttemptActive: 'Wait for the current processing attempt.',
+  failedAttemptRequired: 'No failed checkpoint is available to retry.',
+  undoUnavailable: 'There is no applied step to undo.',
+  redoUnavailable: 'There is no later applied step to redo.',
+  outputRequired: 'Create a durable processing output first.',
+  assistantFindingRequired: 'No current assistant finding is available.',
+  saveInProgress: 'Wait for the current Library save to finish.',
+}
+
+const processAction = (
+  actions: ReadonlyArray<ProcessAction> | undefined,
+  action: ProcessActionName,
+) => actions?.find((candidate) => candidate.action === action)
+
+const processActionReason = (
+  actions: ReadonlyArray<ProcessAction> | undefined,
+  action: ProcessActionName,
+) => {
+  const availability = processAction(actions, action)
+  if (availability?._tag === 'Eligible') return undefined
+  return availability?._tag === 'Ineligible'
+    ? processDenialMessages[availability.reason]
+    : 'The service did not project this Process action.'
+}
+
+function ProcessActionDenial({ reason }: { reason: string | undefined }) {
+  return reason ? (
+    <p className="beta-process-denial">
+      <b>Unavailable:</b> {reason}
+    </p>
+  ) : null
 }
 
 const lifecycleSteps = (session: Session) => [
@@ -297,12 +345,14 @@ function SourceEntry({
   handoff,
   state,
   disabled,
+  disabledReason,
   start,
 }: {
   assetId: string | undefined
   handoff: ProcessSourceHandoff | undefined
   state: HandoffState | undefined
   disabled: boolean
+  disabledReason: string | undefined
   start: () => void
 }) {
   const supported =
@@ -340,9 +390,19 @@ function SourceEntry({
         }
         actions={
           handoff && supported && local ? (
-            <Button tone="primary" disabled={disabled} onClick={start}>
-              Start durable session
-            </Button>
+            <Stack gap={4}>
+              <Button
+                tone="primary"
+                disabled={disabled}
+                title={disabledReason}
+                onClick={start}
+              >
+                Start durable session
+              </Button>
+              <ProcessActionDenial
+                reason={disabled ? disabledReason : undefined}
+              />
+            </Stack>
           ) : (
             <a
               className="nb-button nb-button--secondary nb-button--medium"
@@ -385,7 +445,12 @@ function ProcessDesktop({
   command: (command: object, label: string) => void
 }) {
   const session = selectedSession(workspace)
-  const readOnly = processCommandsProtected(projection) || !workspace
+  const authorityReason = processCommandsProtected(projection)
+    ? 'Current desktop owner authority is not confirmed.'
+    : undefined
+  const startReason =
+    authorityReason ??
+    processActionReason(workspace?.actions, 'StartProcessingSession')
   if (!session)
     return (
       <main
@@ -406,7 +471,8 @@ function ProcessDesktop({
           assetId={sourceAssetId}
           handoff={sourceHandoff}
           state={sourceHandoffState}
-          disabled={readOnly || !!pending}
+          disabled={startReason !== undefined || !!pending}
+          disabledReason={startReason}
           start={() =>
             sourceHandoff &&
             command(
@@ -425,8 +491,16 @@ function ProcessDesktop({
   const outputId = currentOutputId(session)
   const exactReady =
     session.preview?.state === 'ready' && session.preview.previewOutputId
-  const protectedAction =
-    readOnly || !!pending || session.lifecycle === 'discarded'
+  const actionReason = (action: ProcessActionName) =>
+    authorityReason ??
+    processActionReason(
+      workspace?.sessionActions.find(
+        (projection) => projection.sessionId === session.sessionId,
+      )?.actions,
+      action,
+    )
+  const protectedAction = (action: ProcessActionName) =>
+    !!pending || actionReason(action) !== undefined
   const previewState = session.failedAttempt
     ? 'Failed attempt'
     : session.activeAttempt
@@ -494,21 +568,27 @@ function ProcessDesktop({
                 items={lifecycleSteps(session)}
               />
               {session.lifecycle === 'unfinished' ? (
-                <Button
-                  disabled={protectedAction}
-                  onClick={() =>
-                    command(
-                      {
-                        _tag: 'ResumeProcessingSession',
-                        sessionId: session.sessionId,
-                        expectedProcessingRevision: session.revision,
-                      },
-                      'Resuming session',
-                    )
-                  }
-                >
-                  Resume session
-                </Button>
+                <Stack gap={4}>
+                  <Button
+                    disabled={protectedAction('ResumeProcessingSession')}
+                    title={actionReason('ResumeProcessingSession')}
+                    onClick={() =>
+                      command(
+                        {
+                          _tag: 'ResumeProcessingSession',
+                          sessionId: session.sessionId,
+                          expectedProcessingRevision: session.revision,
+                        },
+                        'Resuming session',
+                      )
+                    }
+                  >
+                    Resume session
+                  </Button>
+                  <ProcessActionDenial
+                    reason={actionReason('ResumeProcessingSession')}
+                  />
+                </Stack>
               ) : null}
             </Stack>
           </PanelBody>
@@ -571,25 +651,31 @@ function ProcessDesktop({
                     </DataList>
                   }
                   actions={
-                    <Button
-                      tone="primary"
-                      disabled={protectedAction}
-                      onClick={() =>
-                        command(
-                          {
-                            _tag: 'RetryProcessingStep',
-                            sessionId: session.sessionId,
-                            expectedProcessingRevision: session.revision,
-                            failedAttemptId: session.failedAttempt?.attemptId,
-                            checkpointId: session.failedAttempt?.checkpointId,
-                            idempotencyKey: crypto.randomUUID(),
-                          },
-                          'Retrying checkpoint',
-                        )
-                      }
-                    >
-                      Retry exact checkpoint
-                    </Button>
+                    <Stack gap={4}>
+                      <Button
+                        tone="primary"
+                        disabled={protectedAction('RetryProcessingStep')}
+                        title={actionReason('RetryProcessingStep')}
+                        onClick={() =>
+                          command(
+                            {
+                              _tag: 'RetryProcessingStep',
+                              sessionId: session.sessionId,
+                              expectedProcessingRevision: session.revision,
+                              failedAttemptId: session.failedAttempt?.attemptId,
+                              checkpointId: session.failedAttempt?.checkpointId,
+                              idempotencyKey: crypto.randomUUID(),
+                            },
+                            'Retrying checkpoint',
+                          )
+                        }
+                      >
+                        Retry exact checkpoint
+                      </Button>
+                      <ProcessActionDenial
+                        reason={actionReason('RetryProcessingStep')}
+                      />
+                    </Stack>
                   }
                 />
               ) : null}
@@ -619,7 +705,7 @@ function ProcessDesktop({
                       max={1}
                       step={0.05}
                       value={amount}
-                      disabled={protectedAction}
+                      disabled={protectedAction('SyncProcessingPreview')}
                       onChange={(event: ChangeEvent<HTMLInputElement>) =>
                         setAmount(Number(event.target.value))
                       }
@@ -631,7 +717,7 @@ function ProcessDesktop({
                   >
                     <Select
                       value={adapter}
-                      disabled={protectedAction}
+                      disabled={protectedAction('SyncProcessingPreview')}
                       onChange={(event: ChangeEvent<HTMLSelectElement>) =>
                         setAdapter(event.target.value)
                       }
@@ -646,7 +732,8 @@ function ProcessDesktop({
                   </Field>
                   <Button
                     tone="primary"
-                    disabled={protectedAction || !!session.activeAttempt}
+                    disabled={protectedAction('SyncProcessingPreview')}
+                    title={actionReason('SyncProcessingPreview')}
                     onClick={() =>
                       command(
                         {
@@ -670,9 +757,13 @@ function ProcessDesktop({
                   >
                     Preview Stretch
                   </Button>
+                  <ProcessActionDenial
+                    reason={actionReason('SyncProcessingPreview')}
+                  />
                   <Button
                     tone="primary"
-                    disabled={protectedAction || !exactReady}
+                    disabled={protectedAction('ApplyProcessingPreview')}
+                    title={actionReason('ApplyProcessingPreview')}
                     onClick={() =>
                       exactReady &&
                       command(
@@ -689,11 +780,13 @@ function ProcessDesktop({
                   >
                     Apply exact preview
                   </Button>
+                  <ProcessActionDenial
+                    reason={actionReason('ApplyProcessingPreview')}
+                  />
                   <Cluster>
                     <Button
-                      disabled={
-                        protectedAction || session.historyPosition === 0
-                      }
+                      disabled={protectedAction('UndoProcessingStep')}
+                      title={actionReason('UndoProcessingStep')}
                       onClick={() =>
                         command(
                           {
@@ -709,10 +802,8 @@ function ProcessDesktop({
                       Undo
                     </Button>
                     <Button
-                      disabled={
-                        protectedAction ||
-                        session.historyPosition === session.history.length
-                      }
+                      disabled={protectedAction('RedoProcessingStep')}
+                      title={actionReason('RedoProcessingStep')}
                       onClick={() =>
                         command(
                           {
@@ -728,8 +819,15 @@ function ProcessDesktop({
                       Redo
                     </Button>
                   </Cluster>
+                  <ProcessActionDenial
+                    reason={actionReason('UndoProcessingStep')}
+                  />
+                  <ProcessActionDenial
+                    reason={actionReason('RedoProcessingStep')}
+                  />
                   <Button
-                    disabled={protectedAction || !outputId}
+                    disabled={protectedAction('SaveProcessingArtifacts')}
+                    title={actionReason('SaveProcessingArtifacts')}
                     onClick={() =>
                       outputId &&
                       command(
@@ -748,6 +846,9 @@ function ProcessDesktop({
                   >
                     Save final TIFF to Library
                   </Button>
+                  <ProcessActionDenial
+                    reason={actionReason('SaveProcessingArtifacts')}
+                  />
                 </>
               ) : (
                 <AttentionCard

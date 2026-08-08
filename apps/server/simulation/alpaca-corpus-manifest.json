@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "sourceRoot": "/Users/chicks/dev/personal/astronomy/codex/astro/data",
+  "entries": [
+    {
+      "id": "m101-good-light",
+      "family": "M101, June 21",
+      "source": "2026-06-21-m101/raw/lights/22-38-07_15.00s_0000.fits",
+      "sha256": "3d4abc598e2168bddf9d43d7ce9acad788e5c288a7e6bc211013eea31d9d9e24",
+      "scenario": "Successful exposure and solve-capable real frame",
+      "copiedFilename": "m101-good-light.fits"
+    },
+    {
+      "id": "m101-clouded-light",
+      "family": "M101, June 21",
+      "source": "2026-06-21-m101/raw/lights/22-59-31_15.00s_0059.fits",
+      "sha256": "725ee6c049b75e592349f4061821384cd69d04fa34aeea5746d6abbbc603016c",
+      "scenario": "Cloud-obscured frame and honest no-solution or quality comparison",
+      "copiedFilename": "m101-clouded-light.fits"
+    },
+    {
+      "id": "ngc7000-first-light",
+      "family": "NGC 7000, August 6",
+      "source": "2026-08-06-ngc7000-first-light/raw/lights/2026-08-07_00-05-52__5.00_120.00s_0000.fits",
+      "sha256": "1c3ac674b043791336f66214d360da09d46b4e99f2265036220a3eb8133b49c3",
+      "scenario": "ASI2600MC Pro geometry, headers, preview, and severe focus evidence",
+      "copiedFilename": "ngc7000-first-light.fits"
+    },
+    {
+      "id": "ngc7000-dithered-light",
+      "family": "NGC 7000, August 6",
+      "source": "2026-08-06-ngc7000-first-light/raw/lights/2026-08-07_00-18-48__5.00_120.00s_0006.fits",
+      "sha256": "fac795d2e6236098bac09535972b438b84c702f041e9fe4ce2c73fa20b517524",
+      "scenario": "Successive-frame position comparison without claiming a correction",
+      "copiedFilename": "ngc7000-dithered-light.fits"
+    },
+    {
+      "id": "ngc7000-frame-quality",
+      "family": "NGC 7000, August 6",
+      "source": "2026-08-06-ngc7000-first-light/reports/frame-quality.csv",
+      "sha256": "7e6b7b6a04fead33b678a7c59e0f979e2cb21ab9ab7faee8552c0c9aa564eb34",
+      "scenario": "Recorded quality and focus-threshold facts",
+      "copiedFilename": "ngc7000-frame-quality.csv"
+    },
+    {
+      "id": "m13-source-light",
+      "family": "M13, May 24",
+      "source": "2026-05-24-m13/raw/lights/22-36-52_30.00s_0000.fits",
+      "sha256": "bf7eb486b8cdba50aa5fb7081b8d71c54551675fa5db9b0dc1b4c627a1ba6775",
+      "scenario": "Lights-only source and explicit calibration limitation",
+      "copiedFilename": "m13-source-light.fits"
+    },
+    {
+      "id": "m13-derived-output",
+      "family": "M13, May 24",
+      "source": "2026-05-24-m13/results/stack_all_corrected_2.fit",
+      "sha256": "49c45aa3c3b11b76f1cfc3a740b6b7d15758e024397cbdf9f94c4403de31c461",
+      "scenario": "Process output provenance and source-to-output Library lineage",
+      "copiedFilename": "m13-derived-output.fit"
+    },
+    {
+      "id": "m13-preview",
+      "family": "M13, May 24",
+      "source": "2026-05-24-m13/results/stack_all_preview.jpg",
+      "sha256": "3b8148a2e83fe3c9f9111f563bb5b6b54dfc7beb724113dc85ba103ad79976f8",
+      "scenario": "Existing preview for Process and Library comparison",
+      "copiedFilename": "m13-preview.jpg"
+    }
+  ]
+}

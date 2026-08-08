@@ -151,6 +151,7 @@ describe('hardened Processing domain', () => {
       ApplyCompleted: () => assert.fail('unexpected transition'),
       ApplyFailed: () => assert.fail('unexpected transition'),
       RetryStarted: () => assert.fail('unexpected transition'),
+      Resumed: () => assert.fail('unexpected transition'),
       HistoryMoved: () => assert.fail('unexpected transition'),
       LeftUnfinished: () => assert.fail('unexpected transition'),
       Discarded: () => assert.fail('unexpected transition'),

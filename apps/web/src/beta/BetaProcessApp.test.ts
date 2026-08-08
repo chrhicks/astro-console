@@ -21,6 +21,7 @@ const workspace = Schema.decodeUnknownSync(ProcessingProjection)({
   snapshotVersion: 8,
   eventCursor: 5,
   selectedSessionId: 'session-process-1',
+  actions: [{ _tag: 'Eligible', action: 'StartProcessingSession' }],
   sessions: [
     {
       sessionId: 'session-process-1',
@@ -53,6 +54,40 @@ const workspace = Schema.decodeUnknownSync(ProcessingProjection)({
       },
       assistantFindings: [],
       savedAssetIds: [],
+    },
+  ],
+  sessionActions: [
+    {
+      sessionId: 'session-process-1',
+      actions: [
+        {
+          _tag: 'Ineligible',
+          action: 'ResumeProcessingSession',
+          reason: 'sessionUnfinishedRequired',
+        },
+        { _tag: 'Eligible', action: 'SyncProcessingPreview' },
+        { _tag: 'Eligible', action: 'ApplyProcessingPreview' },
+        {
+          _tag: 'Ineligible',
+          action: 'UndoProcessingStep',
+          reason: 'undoUnavailable',
+        },
+        {
+          _tag: 'Ineligible',
+          action: 'RedoProcessingStep',
+          reason: 'redoUnavailable',
+        },
+        {
+          _tag: 'Ineligible',
+          action: 'RetryProcessingStep',
+          reason: 'failedAttemptRequired',
+        },
+        {
+          _tag: 'Ineligible',
+          action: 'SaveProcessingArtifacts',
+          reason: 'outputRequired',
+        },
+      ],
     },
   ],
   assets: [],
@@ -134,4 +169,65 @@ test('phone Process projection contains evidence and zero mutation controls', ()
   assert.match(bodyMarkup, /A preview is ready for exact apply on desktop/)
   assert.doesNotMatch(bodyMarkup, /<button/)
   assert.doesNotMatch(bodyMarkup, /<input|<select|<textarea/)
+})
+
+test('renders restart recovery and exact denial reasons from service eligibility', () => {
+  const unfinished = Schema.decodeUnknownSync(ProcessingProjection)({
+    ...workspace,
+    sessions: workspace.sessions.map((session) => ({
+      ...session,
+      revision: session.revision + 1,
+      lifecycle: 'unfinished',
+    })),
+    sessionActions: [
+      {
+        sessionId: 'session-process-1',
+        actions: [
+          { _tag: 'Eligible', action: 'ResumeProcessingSession' },
+          {
+            _tag: 'Ineligible',
+            action: 'SyncProcessingPreview',
+            reason: 'sessionActiveRequired',
+          },
+          {
+            _tag: 'Ineligible',
+            action: 'ApplyProcessingPreview',
+            reason: 'sessionActiveRequired',
+          },
+          {
+            _tag: 'Ineligible',
+            action: 'UndoProcessingStep',
+            reason: 'sessionActiveRequired',
+          },
+          {
+            _tag: 'Ineligible',
+            action: 'RedoProcessingStep',
+            reason: 'sessionActiveRequired',
+          },
+          {
+            _tag: 'Ineligible',
+            action: 'SaveProcessingArtifacts',
+            reason: 'sessionActiveRequired',
+          },
+        ],
+      },
+    ],
+  })
+  const markup = renderToStaticMarkup(
+    createElement(BetaProcessApp, {
+      projection: processControllerProjection,
+      loading: false,
+      initialWorkspace: unfinished,
+    }),
+  )
+
+  assert.match(markup, /<button[^>]*>Resume session<\/button>/)
+  assert.match(
+    markup,
+    /<button[^>]*disabled=""[^>]*title="Resume the unfinished session first\."[^>]*>Preview Stretch<\/button>/,
+  )
+  assert.match(
+    markup,
+    /<button[^>]*>Preview Stretch<\/button><p class="beta-process-denial"><b>Unavailable:<\/b> Resume the unfinished session first\.<\/p>/,
+  )
 })

@@ -224,7 +224,7 @@ function deviceFacts(request: typeof fetch, base: string, kind: DeviceKind) {
   const reads: Record<DeviceKind, ReadonlyArray<readonly [string, string]>> = {
     camera: [
       ['canabortexposure', 'abort exposure'],
-      ['cansubexposure', 'sub exposure'],
+      ['canstopexposure', 'stop exposure'],
     ],
     telescope: [
       ['atpark', 'parked'],

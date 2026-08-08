@@ -467,6 +467,9 @@ test('manifest processor is disabled by default and only saves bounded configure
     sourceAssetIds: ['asset-source-m27-001'],
     runId: 'm27-run-001',
     solveAttemptId: 'm27-solve-001',
+    processingSessionId: 'm27-process-001',
+    processingOutputId: 'final',
+    operationIds: [],
   })
   const before = databaseRow(
     CountRow,
@@ -1188,7 +1191,8 @@ test('Process Save materializes configured sources before one Asset, lineage, re
     detail.detail,
     new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
   )
-  assert.doesNotMatch(detail.detail, /outputs|checksum|storage/i)
+  assert.doesNotMatch(detail.detail, /outputs|storage/i)
+  assert.match(detail.detail, /"checksum":"[a-f0-9]{64}"/)
   assert.equal(
     service.saveProcess({
       ...command,

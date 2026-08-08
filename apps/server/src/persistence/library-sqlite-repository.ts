@@ -56,6 +56,7 @@ const LibraryDetail = Schema.Struct({
   revision: Schema.Int,
   role: LibraryRole,
   format: Schema.Literals(['cameraRaw', 'fits', 'tiff', 'png', 'jpeg']),
+  checksum: Schema.optionalKey(Schema.String),
   availability: Schema.Literals([
     'availableLocally',
     'preparing',
@@ -70,10 +71,13 @@ const LibraryDetail = Schema.Struct({
   comparisonGroupId: Schema.String,
   lineage: Schema.Struct({
     sourceAssetIds: Schema.Array(Schema.String),
-    runId: Schema.String,
-    solveAttemptId: Schema.String,
+    runId: Schema.optionalKey(Schema.String),
+    solveAttemptId: Schema.optionalKey(Schema.String),
     sequenceId: Schema.optionalKey(Schema.String),
     acquisitionId: Schema.optionalKey(Schema.String),
+    processingSessionId: Schema.optionalKey(Schema.String),
+    processingOutputId: Schema.optionalKey(Schema.String),
+    operationIds: Schema.optionalKey(Schema.Array(Schema.String)),
   }),
   capture: Schema.optionalKey(
     Schema.Struct({

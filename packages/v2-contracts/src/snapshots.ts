@@ -427,15 +427,19 @@ export const LibraryAssetDetail = Schema.Struct({
   revision: AssetRevision,
   role: AssetSnapshot.fields.role,
   format: AssetSnapshot.fields.format,
+  checksum: Schema.optionalKey(Schema.NonEmptyString),
   availability: AssetSnapshot.fields.availability,
   capturedAt: ObservedAt,
   comparisonGroupId: Schema.NonEmptyString,
   lineage: Schema.Struct({
     sourceAssetIds: Schema.Array(AssetId),
-    runId: Schema.NonEmptyString,
-    solveAttemptId: Schema.NonEmptyString,
+    runId: Schema.optionalKey(Schema.NonEmptyString),
+    solveAttemptId: Schema.optionalKey(Schema.NonEmptyString),
     sequenceId: Schema.optionalKey(Schema.NonEmptyString),
     acquisitionId: Schema.optionalKey(Schema.NonEmptyString),
+    processingSessionId: Schema.optionalKey(ProcessingSessionId),
+    processingOutputId: Schema.optionalKey(ProcessingOutputId),
+    operationIds: Schema.optionalKey(Schema.Array(OperationId)),
   }),
   capture: Schema.optionalKey(
     Schema.Struct({
@@ -514,10 +518,13 @@ export const ProcessSourceHandoff = Schema.Struct({
   comparisonGroupId: Schema.NonEmptyString,
   lineage: Schema.Struct({
     sourceAssetIds: Schema.Array(AssetId),
-    runId: Schema.NonEmptyString,
-    solveAttemptId: Schema.NonEmptyString,
+    runId: Schema.optionalKey(Schema.NonEmptyString),
+    solveAttemptId: Schema.optionalKey(Schema.NonEmptyString),
     sequenceId: Schema.optionalKey(Schema.NonEmptyString),
     acquisitionId: Schema.optionalKey(Schema.NonEmptyString),
+    processingSessionId: Schema.optionalKey(ProcessingSessionId),
+    processingOutputId: Schema.optionalKey(ProcessingOutputId),
+    operationIds: Schema.optionalKey(Schema.Array(OperationId)),
   }),
   processing: Schema.Struct({
     availability: Schema.Literal('unavailable'),

@@ -37,6 +37,7 @@ import {
 } from './processing-pressure.js'
 import {
   ProcessingSession,
+  ProcessingImageRef,
   ProcessingSourceRef,
   ProcessingTransition,
   ProcessingWork,
@@ -44,6 +45,7 @@ import {
   completeLinearMasterBuild,
   completeProcessingApply,
   completeProcessingPreview,
+  currentProcessingImage,
   decideStartProcessingSession,
   discardHardenedProcessingSession,
   failProcessingApply,
@@ -52,6 +54,7 @@ import {
   queueAssistantSuggestionPreview,
   queueProcessingPreview,
   retryHardenedProcessingStage,
+  resumeProcessingSession,
   startProcessingApply,
 } from './processing-domain.js'
 import {
@@ -116,11 +119,59 @@ const PressureProjection = Schema.Struct({
   measurement: Schema.optionalKey(HostPressure),
 })
 
+export const ProcessingAction = Schema.Literals([
+  'StartProcessingSession',
+  'ResumeProcessingSession',
+  'SyncProcessingPreview',
+  'ApplyProcessingPreview',
+  'UndoProcessingStep',
+  'RedoProcessingStep',
+  'PreviewAssistantSuggestion',
+  'MarkAssistantFindingViewed',
+  'RetryProcessingStep',
+  'SwitchProcessingContext',
+  'SaveProcessingArtifacts',
+  'DiscardProcessingSession',
+])
+
+export const ProcessingActionDenialReason = Schema.Literals([
+  'ownerRequired',
+  'readOnlyClient',
+  'sourceRequired',
+  'sessionActiveRequired',
+  'sessionUnfinishedRequired',
+  'sessionDiscarded',
+  'currentImageRequired',
+  'previewReadyRequired',
+  'processingAttemptActive',
+  'failedAttemptRequired',
+  'undoUnavailable',
+  'redoUnavailable',
+  'outputRequired',
+  'assistantFindingRequired',
+  'saveInProgress',
+])
+
+export const ProcessingActionEligibility = Schema.TaggedUnion({
+  Eligible: { action: ProcessingAction },
+  Ineligible: {
+    action: ProcessingAction,
+    reason: ProcessingActionDenialReason,
+  },
+})
+
 export const ProcessingProjection = Schema.Struct({
   snapshotVersion: SnapshotVersion,
   eventCursor: EventCursor,
   selectedSessionId: Schema.optionalKey(ProcessingSessionId),
+  actions: Schema.Array(ProcessingActionEligibility),
   sessions: Schema.Array(ProcessingSession),
+  sessionActions: Schema.Array(
+    Schema.Struct({
+      sessionId: ProcessingSessionId,
+      actions: Schema.Array(ProcessingActionEligibility),
+    }),
+  ),
   assets: Schema.Array(LibraryAsset),
   pressure: PressureProjection,
 })
@@ -447,6 +498,7 @@ export const makeProcessingServerSimulation = Effect.fn(
           ),
         RetryStarted: () =>
           Effect.succeed({ state: current, result: transition }),
+        Resumed: () => Effect.succeed({ state: current, result: transition }),
         HistoryMoved: () =>
           Effect.succeed({ state: current, result: transition }),
         LeftUnfinished: () =>
@@ -499,6 +551,7 @@ export const makeProcessingServerSimulation = Effect.fn(
             ApplyStarted: () => undefined,
             ApplyFailed: () => undefined,
             RetryStarted: () => undefined,
+            Resumed: () => undefined,
             HistoryMoved: () => undefined,
             LeftUnfinished: () => undefined,
             Discarded: () => undefined,
@@ -528,6 +581,7 @@ export const makeProcessingServerSimulation = Effect.fn(
             ApplyStarted: () => undefined,
             ApplyCompleted: () => undefined,
             RetryStarted: () => undefined,
+            Resumed: () => undefined,
             HistoryMoved: () => undefined,
             LeftUnfinished: () => undefined,
             Discarded: () => undefined,
@@ -605,19 +659,12 @@ function decideCommand(
           }),
       })
     },
-    ResumeProcessingSession: ({ sessionId }) => {
-      const session = current.sessions.find(
-        (candidate) => candidate.sessionId === sessionId,
-      )
-      return session === undefined || session.lifecycle === 'discarded'
-        ? rejected('ProcessingSessionUnavailable')
-        : Effect.succeed({
-            selectedSessionId: sessionId,
-            events: [],
-            work: [],
-            effect: 'resumed',
-          })
-    },
+    ResumeProcessingSession: ({ sessionId }) =>
+      withSession(current, sessionId, (session) =>
+        transitionChange(resumeProcessingSession(session), 'resumed').pipe(
+          Effect.map((change) => ({ ...change, selectedSessionId: sessionId })),
+        ),
+      ),
     SyncProcessingPreview: (input) =>
       withSession(current, input.sessionId, (session) =>
         transitionChange(
@@ -839,6 +886,7 @@ function transitionChange(
     ApplyFailed: ({ session }) => acceptedTransition(session, effect, event),
     RetryStarted: ({ session, work }) =>
       acceptedTransition(session, effect, event, work),
+    Resumed: ({ session }) => acceptedTransition(session, effect, event),
     HistoryMoved: ({ session }) => acceptedTransition(session, effect, event),
     LeftUnfinished: ({ session }) => acceptedTransition(session, effect, event),
     Discarded: ({ session, work }) =>
@@ -1426,17 +1474,153 @@ function replay(
       )
 }
 
-function project(state: ProcessingSimulationState): ProcessingProjection {
+export function projectProcessingProjection(
+  state: ProcessingSimulationState,
+  authority: {
+    readonly role: 'owner' | 'viewer'
+    readonly capability: 'controlCapable' | 'readOnly'
+  } = { role: 'owner', capability: 'controlCapable' },
+): ProcessingProjection {
   return ProcessingProjection.make({
     snapshotVersion: state.snapshotVersion,
     eventCursor: state.eventCursor,
     ...(state.selectedSessionId === undefined
       ? {}
       : { selectedSessionId: state.selectedSessionId }),
+    actions: [
+      eligibility(
+        'StartProcessingSession',
+        authorityReason(authority) ??
+          (state.sourceCatalog.length === 0 ? 'sourceRequired' : undefined),
+      ),
+    ],
     sessions: state.sessions,
+    sessionActions: state.sessions.map((session) => ({
+      sessionId: session.sessionId,
+      actions: projectSessionActions(state, session, authority),
+    })),
     assets: state.assets,
     pressure: state.pressure,
   })
+}
+
+const project = projectProcessingProjection
+
+type ProcessingAuthority = Parameters<typeof projectProcessingProjection>[1]
+type ProcessingDenial = typeof ProcessingActionDenialReason.Type
+type ProcessingActionName = typeof ProcessingAction.Type
+
+function authorityReason(
+  authority: ProcessingAuthority,
+): ProcessingDenial | undefined {
+  if (authority?.role !== 'owner') return 'ownerRequired'
+  return authority.capability !== 'controlCapable'
+    ? 'readOnlyClient'
+    : undefined
+}
+
+function eligibility(
+  action: ProcessingActionName,
+  reason: ProcessingDenial | undefined,
+): typeof ProcessingActionEligibility.Type {
+  return reason === undefined
+    ? { _tag: 'Eligible', action }
+    : { _tag: 'Ineligible', action, reason }
+}
+
+function projectSessionActions(
+  state: ProcessingSimulationState,
+  session: ProcessingSession,
+  authority: ProcessingAuthority,
+): ReadonlyArray<typeof ProcessingActionEligibility.Type> {
+  const authorityDenied = authorityReason(authority)
+  const discarded = session.lifecycle === 'discarded'
+  const inactive = session.lifecycle !== 'active'
+  const activeAttempt = session.activeAttempt !== undefined
+  const currentImage = currentProcessingImage(session)
+  const pendingSave = state.pendingSaves.some(
+    (pending) => pending.sessionId === session.sessionId,
+  )
+  const sessionReason = (): ProcessingDenial | undefined =>
+    authorityDenied ??
+    (discarded
+      ? 'sessionDiscarded'
+      : inactive
+        ? 'sessionActiveRequired'
+        : undefined)
+  const attemptReason = (): ProcessingDenial | undefined =>
+    sessionReason() ?? (activeAttempt ? 'processingAttemptActive' : undefined)
+  return [
+    eligibility(
+      'ResumeProcessingSession',
+      authorityDenied ??
+        (discarded
+          ? 'sessionDiscarded'
+          : session.lifecycle !== 'unfinished'
+            ? 'sessionUnfinishedRequired'
+            : undefined),
+    ),
+    eligibility(
+      'SyncProcessingPreview',
+      attemptReason() ??
+        (currentImage === undefined ? 'currentImageRequired' : undefined),
+    ),
+    eligibility(
+      'ApplyProcessingPreview',
+      attemptReason() ??
+        (currentImage === undefined
+          ? 'currentImageRequired'
+          : session.preview?.state !== 'ready' ||
+              session.preview.previewOutputId === undefined
+            ? 'previewReadyRequired'
+            : undefined),
+    ),
+    eligibility(
+      'UndoProcessingStep',
+      attemptReason() ??
+        (session.historyPosition === 0 ? 'undoUnavailable' : undefined),
+    ),
+    eligibility(
+      'RedoProcessingStep',
+      attemptReason() ??
+        (session.historyPosition === session.history.length
+          ? 'redoUnavailable'
+          : undefined),
+    ),
+    eligibility(
+      'PreviewAssistantSuggestion',
+      attemptReason() ??
+        (session.assistantFindings.length === 0
+          ? 'assistantFindingRequired'
+          : undefined),
+    ),
+    eligibility(
+      'MarkAssistantFindingViewed',
+      sessionReason() ??
+        (session.assistantFindings.length === 0
+          ? 'assistantFindingRequired'
+          : undefined),
+    ),
+    eligibility(
+      'RetryProcessingStep',
+      attemptReason() ??
+        (session.failedAttempt === undefined
+          ? 'failedAttemptRequired'
+          : undefined),
+    ),
+    eligibility('SwitchProcessingContext', attemptReason()),
+    eligibility(
+      'SaveProcessingArtifacts',
+      sessionReason() ??
+        (pendingSave
+          ? 'saveInProgress'
+          : currentImage === undefined ||
+              !ProcessingImageRef.guards.DerivedOutput(currentImage)
+            ? 'outputRequired'
+            : undefined),
+    ),
+    eligibility('DiscardProcessingSession', attemptReason()),
+  ]
 }
 
 function rejected(

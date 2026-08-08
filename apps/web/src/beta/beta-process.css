@@ -27,9 +27,13 @@
   min-height: 330px;
 }
 .beta-process-message,
+.beta-process-denial,
 .beta-process-phone-protection {
   color: var(--nb-muted);
   font-size: 10px;
+}
+.beta-process-denial {
+  margin: 0;
 }
 .beta-process-empty {
   align-self: start;

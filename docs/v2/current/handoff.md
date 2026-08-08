@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phase 4 complete; Nightbook UI migration is the next product-facing preparation**
+Status: **V2.0 complete; V2.1 Phase 4 complete; first beta real-truth bundle complete**
 
 ## Current Position
 
@@ -30,28 +30,49 @@ and then promote it as the main UI. Follow the lightweight
 [UI and UX direction](ui-ux.md). Former Astro Console visual guides, UX
 catalogs, component grammar, and Phase 0.5 material are archived.
 
-## Known Beta Alignment Gaps
+The accepted implementation sequence is the
+[Nightbook beta real-runtime plan](beta-real-runtime-plan.md). It uses a small,
+checksum-pinned selection from the owner's real-frame archive in an ignored
+local directory and a bounded development Alpaca simulator. Simulation improves
+adapter, workflow, and UI proof but does not replace live provider or hardware
+evidence.
 
-1. Process needs service-owned per-action eligibility and typed denial reasons.
-2. Process-created Library outputs need complete asset-detail projections.
-3. Unfinished Process sessions need a deterministic restart-to-resume journey.
+## Completed Beta Foundation
 
-Do not hide these gaps with client fixtures, inferred eligibility, or
-Astro Console-specific logic inside `@nightbook/ui`.
+The first local bundle now provides:
+
+- service-owned Process per-action eligibility and typed denial reasons;
+- complete Library detail and lineage for new Process-created outputs;
+- deterministic restart-to-unfinished and Resume behavior;
+- a checksum-pinned five-file M101 and NGC 7000 local corpus;
+- a bounded deterministic Alpaca simulator with real FITS-derived ImageBytes;
+- a simulated real exposure through Acquire, Library intake, restart, and
+  no-replay proof; and
+- passing Designer review against Nightbook at wide, 768 px, and 390 px.
+- a live GET-only `ready` projection for the ASI2600MC Pro, ASI Mount, and ZWO
+  EAF after matching current device numbers and `UniqueID` values.
+
+The corpus remains ignored and local. The implementation is not staged or
+committed.
 
 ## Proof Boundary
 
 Completed evidence covers local contracts, service behavior, SQLite/HTTP/SSE,
-browser presentation, the opt-in beta integration, remote ingress and control,
-one isolated real camera-original intake, and local solve-only evidence. It does
-not prove beta route promotion, production deployment of the beta, mount
-movement, production processing tools, or physical image quality.
+browser presentation, the opt-in beta integration, deterministic simulated
+Alpaca behavior, real-frame transfer and intake, restart without replay, remote
+ingress and control, one isolated real camera-original intake, local solve-only
+evidence, and current GET-only provider/device communication for the selected
+ASI mount, imaging camera, and focuser. It does not prove beta route promotion,
+production deployment of the beta, mount movement, production processing
+tools, a new physical exposure, or physical image quality.
 
 ## Next Action
 
-Use one exact Nightbook demo workflow at a time to prepare the projection and
-integration plan. Start with the three known alignment gaps, then compare every
-workspace against the current demo before requesting main-route promotion.
+Continue with the supervised execution spine in the accepted plan: replace
+presentation-only acquisition and capture strings with structured facts, add
+durable service-owned work, and reconcile accepted work after restart without
+replay. Keep hardware commands behind a separate owner-approved indoor or
+outdoor proof step.
 
 Completed chronology and former authority are indexed in the
 [documentation archive](../archive/README.md).

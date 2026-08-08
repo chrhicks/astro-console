@@ -163,6 +163,41 @@ test('keeps preview failure truth separate from durable asset truth', () => {
   assert.doesNotMatch(markup, /Inspection metrics/)
 })
 
+test('renders complete Process output lineage without invented capture lineage', () => {
+  const detailWithoutCapture = { ...detail }
+  delete detailWithoutCapture.capture
+  delete detailWithoutCapture.provenance
+  const processDetail = Schema.decodeUnknownSync(LibraryAssetDetailSchema)({
+    ...detailWithoutCapture,
+    assetId: 'asset-process-00000000-0000-0000-0000-000000000001',
+    role: 'final',
+    format: 'tiff',
+    checksum: 'sha256:process-output',
+    lineage: {
+      sourceAssetIds: ['asset-m27-001'],
+      processingSessionId: 'session-process-1',
+      processingOutputId: 'output-process-1',
+      operationIds: ['operation-stretch-1'],
+    },
+  })
+  const markup = renderToStaticMarkup(
+    createElement(BetaLibraryApp, {
+      projection: controllerProjection,
+      loading: false,
+      page: { query, value: page },
+      detail: processDetail,
+      onSelectAsset: () => undefined,
+    }),
+  )
+
+  assert.match(markup, /<dt>Checksum<\/dt>/)
+  assert.match(markup, /<dt>Process session<\/dt>/)
+  assert.match(markup, /session-process-1/)
+  assert.match(markup, /<dt>Process output<\/dt>/)
+  assert.match(markup, /output-process-1/)
+  assert.doesNotMatch(markup, /<dt>Run<\/dt>|<dt>Solve<\/dt>/)
+})
+
 test('phone is evidence, availability, and lineage without mutation controls', () => {
   const markup = renderToStaticMarkup(
     createElement(BetaLibraryPhone, {

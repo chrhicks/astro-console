@@ -265,6 +265,7 @@ export type ProcessingTransition = Data.TaggedEnum<{
     readonly session: ProcessingSession
     readonly work: typeof ProcessingWork.Type
   }
+  Resumed: { readonly session: ProcessingSession }
   HistoryMoved: { readonly session: ProcessingSession }
   LeftUnfinished: { readonly session: ProcessingSession }
   Discarded: {
@@ -288,6 +289,7 @@ export type ProcessingTransition = Data.TaggedEnum<{
       | 'AssistantFindingSuperseded'
       | 'DiscardConfirmationMismatch'
       | 'BuildCompletionSuperseded'
+      | 'SessionUnfinishedRequired'
   }
 }>
 
@@ -588,6 +590,21 @@ export const leaveProcessingSessionUnfinished = (
     return ProcessingTransition.Rejected({ reason: 'ProcessingAttemptBusy' })
   return ProcessingTransition.LeftUnfinished({
     session: revised(session, { ...session, lifecycle: 'unfinished' }),
+  })
+}
+
+export const resumeProcessingSession = (
+  session: ProcessingSession,
+): ProcessingTransition => {
+  if (session.lifecycle !== 'unfinished')
+    return ProcessingTransition.Rejected({
+      reason:
+        session.lifecycle === 'discarded'
+          ? 'SessionDiscarded'
+          : 'SessionUnfinishedRequired',
+    })
+  return ProcessingTransition.Resumed({
+    session: revised(session, { ...session, lifecycle: 'active' }),
   })
 }
 

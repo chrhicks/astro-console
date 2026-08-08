@@ -23,6 +23,8 @@
     "check": "npm run format:check && npm run lint && npm run build && npm run test",
     "dev": "node --experimental-strip-types src/server.ts",
     "dev:inspect": "node scripts/dev-inspect.mjs",
+    "sim:alpaca": "node --experimental-strip-types scripts/alpaca-simulator.ts",
+    "sim:corpus": "node --experimental-strip-types scripts/prepare-alpaca-simulation-corpus.ts",
     "publisher": "node --experimental-strip-types src/workers/publisher-service.ts",
     "download-grant": "node --experimental-strip-types src/workers/download-grant-service.ts",
     "format": "prettier --write .",

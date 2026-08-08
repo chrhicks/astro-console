@@ -168,9 +168,33 @@ function LineagePanel({ detail }: { detail: LibraryAssetDetail }) {
       <PanelBody>
         <DataList aria-label="Asset lineage">
           <DataListItem label="Stable asset" value={detail.assetId} />
+          {detail.checksum ? (
+            <DataListItem label="Checksum" value={detail.checksum} />
+          ) : null}
           <DataListItem label="Captured" value={detail.capturedAt} />
-          <DataListItem label="Run" value={detail.lineage.runId} />
-          <DataListItem label="Solve" value={detail.lineage.solveAttemptId} />
+          {detail.lineage.runId ? (
+            <DataListItem label="Run" value={detail.lineage.runId} />
+          ) : null}
+          {detail.lineage.solveAttemptId ? (
+            <DataListItem label="Solve" value={detail.lineage.solveAttemptId} />
+          ) : null}
+          {detail.lineage.processingSessionId ? (
+            <DataListItem
+              label="Process session"
+              value={detail.lineage.processingSessionId}
+            />
+          ) : null}
+          {detail.lineage.processingOutputId ? (
+            <DataListItem
+              label="Process output"
+              value={detail.lineage.processingOutputId}
+              detail={
+                detail.lineage.operationIds?.length
+                  ? `${detail.lineage.operationIds.length} operation${detail.lineage.operationIds.length === 1 ? '' : 's'}`
+                  : 'Build output'
+              }
+            />
+          ) : null}
           <DataListItem
             label="Sources"
             value={
@@ -567,7 +591,15 @@ export function BetaLibraryPhone({
               <DataList aria-label="Phone asset evidence and availability">
                 <DataListItem label="Asset ID" value={detail.assetId} />
                 <DataListItem label="Captured" value={detail.capturedAt} />
-                <DataListItem label="Run" value={detail.lineage.runId} />
+                {detail.lineage.runId ? (
+                  <DataListItem label="Run" value={detail.lineage.runId} />
+                ) : null}
+                {detail.lineage.processingSessionId ? (
+                  <DataListItem
+                    label="Process session"
+                    value={detail.lineage.processingSessionId}
+                  />
+                ) : null}
                 <DataListItem
                   label="Source"
                   value={

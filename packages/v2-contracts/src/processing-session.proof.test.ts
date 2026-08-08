@@ -14,6 +14,7 @@ import {
 import {
   ProcessingSimulationState,
   makeProcessingServerSimulation,
+  projectProcessingProjection,
 } from './processing-server-simulation.js'
 import { projectProcessingSessionSnapshot } from './snapshots.js'
 import {
@@ -678,6 +679,41 @@ describe('processing session server proofs', () => {
     )
   })
 
+  it('projects each Process action with typed domain and authority eligibility', () => {
+    const active = projectProcessingProjection(state([developSession(0)]))
+    const actions = active.sessionActions[0]?.actions ?? []
+    assert.deepEqual(
+      actions.find((action) => action.action === 'SyncProcessingPreview'),
+      { _tag: 'Eligible', action: 'SyncProcessingPreview' },
+    )
+    assert.deepEqual(
+      actions.find((action) => action.action === 'ApplyProcessingPreview'),
+      {
+        _tag: 'Ineligible',
+        action: 'ApplyProcessingPreview',
+        reason: 'previewReadyRequired',
+      },
+    )
+    const viewer = projectProcessingProjection(state([developSession(0)]), {
+      role: 'viewer',
+      capability: 'readOnly',
+    })
+    assert.equal(
+      viewer.actions.every(
+        (action) =>
+          action._tag === 'Ineligible' && action.reason === 'ownerRequired',
+      ),
+      true,
+    )
+    assert.equal(
+      viewer.sessionActions[0]?.actions.every(
+        (action) =>
+          action._tag === 'Ineligible' && action.reason === 'ownerRequired',
+      ),
+      true,
+    )
+  })
+
   it('restores one authoritative session snapshot and resumes without reconstructing history', async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -692,18 +728,28 @@ describe('processing session server proofs', () => {
           owner,
         )
         const persisted = yield* server.readState()
-        const reloaded = yield* makeServer(persisted)
+        const unfinished = {
+          ...persisted,
+          sessions: persisted.sessions.map((session) =>
+            ProcessingSession.make({
+              ...session,
+              revision: ProcessingRevision.make(session.revision + 1),
+              lifecycle: 'unfinished',
+            }),
+          ),
+        }
+        const reloaded = yield* makeServer(unfinished)
         const response = yield* reloaded.execute(
           envelope('resume', {
             _tag: 'ResumeProcessingSession',
             sessionId: 'process-1',
-            expectedProcessingRevision: 1,
+            expectedProcessingRevision: 2,
           }),
           owner,
         )
-        assert.deepEqual(response.projection.sessions, persisted.sessions)
+        assert.equal(response.projection.sessions[0]?.lifecycle, 'active')
         assert.equal(response.projection.sessions[0]?.historyPosition, 1)
-        assert.equal(response.projection.sessions[0]?.revision, 1)
+        assert.equal(response.projection.sessions[0]?.revision, 3)
         const restored = response.projection.sessions[0]
         if (restored === undefined)
           assert.fail('authoritative processing session missing')

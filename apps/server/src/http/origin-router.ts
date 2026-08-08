@@ -32,7 +32,11 @@ export type OriginRouterDependencies = {
     request: IncomingMessage,
   ) => RouteResult
   readonly planWorkspace: (response: ServerResponse) => RouteResult
-  readonly processWorkspace: (response: ServerResponse, url: URL) => RouteResult
+  readonly processWorkspace: (
+    response: ServerResponse,
+    url: URL,
+    identity: LocalIdentity,
+  ) => RouteResult
   readonly libraryPage: (response: ServerResponse, url: URL) => RouteResult
   readonly libraryDownload: (response: ServerResponse, url: URL) => RouteResult
   readonly libraryDetail: (
@@ -112,7 +116,7 @@ export const createOriginRouter =
     if (request.method === 'GET' && url.pathname === '/api/workspaces/plan')
       return dependencies.planWorkspace(response)
     if (request.method === 'GET' && url.pathname === '/api/workspaces/process')
-      return dependencies.processWorkspace(response, url)
+      return dependencies.processWorkspace(response, url, identity)
     if (request.method === 'GET' && url.pathname === '/api/library')
       return dependencies.libraryPage(response, url)
     if (request.method === 'GET' && url.pathname === '/api/observe/live-frame')

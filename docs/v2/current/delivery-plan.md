@@ -76,6 +76,16 @@ connected, not parked, and not slewing; the Sony camera was disconnected and
 did not return optional capability facts. The isolated validation image did
 not replace the running production service. No hardware command was sent.
 
+Rechecked August 8, 2026 after the owner restored ASCOM Remote. GET-only
+management and device reads matched the ASI Mount, ZWO ASI2600MC Pro, ZWO
+ASI220MM Mini, ZWO Focuser, Pegasus conditions, and Pegasus switch. The primary
+mount, ASI2600MC Pro, and focuser produced a typed `ready` Astro Console
+preflight snapshot. The Sony camera remained disconnected; no filter wheel was
+listed; the optional Pegasus pressure property was not implemented. The live
+server also exposed the non-standard `cansubexposure` read in Astro Console;
+the adapter and simulator now use ASCOM `canstopexposure`. No hardware command
+was sent.
+
 ### Phase 2 — Bounded real commands and recovery
 
 Add service-owned Alpaca command adapters for the smallest useful indoor set:
@@ -186,6 +196,10 @@ uncertainty.
   mount from a successful Park response.
 - Bound camera image transfer and decode before allocating or writing it. The
   prior ASCOM Remote full-frame evidence was about 46 MB.
+- Use the accepted real-frame corpus and bounded Alpaca simulator described in
+  [the beta real-runtime plan](beta-real-runtime-plan.md) for repeatable
+  adapter and workflow development. Simulation proof never replaces live
+  provider, device, image, or physical evidence.
 - Taildrop is preferred for one-off support artifacts between hosts. It is not
   part of the app asset-transfer path.
 

@@ -24,9 +24,13 @@ import {
   CommandHttpFailureEnvelope,
   CommandHttpSuccessEnvelope,
   DomainEvent,
+  LibraryAssetDetail,
+  LibraryPage,
   ObserveCommandResponse,
   PlanCommandResponse,
   ProcessSourceHandoff,
+  ProcessingProjection,
+  ProcessingResponse,
   PreflightSnapshot,
   RefreshPreflightResponse,
   RunSnapshot,
@@ -86,6 +90,11 @@ test('Process HTTP workflow durably builds, fails locally, retries, and resumes 
   const databasePath = join(root, 'state.sqlite')
   const service = createFixtureService(databasePath)
   let listener = await service.listen()
+  let activeService = service
+  t.after(async () => {
+    await listener.close().catch(() => undefined)
+    activeService.close()
+  })
   let base = `http://127.0.0.1:${listener.port}`
   const command = async (value: object) => {
     const response = await fetch(`${base}/api/process/commands`, {
@@ -93,16 +102,15 @@ test('Process HTTP workflow durably builds, fails locally, retries, and resumes 
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ commandId: crypto.randomUUID(), command: value }),
     })
-    assert.equal(response.status, 200)
-    return response.json()
+    assert.equal(response.status, 202)
+    return Schema.decodeUnknownSync(ProcessingResponse)(await response.json())
   }
   const catalog = await fetch(
     `${base}/api/library?queryId=process-proof&pageSize=40`,
   )
-  const assets = (await catalog.json()).results as Array<{
-    assetId: string
-    role: string
-  }>
+  const assets = Schema.decodeUnknownSync(LibraryPage)(
+    await catalog.json(),
+  ).results
   const source = assets.find((asset) => asset.role === 'original')
   assert.ok(source)
   await command({
@@ -110,18 +118,9 @@ test('Process HTTP workflow durably builds, fails locally, retries, and resumes 
     sourceAssetIds: [source.assetId],
     idempotencyKey: 'process-start',
   })
-  let workspace = (await (
-    await fetch(`${base}/api/workspaces/process`)
-  ).json()) as {
-    sessions: Array<{
-      sessionId: string
-      revision: number
-      phase: string
-      historyPosition: number
-      preview?: { previewId: string }
-      failedAttempt?: { attemptId: string; checkpointId: string }
-    }>
-  }
+  let workspace = Schema.decodeUnknownSync(ProcessingProjection)(
+    await (await fetch(`${base}/api/workspaces/process`)).json(),
+  )
   let session = workspace.sessions[0]
   assert.equal(session?.phase, 'develop')
   assert.ok(session)
@@ -135,7 +134,9 @@ test('Process HTTP workflow durably builds, fails locally, retries, and resumes 
     baseHistoryPosition: session.historyPosition,
     clientPreviewSequence: 1,
   })
-  workspace = await (await fetch(`${base}/api/workspaces/process`)).json()
+  workspace = Schema.decodeUnknownSync(ProcessingProjection)(
+    await (await fetch(`${base}/api/workspaces/process`)).json(),
+  )
   session = workspace.sessions[0]
   assert.ok(session?.preview)
   await command({
@@ -145,7 +146,9 @@ test('Process HTTP workflow durably builds, fails locally, retries, and resumes 
     previewId: session.preview?.previewId,
     idempotencyKey: 'process-apply-fail',
   })
-  workspace = await (await fetch(`${base}/api/workspaces/process`)).json()
+  workspace = Schema.decodeUnknownSync(ProcessingProjection)(
+    await (await fetch(`${base}/api/workspaces/process`)).json(),
+  )
   session = workspace.sessions[0]
   assert.ok(session?.failedAttempt)
   await command({
@@ -159,20 +162,69 @@ test('Process HTTP workflow durably builds, fails locally, retries, and resumes 
   await listener.close()
   service.close()
   const resumed = createFixtureService(databasePath)
+  activeService = resumed
   listener = await resumed.listen()
   base = `http://127.0.0.1:${listener.port}`
-  const recovered = (await (
-    await fetch(`${base}/api/workspaces/process`)
-  ).json()) as {
-    sessions: Array<{
-      phase: string
-      history: unknown[]
-      failedAttempt?: unknown
-    }>
-  }
+  const recovered = Schema.decodeUnknownSync(ProcessingProjection)(
+    await (await fetch(`${base}/api/workspaces/process`)).json(),
+  )
+  const recoveredSession = recovered.sessions[0]
+  assert.ok(recoveredSession)
+  assert.equal(recoveredSession.lifecycle, 'unfinished')
   assert.equal(recovered.sessions[0]?.phase, 'develop')
   assert.equal(recovered.sessions[0]?.history.length, 1)
   assert.equal(recovered.sessions[0]?.failedAttempt, undefined)
+  assert.deepEqual(
+    recovered.sessionActions[0]?.actions.find(
+      (action) => action.action === 'ResumeProcessingSession',
+    ),
+    { _tag: 'Eligible', action: 'ResumeProcessingSession' },
+  )
+  assert.deepEqual(
+    recovered.sessionActions[0]?.actions.find(
+      (action) => action.action === 'SyncProcessingPreview',
+    ),
+    {
+      _tag: 'Ineligible',
+      action: 'SyncProcessingPreview',
+      reason: 'sessionActiveRequired',
+    },
+  )
+  const resumedCommand = await command({
+    _tag: 'ResumeProcessingSession',
+    sessionId: recoveredSession.sessionId,
+    expectedProcessingRevision: recoveredSession.revision,
+  })
+  assert.equal(resumedCommand.effect, 'resumed')
+  const active = Schema.decodeUnknownSync(ProcessingProjection)(
+    await (await fetch(`${base}/api/workspaces/process`)).json(),
+  )
+  const activeSession = active.sessions[0]
+  assert.ok(activeSession)
+  assert.equal(activeSession.lifecycle, 'active')
+  assert.equal(activeSession.history.length, 1)
+  const outputId = activeSession.history[0]?.output.outputId
+  assert.ok(outputId)
+  const save = await command({
+    _tag: 'SaveProcessingArtifacts',
+    sessionId: activeSession.sessionId,
+    expectedProcessingRevision: activeSession.revision,
+    artifacts: [{ outputId, format: 'tiff', role: 'final' }],
+    idempotencyKey: 'process-save-after-resume',
+  })
+  const savedAssetId = save.projection.assets[0]?.assetId
+  assert.ok(savedAssetId)
+  const savedDetail = Schema.decodeUnknownSync(LibraryAssetDetail)(
+    await fetch(`${base}/api/library/assets/${savedAssetId}`).then((response) =>
+      response.json(),
+    ),
+  )
+  assert.equal(savedDetail.checksum, `sha256:${outputId}`)
+  assert.equal(savedDetail.lineage.processingSessionId, activeSession.sessionId)
+  assert.equal(savedDetail.lineage.processingOutputId, outputId)
+  assert.deepEqual(savedDetail.lineage.operationIds, [
+    activeSession.history[0]?.operationId,
+  ])
   await listener.close()
   resumed.close()
 })
@@ -1130,7 +1182,9 @@ test('Alpaca inventory preserves an unavailable optional configured device witho
           ? 'Recorded camera'
           : url.endsWith('/canabortexposure')
             ? true
-            : false
+            : url.endsWith('/canstopexposure')
+              ? false
+              : false
     return Response.json({ Value: value, ErrorNumber: 0 })
   }
   const provider = alpacaPreflightProvider(
@@ -1155,6 +1209,8 @@ test('Alpaca inventory preserves an unavailable optional configured device witho
   assert.equal(snapshot.rig?.devices[1]?.state, 'unavailable')
   assert.deepEqual(snapshot.rig?.devices[1]?.capabilities, [])
   assert.ok(requests.every((entry) => entry.method === 'GET'))
+  assert.ok(requests.some((entry) => entry.url.endsWith('/canstopexposure')))
+  assert.ok(!requests.some((entry) => entry.url.endsWith('/cansubexposure')))
   assert.ok(
     !requests.some((entry) => entry.url.includes('/focuser/0/connected')),
   )

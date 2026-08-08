@@ -7,6 +7,7 @@ import {
 } from '@astro-console/v2-contracts'
 import {
   executeProcessCommand,
+  prepareProcessingWorkspaceAfterRestart,
   processSnapshot,
 } from '../services/process-workspace.ts'
 import {
@@ -190,6 +191,7 @@ export function createLocalWebService(
     if (options.fixture === 'library-published')
       installPublishedLibraryFixture(database)
   } else initializeRuntimeState(database)
+  prepareProcessingWorkspaceAfterRestart(database)
   const acquireRepository = acquireSqliteRepository(database)
   const stateRepository: StateSqliteRepositoryShape = Effect.runSync(
     StateSqliteRepository.pipe(
@@ -547,7 +549,7 @@ export function createLocalWebService(
           ),
         ).then(({ status, body }) => json(response, status, body)),
       planWorkspace: (response) => workspace(response, database, 'plan'),
-      processWorkspace: (response, url) =>
+      processWorkspace: (response, url, identity) =>
         url.searchParams.has('sourceAssetId')
           ? processWorkspace(
               response,
@@ -555,7 +557,7 @@ export function createLocalWebService(
               url,
               () => stateRepository.state().snapshotVersion,
             )
-          : json(response, 200, processSnapshot(database)),
+          : json(response, 200, processSnapshot(database, identity)),
       libraryPage: (response, url) =>
         libraryPage(
           response,
@@ -655,7 +657,7 @@ export function createLocalWebService(
         )
         if (result.outcome === 'accepted')
           publish('ProcessingProjected', stateRepository.state().eventCursor)
-        return json(response, result.outcome === 'accepted' ? 200 : 409, result)
+        return json(response, result.outcome === 'accepted' ? 202 : 409, result)
       },
       refreshPreflight: async (response, identity, request) => {
         if (identity.capability !== 'controlCapable')
@@ -1147,7 +1149,10 @@ export function createLocalWebService(
         )
   const solveRetainedFrame = async (assetId: string) => {
     if (options.plateSolveWorker === undefined)
-      return { outcome: 'rejected' as const, reason: 'SourceUnavailable' as const }
+      return {
+        outcome: 'rejected' as const,
+        reason: 'SourceUnavailable' as const,
+      }
     const result = await createPlateSolveWorker(
       database,
       options.plateSolveWorker,
