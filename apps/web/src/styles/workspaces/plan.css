@@ -1,6 +1,6 @@
 .plan-workspace {
   grid-template-columns: 17rem minmax(20rem, 1fr) 18rem;
-  grid-template-rows: auto minmax(0, 1fr) 4rem;
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 .plan-workspace .workspace-heading,
 .plan-timeline {
@@ -20,8 +20,11 @@
   text-align: left;
 }
 .sequence-list strong {
-  grid-row: 1 / 3;
+  grid-row: 1 / 5;
   font-family: Georgia, serif;
+}
+.sequence-list small {
+  white-space: nowrap;
 }
 .sequence-list small,
 .plan-inspector p {
@@ -29,14 +32,13 @@
 }
 .plan-evidence {
   position: relative;
-  min-height: 25rem;
   padding: var(--space-16);
   overflow: hidden;
 }
 .sky-field {
   position: relative;
   height: 100%;
-  min-height: 24rem;
+  min-height: 16rem;
   border: 1px solid var(--color-border-strong);
   background: radial-gradient(
     circle at 55% 30%,
@@ -44,7 +46,23 @@
     var(--color-canvas) 63%
   );
 }
-.sky-field span {
+.sky-field__horizon {
+  position: absolute;
+  right: 0;
+  bottom: 18%;
+  left: 0;
+  border-top: 1px solid var(--color-border-strong);
+  opacity: 0.6;
+}
+.sky-field__target {
+  position: absolute;
+  top: var(--space-12);
+  max-width: 70%;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+.sky-field__caption {
   position: absolute;
   bottom: var(--space-16);
   left: var(--space-16);
@@ -53,26 +71,14 @@
 }
 .arc {
   position: absolute;
-  border-top: 0.2rem dashed var(--color-primary);
+  bottom: 18%;
+  border-top: 0.2rem dashed var(--color-neutral);
   border-radius: 50%;
+  opacity: 0.5;
 }
-.arc--one {
-  top: 30%;
-  left: 8%;
-  width: 38%;
-  height: 35%;
-}
-.arc--two {
-  top: 19%;
-  left: 38%;
-  width: 35%;
-  height: 44%;
-}
-.arc--three {
-  top: 35%;
-  right: 5%;
-  width: 25%;
-  height: 30%;
+.arc[data-selected='true'] {
+  border-top-color: var(--color-primary);
+  opacity: 1;
 }
 .plan-inspector {
   border-left: 1px solid var(--color-border-strong);
@@ -83,22 +89,68 @@
 }
 .plan-timeline {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: var(--space-4);
-  padding: var(--space-8) var(--space-16);
+  padding: var(--space-4) var(--space-16);
   border-top: 1px solid var(--color-border-strong);
   background: var(--color-surface);
 }
-.plan-timeline button {
-  flex: 1;
-  padding: var(--space-4);
-  font-size: 0.75rem;
-}
-.plan-timeline small,
-.plan-timeline > span {
-  display: block;
+.plan-timeline__ruler {
+  display: flex;
+  justify-content: space-between;
   color: var(--color-text-secondary);
   font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.plan-timeline__lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.plan-timeline__lane {
+  position: relative;
+  height: 2.5rem;
+}
+.plan-timeline__lane > button {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: block;
+  padding: var(--space-4) var(--space-8);
+  overflow: hidden;
+  font-size: 0.75rem;
+  text-align: left;
+}
+.plan-timeline__lane b,
+.plan-timeline__lane small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-timeline__lane small {
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.plan-timeline__estimate {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 0.2rem;
+  background: var(--color-primary);
+  opacity: 0.75;
+}
+.fact-tone--safe {
+  color: var(--color-safe);
+}
+.fact-tone--attention {
+  color: var(--color-attention);
+}
+.fact-tone--danger {
+  color: var(--color-danger);
+}
+.fact-tone--neutral {
+  color: var(--color-neutral);
 }
 @media (max-width: 1080px) and (min-width: 601px) {
   .plan-workspace {
@@ -115,12 +167,14 @@
     display: grid;
     grid-template-columns: 14rem minmax(0, 1fr);
     gap: var(--space-16);
+    overflow: visible;
     border-top: var(--border-width) solid var(--color-border-strong);
     border-left: 0;
   }
   .plan-inspector > span,
   .plan-inspector > h2,
-  .plan-inspector > p {
+  .plan-inspector > p,
+  .plan-inspector > section {
     grid-column: 1 / -1;
   }
   .plan-inspector .evidence-image {
@@ -142,7 +196,7 @@
   .sky-field {
     min-height: 20rem;
   }
-  .plan-timeline button {
+  .plan-timeline__lanes {
     display: none;
   }
 }

@@ -7,7 +7,18 @@ import { unavailableProjection } from './future-adapter'
 import { ActionResult, actionAvailability, actionResult } from './presentation'
 import { parseRoute, routePath, routeWithProjection } from './routes'
 import { Shell } from './Shell'
-import { planDraftStatus, PlanView } from './workspaces/PlanView'
+import {
+  formatDurationMinutes,
+  formatStorage,
+  formatTimeUTC,
+  formatWindowRange,
+  nightLabel,
+  planDraftStatus,
+  PlanView,
+  planTimeline,
+  skyArcs,
+} from './workspaces/PlanView'
+import type { PlanSequenceView } from './presentation'
 import { ProcessView } from './workspaces/ProcessView'
 import { Status } from './workspaces/shared'
 import { ObserveView } from './workspaces/ObserveView'
@@ -75,6 +86,165 @@ test('unavailable Plan projection does not claim a draft or revision', () => {
 test('Plan draft status distinguishes ephemeral changes from saved revisions', () => {
   assert.equal(planDraftStatus(3, false), 'Saved draft revision 3')
   assert.equal(planDraftStatus(3, true), 'Unsaved draft changes')
+})
+
+const planSequence = (
+  overrides: Partial<PlanSequenceView> = {},
+): PlanSequenceView => ({
+  id: 'seq-1',
+  target: 'M27',
+  capture: '24 × 180s · L',
+  acquisition: 'Solve, center, focus, then start capture.',
+  stopCondition: 'Stop at 24 verified frames or 01:02 local.',
+  windowStart: '2026-07-25T03:18:00.000Z',
+  windowEnd: '2026-07-25T05:02:00.000Z',
+  usableMinutes: 104,
+  estimatedMinutes: 72,
+  storageForecastMb: 1800,
+  peakAltitudeDeg: 62,
+  horizonClearanceDeg: 28,
+  horizon: 'clear',
+  storage: 'available',
+  viability: 'viable',
+  ...overrides,
+})
+
+test('Plan formats observing-window facts for people, not machines', () => {
+  assert.equal(formatTimeUTC('2026-07-25T03:18:00.000Z'), '03:18')
+  assert.equal(
+    formatWindowRange('2026-07-25T03:18:00.000Z', '2026-07-25T05:02:00.000Z'),
+    '25 Jul · 03:18 – 05:02 UTC',
+  )
+  assert.equal(
+    formatWindowRange('2026-07-25T21:00:00Z', '2026-07-26T01:00:00Z'),
+    '25 Jul 21:00 – 26 Jul 01:00 UTC',
+  )
+  assert.equal(formatDurationMinutes(45), '45 m')
+  assert.equal(formatDurationMinutes(72), '1 h 12 m')
+  assert.equal(formatDurationMinutes(104), '1 h 44 m')
+  assert.equal(formatStorage(800), '800 MB')
+  assert.equal(formatStorage(1800), '1.8 GB')
+})
+
+test('Plan derives night label and timeline bounds from sequence windows', () => {
+  assert.equal(nightLabel([planSequence()]), 'Plan night · 25 July 2026')
+  assert.equal(
+    nightLabel([
+      planSequence({
+        windowStart: '2026-07-25T21:00:00Z',
+        windowEnd: '2026-07-26T01:00:00Z',
+      }),
+    ]),
+    'Plan window · 25 – 26 July 2026',
+  )
+  const timeline = planTimeline([
+    planSequence(),
+    planSequence({
+      id: 'seq-2',
+      windowStart: '2026-07-25T04:18:00.000Z',
+      windowEnd: '2026-07-25T06:02:00.000Z',
+    }),
+  ])
+  assert.equal(timeline?.startLabel, '03:18')
+  assert.equal(timeline?.endLabel, '06:02 UTC')
+})
+
+test('Plan sky arcs follow distinct targets and their peak altitude', () => {
+  const arcs = skyArcs([
+    planSequence(),
+    planSequence({ id: 'seq-2', peakAltitudeDeg: 41 }),
+    planSequence({ id: 'seq-3', target: 'M31', peakAltitudeDeg: 90 }),
+  ])
+  assert.equal(arcs.length, 2)
+  assert.equal(arcs[0]?.target, 'M27')
+  assert.equal(arcs[0]?.peakAltitudeDeg, 62)
+  assert.ok(arcs[1]!.height > arcs[0]!.height)
+  const flat = skyArcs([planSequence({ peakAltitudeDeg: 0 })])
+  const overhead = skyArcs([planSequence({ peakAltitudeDeg: 90 })])
+  assert.equal(flat[0]?.height, 15)
+  assert.equal(overhead[0]?.height, 65)
+})
+
+test('Plan presents formatted sequence evidence instead of raw projection strings', () => {
+  const snapshot = Schema.decodeUnknownSync(BootstrapSnapshot)({
+    ...bootstrapFixtures.fresh,
+    plan: {
+      planId: 'plan-m27',
+      revision: 3,
+      readiness: 'readyWithLimitations',
+      readinessSummary: 'The plan is usable with the named limitations.',
+      limitations: ['seq-2: horizon clearance is limited.'],
+      sequences: [
+        {
+          sequenceId: 'seq-1',
+          target: 'M27',
+          capture: '24 × 180s · L',
+          acquisition: 'Solve, center, focus, then start capture.',
+          stopCondition: 'Stop at 24 verified frames or 01:02 local.',
+          window: {
+            startsAt: '2026-07-25T03:18:00.000Z',
+            endsAt: '2026-07-25T05:02:00.000Z',
+            usableMinutes: 104,
+            peakAltitudeDeg: 62,
+            horizonClearanceDeg: 28,
+          },
+          estimatedMinutes: 72,
+          storageForecastMb: 1800,
+          horizon: 'clear',
+          storage: 'available',
+          viability: 'viable',
+        },
+        {
+          sequenceId: 'seq-2',
+          target: 'M31',
+          capture: '18 × 180s · RGB',
+          acquisition: 'Continue after luminance with the same solved center.',
+          stopCondition: 'Stop at 18 verified frames or window end.',
+          window: {
+            startsAt: '2026-07-25T04:18:00.000Z',
+            endsAt: '2026-07-25T06:02:00.000Z',
+            usableMinutes: 104,
+            peakAltitudeDeg: 41,
+            horizonClearanceDeg: 12,
+          },
+          estimatedMinutes: 54,
+          storageForecastMb: 1350,
+          horizon: 'limited',
+          storage: 'available',
+          viability: 'limited',
+        },
+      ],
+    },
+  })
+  const markup = renderToStaticMarkup(
+    createElement(PlanView, {
+      view: projectBootstrapState(BootstrapClientState.Current({ snapshot }))
+        .plan,
+    }),
+  )
+  assert.match(markup, /Plan night · 25 July 2026/)
+  assert.doesNotMatch(markup, /T0[3456]:(18|02):00\.000Z/)
+  assert.match(markup, /25 Jul · 03:18 – 05:02 UTC/)
+  assert.match(markup, /1 h 44 m/)
+  assert.match(markup, /1 h 12 m/)
+  assert.match(markup, /1\.8 GB/)
+  assert.match(markup, /Clear<\/span> · 28° clearance/)
+  assert.match(markup, />Viable</)
+  assert.match(markup, /Solve, center, focus, then start capture\./)
+  assert.match(markup, /Stop at 24 verified frames or 01:02 local\./)
+  assert.match(markup, /peaks 62°/)
+  assert.match(markup, />03:18</)
+  assert.match(markup, />06:02 UTC</)
+  assert.match(markup, /18 × 180s · RGB/)
+  assert.match(
+    markup,
+    /· <span class="fact-tone fact-tone--attention">Limited<\/span>/,
+  )
+  assert.equal(markup.match(/class="arc"/g)?.length, 2)
+  assert.match(
+    markup,
+    /data-tone="attention" role="status">Ready with limitations/,
+  )
 })
 
 test('Plan distinguishes saved drafts, unsaved edits, immutable definitions, and eligible actions', () => {
@@ -411,8 +581,14 @@ test('desktop shared-control surface exposes request resolution and takeover onl
       createElement('p', null, 'Workspace'),
     ),
   )
-  assert.match(phoneMarkup, /This client is read-only; control actions are unavailable/)
-  assert.doesNotMatch(phoneMarkup, /Request control|Take control|Release control/)
+  assert.match(
+    phoneMarkup,
+    /This client is read-only; control actions are unavailable/,
+  )
+  assert.doesNotMatch(
+    phoneMarkup,
+    /Request control|Take control|Release control/,
+  )
 })
 
 test('process has a focusable screen heading', () => {

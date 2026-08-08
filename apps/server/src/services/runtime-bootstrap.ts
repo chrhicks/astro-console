@@ -64,10 +64,10 @@ export const evaluatePlan = (input: {
     readiness,
     readinessSummary:
       readiness === 'ready'
-        ? 'All supplied deterministic planning facts are viable.'
+        ? 'All supplied planning facts are viable.'
         : readiness === 'readyWithLimitations'
-          ? 'The plan is usable with the named deterministic limitations.'
-          : 'The plan is blocked by the named deterministic planning facts.',
+          ? 'The plan is usable with the named limitations.'
+          : 'The plan is blocked by the named planning facts.',
     limitations,
     sequences,
   }

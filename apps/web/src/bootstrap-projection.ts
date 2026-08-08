@@ -110,6 +110,7 @@ function plan(
       detailAvailable: false,
       title: 'Plan detail unavailable',
       readiness: 'Plan readiness is unavailable from the service snapshot.',
+      tone: 'neutral' as const,
       detail:
         'Plan draft and revision detail are unavailable from this snapshot.',
       sequences: [],
@@ -121,15 +122,26 @@ function plan(
     readiness: current
       ? readiness(snapshot.plan.readiness)
       : `Last-confirmed ${readiness(snapshot.plan.readiness)}`,
+    tone: readinessTone(snapshot.plan.readiness),
     detail: current
       ? snapshot.plan.readinessSummary
       : `Current plan truth is unavailable. ${snapshot.plan.readinessSummary}`,
     sequences: snapshot.plan.sequences.map((sequence) => ({
       id: sequence.sequenceId,
       target: sequence.target,
-      window: `${sequence.window.startsAt} – ${sequence.window.endsAt}`,
       capture: sequence.capture,
-      readiness: sequence.viability,
+      acquisition: sequence.acquisition,
+      stopCondition: sequence.stopCondition,
+      windowStart: sequence.window.startsAt,
+      windowEnd: sequence.window.endsAt,
+      usableMinutes: sequence.window.usableMinutes,
+      estimatedMinutes: sequence.estimatedMinutes,
+      storageForecastMb: sequence.storageForecastMb,
+      peakAltitudeDeg: sequence.window.peakAltitudeDeg,
+      horizonClearanceDeg: sequence.window.horizonClearanceDeg,
+      horizon: sequence.horizon,
+      storage: sequence.storage,
+      viability: sequence.viability,
     })),
     source: snapshot.plan,
     snapshotVersion: snapshot.snapshotVersion,
@@ -152,6 +164,16 @@ function readiness(value: PlanWorkspaceProjection['readiness']) {
     : value === 'readyWithLimitations'
       ? 'Ready with limitations'
       : 'Blocked'
+}
+
+function readinessTone(
+  value: PlanWorkspaceProjection['readiness'],
+): StatusTone {
+  return value === 'ready'
+    ? 'safe'
+    : value === 'readyWithLimitations'
+      ? 'attention'
+      : 'danger'
 }
 
 function unavailableProjection(reason: string): Projection {
@@ -194,6 +216,7 @@ function unavailableProjection(reason: string): Projection {
       detailAvailable: false,
       title: 'Plan unavailable',
       readiness: 'Readiness unavailable without a service snapshot.',
+      tone: 'neutral',
       detail:
         'Plan draft and revision detail are unavailable without a snapshot.',
       sequences: [],

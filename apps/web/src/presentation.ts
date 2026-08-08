@@ -108,18 +108,30 @@ export type ShellView = {
   }
   health: readonly HealthFact[]
 }
+export type PlanSequenceView = {
+  id: string
+  target: string
+  capture: string
+  acquisition: string
+  stopCondition: string
+  windowStart: string
+  windowEnd: string
+  usableMinutes: number
+  estimatedMinutes: number
+  storageForecastMb: number
+  peakAltitudeDeg: number
+  horizonClearanceDeg: number
+  horizon: 'clear' | 'limited' | 'blocked' | 'missing'
+  storage: 'available' | 'limited' | 'blocked' | 'missing'
+  viability: 'viable' | 'limited' | 'blocked'
+}
 export type PlanView = {
   detailAvailable: boolean
   title: string
   readiness: string
+  tone: StatusTone
   detail: string
-  sequences: readonly {
-    id: string
-    target: string
-    window: string
-    capture: string
-    readiness: string
-  }[]
+  sequences: readonly PlanSequenceView[]
   action?: Action
   source?: PlanWorkspaceProjection
   actionReason?: string
