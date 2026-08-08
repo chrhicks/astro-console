@@ -22,6 +22,7 @@ seestar_3.1.2_fw_7.32_interop.pem
 
 dist/
 node_modules/
+.vite/
 .local/
 apps/v2-local-web/.astro-local-web/
 .bak*
