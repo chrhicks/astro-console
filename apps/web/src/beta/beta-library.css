@@ -1,0 +1,215 @@
+.beta-library-workspace,
+.beta-library-phone {
+  min-width: 0;
+  color: var(--nb-text);
+}
+
+.beta-library-workspace {
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px 44px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+}
+
+.beta-library-assets {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto auto auto;
+  justify-content: start;
+  align-items: center;
+  gap: 4px;
+}
+
+.beta-library-assets > div {
+  min-width: 0;
+  color: var(--nb-text);
+  text-align: center;
+  font: 650 11px var(--nb-font-mono);
+}
+
+.beta-library-assets > a,
+.beta-library-assets > span {
+  min-width: 72px;
+  color: var(--nb-text);
+  font: 650 11px var(--nb-font-mono);
+  text-align: center;
+}
+
+.beta-library-assets > a {
+  border: 1px solid var(--nb-line-strong);
+  border-radius: var(--nb-radius);
+  min-height: var(--nb-control-height);
+  padding: 0 8px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.beta-library-assets > a:hover {
+  border-color: var(--nb-accent);
+}
+
+.beta-library-assets > a:focus-visible {
+  outline: 2px solid var(--nb-focus);
+  outline-offset: 2px;
+}
+
+.beta-library-assets > span[aria-disabled='true'] {
+  color: var(--nb-muted);
+  opacity: 0.6;
+}
+
+.beta-library-message {
+  color: var(--nb-muted);
+  margin: 0;
+}
+
+.beta-library-tabs {
+  border: 1px solid var(--nb-line);
+  background: var(--nb-surface);
+  min-width: 0;
+  min-height: 0;
+}
+
+.beta-library-tabs .nb-tab-list {
+  justify-content: flex-end;
+}
+
+.beta-library-tabs .nb-tab-panel {
+  min-height: 0;
+  height: calc(100% - var(--nb-control-height));
+  padding: 8px;
+}
+
+.beta-library-review-grid {
+  min-height: min(620px, calc(100vh - 250px));
+  display: grid;
+  grid-template-columns: 220px minmax(420px, 1fr) 280px;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.beta-library-lineage,
+.beta-library-decision,
+.beta-library-evidence {
+  min-width: 0;
+}
+
+.beta-library-decision {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+}
+
+.beta-library-lineage .nb-panel-body {
+  height: 100%;
+}
+
+.beta-library-evidence {
+  min-height: 420px;
+}
+
+.beta-library-evidence .nb-evidence-canvas {
+  background:
+    linear-gradient(
+      45deg,
+      transparent 49%,
+      rgb(255 255 255 / 2%) 50%,
+      transparent 51%
+    ),
+    #05080b;
+  background-size: 18px 18px;
+}
+
+.beta-library-evidence .nb-evidence-overlays {
+  display: flex;
+  align-items: end;
+  padding: 8px;
+}
+
+.beta-library-evidence .nb-metric-overlay {
+  pointer-events: none;
+}
+
+.beta-library-availability {
+  min-height: 380px;
+  display: grid;
+  grid-template-columns: minmax(300px, 1.4fr) minmax(240px, 0.8fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.beta-library-download {
+  min-height: var(--nb-control-height);
+  border: 1px solid var(--nb-line-strong);
+  border-radius: var(--nb-radius);
+  color: var(--nb-text);
+  background: var(--nb-surface-raised);
+  padding: 0 12px;
+  font: 650 var(--nb-font-size) var(--nb-font-mono);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.beta-library-download:hover {
+  border-color: var(--nb-accent);
+}
+
+.beta-library-download:focus-visible {
+  outline: 2px solid var(--nb-focus);
+  outline-offset: 2px;
+}
+
+.beta-library-phone {
+  padding: 12px 12px 44px;
+  display: none;
+  gap: 10px;
+}
+
+.beta-library-phone .beta-library-evidence {
+  min-height: 0;
+}
+
+.beta-library-phone .nb-evidence-toolbar {
+  display: none;
+}
+
+@media (max-width: 1050px) {
+  .beta-library-review-grid {
+    min-height: 0;
+    grid-template-columns: 190px minmax(360px, 1fr);
+  }
+
+  .beta-library-decision {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 800px) and (min-width: 601px) {
+  .beta-library-review-grid,
+  .beta-library-availability {
+    grid-template-columns: 1fr;
+  }
+
+  .beta-library-evidence {
+    min-height: 360px;
+  }
+}
+
+@media (max-width: 600px) {
+  .beta-library-workspace {
+    display: none;
+  }
+
+  .beta-library-phone {
+    display: grid;
+  }
+
+  .beta-library-phone .nb-data-list-item {
+    grid-template-columns: minmax(88px, 0.8fr) minmax(0, 1.2fr);
+  }
+}

@@ -1,0 +1,101 @@
+.beta-process-workspace {
+  grid-template-rows: auto minmax(520px, 1fr);
+}
+.beta-process-grid {
+  display: grid;
+  grid-template-columns: 220px minmax(430px, 1fr) 285px;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+.beta-process-grid > * {
+  min-width: 0;
+  height: 100%;
+}
+.beta-process-source .nb-panel-body,
+.beta-process-operation .nb-panel-body,
+.beta-process-stage .nb-panel-body {
+  overflow: auto;
+}
+.beta-process-stage .nb-panel-body {
+  height: calc(100% - 34px);
+}
+.beta-process-stage .nb-evidence {
+  min-height: 360px;
+}
+.beta-process-stage .nb-evidence-canvas {
+  min-height: 330px;
+}
+.beta-process-message,
+.beta-process-phone-protection {
+  color: var(--nb-muted);
+  font-size: 10px;
+}
+.beta-process-empty {
+  align-self: start;
+}
+.beta-process-empty .nb-attention {
+  max-width: 760px;
+}
+.beta-process-operation a {
+  color: var(--nb-accent);
+  font: 9px var(--nb-font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.beta-operational-status .beta-process-status-mobile {
+  display: none;
+}
+@media (min-width: 781px) and (max-width: 1120px) {
+  .beta-process-grid {
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+  .beta-process-operation {
+    grid-column: 1/-1;
+    height: auto;
+  }
+  .beta-process-operation .nb-panel-body > .nb-stack {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+@media (min-width: 601px) and (max-width: 780px) {
+  .beta-process-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .beta-process-stage {
+    grid-row: 1;
+    min-height: 520px;
+  }
+  .beta-process-source {
+    grid-row: 2;
+    height: auto;
+  }
+  .beta-process-operation {
+    grid-row: 3;
+    height: auto;
+  }
+}
+@media (max-width: 600px) {
+  .beta-process-phone {
+    overflow-x: hidden;
+  }
+  .beta-process-phone .nb-evidence-canvas {
+    min-height: 220px;
+  }
+  .beta-operational-status.beta-process-status {
+    display: flex;
+    min-width: 0;
+  }
+  .beta-operational-status .beta-process-status-desktop {
+    display: none;
+  }
+  .beta-operational-status .beta-process-status-mobile {
+    display: flex;
+    width: 100%;
+    max-width: none;
+    justify-content: flex-start;
+    font-size: 8px;
+  }
+}

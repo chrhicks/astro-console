@@ -1,5 +1,5 @@
 import { Effect, Fiber, Stream } from 'effect'
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { BootstrapClient } from './bootstrap-client'
 import {
   PlanCommandClient,
@@ -35,6 +35,7 @@ import {
   routeWorkspace,
   type Route,
 } from './routes'
+import { isBetaWorkspaceLocation } from './beta/route'
 import { Shell } from './Shell'
 import { LibraryView } from './workspaces/LibraryView'
 import {
@@ -57,6 +58,12 @@ import {
 } from './live-frame-review-client'
 
 const currentRoute = () => parseRoute(location.pathname, location.search)
+const currentBetaWorkspace = () =>
+  isBetaWorkspaceLocation(location.pathname, location.search)
+const BetaObserveApp = lazy(() => import('./beta/BetaObserveApp'))
+const BetaLibraryApp = lazy(() => import('./beta/BetaLibraryApp'))
+const BetaPlanApp = lazy(() => import('./beta/BetaPlanApp'))
+const BetaProcessApp = lazy(() => import('./beta/BetaProcessApp'))
 
 export function App() {
   const [projection, setProjection] = useState<Projection>(
@@ -65,6 +72,8 @@ export function App() {
   const projectionRef = useRef(projection)
   projectionRef.current = projection
   const [route, setRoute] = useState<Route>(currentRoute)
+  const [betaWorkspace, setBetaWorkspace] = useState(currentBetaWorkspace)
+  const [projectionReceived, setProjectionReceived] = useState(false)
   const [submitPlan, setSubmitPlan] = useState<
     | ((
         action: PlanAction,
@@ -154,6 +163,12 @@ export function App() {
     value: ProcessSourceHandoff | undefined
     state: 'loading' | 'not-found' | 'not-local' | 'unavailable' | undefined
   }>({ value: undefined, state: undefined })
+  const selectedLibraryAssetId =
+    route.kind === 'asset'
+      ? route.assetId
+      : betaWorkspace && workspace === 'library'
+        ? libraryPage.value?.results[0]?.assetId
+        : undefined
 
   useEffect(() => {
     const frame = projection.observe.source?.acquire?.liveFrame
@@ -182,7 +197,10 @@ export function App() {
     projection.observe.snapshotVersion,
   ])
   useEffect(() => {
-    const onPopState = () => setRoute(currentRoute())
+    const onPopState = () => {
+      setRoute(currentRoute())
+      setBetaWorkspace(currentBetaWorkspace())
+    }
     addEventListener('popstate', onPopState)
     return () => removeEventListener('popstate', onPopState)
   }, [])
@@ -219,7 +237,22 @@ export function App() {
     }
   }, [libraryQuery, workspace])
   useEffect(() => {
-    if (route.kind !== 'asset') {
+    if (
+      !betaWorkspace ||
+      route.kind !== 'workspace' ||
+      route.workspace !== 'library'
+    )
+      return
+    const firstAssetId = libraryPage.value?.results[0]?.assetId
+    if (firstAssetId === undefined) return
+    const path = `/library/assets/${encodeURIComponent(firstAssetId)}`
+    const next = parseRoute(path, '?ui=beta')
+    if (next.kind !== 'asset') return
+    history.replaceState(null, '', `${path}?ui=beta`)
+    setRoute(next)
+  }, [betaWorkspace, libraryPage.value, route])
+  useEffect(() => {
+    if (selectedLibraryAssetId === undefined) {
       setLibraryDetail({ value: undefined, state: undefined })
       return
     }
@@ -230,7 +263,7 @@ export function App() {
       .runPromise(
         Effect.gen(function* () {
           const client = yield* LibraryClient
-          return yield* client.detail(route.assetId)
+          return yield* client.detail(selectedLibraryAssetId)
         }),
       )
       .then(
@@ -255,7 +288,7 @@ export function App() {
       libraryDetailGeneration.current += 1
       void runtime.dispose()
     }
-  }, [route])
+  }, [selectedLibraryAssetId])
   useEffect(() => {
     if (route.kind !== 'process-source') {
       setProcessSource({ value: undefined, state: undefined })
@@ -538,7 +571,10 @@ export function App() {
         const client = yield* BootstrapClient
         yield* client.states.pipe(
           Stream.runForEach((state) =>
-            Effect.sync(() => setProjection(projectBootstrapState(state))),
+            Effect.sync(() => {
+              setProjection(projectBootstrapState(state))
+              setProjectionReceived(true)
+            }),
           ),
         )
       }),
@@ -570,6 +606,7 @@ export function App() {
     const path = routeWithProjection(next)
     history.pushState(null, '', path)
     setRoute(next)
+    setBetaWorkspace(false)
   }
   const intercept = (
     event: React.MouseEvent<HTMLAnchorElement>,
@@ -597,6 +634,39 @@ export function App() {
       message: 'Loading Library records.',
     })
     setLibraryQuery(query)
+  }
+  const selectBetaLibraryAsset = (assetId: string) => {
+    const path = `/library/assets/${encodeURIComponent(assetId)}`
+    const next = parseRoute(path, '?ui=beta')
+    if (next.kind !== 'asset') return
+    history.pushState(null, '', `${path}?ui=beta`)
+    setRoute(next)
+    setBetaWorkspace(true)
+  }
+  const reviewLibraryAsset = async (decision: 'accepted' | 'rejected') => {
+    const detail = libraryDetail.value
+    if (!detail) throw new Error('Asset detail is unavailable.')
+    const response = await fetch(
+      `/api/library/assets/${encodeURIComponent(detail.assetId)}/review`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          expectedAssetRevision: detail.revision,
+          expectedReviewRevision: detail.review?.revision ?? 0,
+          decision,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      },
+    )
+    if (!response.ok) throw new Error('The review was not accepted.')
+    const result = await response.json()
+    if (result.outcome !== 'accepted')
+      throw new Error('The review was not accepted.')
+    setLibraryDetail({
+      value: { ...detail, review: result.review },
+      state: undefined,
+    })
   }
 
   const content =
@@ -669,29 +739,7 @@ export function App() {
         onQuery={changeLibraryQuery}
         readOnly={projection.shell.readOnly}
         onReview={(decision) => {
-          const detail = libraryDetail.value
-          if (!detail) return
-          void fetch(
-            `/api/library/assets/${encodeURIComponent(detail.assetId)}/review`,
-            {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                expectedAssetRevision: detail.revision,
-                expectedReviewRevision: detail.review?.revision ?? 0,
-                decision,
-                idempotencyKey: crypto.randomUUID(),
-              }),
-            },
-          )
-            .then((response) => response.json())
-            .then((result) => {
-              if (result.outcome === 'accepted')
-                setLibraryDetail({
-                  value: { ...detail, review: result.review },
-                  state: undefined,
-                })
-            })
+          void reviewLibraryAsset(decision).catch(() => undefined)
         }}
       />
     ) : workspace === 'process' ? (
@@ -711,6 +759,120 @@ export function App() {
         view={projection.plan}
         {...(submitPlan === undefined ? {} : { submit: submitPlan })}
       />
+    )
+
+  if (betaWorkspace && workspace === 'observe')
+    return (
+      <Suspense
+        fallback={
+          <main aria-busy="true" aria-label="Loading Nightbook beta">
+            Loading Nightbook beta…
+          </main>
+        }
+      >
+        <BetaObserveApp
+          projection={projection}
+          loading={!projectionReceived}
+          {...(refreshPreflight === undefined ||
+          projection.shell.readOnly ||
+          projection.observe.source?.phase !== 'preflight'
+            ? {}
+            : { refreshPreflight })}
+          {...(targetAcquisitionCommand === undefined ||
+          projection.shell.readOnly
+            ? {}
+            : { targetAcquisitionCommand })}
+          {...(acquireRecoveryCommand === undefined || projection.shell.readOnly
+            ? {}
+            : { acquireRecoveryCommand })}
+          {...(approvePointingCorrection === undefined ||
+          projection.shell.readOnly
+            ? {}
+            : { approvePointingCorrection })}
+        />
+      </Suspense>
+    )
+
+  if (betaWorkspace && workspace === 'plan')
+    return (
+      <Suspense
+        fallback={
+          <main aria-busy="true" aria-label="Loading Nightbook Plan beta">
+            Loading Nightbook Plan beta…
+          </main>
+        }
+      >
+        <BetaPlanApp
+          projection={projection}
+          loading={!projectionReceived}
+          {...(submitPlan === undefined || projection.shell.readOnly
+            ? {}
+            : { submit: submitPlan })}
+        />
+      </Suspense>
+    )
+
+  if (betaWorkspace && workspace === 'library')
+    return (
+      <Suspense
+        fallback={
+          <main aria-busy="true" aria-label="Loading Nightbook Library beta">
+            Loading Nightbook Library beta…
+          </main>
+        }
+      >
+        <BetaLibraryApp
+          projection={projection}
+          loading={!projectionReceived}
+          page={{
+            query: libraryQuery,
+            ...(libraryPage.value === undefined
+              ? {}
+              : { value: libraryPage.value }),
+            ...(libraryPage.message === undefined
+              ? {}
+              : { message: libraryPage.message }),
+          }}
+          onSelectAsset={selectBetaLibraryAsset}
+          {...(selectedLibraryAssetId === undefined
+            ? {}
+            : { assetId: selectedLibraryAssetId })}
+          {...(libraryDetail.value === undefined
+            ? {}
+            : { detail: libraryDetail.value })}
+          {...(libraryDetail.state === undefined
+            ? {}
+            : { detailState: libraryDetail.state })}
+          {...(projection.shell.readOnly
+            ? {}
+            : { onReview: reviewLibraryAsset })}
+        />
+      </Suspense>
+    )
+
+  if (betaWorkspace && workspace === 'process')
+    return (
+      <Suspense
+        fallback={
+          <main aria-busy="true" aria-label="Loading Nightbook Process beta">
+            Loading Nightbook Process beta…
+          </main>
+        }
+      >
+        <BetaProcessApp
+          projection={projection}
+          loading={!projectionReceived}
+          sourceAssetId={
+            route.kind === 'process-source' ? route.sourceAssetId : undefined
+          }
+          {...(processSource.value === undefined
+            ? {}
+            : { sourceHandoff: processSource.value })}
+          {...(processSource.state === undefined
+            ? {}
+            : { sourceHandoffState: processSource.state })}
+        />
+      </Suspense>
     )
 
   return (
