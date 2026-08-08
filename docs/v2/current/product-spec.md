@@ -1,10 +1,11 @@
 # V2 Product Specification
 
-Status: **living product specification — Gates 1–5 accepted; Gate 6 technical spikes complete; Gate 7 reference frozen**
+Status: **living product specification — V2.0 complete; V2.1 Phases 1–4 complete**
 
-Last reconciled: July 23, 2026 against accepted Gates 1–5, completed Gate 6
-constraints, the frozen Gate 7 reference, and the user-visible infrastructure
-model.
+Last reconciled: August 5, 2026 against the delivered V2.0 workspaces and
+remote-access model, the V2.1 Alpaca inventory and camera boundaries, and the
+local plate-solve evidence worker. V2.1 outdoor acquisition and capture remain
+planned work.
 
 Read this only when workspace behavior or product-entity detail is needed. The
 default V2 context begins at [Start Here](../README.md).
@@ -31,12 +32,15 @@ how design decisions are made.
 V2 is a web-first personal observatory workspace over a durable rig-local
 service. It helps an operator decide what to observe, acquire it safely,
 evaluate the evidence, and develop useful results without requiring the
-browser to own long-running work.
+browser to own long-running work. V2.0 delivers the Plan, Observe, Library,
+and Process workspace model with remote viewing and bounded shared control.
+V2.1 adds one configured Alpaca-rig boundary for real capability observation,
+bounded camera exposure, immutable original intake, and local solve evidence.
 
 It is designed for one observatory shared with a few trusted people. It is not
 a commercial multi-tenant platform, a generic device dashboard, or an
-enterprise operations product. `Astro Console` remains a working name rather
-than an accepted V2 naming decision.
+enterprise operations product. **Nightbook** is the user-facing V2 workspace;
+Astro Console remains the project and service name.
 
 The product should answer three questions in order:
 
@@ -108,13 +112,16 @@ state.
 | Acquisition Attempt | Evidence and corrections used to align, solve, center, and prepare a target |
 | Frame | Durable captured evidence with settings, metrics, provenance, and review status |
 | Asset | Stable identity, lineage, checksums, representations, availability, and authorization for original or derived evidence |
+| Configured Rig | One selected Alpaca endpoint and its observed device identities, capabilities, connection state, and safe-state facts; it is not a browser-side device client |
 | Processing Session | A durable, resumable Build/Develop working resource with linear applied history, synchronized preview state, working outputs, checkpoints, and references to any saved Library artifacts; it is not itself a Library asset |
 | Control Lease | The single client currently authorized to issue observing commands |
 | Client Presence | Ephemeral authenticated viewer identity, device, freshness, and capability; never authority by itself |
 
 The Astro Console service owns accepted run execution, mutation impact,
 current rig and workflow state, processing sessions, asset identity, presence,
-and the exclusive control lease. These do not belong to a workspace, React
+and the exclusive control lease. It decodes Alpaca provider data at its adapter
+boundary and records later observation or image evidence separately from a
+provider acknowledgement. These facts do not belong to a workspace, React
 tree, browser tab, or connected client.
 
 ### Identity, Presence, And Control
@@ -188,6 +195,21 @@ The UI distinguishes Astro Console service availability, rig connectivity,
 public-tunnel availability, processing availability, artifact publication, and
 storage pressure. A failed public tunnel means remote access is unavailable;
 it does not imply the observatory or accepted run stopped.
+
+### Remote Viewing And Shared Control
+
+- Cloudflare Access admits trusted remote clients to the rig-local service; it
+  is ingress and identity admission, not observatory authority.
+- Remote phone clients are read-only. A remote desktop client may request the
+  existing service-owned control lease; owner grant, release, decline, and
+  takeover stay explicit.
+- The shell shows the admitted identity, membership, remote availability,
+  controller, lease/presence state, and why an action is unavailable. It does
+  not expose provider paths, host paths, tokens, or driver diagnostics.
+- Remote previews are deliberately bounded. Original download remains an
+  explicit authorized Library action, never routine viewing data.
+- Tunnel or Access loss changes remote availability only. A local owner route
+  continues to show the service-owned state and does not stop accepted work.
 
 ### Information Hierarchy
 
@@ -335,6 +357,21 @@ Preflight presents a decision-grade checklist:
 The primary action is to resolve the next blocker or begin the run. Raw device
 facts belong behind the verdict.
 
+### Current Rig Observation And Camera Boundary
+
+V2.1 supports one configured Alpaca rig at a time. Preflight can publish
+timestamped observed identities, optional capability facts, connection state,
+and provider-unavailable truth for its camera, telescope, focuser, filter
+wheel, and switch devices. It does not invent unsupported capability or treat
+a missing provider observation as a safe verdict.
+
+The first real command boundary is deliberately narrow: start or abort a
+camera exposure, then read camera state. It requires the existing controller
+lease, current revisions, idempotency, and current camera eligibility. A
+provider acknowledgement is provisional; later device observation and captured
+image evidence establish what happened. Mount motion, focus, filter changes,
+parking, and a generic provider-control panel are not current V2.1 behavior.
+
 ### Session-Level Acquire
 
 Session preparation may include:
@@ -442,6 +479,12 @@ Library is for judgment and evidence management, not image transformation.
 Library owns stable identity and durable lineage for original and saved assets.
 The UI works with asset IDs and user-facing metadata, never raw filesystem
 paths or R2 object keys. Original sources remain immutable evidence.
+
+Completed Alpaca camera data may enter Library as a retained original after
+bounded retrieval, representation validation, checksum, and provenance
+recording. An original remains available even when preview generation or image
+inspection cannot interpret its representation; Library shows that limitation
+instead of implying a usable preview.
 
 ### Organization
 
@@ -567,7 +610,20 @@ and the UI names that condition directly.
 Review and Process remain separate because they answer different questions:
 `Is this evidence good?` versus `How should it be transformed?`
 
-## 9. Responsive And Field-Use Behavior
+## 9. Local Plate-Solve Evidence
+
+V2.1 includes one bounded local Astrometry.net solve worker for FITS originals
+that are available locally and contain the required coordinate hints. It records
+the selected solver identity and version, declared search bounds, sanitized
+diagnostics, input asset, and a typed `Solved` or `NoSolution` result. The
+source asset remains intact on either result.
+
+The worker supplies image evidence to the existing Acquire model only when an
+Acquire session is already waiting for a deep-sky solve. It has no mount or
+correction-provider dependency and cannot move the rig. A solved frame does
+not, by itself, prove outdoor pointing or authorize a correction.
+
+## 10. Responsive And Field-Use Behavior
 
 Responsive design should change the task surface, not merely shrink it.
 
@@ -606,30 +662,35 @@ desktop buttons at a smaller breakpoint.
 - Keep dense diagnostics available without placing them in the primary scan
   path.
 
-## 10. Deferred And Explicitly Out Of Scope
+## 11. Deferred And Explicitly Out Of Scope
 
 These items are not current product behavior. Some need later decisions;
 others are explicitly outside the accepted first model and should not be
 reintroduced without new evidence:
 
-- final product name, visual polish, and detailed copy;
+- visual polish and detailed copy;
 - the final controller reconnect-grace duration and control-request audience;
 - how several accepted active-run changes are summarized in durable history;
 - a future control-capable phone experience;
+- V2.1 Phase 5 outdoor target selection, slew, image-backed centering, and a
+  modest captured target; Phases 1–4 do not establish sky position or image
+  quality;
+- unattended or all-night operation, automatic multi-target operation, and
+  simultaneous control of more than one configured rig;
+- a generic Alpaca configuration or device-control panel;
 - a first-class reusable processing recipe; presets remain deferred unless
   real use demonstrates value;
 - user-visible processing branches or arbitrary edit-history navigation,
   which are not part of the accepted one-current-history model;
-- the final inventory and invocation details for Siril, RCAstro, and other
-  processing adapters; and
-- production transports, persistence layouts, and adapter payloads, which
-  later implementation work must define without changing the accepted Gate 5
-  command, failure, transition, and projection semantics.
+- production processing-tool invocation and image-quality claims for Siril,
+  RCAstro, or other Process adapters; and
+- any later provider boundary beyond the configured Alpaca inventory, camera,
+  image-intake, and local solve-evidence work already described here.
 
 These items remain in the relevant gate or planning record. They enter this
 living specification only when accepted as current product behavior.
 
-## 11. V2 UX Acceptance Outcomes
+## 12. V2 UX Acceptance Outcomes
 
 The V2 interaction model is successful when:
 
@@ -643,6 +704,10 @@ The V2 interaction model is successful when:
 - every warning has a discoverable cause and remedy;
 - every frame has enough preview, quality, and provenance information to judge
   it;
+- a camera original can remain inspectable and downloadable even when its
+  preview is explicitly unavailable;
+- remote availability, membership, and controller state remain separate from
+  the local observatory state;
 - processing outputs remain reproducible and connected to their sources;
 - the phone experience is useful without becoming an unsafe miniature desktop;
 - information density increases confidence instead of increasing search cost.
