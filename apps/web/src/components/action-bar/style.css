@@ -1,0 +1,81 @@
+.action-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-12);
+  padding: var(--space-12) var(--space-16);
+  border-top: var(--border-width) solid var(--color-border-strong);
+  background: var(--color-surface);
+}
+.action-bar__summary {
+  min-width: 0;
+  color: var(--color-text);
+  font-weight: 700;
+}
+.action-bar__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+.action-bar__action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-height: var(--control-min-height);
+  padding: var(--space-4) var(--space-12);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+}
+.action-bar__action:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+.action-bar__action--primary {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-canvas);
+  font-weight: 800;
+}
+.action-bar__action--danger {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+.action-bar__action--danger:hover:not(:disabled) {
+  border-color: var(--color-danger);
+  background: var(--color-danger);
+  color: var(--color-canvas);
+}
+.action-bar__action:disabled {
+  cursor: not-allowed;
+  color: var(--color-disabled-text);
+  border-color: var(--color-disabled-border);
+  background: var(--color-disabled-background);
+}
+.action-bar__reason {
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+.action-bar__note {
+  flex: 1 1 16rem;
+  min-width: 0;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  text-align: right;
+}
+@media (max-width: 600px) {
+  /* Phone is monitoring only: mutation actions leave with the buttons. */
+  .action-bar__actions {
+    display: none;
+  }
+  .action-bar__note {
+    text-align: left;
+  }
+}

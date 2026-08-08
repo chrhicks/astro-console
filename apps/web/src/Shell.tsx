@@ -97,7 +97,10 @@ export function Shell({
             {view.health.map((fact) => fact.summary).join(' · ')}
           </span>
           {workspace !== 'observe' && view.currentRun && (
-            <a className="return-to-observe" {...link({ kind: 'workspace', workspace: 'observe' })}>
+            <a
+              className="return-to-observe"
+              {...link({ kind: 'workspace', workspace: 'observe' })}
+            >
               Return to Observe
             </a>
           )}
@@ -120,12 +123,19 @@ export function Shell({
             Full status and service detail
           </summary>
           <div className="status-anchor__authority">
-            <span>{view.membership}</span><span>{view.remoteAvailability}</span>
-            <span>{view.authority}</span><span>{view.presence}</span>
-            <span>{view.attentionOwner}</span><span>{view.service}</span>
-            <span>{view.capability}</span><span>{view.protection}</span>
+            <span>{view.membership}</span>
+            <span>{view.remoteAvailability}</span>
+            <span>{view.authority}</span>
+            <span>{view.presence}</span>
+            <span>{view.attentionOwner}</span>
+            <span>{view.service}</span>
+            <span>{view.capability}</span>
+            <span>{view.protection}</span>
           </div>
-          <div className="status-anchor__health" aria-label="Service health details">
+          <div
+            className="status-anchor__health"
+            aria-label="Service health details"
+          >
             {view.health.map((fact) => (
               <Status key={fact.label} tone={fact.tone}>
                 {fact.detail}
@@ -154,12 +164,14 @@ function SharedControl({
   submit,
 }: {
   control: ShellView['control']
-  submit: ((intent: ControlIntent) => Promise<{
-    readonly _tag: 'Accepted' | 'Rejected' | 'Unavailable'
-    readonly safeNextAction: string
-    readonly reason?: string
-    readonly failure?: { readonly summary: string }
-  }>) | undefined
+  submit:
+    | ((intent: ControlIntent) => Promise<{
+        readonly _tag: 'Accepted' | 'Rejected' | 'Unavailable'
+        readonly safeNextAction: string
+        readonly reason?: string
+        readonly failure?: { readonly summary: string }
+      }>)
+    | undefined
 }) {
   const phone = usePhoneReadOnly()
   const [pending, setPending] = useState(false)
@@ -216,25 +228,27 @@ function SharedControl({
       {control.requests.length > 0 && (
         <p>{control.requests.map((request) => request.label).join(' ')}</p>
       )}
-      {!control.readOnly && control.actions.length > 0 && (
-        phone ? (
+      {!control.readOnly &&
+        control.actions.length > 0 &&
+        (phone ? (
           <p>Read-only phone monitoring. {control.state}</p>
         ) : (
           <div className="shared-control__actions">
-          {control.actions.map((value) => (
-            <button
-              key={`${value.kind}-${'requestId' in value ? value.requestId : ''}`}
-              type="button"
-              disabled={pending}
-              onClick={() => action(value)}
-            >
-              {value.label}
-            </button>
-          ))}
+            {control.actions.map((value) => (
+              <button
+                key={`${value.kind}-${'requestId' in value ? value.requestId : ''}`}
+                type="button"
+                disabled={pending}
+                onClick={() => action(value)}
+              >
+                {value.label}
+              </button>
+            ))}
           </div>
-        )
+        ))}
+      {control.readOnly && (
+        <p>This client is read-only; control actions are unavailable.</p>
       )}
-      {control.readOnly && <p>This client is read-only; control actions are unavailable.</p>}
       {message && <p role="status">{message}</p>}
     </section>
   )

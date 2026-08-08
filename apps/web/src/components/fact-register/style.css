@@ -1,0 +1,30 @@
+.fact-register {
+  margin: var(--space-16) 0;
+  border-top: var(--border-width) solid var(--color-border);
+}
+.fact-register__row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-16);
+  padding: var(--space-12) 0;
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+.fact-register__row dt {
+  color: var(--color-text-secondary);
+}
+.fact-register__row dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.fact-register__row dd[data-tone='safe'] {
+  color: var(--color-safe);
+}
+.fact-register__row dd[data-tone='attention'] {
+  color: var(--color-attention);
+}
+.fact-register__row dd[data-tone='danger'] {
+  color: var(--color-danger);
+}

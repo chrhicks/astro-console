@@ -164,31 +164,7 @@
   color: var(--color-secondary);
   font-weight: 700;
 }
-.semantic-status {
-  color: var(--color-neutral);
-  font-size: 0.75rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.semantic-status::before {
-  display: inline-block;
-  width: 0.45rem;
-  height: 0.45rem;
-  margin-right: var(--space-4);
-  border-radius: 50%;
-  background: currentColor;
-  content: '';
-}
-.semantic-status[data-tone='safe'] {
-  color: var(--color-safe);
-}
-.semantic-status[data-tone='attention'] {
-  color: var(--color-attention);
-}
-.semantic-status[data-tone='danger'] {
-  color: var(--color-danger);
-}
+/* .semantic-status base + tone rules live in components/status/style.css */
 .app-shell__content {
   min-height: 0;
 }
@@ -236,6 +212,13 @@
   opacity: 0.6;
 }
 @media (max-width: 1080px) and (min-width: 601px) {
+  .app-shell__header {
+    grid-template-columns: 10rem minmax(0, 1fr) 9rem;
+  }
+  .workspace-nav a {
+    flex: 1 1 0;
+    min-width: 0;
+  }
   .status-anchor {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: var(--space-8) var(--space-16);

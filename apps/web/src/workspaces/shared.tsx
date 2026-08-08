@@ -1,49 +1,11 @@
-import type { ReactNode } from 'react'
-import type { Action, StatusTone } from '../presentation'
+import type { Action } from '../presentation'
 
-export function Status({
-  tone,
-  children,
-  className,
-}: {
-  tone: StatusTone
-  children: ReactNode
-  className?: string
-}) {
-  return (
-    <span
-      className={`semantic-status${className ? ` ${className}` : ''}`}
-      data-tone={tone}
-      role="status"
-    >
-      {children}
-    </span>
-  )
-}
-export function Evidence({
-  label,
-  variant = 'andromeda',
-}: {
-  label: string
-  variant?: 'andromeda' | 'nebula'
-}) {
-  return (
-    <div
-      className={`evidence-image evidence-image--${variant}`}
-      role="img"
-      aria-label={label}
-    >
-      <span className="evidence-image__core" />
-      {Array.from({ length: 12 }, (_, index) => (
-        <i
-          key={index}
-          className={`evidence-image__star evidence-image__star--${index + 1}`}
-        />
-      ))}
-      <span className="evidence-image__frame" />
-    </div>
-  )
-}
+// The grammar components live in ../components (status, evidence-frame,
+// fact-register, action-bar, ...). These re-exports keep existing workspace
+// imports stable while the workspaces migrate onto the component layer.
+export { Status } from '../components/status'
+export { EvidenceFrame as Evidence } from '../components/evidence-frame'
+
 export function ActionButton({
   action,
   renderActions,

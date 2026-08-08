@@ -6,21 +6,41 @@ import type {
 import { useEffect, useState } from 'react'
 import type { LibraryView as View } from '../presentation'
 import type { Route } from '../routes'
-import { Status } from './shared'
+import {
+  ActionBar,
+  AvailabilityStrip,
+  EvidenceFrame,
+  FactRegister,
+  Panel,
+  Status,
+  availabilityLabel,
+  availabilityTone,
+} from '../components'
 
-const roles = [
-  'original',
-  'linearMaster',
-  'intermediate',
-  'final',
-  'preview',
-  'diagnostic',
-] as const
-const sorts = [
-  'capturedAtDescending',
-  'sharpestFirst',
-  'recentlyUpdated',
-] as const
+const roleOptions: readonly {
+  value: LibraryQuery['role'] | undefined
+  label: string
+}[] = [
+  { value: undefined, label: 'All roles' },
+  { value: 'original', label: 'Original' },
+  { value: 'linearMaster', label: 'Linear master' },
+  { value: 'intermediate', label: 'Intermediate' },
+  { value: 'final', label: 'Final' },
+  { value: 'preview', label: 'Preview' },
+  { value: 'diagnostic', label: 'Diagnostic' },
+]
+const sortOptions: readonly { value: LibraryQuery['sort']; label: string }[] = [
+  { value: 'capturedAtDescending', label: 'Newest first' },
+  { value: 'sharpestFirst', label: 'Sharpest first' },
+  { value: 'recentlyUpdated', label: 'Recently updated' },
+]
+
+/** Human reading of the contract's Unavailable reasons. */
+const actionReasons: Record<string, string> = {
+  AssetNotPublished: 'not published',
+  AssetNotAvailableLocally: 'not available locally',
+  PublicationUnavailable: 'publication unavailable',
+}
 
 export function LibraryView({
   view,
@@ -51,6 +71,7 @@ export function LibraryView({
   onReview?: (decision: 'accepted' | 'rejected') => void
 }) {
   const [comparisonIds, setComparisonIds] = useState<readonly string[]>([])
+  const [comparisonOpen, setComparisonOpen] = useState(false)
   const [phoneComparison, setPhoneComparison] = useState(false)
   useEffect(() => {
     const query = matchMedia('(max-width: 600px)')
@@ -63,8 +84,13 @@ export function LibraryView({
   useEffect(() => {
     if (phoneComparison) {
       setComparisonIds([])
+      setComparisonOpen(false)
     }
   }, [phoneComparison])
+  useEffect(() => {
+    if (comparisonIds.length !== 2) setComparisonOpen(false)
+  }, [comparisonIds])
+
   const remoteAssets = page?.value?.results
   // The root catalogue gives the first bounded record visual placement, but
   // does not claim that its detail has been loaded.
@@ -75,7 +101,7 @@ export function LibraryView({
   const selected = remoteAssets?.find(
     (asset) => asset.assetId === selectedAssetId,
   )
-  const availability = detail?.availability ?? fallback?.review
+  const availability = detail?.availability ?? selected?.availability
   const download = detail?.actions.find(
     (action) => action.action === 'download',
   )
@@ -83,6 +109,41 @@ export function LibraryView({
     (action) => action.action === 'openInProcess',
   )
   const nextCursor = page?.value?.nextCursor
+
+  // Frame-review position inside the loaded page (wf-15 prev/next).
+  const position = remoteAssets?.findIndex(
+    (asset) => asset.assetId === selectedAssetId,
+  )
+  const prev =
+    position !== undefined && position > 0
+      ? remoteAssets?.[position - 1]
+      : undefined
+  const next =
+    remoteAssets && position !== undefined && position >= 0
+      ? remoteAssets[position + 1]
+      : undefined
+
+  // Review keyboard loop (wf-15): A/R decide, arrows move. Navigation goes
+  // through the same anchors pointer users get — no second nav path.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (isLibraryShortcutBlocked(event)) return
+      if (event.key === 'ArrowLeft')
+        document
+          .querySelector<HTMLAnchorElement>('[data-library-nav="prev"]')
+          ?.click()
+      if (event.key === 'ArrowRight')
+        document
+          .querySelector<HTMLAnchorElement>('[data-library-nav="next"]')
+          ?.click()
+      if (readOnly || !onReview) return
+      if (event.key === 'a' || event.key === 'A') onReview('accepted')
+      if (event.key === 'r' || event.key === 'R') onReview('rejected')
+    }
+    addEventListener('keydown', onKey)
+    return () => removeEventListener('keydown', onKey)
+  }, [readOnly, onReview, detail])
+
   const changeRole = (role: LibraryQuery['role'] | undefined) => {
     if (!onQuery || !page) return
     onQuery({
@@ -101,6 +162,15 @@ export function LibraryView({
       sort,
     })
   }
+
+  const compared = comparisonIds
+    .map((id) => remoteAssets?.find((asset) => asset.assetId === id))
+    .filter((asset) => asset !== undefined)
+
+  // Compare selection is browser-only view state, not a domain mutation:
+  // it stays available in read-only monitoring (navigation, not control).
+  const compareSelectable = remoteAssets !== undefined && !phoneComparison
+
   return (
     <div className="workspace library-workspace">
       <header className="workspace-heading">
@@ -108,283 +178,456 @@ export function LibraryView({
           <span>Library / durable evidence</span>
           <h1 tabIndex={-1}>Durable evidence</h1>
         </div>
-        {page && onQuery ? (
-          <div className="library-controls">
-            <label>
-              Role
-              <select
-                value={page.query.role ?? ''}
-                onChange={(event) =>
-                  changeRole(
-                    event.target.value === ''
-                      ? undefined
-                      : (event.target.value as LibraryQuery['role']),
-                  )
-                }
-              >
-                <option value="">All roles</option>
-                {roles.map((role) => (
-                  <option key={role}>{role}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Sort
-              <select
-                value={page.query.sort}
-                onChange={(event) =>
-                  changeSort(event.target.value as LibraryQuery['sort'])
-                }
-              >
-                {sorts.map((sort) => (
-                  <option key={sort}>{sort}</option>
-                ))}
-              </select>
-            </label>
-          </div>
+        {availability !== undefined ? (
+          <Status tone={availabilityTone(availability)}>
+            {availabilityLabel(availability)}
+          </Status>
         ) : null}
       </header>
-      <aside className="library-lineage">
-        <span>Relationship</span>
-        <b>
-          {detail?.comparisonGroupId ??
-            selected?.comparisonGroupId ??
-            fallback?.lineage}
-        </b>
-        <small>
-          Sources: {detail?.lineage.sourceAssetIds.length ?? 'Loading detail'}
-        </small>
-        <small>Run evidence available</small>
-        <small>Solve evidence available</small>
-        <p>Originals are immutable. Related saved outputs are peers.</p>
-      </aside>
-      <section className="library-comparison" aria-label="Transient comparison">
-        <span>Compare selected Library records</span>
-        {phoneComparison || readOnly ? (
-          <p>Comparison unavailable in read-only monitoring.</p>
-        ) : comparisonIds.length === 2 ? (
-          <p>
-            <b>{comparisonIds[0]}</b> ↔ <b>{comparisonIds[1]}</b>. Browser-only
-            selection; originals and durable reviews remain unchanged.
-          </p>
-        ) : (
-          <p>
-            {readOnly
-              ? 'Comparison is unavailable in read-only monitoring.'
-              : 'Select two records below to compare their saved evidence.'}
-          </p>
-        )}
-      </section>
-      <section className="frame-grid" aria-label="Evidence records">
-        <div className="frame-grid__heading">
-          <span>Capture chronology</span>
-          <small>Metadata records / select for detail</small>
+
+      <Panel
+        as="aside"
+        className="library-browse"
+        title="Browse"
+        note="fixed facets — no query language"
+      >
+        <div className="facet-group">
+          <span className="facet-group__label">Role</span>
+          {roleOptions.map((option) => (
+            <button
+              key={option.label}
+              type="button"
+              className="facet"
+              aria-pressed={(page?.query.role ?? undefined) === option.value}
+              onClick={() => changeRole(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
-        {page?.message ? <p className="action-result">{page.message}</p> : null}
-        {remoteAssets
-          ? remoteAssets.map((asset) => (
-              <a
-                key={asset.assetId}
-                data-selected={asset.assetId === selectedAssetId}
-                aria-current={asset.assetId === assetId ? 'page' : undefined}
-                {...link({ kind: 'asset', assetId: asset.assetId })}
-              >
-                <b>
-                  {asset.role} · {asset.format}
-                </b>
-                <small>{asset.availability}</small>
-                {!readOnly && !phoneComparison ? (
-                  <button
-                    aria-label={`Compare ${asset.assetId}`}
-                    onClick={(event) => {
-                      event.preventDefault()
-                      setComparisonIds((current) =>
-                        current.includes(asset.assetId)
-                          ? current.filter((id) => id !== asset.assetId)
-                          : [...current, asset.assetId].slice(-2),
-                      )
-                    }}
-                  >
-                    {comparisonIds.includes(asset.assetId)
-                      ? 'Remove compare'
-                      : 'Compare'}
-                  </button>
-                ) : null}
-              </a>
-            ))
-          : page
-            ? null
-            : view.assets.map((asset) => (
-                <a
-                  key={asset.id}
-                  data-selected={asset.id === selectedAssetId}
-                  aria-current={asset.id === assetId ? 'page' : undefined}
-                  {...link({ kind: 'asset', assetId: asset.id })}
-                >
-                  <b>{asset.name}</b>
-                  <small>{asset.review}</small>
-                </a>
-              ))}
-        {page && nextCursor && onQuery ? (
-          <button
-            onClick={() =>
-              onQuery({
-                queryId: page.query.queryId,
-                pageSize: page.query.pageSize,
-                ...(page.query.role === undefined
-                  ? {}
-                  : { role: page.query.role }),
-                sort: page.query.sort,
-                cursor: nextCursor,
-              })
-            }
+        <div className="facet-group">
+          <span className="facet-group__label">Sort</span>
+          {sortOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className="facet"
+              aria-pressed={page?.query.sort === option.value}
+              onClick={() => changeSort(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <p className="facet-gap">
+          Night, target, and review-status facets need service support —
+          recorded gaps, not hidden ones. Lineage stays navigable through each
+          record.
+        </p>
+      </Panel>
+
+      <div className="library-center">
+        {comparisonOpen && compared.length === 2 ? (
+          <Panel
+            className="library-compare"
+            title="Compare"
+            note="browser-only · originals and reviews unchanged"
           >
-            Next page
-          </button>
+            <div className="library-compare__sides">
+              {compared.map((asset) => (
+                <div key={asset.assetId}>
+                  <FactRegister
+                    facts={[
+                      { label: 'Record', value: asset.assetId },
+                      {
+                        label: 'Role',
+                        value: `${asset.role} · ${asset.format}`,
+                      },
+                      {
+                        label: 'Availability',
+                        value: availabilityLabel(asset.availability),
+                        tone: availabilityTone(asset.availability),
+                      },
+                    ]}
+                  />
+                  <a {...link({ kind: 'asset', assetId: asset.assetId })}>
+                    Open record
+                  </a>
+                </div>
+              ))}
+            </div>
+            <p className="library-compare__gap">
+              Metric comparison needs both asset details loaded; open each
+              record for its inspection facts. Both stay saved — “final” is a
+              role, not a verdict.
+            </p>
+          </Panel>
         ) : null}
-      </section>
-      <aside className="library-inspector">
-        {!assetId && remoteAssets ? (
-          <p>Select an asset to open detail.</p>
-        ) : null}
-        {detailState === 'loading' ? <p>Loading asset detail.</p> : null}
-        {detailState === 'not-found' ? <p>Asset not found.</p> : null}
-        {detailState === 'unavailable' ? (
-          <p>Asset detail is unavailable.</p>
-        ) : null}
-        <Status
-          tone={
-            availability === undefined
-              ? 'neutral'
-              : availability === 'published' ||
-                  availability === 'availableLocally'
-                ? 'safe'
-                : 'danger'
+
+        <Panel
+          className="library-assets"
+          title="Assets"
+          note={
+            remoteAssets
+              ? `${remoteAssets.length} records${nextCursor ? ' · more available' : ''}`
+              : 'catalogue'
           }
         >
-          {availability ?? 'Select a record'}
-        </Status>
-        <h2>
-          {detail
-            ? `${detail.role} · ${detail.format}`
-            : (fallback?.name ?? 'No asset selected')}
-        </h2>
-        {detail && download?._tag === 'Eligible' ? (
-          <a
-            href={`/api/library/assets/${encodeURIComponent(detail.assetId)}/download`}
-          >
-            Download original
-          </a>
-        ) : null}
-        {!readOnly && detail && process?._tag === 'Eligible' ? (
-          <a
-            {...link({ kind: 'process-source', sourceAssetId: detail.assetId })}
-          >
-            Open source in Process
-          </a>
-        ) : null}
-        <section className="library-review" aria-label="Review selected frame">
-          <span>Review selected frame</span>
-          <p>
-            Asset {detail?.assetId ?? 'unavailable'} ·{' '}
-            {detail?.review?.decision ?? 'unreviewed'}
+          {page?.message ? (
+            <p className="action-result">{page.message}</p>
+          ) : null}
+          <div className="asset-grid" aria-label="Evidence records">
+            {remoteAssets
+              ? remoteAssets.map((asset) => (
+                  <a
+                    key={asset.assetId}
+                    className="asset-cell"
+                    data-selected={asset.assetId === selectedAssetId}
+                    aria-current={
+                      asset.assetId === assetId ? 'page' : undefined
+                    }
+                    {...link({ kind: 'asset', assetId: asset.assetId })}
+                  >
+                    <b>
+                      {asset.role} · {asset.format}
+                    </b>
+                    <Status tone={availabilityTone(asset.availability)}>
+                      {availabilityLabel(asset.availability)}
+                    </Status>
+                    {compareSelectable ? (
+                      <button
+                        type="button"
+                        className="asset-cell__compare"
+                        aria-label={`Compare ${asset.assetId}`}
+                        onClick={(event) => {
+                          event.preventDefault()
+                          setComparisonIds((current) =>
+                            current.includes(asset.assetId)
+                              ? current.filter((id) => id !== asset.assetId)
+                              : [...current, asset.assetId].slice(-2),
+                          )
+                        }}
+                      >
+                        {comparisonIds.includes(asset.assetId)
+                          ? 'Remove compare'
+                          : 'Compare'}
+                      </button>
+                    ) : null}
+                  </a>
+                ))
+              : page
+                ? null
+                : view.assets.map((asset) => (
+                    <a
+                      key={asset.id}
+                      className="asset-cell"
+                      data-selected={asset.id === selectedAssetId}
+                      aria-current={asset.id === assetId ? 'page' : undefined}
+                      {...link({ kind: 'asset', assetId: asset.id })}
+                    >
+                      <b>{asset.name}</b>
+                      <Status tone="neutral">{asset.review}</Status>
+                    </a>
+                  ))}
+          </div>
+          {page && nextCursor && onQuery ? (
+            <button
+              type="button"
+              className="library-more"
+              onClick={() =>
+                onQuery({
+                  queryId: page.query.queryId,
+                  pageSize: page.query.pageSize,
+                  ...(page.query.role === undefined
+                    ? {}
+                    : { role: page.query.role }),
+                  sort: page.query.sort,
+                  cursor: nextCursor,
+                })
+              }
+            >
+              Next page
+            </button>
+          ) : null}
+        </Panel>
+      </div>
+
+      {compareSelectable ? (
+        <ActionBar
+          className="library-selection"
+          summary={
+            comparisonIds.length > 0
+              ? `${comparisonIds.length} selected`
+              : 'Select two records to compare'
+          }
+          actions={[
+            comparisonIds.length === 2
+              ? {
+                  label: 'Compare ▸',
+                  tone: 'secondary' as const,
+                  onClick: () => setComparisonOpen(true),
+                }
+              : {
+                  label: 'Compare ▸',
+                  tone: 'secondary' as const,
+                  disabled: true as const,
+                  disabledReason: 'select two records',
+                },
+          ]}
+          note="selection is browser-only — originals and durable reviews never change"
+        />
+      ) : null}
+
+      <div className="library-detail">
+        {!assetId && remoteAssets ? (
+          <p className="library-detail__hint">
+            Select an asset to open detail.
           </p>
-          {detail?.inspection?._tag === 'Available' ? (
-            <>
-              <div
-                className="evidence-image"
-                aria-label="Deterministic frame preview"
-              >
-                Preview retained · {detail.inspection.preview.format}
-              </div>
-              <p>{detail.inspection.rationale.summary}</p>
-              <p>
-                Sharpness {detail.inspection.metrics.sharpness} · shape{' '}
-                {detail.inspection.metrics.shape} · drift{' '}
-                {detail.inspection.metrics.driftArcsec} arcsec · clipping{' '}
-                {detail.inspection.metrics.clippingPercent}%
+        ) : null}
+        {detailState === 'loading' ? (
+          <p className="library-detail__hint">Loading asset detail.</p>
+        ) : null}
+        {detailState === 'not-found' ? (
+          <p className="library-detail__hint">Asset not found.</p>
+        ) : null}
+        {detailState === 'unavailable' ? (
+          <p className="library-detail__hint">Asset detail is unavailable.</p>
+        ) : null}
+
+        {detail ? (
+          <>
+            <Panel title="Review" note="durable decision">
+              {remoteAssets && position !== undefined && position >= 0 ? (
+                <nav
+                  className="library-review-nav"
+                  aria-label="Frame review navigation"
+                >
+                  {prev ? (
+                    <a
+                      data-library-nav="prev"
+                      {...link({ kind: 'asset', assetId: prev.assetId })}
+                    >
+                      ◂ Prev
+                    </a>
+                  ) : (
+                    <span />
+                  )}
+                  <span>
+                    {position + 1} / {remoteAssets.length}
+                  </span>
+                  {next ? (
+                    <a
+                      data-library-nav="next"
+                      {...link({ kind: 'asset', assetId: next.assetId })}
+                    >
+                      Next ▸
+                    </a>
+                  ) : (
+                    <span />
+                  )}
+                </nav>
+              ) : null}
+              <p className="library-review__status">
+                <Status
+                  tone={
+                    detail.review?.decision === 'accepted'
+                      ? 'safe'
+                      : detail.review?.decision === 'rejected'
+                        ? 'danger'
+                        : 'neutral'
+                  }
+                >
+                  {detail.review?.decision ?? 'unreviewed'}
+                </Status>
               </p>
-            </>
-          ) : detail?.inspection ? (
-            <p>
-              {detail.inspection._tag === 'Failed'
-                ? `Inspection failed: ${detail.inspection.summary}`
-                : `Inspection unavailable: ${detail.inspection.summary}`}
+              {!readOnly && onReview ? (
+                <ActionBar
+                  actions={[
+                    {
+                      label: 'Accept',
+                      tone: 'primary',
+                      onClick: () => onReview('accepted'),
+                    },
+                    {
+                      label: 'Reject',
+                      tone: 'danger',
+                      scope:
+                        'this review decision only — the original and its acquisition evidence are untouched',
+                      onClick: () => onReview('rejected'),
+                    },
+                  ]}
+                  note="keys: A accept · R reject · ←/→ move"
+                />
+              ) : null}
+            </Panel>
+
+            <Panel
+              title={`${detail.role} · ${detail.format}`}
+              note={availabilityLabel(detail.availability)}
+            >
+              <AvailabilityStrip availability={detail.availability} />
+              {detail.inspection?._tag === 'Available' ? (
+                <>
+                  <EvidenceFrame
+                    className="library-evidence"
+                    label={`Preview retained · ${detail.inspection.preview.format}`}
+                    facts={[
+                      `sharpness ${detail.inspection.metrics.sharpness}`,
+                      `shape ${detail.inspection.metrics.shape}`,
+                      `drift ${detail.inspection.metrics.driftArcsec}″`,
+                      `clip ${detail.inspection.metrics.clippingPercent}%`,
+                    ]}
+                  />
+                  <p className="library-automation">
+                    <span>Automation said</span>
+                    {detail.inspection.rationale.summary}
+                  </p>
+                </>
+              ) : detail.inspection ? (
+                <p>
+                  {detail.inspection._tag === 'Failed'
+                    ? `Inspection failed: ${detail.inspection.summary}`
+                    : `Inspection unavailable: ${detail.inspection.summary}`}
+                </p>
+              ) : (
+                <p>
+                  Inspection has not been generated for this asset. Identity and
+                  download remain — an unreadable preview is not a broken asset.
+                </p>
+              )}
+              <FactRegister
+                facts={[
+                  { label: 'Stable asset', value: detail.assetId },
+                  { label: 'Captured', value: detail.capturedAt },
+                  ...(detail.capture
+                    ? [
+                        {
+                          label: 'Exposure',
+                          value: `${detail.capture.exposureSeconds}s · ${detail.capture.filter} · bin ${detail.capture.binning} · ${detail.capture.frameType}`,
+                        },
+                      ]
+                    : []),
+                  ...(detail.provenance
+                    ? [
+                        {
+                          label: 'Checksum',
+                          value: detail.provenance.checksum,
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+              {detail.representations.length > 0 ? (
+                <FactRegister
+                  facts={detail.representations.map((representation) => ({
+                    label: representation.label,
+                    value: representation.state,
+                  }))}
+                />
+              ) : null}
+              <details className="library-provenance">
+                <summary>Provenance details</summary>
+                <p>Source: {detail.provenance?.source ?? 'Unavailable'}</p>
+                <p>Checksum: {detail.provenance?.checksum ?? 'Unavailable'}</p>
+                {detail.provenance?.fitsHeader ? (
+                  <p>
+                    FITS facts:{' '}
+                    {Object.entries(detail.provenance.fitsHeader)
+                      .map(([key, value]) => `${key}=${value}`)
+                      .join(' · ')}
+                  </p>
+                ) : null}
+                {detail.provenance?.imageBytesHeader ? (
+                  <p>
+                    ImageBytes facts:{' '}
+                    {Object.entries(detail.provenance.imageBytesHeader)
+                      .map(([key, value]) => `${key}=${value}`)
+                      .join(' · ')}
+                  </p>
+                ) : null}
+                <p>Source IDs: {detail.lineage.sourceAssetIds.join(', ')}</p>
+                <p>Run: {detail.lineage.runId}</p>
+                <p>Solve: {detail.lineage.solveAttemptId}</p>
+              </details>
+            </Panel>
+
+            <Panel title="Get data" note="explicit intent">
+              <ActionBar
+                actions={[
+                  download
+                    ? download._tag === 'Eligible'
+                      ? {
+                          label: 'Download original',
+                          tone: 'secondary' as const,
+                          href: `/api/library/assets/${encodeURIComponent(detail.assetId)}/download`,
+                        }
+                      : {
+                          label: 'Download original',
+                          tone: 'secondary' as const,
+                          disabled: true as const,
+                          disabledReason:
+                            actionReasons[download.reason] ?? download.reason,
+                        }
+                    : {
+                        label: 'Download original',
+                        tone: 'secondary' as const,
+                        disabled: true as const,
+                        disabledReason: 'unavailable',
+                      },
+                  ...(process && !readOnly
+                    ? [
+                        process._tag === 'Eligible'
+                          ? {
+                              label: 'Open in Process ▸',
+                              tone: 'secondary' as const,
+                              ...link({
+                                kind: 'process-source' as const,
+                                sourceAssetId: detail.assetId,
+                              }),
+                            }
+                          : {
+                              label: 'Open in Process ▸',
+                              tone: 'secondary' as const,
+                              disabled: true as const,
+                              disabledReason:
+                                actionReasons[process.reason] ?? process.reason,
+                            },
+                      ]
+                    : []),
+                ]}
+                note="identity and the local original survive any staged-copy expiry"
+              />
+            </Panel>
+          </>
+        ) : fallback ? (
+          <Panel title={fallback.name} note="catalogue projection">
+            <Status tone="neutral">{fallback.review}</Status>
+            <p className="library-detail__hint">
+              Detail loads with the Library service projection.
             </p>
-          ) : (
-            <p>Inspection has not been generated for this selected frame.</p>
-          )}
-          {!readOnly && detail && onReview ? (
-            <div className="library-controls">
-              <button onClick={() => onReview('accepted')}>
-                Accept this frame
-              </button>
-              <button onClick={() => onReview('rejected')}>
-                Reject this frame
-              </button>
-            </div>
-          ) : null}
-        </section>
-        <p>
-          {detail?.representations
-            .map(
-              (representation) =>
-                `${representation.label} (${representation.state})`,
-            )
-            .join(' · ') ?? 'Representation detail unavailable.'}
-        </p>
-        <details className="library-provenance">
-          <summary>Provenance details</summary>
-          <p>Source: {detail?.provenance?.source ?? 'Unavailable'}</p>
-          <p>Checksum: {detail?.provenance?.checksum ?? 'Unavailable'}</p>
-          {detail?.provenance?.fitsHeader ? (
-            <p>
-              FITS facts: {Object.entries(detail.provenance.fitsHeader)
-                .map(([key, value]) => `${key}=${value}`)
-                .join(' · ')}
-            </p>
-          ) : null}
-          {detail?.provenance?.imageBytesHeader ? (
-            <p>
-              ImageBytes facts: {Object.entries(detail.provenance.imageBytesHeader)
-                .map(([key, value]) => `${key}=${value}`)
-                .join(' · ')}
-            </p>
-          ) : null}
-          <p>Source IDs: {detail?.lineage.sourceAssetIds.join(', ') ?? 'Unavailable'}</p>
-          <p>Run: {detail?.lineage.runId ?? 'Unavailable'}</p>
-          <p>Solve: {detail?.lineage.solveAttemptId ?? 'Unavailable'}</p>
-        </details>
-        <dl>
-          <div>
-            <dt>Stable asset</dt>
-            <dd>{detail?.assetId ?? selected?.assetId ?? fallback?.id}</dd>
-          </div>
-          <div>
-            <dt>Captured</dt>
-            <dd>{detail?.capturedAt ?? 'Unavailable'}</dd>
-          </div>
-          <div>
-            <dt>Download</dt>
-            <dd>
-              {download?._tag === 'Eligible'
-                ? 'Eligible'
-                : (download?.reason ?? 'Unavailable')}
-            </dd>
-          </div>
-          <div>
-            <dt>Process source</dt>
-            <dd>
-              {process?._tag === 'Eligible'
-                ? 'Eligible'
-                : (process?.reason ?? 'Unavailable')}
-            </dd>
-          </div>
-        </dl>
-        <p className="action-result">
+          </Panel>
+        ) : assetId === undefined ? (
+          <p className="library-detail__hint">No asset selected.</p>
+        ) : null}
+        <p className="action-result library-detail__readonly">
           Read-only monitoring. Durable local evidence is protected.
         </p>
-      </aside>
+      </div>
     </div>
+  )
+}
+
+export function isLibraryShortcutBlocked(
+  event: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'metaKey' | 'target'>,
+) {
+  if (event.altKey || event.ctrlKey || event.metaKey) return true
+  const target = event.target as {
+    readonly tagName?: string
+    readonly isContentEditable?: boolean
+  } | null
+  return (
+    target?.isContentEditable === true ||
+    (target?.tagName !== undefined &&
+      ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName))
   )
 }

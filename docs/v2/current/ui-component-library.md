@@ -10,8 +10,11 @@ proven uses. Shared styling alone is not promotion evidence.
 Use `apps/web` source and CSS for the real production visual composition:
 compact status register; Plan rail/window/inspector/timeline;
 Observe image/decision/lifecycle; Library lineage/evidence/inspector/chronology;
-and Process steps/canvas/rail. Retired UI studies are available only through
-Git history and are excluded from implementation authority.
+and Process steps/canvas/rail. The shared pattern implementations live in
+`apps/web/src/components/` — see its `PATTERNS.md` for the invariant each
+component owns, the promotion rule, and the review checklist. Retired UI
+studies are available only through Git history and are excluded from
+implementation authority.
 
 ## Core Patterns
 
