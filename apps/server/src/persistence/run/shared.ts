@@ -4,6 +4,8 @@ import { Schema } from 'effect'
 import {
   PlanIntent,
   PlanWorkspaceProjection,
+  RunDefinition,
+  RunExecutionContext,
   type ObserveIntent,
 } from '@astro-console/v2-contracts'
 import type { LocalIdentity } from '../../auth/identity.ts'
@@ -51,12 +53,16 @@ export type SavePlanDraft = Extract<
   { readonly _tag: 'SaveDraft' }
 >
 export type { LocalIdentity, StateSqliteRepositoryShape }
+export type RunDefinitionAuthority =
+  | { readonly executor: 'fake' }
+  | { readonly executor: 'unavailable' }
+  | {
+      readonly executor: 'real'
+      readonly executionContext: typeof RunExecutionContext.Type
+    }
 export const StoredRunDefinition = Schema.Struct({
   id: Schema.String,
-  sourcePlanId: Schema.String,
-  sourcePlanRevision: Schema.Int,
-  acceptedAt: Schema.String,
-  executor: Schema.Literals(['fake', 'fixture']),
+  definition: RunDefinition,
   plan: PlanWorkspaceProjection,
 })
 export const PlanReceiptRow = Schema.Struct({ response: Schema.String })

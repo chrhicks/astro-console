@@ -1,7 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { PlanWorkspaceProjection } from '@astro-console/v2-contracts'
 import {
-  type RunDefinition,
+  PlanWorkspaceProjection,
+  RunDefinition,
+  planSequencePresentation,
+  planSequenceWindow,
+} from '@astro-console/v2-contracts'
+import {
+  type AcceptedRunDefinitionRecord,
   type SavePlanDraftResult,
   type AcceptRunDefinitionResult,
 } from '../../services/domain-state.ts'
@@ -19,6 +24,7 @@ import {
   type SavePlanDraft,
   type AcceptRunDefinition,
   type StateSqliteRepositoryShape,
+  type RunDefinitionAuthority,
   isOwner,
   reject,
 } from './shared.ts'
@@ -32,7 +38,10 @@ export function acceptPlanDraft(
   if (!isOwner(identity)) return reject('OwnerRequired')
   if (identity.capability === 'readOnly') return reject('ClientReadOnly')
   if (
-    input.sequences.length < 2 ||
+    input.sequences.length < 1 ||
+    input.sequences.some(
+      (sequence) => sequence.sequenceId !== sequence.definition.sequenceId,
+    ) ||
     new Set(input.sequences.map((sequence) => sequence.sequenceId)).size !==
       input.sequences.length
   )
@@ -72,15 +81,66 @@ export function acceptPlanDraft(
   )
     return reject('FreshnessConflict')
   const currentPlan = planWorkspaceProjection(db, 'plan')
+  const currentBySequenceId = new Map(
+    currentPlan.sequences.map((sequence) => [sequence.sequenceId, sequence]),
+  )
+  const sequencePairs = input.sequences.flatMap((sequence) => {
+    const currentSequence = currentBySequenceId.get(sequence.sequenceId)
+    return currentSequence === undefined ? [] : [{ sequence, currentSequence }]
+  })
+  if (sequencePairs.length !== input.sequences.length)
+    return reject('InvalidInput')
+  const invalidWindow = sequencePairs.some(({ sequence, currentSequence }) => {
+    const startsAt =
+      sequence.definition.earliestStart ?? currentSequence.window.startsAt
+    const endsAt =
+      sequence.definition.latestEnd ?? currentSequence.window.endsAt
+    const start = Date.parse(startsAt)
+    const end = Date.parse(endsAt)
+    return !Number.isFinite(start) || !Number.isFinite(end) || end <= start
+  })
+  if (invalidWindow) return reject('InvalidInput')
+  const submittedSequences = sequencePairs.map(
+    ({ sequence, currentSequence }) => {
+      const startsAt =
+        sequence.definition.earliestStart ?? currentSequence.window.startsAt
+      const endsAt =
+        sequence.definition.latestEnd ?? currentSequence.window.endsAt
+      const definition = {
+        ...sequence.definition,
+        earliestStart: startsAt,
+        latestEnd: endsAt,
+      }
+      const missesObservedHorizonBound =
+        currentSequence.window.peakAltitudeDeg <
+          definition.minimumAltitudeDegrees ||
+        currentSequence.window.horizonClearanceDeg <
+          definition.horizonClearanceDegrees
+      return {
+        sequenceId: sequence.sequenceId,
+        ...planSequencePresentation(definition),
+        window: planSequenceWindow(definition, currentSequence.window),
+        horizon:
+          currentSequence.horizon === 'missing' ||
+          currentSequence.horizon === 'blocked'
+            ? currentSequence.horizon
+            : missesObservedHorizonBound
+              ? ('blocked' as const)
+              : currentSequence.horizon,
+        storage: currentSequence.storage,
+        definition,
+      }
+    },
+  )
   const currentSequences = currentPlan.sequences.map(
     ({ viability, ...sequence }) => sequence,
   )
-  if (JSON.stringify(input.sequences) === JSON.stringify(currentSequences))
+  if (JSON.stringify(submittedSequences) === JSON.stringify(currentSequences))
     return reject('DraftUnchanged')
   const plan = evaluatePlan({
     planId: input.planId,
     revision: current.plan.revision + 1,
-    sequences: input.sequences,
+    sequences: submittedSequences,
   })
   db.exec('BEGIN IMMEDIATE')
   try {
@@ -133,6 +193,7 @@ export function acceptRunDefinition(
   stateRepository: StateSqliteRepositoryShape,
   input: AcceptRunDefinition,
   identity: LocalIdentity,
+  authority: RunDefinitionAuthority,
 ) {
   if (!isOwner(identity)) return reject('OwnerRequired')
   if (identity.capability === 'readOnly') return reject('ClientReadOnly')
@@ -192,15 +253,41 @@ export function acceptRunDefinition(
     Schema.Struct({ projection: Schema.String }),
   )(planRaw)
   const acceptedAt = new Date().toISOString()
-  const definition: RunDefinition = {
+  if (authority.executor === 'unavailable') return reject('PlanNotReady')
+  const acceptedPlan = Schema.decodeUnknownSync(PlanWorkspaceProjection)(
+    JSON.parse(plan.projection),
+  )
+  let structuredDefinition: AcceptedRunDefinitionRecord['definition']
+  try {
+    structuredDefinition = Schema.decodeUnknownSync(RunDefinition)({
+      runId: `run-${randomUUID()}`,
+      executor: authority.executor,
+      sourcePlanId: input.planId,
+      sourcePlanRevision: input.expectedPlanRevision,
+      acceptedAt,
+      acceptedLimitations: [],
+      executionContext:
+        authority.executor === 'real'
+          ? authority.executionContext
+          : {
+              rigId: 'fixture-rig',
+              mountDeviceId: 'fixture-mount',
+              cameraDeviceId: 'fixture-camera',
+              latitudeDegrees: 39.95,
+              longitudeDegrees: -75.16,
+              elevationMeters: 30,
+              completionBehavior: 'hold',
+              unsafeBehavior: 'pauseAndPark',
+            },
+      sequences: acceptedPlan.sequences.map((sequence) => sequence.definition),
+    })
+  } catch {
+    return reject('PlanNotReady')
+  }
+  const definition: AcceptedRunDefinitionRecord = {
     id: `run-definition-${randomUUID()}`,
-    sourcePlanId: input.planId,
-    sourcePlanRevision: input.expectedPlanRevision,
-    acceptedAt,
-    executor: 'fake',
-    plan: Schema.decodeUnknownSync(PlanWorkspaceProjection)(
-      JSON.parse(plan.projection),
-    ),
+    definition: structuredDefinition,
+    plan: acceptedPlan,
   }
   db.exec('BEGIN IMMEDIATE')
   try {
@@ -216,10 +303,10 @@ export function acceptRunDefinition(
     }
     db.prepare('INSERT INTO run_definitions VALUES (?,?,?,?,?)').run(
       definition.id,
-      definition.sourcePlanId,
-      definition.sourcePlanRevision,
+      definition.definition.sourcePlanId,
+      definition.definition.sourcePlanRevision,
       JSON.stringify(definition),
-      definition.acceptedAt,
+      definition.definition.acceptedAt,
     )
     stateRepository.commit({
       snapshotVersion: current.snapshotVersion + 1,

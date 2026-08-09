@@ -9,6 +9,7 @@ import {
   AcquireActiveWork,
   PointingSolveResult,
   AcquireSnapshot,
+  RunDefinition,
 } from '@astro-console/v2-contracts'
 import type { Snapshot } from './domain-state.ts'
 import type { LocalIdentity } from '../auth/identity.ts'
@@ -16,10 +17,7 @@ import { planWorkspaceProjection } from './runtime-bootstrap.ts'
 
 const StoredRunDefinition = Schema.Struct({
   id: Schema.String,
-  sourcePlanId: Schema.String,
-  sourcePlanRevision: Schema.Int,
-  acceptedAt: Schema.String,
-  executor: Schema.Literals(['fake', 'fixture']),
+  definition: RunDefinition,
   plan: PlanWorkspaceProjection,
 })
 const StoredMutationPreview = Schema.Struct({
@@ -45,6 +43,23 @@ const LifecycleEventPayload = Schema.Struct({
   run: Schema.Struct({ id: Schema.String }),
 })
 const StoredAcquireSession = Schema.Struct({ session: Schema.String })
+const ExecutorWorkRow = Schema.Struct({
+  work_id: Schema.String,
+  kind: Schema.Literals(['BeginRun', 'StartExposure', 'AbortExposure']),
+  state: Schema.Literals([
+    'pending',
+    'commandAttempted',
+    'observing',
+    'reconciling',
+    'completed',
+    'rejected',
+    'cancelled',
+  ]),
+  command_attempted_at: Schema.NullOr(Schema.String),
+  acknowledged_at: Schema.NullOr(Schema.String),
+  settled_at: Schema.NullOr(Schema.String),
+  last_error: Schema.NullOr(Schema.String),
+})
 const isOwner = (identity: LocalIdentity) => identity.role === 'owner'
 
 export const observeWorkspaceProjection = (
@@ -67,6 +82,7 @@ export const observeWorkspaceProjection = (
   const definition = Schema.decodeUnknownSync(StoredRunDefinition)(
     JSON.parse(definitionRow.definition),
   )
+  const realExecutor = definition.definition.executor === 'real'
   const controller = current.control.holderClientId === identity.clientId
   const writable = identity.capability === 'controlCapable'
   const terminal =
@@ -99,12 +115,15 @@ export const observeWorkspaceProjection = (
   const events = Schema.decodeUnknownSync(Schema.Array(LifecycleEventRow))(
     db
       .prepare(
-        "SELECT type,snapshot FROM events WHERE type IN ('RunStarted','RunPaused','RunResumed','RunStopped','FakeSequenceSkipped','FakePhaseRetried','FakeParkRequested','RunCompleted') ORDER BY cursor",
+        "SELECT type,snapshot FROM events WHERE type IN ('RunStarted','RunPaused','RunResumed','RunStopped','FakeSequenceSkipped','FakePhaseRetried','FakeParkRequested','RunCompleted','RunCaptureReady','RunAcquireRequired','RunExposureObserved','RunExposureCompletionObserved','RunProviderOutcomeUnknown','RunProviderCommandRejected','RunReconciliationUnavailable','RunExposureAbortObserved') ORDER BY cursor",
       )
       .all(),
   )
     .filter(({ snapshot }) => lifecycleEventRunId(snapshot) === run.id)
-    .map(({ type }) => `Fake/fixture lifecycle fact: ${type}.`)
+    .map(
+      ({ type }) =>
+        `${realExecutor ? 'Supervised' : 'Fake/fixture'} lifecycle fact: ${type}.`,
+    )
   const acquireRow = Schema.decodeUnknownSync(
     Schema.optional(StoredAcquireSession),
   )(
@@ -121,50 +140,107 @@ export const observeWorkspaceProjection = (
           ),
           writable && controller,
         )
+  const executorWork = realExecutor
+    ? Schema.decodeUnknownSync(Schema.Array(ExecutorWorkRow))(
+        db
+          .prepare(
+            'SELECT work_id,kind,state,command_attempted_at,acknowledged_at,settled_at,last_error FROM run_executor_work WHERE run_id=? ORDER BY rowid',
+          )
+          .all(run.id),
+      ).map((work) => ({
+        workId: work.work_id,
+        kind: work.kind,
+        state: work.state,
+        ...(work.command_attempted_at === null
+          ? {}
+          : { commandAttemptedAt: work.command_attempted_at }),
+        ...(work.acknowledged_at === null
+          ? {}
+          : { acknowledgedAt: work.acknowledged_at }),
+        ...(work.settled_at === null ? {} : { settledAt: work.settled_at }),
+        ...(work.last_error === null ? {} : { lastError: work.last_error }),
+      }))
+    : []
+  const workFacts = executorWork.map((work) => executorWorkFact(work))
+  const refreshPreflightReason = !writable
+    ? 'readOnlyClient'
+    : !controller
+      ? 'controlRequired'
+      : terminal
+        ? 'terminalRun'
+        : 'policyUnavailable'
   return Schema.decodeUnknownSync(ObserveWorkspaceProjection)({
     runId: run.id,
     revision: run.revision,
-    executor: definition.executor,
+    executor: definition.definition.executor,
     phase: run.phase,
     ...(terminal ? { terminalOutcome: run.phase } : {}),
     target: run.target,
     currentSequence: run.activeSequenceIndex ?? 0,
     completedSequences: run.completedSequenceCount ?? 0,
-    totalSequences: definition.plan.sequences.length,
+    totalSequences: definition.definition.sequences.length,
     ...(run.resumablePhase === undefined
       ? {}
       : { resumablePhase: run.resumablePhase }),
     retryUsed: run.retryPhase !== undefined,
     ...(run.preflight === undefined ? {} : { preflight: run.preflight }),
     ...(acquire === undefined ? {} : { acquire }),
+    ...(realExecutor ? { executorWork } : {}),
     lifecycleFacts:
-      events.length === 0 ? ['Fake/fixture lifecycle started.'] : events,
-    attemptFacts: [
-      'All lifecycle and attempt evidence is fake/fixture only; no physical capture is claimed.',
-      ...(run.retryPhase === undefined
-        ? ['No fake/fixture phase retry has been used.']
-        : [`Fake/fixture retry used for ${run.retryPhase}.`]),
-      ...(run.phase === 'parkRequested'
-        ? ['Park is policy only; no mount moved.']
-        : []),
-    ],
+      events.length === 0
+        ? [
+            realExecutor
+              ? 'Supervised lifecycle started from durable service work.'
+              : 'Fake/fixture lifecycle started.',
+          ]
+        : events,
+    attemptFacts: realExecutor
+      ? [
+          ...(workFacts.length === 0
+            ? ['No durable executor work is recorded for this run.']
+            : workFacts),
+          run.phase === 'verify'
+            ? 'The camera was later observed idle. Captured bytes and Library intake are the next milestone.'
+            : 'No physical capture or captured bytes are claimed by this projection.',
+        ]
+      : [
+          'All lifecycle and attempt evidence is fake/fixture only; no physical capture is claimed.',
+          ...(run.retryPhase === undefined
+            ? ['No fake/fixture phase retry has been used.']
+            : [`Fake/fixture retry used for ${run.retryPhase}.`]),
+          ...(run.phase === 'parkRequested'
+            ? ['Park is policy only; no mount moved.']
+            : []),
+        ],
     actions: {
-      pause: eligible(active, baseReason),
+      refreshPreflight: eligible(
+        writable && controller && !terminal && run.phase === 'preflight',
+        refreshPreflightReason,
+      ),
+      pause: eligible(
+        active && !(realExecutor && run.phase === 'verify'),
+        realExecutor && run.phase === 'verify'
+          ? 'policyUnavailable'
+          : baseReason,
+      ),
       resume: eligible(
         writable &&
           controller &&
+          !realExecutor &&
           run.phase === 'paused' &&
           run.resumablePhase !== undefined,
         run.phase !== 'paused' ? 'pausedRunRequired' : baseReason,
       ),
       stop: eligible(active || pausedRecovery, baseReason),
       skip: eligible(
-        active,
-        run.phase === 'paused' ? 'policyUnavailable' : baseReason,
+        active && !realExecutor,
+        realExecutor || run.phase === 'paused'
+          ? 'policyUnavailable'
+          : baseReason,
       ),
       retry: eligible(
-        active && run.retryPhase === undefined,
-        terminal || run.phase === 'paused'
+        active && !realExecutor && run.retryPhase === undefined,
+        realExecutor || terminal || run.phase === 'paused'
           ? run.phase === 'paused'
             ? 'policyUnavailable'
             : baseReason
@@ -172,9 +248,42 @@ export const observeWorkspaceProjection = (
             ? baseReason
             : 'retryUsed',
       ),
-      park: eligible(active || pausedRecovery, baseReason),
+      park: eligible(
+        !realExecutor && (active || pausedRecovery),
+        realExecutor ? 'policyUnavailable' : baseReason,
+      ),
     },
   })
+}
+
+function executorWorkFact(work: {
+  readonly kind: 'BeginRun' | 'StartExposure' | 'AbortExposure'
+  readonly state:
+    | 'pending'
+    | 'commandAttempted'
+    | 'observing'
+    | 'reconciling'
+    | 'completed'
+    | 'rejected'
+    | 'cancelled'
+  readonly lastError?: string
+}) {
+  const subject = `${work.kind} ${work.state}`
+  const fact =
+    work.state === 'pending'
+      ? `${subject}: durable work was persisted before any provider command.`
+      : work.state === 'commandAttempted'
+        ? `${subject}: the provider write was attempted and will not be replayed until later observation resolves it.`
+        : work.state === 'observing'
+          ? `${subject}: provider acknowledgement was followed by an active camera observation.`
+          : work.state === 'reconciling'
+            ? `${subject}: the service is using read-only observation and will not replay the provider command.`
+            : work.state === 'completed'
+              ? `${subject}: later observation settled this durable work.`
+              : work.state === 'cancelled'
+                ? `${subject}: the intervention settled this work before a provider command was sent.`
+                : `${subject}: the provider rejected this durable work.`
+  return work.lastError === undefined ? fact : `${fact} ${work.lastError}`
 }
 
 function acquireSnapshot(
@@ -549,9 +658,9 @@ export const bootstrapPlanWorkspaceProjection = (
       : {
           acceptedRunDefinition: {
             id: accepted.id,
-            sourcePlanRevision: accepted.sourcePlanRevision,
-            acceptedAt: accepted.acceptedAt,
-            executor: 'fake' as const,
+            sourcePlanRevision: accepted.definition.sourcePlanRevision,
+            acceptedAt: accepted.definition.acceptedAt,
+            executor: accepted.definition.executor,
           },
         }),
     ...(previewVisible
@@ -713,6 +822,6 @@ function hasFakeExecutor(db: DatabaseSync, current: Snapshot) {
   if (row === undefined) return false
   return (
     Schema.decodeUnknownSync(StoredRunDefinition)(JSON.parse(row.definition))
-      .executor === 'fake'
+      .definition.executor === 'fake'
   )
 }

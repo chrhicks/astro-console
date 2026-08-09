@@ -16,7 +16,15 @@ import {
   type StepItem,
   type Tone,
 } from '@nightbook/ui'
+import {
+  IdempotencyKey,
+  type ObserveWorkspaceProjection,
+} from '@astro-console/v2-contracts'
 import { useEffect, useId, useMemo, useState } from 'react'
+import {
+  ObserveCommandSubmission,
+  type ObserveAction,
+} from '../observe-command-client'
 import type { PreflightRefreshSubmission } from '../preflight-refresh-client'
 import type {
   HealthFact,
@@ -32,6 +40,10 @@ import './beta-observe.css'
 export type BetaObserveAppProps = {
   projection: Projection
   loading: boolean
+  submit?: (
+    action: ObserveAction,
+    key: typeof IdempotencyKey.Type,
+  ) => Promise<ObserveCommandSubmission>
   refreshPreflight?: () => Promise<PreflightRefreshSubmission>
   targetAcquisitionCommand?: () => Promise<void>
   acquireRecoveryCommand?: (
@@ -99,9 +111,11 @@ const lifecycle = (view: ObserveView) => {
                     phase === 'stopped' ||
                     phase === 'parkRequested'
                   ? 'recover'
-                  : phase === 'verify' || phase === 'completed'
-                    ? 'complete'
-                    : undefined
+                  : phase === 'verify'
+                    ? 'capture'
+                    : phase === 'completed'
+                      ? 'complete'
+                      : undefined
   const activeIndex = lifecycleStages.findIndex(({ id }) => id === activeId)
   const items: StepItem[] = lifecycleStages.map((stage, index) => ({
     ...stage,
@@ -123,6 +137,7 @@ const lifecycle = (view: ObserveView) => {
 }
 
 const lifecycleLabel = (view: ObserveView) => {
+  if (view.source?.phase === 'verify') return 'Verify'
   const state = lifecycle(view)
   return state.activeIndex < 0
     ? titleCase(view.phase)
@@ -1045,9 +1060,88 @@ export function BetaObservePhone({
   )
 }
 
+type ObserveEligibility = ObserveWorkspaceProjection['actions']['pause']
+type ObserveActionKey = 'pause' | 'resume' | 'stop' | 'skip' | 'retry' | 'park'
+
+const observeActionEntries = (
+  source: ObserveWorkspaceProjection,
+): readonly (readonly [ObserveActionKey, ObserveEligibility])[] => [
+  ['pause', source.actions.pause],
+  ['resume', source.actions.resume],
+  ['stop', source.actions.stop],
+  ['skip', source.actions.skip],
+  ['retry', source.actions.retry],
+  ['park', source.actions.park],
+]
+
+const observeCommand = (key: ObserveActionKey): ObserveAction =>
+  key === 'pause'
+    ? 'PauseRun'
+    : key === 'resume'
+      ? 'ResumeRun'
+      : key === 'stop'
+        ? 'StopRun'
+        : key === 'skip'
+          ? 'SkipSequence'
+          : key === 'retry'
+            ? 'RetryPhase'
+            : 'RequestPark'
+
+const eligibilityDescription = (
+  eligibility: ObserveEligibility | undefined,
+) => {
+  if (eligibility === undefined)
+    return 'The service did not project this action.'
+  if (eligibility._tag === 'Eligible')
+    return 'Available from the current service projection.'
+  const reasons: Record<
+    Extract<ObserveEligibility, { _tag: 'Ineligible' }>['reason'],
+    string
+  > = {
+    readOnlyClient: 'This client is read-only.',
+    controlRequired: 'Current desktop control is required.',
+    activeRunRequired: 'A non-terminal active run is required.',
+    pausedRunRequired: 'The run must be paused.',
+    terminalRun: 'The run is terminal.',
+    retryUsed: 'The bounded retry was already used.',
+    policyUnavailable:
+      'This action is not supported for the current executor and phase.',
+  }
+  return reasons[eligibility.reason]
+}
+
+const executorAttemptItems = (
+  source: ObserveWorkspaceProjection,
+): AttemptItem[] =>
+  (source.executorWork ?? []).map((work) => ({
+    id: work.workId,
+    label: titleCase(work.kind),
+    detail:
+      work.lastError ??
+      (work.state === 'pending'
+        ? 'Persisted before any provider command.'
+        : work.state === 'commandAttempted'
+          ? 'Provider write attempted; replay is held for observation.'
+          : work.state === 'observing'
+            ? 'A later active camera state was observed.'
+            : work.state === 'reconciling'
+              ? 'Read-only reconciliation is active; the command is not replayed.'
+              : work.state === 'cancelled'
+                ? 'An intervention settled this work before provider dispatch.'
+                : 'Durable work settled from service evidence.'),
+    meta: titleCase(work.state),
+    state:
+      work.state === 'completed'
+        ? 'complete'
+        : work.state === 'rejected' || work.state === 'cancelled'
+          ? 'failed'
+          : 'current',
+  }))
+
 function BetaObserveDesktop({
   projection,
   loading,
+  submit,
   refreshPreflight,
   targetAcquisitionCommand,
   acquireRecoveryCommand,
@@ -1055,21 +1149,27 @@ function BetaObserveDesktop({
 }: BetaObserveAppProps) {
   const [result, setResult] = useState<string>()
   const [refreshing, setRefreshing] = useState(false)
+  const [pendingAction, setPendingAction] = useState<ObserveAction>()
   const view = projection.observe
   const source = view.source
   const progress = observeProgress(projection)
   const lifecycleState = useMemo(() => lifecycle(view), [view])
   const currentStage =
-    lifecycleState.activeIndex < 0
-      ? loading
-        ? 'Loading'
-        : 'Observe unavailable'
-      : (lifecycleStages[lifecycleState.activeIndex]?.label ??
-        titleCase(view.phase))
+    source?.phase === 'verify'
+      ? 'Verify'
+      : lifecycleState.activeIndex < 0
+        ? loading
+          ? 'Loading'
+          : 'Observe unavailable'
+        : (lifecycleStages[lifecycleState.activeIndex]?.label ??
+          titleCase(view.phase))
 
+  const refreshEligibility = source?.actions.refreshPreflight
   const refreshAction: ActionDescriptor | undefined =
-    source?.phase === 'preflight'
-      ? refreshPreflight !== undefined && !projection.shell.readOnly
+    source?.phase === 'preflight' && refreshEligibility !== undefined
+      ? refreshPreflight !== undefined &&
+        refreshEligibility._tag === 'Eligible' &&
+        !projection.shell.readOnly
         ? {
             id: 'refresh-preflight',
             label: refreshing ? 'Refreshing…' : 'Refresh preflight',
@@ -1093,24 +1193,53 @@ function BetaObserveDesktop({
             disabled: true,
             description: projection.shell.readOnly
               ? 'Current control is required.'
-              : 'A fresh preflight projection is required.',
+              : eligibilityDescription(refreshEligibility),
           }
       : undefined
 
-  const eligibleAction = source
-    ? Object.entries(source.actions).find(
-        ([, eligibility]) => eligibility._tag === 'Eligible',
-      )
-    : undefined
-  const deferredAction: ActionDescriptor | undefined =
-    refreshAction === undefined && eligibleAction !== undefined
-      ? {
-          id: `deferred-${eligibleAction[0]}`,
-          label: titleCase(eligibleAction[0]),
-          disabled: true,
-          description: 'This beta command seam is not available.',
-        }
-      : undefined
+  const runActions = source
+    ? observeActionEntries(source).map(([key, eligibility]) => {
+        const action = observeCommand(key)
+        const enabled =
+          eligibility._tag === 'Eligible' &&
+          submit !== undefined &&
+          !projection.shell.readOnly
+        return {
+          id: `observe-${key}`,
+          label:
+            pendingAction === action ? `${titleCase(key)}…` : titleCase(key),
+          tone: key === 'stop' ? ('danger' as const) : ('secondary' as const),
+          disabled: !enabled || pendingAction !== undefined,
+          description: eligibilityDescription(eligibility),
+          ...(enabled
+            ? {
+                onSelect: () => {
+                  setPendingAction(action)
+                  setResult(undefined)
+                  void submit(action, IdempotencyKey.make(crypto.randomUUID()))
+                    .then((submission) =>
+                      ObserveCommandSubmission.$match(submission, {
+                        Accepted: ({ message }) => setResult(message),
+                        Rejected: ({ reason, safeNextAction }) =>
+                          setResult(`${reason} ${safeNextAction}`),
+                        Unavailable: ({ reason, safeNextAction }) =>
+                          setResult(`${reason} ${safeNextAction}`),
+                      }),
+                    )
+                    .finally(() => setPendingAction(undefined))
+                },
+              }
+            : {}),
+        } satisfies ActionDescriptor
+      })
+    : []
+  const primaryAction =
+    refreshAction ??
+    runActions.find((action) => !action.disabled) ??
+    runActions[0]
+  const secondaryActions = runActions.filter(
+    (action) => action.id !== primaryAction?.id,
+  )
 
   return (
     <main id="beta-workspace" className="beta-desktop-workspace">
@@ -1207,7 +1336,32 @@ function BetaObserveDesktop({
                   description={view.evidence}
                   evidence={view.recovery ?? view.annotation}
                 />
+                {source?.executorWork !== undefined &&
+                source.executorWork.length > 0 ? (
+                  <AttemptTrail
+                    label="Durable executor work"
+                    items={executorAttemptItems(source)}
+                  />
+                ) : null}
                 <EvidenceFacts view={view} />
+                {source !== undefined ? (
+                  <DataList aria-label="Observe action availability">
+                    {Object.entries(source.actions).map(([key, eligibility]) =>
+                      eligibility === undefined ? null : (
+                        <DataListItem
+                          key={key}
+                          label={titleCase(key)}
+                          value={
+                            eligibility._tag === 'Eligible'
+                              ? 'Available'
+                              : 'Unavailable'
+                          }
+                          detail={eligibilityDescription(eligibility)}
+                        />
+                      ),
+                    )}
+                  </DataList>
+                ) : null}
               </div>
             </PanelBody>
           </Panel>
@@ -1221,7 +1375,8 @@ function BetaObserveDesktop({
             }
             title={view.heading}
             description={view.recovery ?? view.evidence}
-            primary={refreshAction ?? deferredAction}
+            primary={primaryAction}
+            secondary={secondaryActions}
             footer={
               result ??
               (projection.shell.readOnly

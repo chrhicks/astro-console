@@ -57,6 +57,7 @@ const sequence = (
   RunSequenceDefinition.make({
     sequenceId,
     targetName,
+    acquisitionMode: 'deepSkyPlateSolve',
     rightAscensionHours,
     declinationDegrees,
     exposureSeconds: 180,
@@ -82,6 +83,7 @@ const sh2101 = sequence('sh2-101', 'Sh2-101', 20.3, 40.7)
 const initialState = (holderClientId = controller.clientId) => ({
   definition: RunDefinition.make({
     runId: RunId.make('run-1'),
+    executor: 'fake',
     sourcePlanId: PlanId.make('plan-1'),
     sourcePlanRevision: PlanRevision.make(7),
     acceptedAt: '2026-07-23T00:00:00Z',

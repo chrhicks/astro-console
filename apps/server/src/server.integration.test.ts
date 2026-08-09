@@ -28,6 +28,7 @@ import {
   LibraryPage,
   ObserveCommandResponse,
   PlanCommandResponse,
+  planSequencePresentation,
   ProcessSourceHandoff,
   ProcessingProjection,
   ProcessingResponse,
@@ -35,6 +36,22 @@ import {
   RefreshPreflightResponse,
   RunSnapshot,
 } from '@astro-console/v2-contracts'
+
+const revisePlanSequence = <
+  Sequence extends {
+    readonly definition: Parameters<typeof planSequencePresentation>[0]
+  },
+>(
+  sequence: Sequence,
+  changes: Partial<Sequence['definition']>,
+) => {
+  const definition = { ...sequence.definition, ...changes }
+  return {
+    ...sequence,
+    ...planSequencePresentation(definition),
+    definition,
+  }
+}
 import {
   createOriginAdmission,
   createLocalOwnerAdmission,
@@ -254,15 +271,30 @@ test('local plate solver records solved and no-solution evidence without a mount
         execute: async ({ args }) => {
           calls += 1
           assert.deepEqual(args.slice(2, 8), [
-            '--dir', args[3], '--no-plots', '--overwrite', '--cpulimit', '45',
+            '--dir',
+            args[3],
+            '--no-plots',
+            '--overwrite',
+            '--cpulimit',
+            '45',
           ])
           assert.equal(
             readFileSync(args[1]!, 'utf8'),
             'add_path /home/chicks/.local/share/astrometry/indexes\nautoindex\n',
           )
           assert.deepEqual(args.slice(8, 20), [
-            '--scale-units', 'degwidth', '--scale-low', '20', '--scale-high',
-            '30', '--ra', '210', '--dec', '54', '--radius', '15',
+            '--scale-units',
+            'degwidth',
+            '--scale-low',
+            '20',
+            '--scale-high',
+            '30',
+            '--ra',
+            '210',
+            '--dec',
+            '54',
+            '--radius',
+            '15',
           ])
           return {
             exitCode: 0,
@@ -278,13 +310,21 @@ test('local plate solver records solved and no-solution evidence without a mount
     frameId: 'plate-solve-001',
     capturedAt: '2026-08-05T10:00:00.000Z',
     format: 'fits' as const,
-    capture: { exposureSeconds: 30, filter: 'L', binning: 1, frameType: 'light' as const },
-    lineage: { runId: 'run-m27', sequenceId: 'plate-solve', acquisitionId: 'plate-solve-001' },
+    capture: {
+      exposureSeconds: 30,
+      filter: 'L',
+      binning: 1,
+      frameType: 'light' as const,
+    },
+    lineage: {
+      runId: 'run-m27',
+      sequenceId: 'plate-solve',
+      acquisitionId: 'plate-solve-001',
+    },
     idempotencyKey: 'plate-solve-001',
   }
   assert.equal(
-    service.ingestCapturedFrame(intake, retainedFitsWithHints())
-      .outcome,
+    service.ingestCapturedFrame(intake, retainedFitsWithHints()).outcome,
     'accepted',
   )
   const solved = await service.solveRetainedFrame(intake.assetId)
@@ -308,9 +348,13 @@ test('local plate solver records solved and no-solution evidence without a mount
   const resumed = createLocalWebService(databasePath)
   t.after(() => resumed.close())
   assert.equal(
-    (resumed.database.prepare('SELECT evidence FROM plate_solve_runs').get() as {
-      evidence: string
-    }).evidence,
+    (
+      resumed.database
+        .prepare('SELECT evidence FROM plate_solve_runs')
+        .get() as {
+        evidence: string
+      }
+    ).evidence,
     evidence.evidence,
   )
   assert.equal(existsSync(join(originalsRoot, `${intake.assetId}.fits`)), true)
@@ -334,8 +378,17 @@ test('local plate solver records a bounded failure as typed no-solution and reta
       frameId: 'plate-solve-timeout',
       capturedAt: '2026-08-05T10:00:00.000Z',
       format: 'fits',
-      capture: { exposureSeconds: 30, filter: 'L', binning: 1, frameType: 'light' },
-      lineage: { runId: 'run-m27', sequenceId: 'plate-solve', acquisitionId: 'plate-timeout' },
+      capture: {
+        exposureSeconds: 30,
+        filter: 'L',
+        binning: 1,
+        frameType: 'light',
+      },
+      lineage: {
+        runId: 'run-m27',
+        sequenceId: 'plate-solve',
+        acquisitionId: 'plate-timeout',
+      },
       idempotencyKey: 'plate-solve-timeout',
     },
     retainedFitsWithHints(),
@@ -349,7 +402,11 @@ test('local plate solver records a bounded failure as typed no-solution and reta
     scaleLowDeg: 20,
     scaleHighDeg: 30,
     searchRadiusDeg: 15,
-    execute: async () => ({ exitCode: -1, stdout: '', stderr: 'timed out after 45 seconds' }),
+    execute: async () => ({
+      exitCode: -1,
+      stdout: '',
+      stderr: 'timed out after 45 seconds',
+    }),
   }).solve(assetId)
   assert.equal(outcome.outcome, 'recorded')
   if (outcome.outcome !== 'recorded') throw new Error('solve was not recorded')
@@ -379,8 +436,17 @@ test('local plate solver records normal solve-field exit 1 as no-solution', asyn
       frameId: 'plate-solve-none',
       capturedAt: '2026-08-05T10:00:00.000Z',
       format: 'fits',
-      capture: { exposureSeconds: 30, filter: 'L', binning: 1, frameType: 'light' },
-      lineage: { runId: 'run-m27', sequenceId: 'plate-solve', acquisitionId: 'plate-none' },
+      capture: {
+        exposureSeconds: 30,
+        filter: 'L',
+        binning: 1,
+        frameType: 'light',
+      },
+      lineage: {
+        runId: 'run-m27',
+        sequenceId: 'plate-solve',
+        acquisitionId: 'plate-none',
+      },
       idempotencyKey: 'plate-solve-none',
     },
     retainedFitsWithHints(),
@@ -1236,9 +1302,12 @@ test('Alpaca camera adapter keeps a provider error message from a non-2xx envelo
       ),
   )
   const exit = await Effect.runPromiseExit(provider.startExposure(15))
-  assert.equal(exit._tag, 'Failure')
-  if (Exit.isFailure(exit))
-    assert.match(Cause.pretty(exit.cause), /Camera is not connected/)
+  assert.equal(exit._tag, 'Success')
+  if (Exit.isSuccess(exit))
+    assert.deepEqual(exit.value, {
+      _tag: 'Rejected',
+      summary: 'Camera is not connected.',
+    })
 })
 
 test('Alpaca camera adapter keeps bounded plain-text non-2xx diagnostics', async () => {
@@ -3529,10 +3598,12 @@ test('Plan command preview responses preserve persisted notice and disruptive do
         planId: initial.plan.planId,
         expectedPlanRevision: initial.plan.revision,
         idempotencyKey: 'plan-preview-save',
-        sequences: initial.plan.sequences.map(({ viability, ...sequence }) => ({
-          ...sequence,
-          capture: `${sequence.capture} · revised`,
-        })),
+        sequences: initial.plan.sequences.map(
+          ({ viability: _viability, ...sequence }) =>
+            revisePlanSequence(sequence, {
+              targetName: `${sequence.definition.targetName} revised`,
+            }),
+        ),
       },
     }),
   })
@@ -3654,10 +3725,11 @@ test('later drafts retain the latest accepted definition summary without making 
         planId: initial.plan.planId,
         expectedPlanRevision: initial.plan.revision,
         idempotencyKey: 'later-draft',
-        sequences: initial.plan.sequences.map((sequence) => ({
-          ...sequence,
-          capture: `${sequence.capture} · revised`,
-        })),
+        sequences: initial.plan.sequences.map((sequence) =>
+          revisePlanSequence(sequence, {
+            targetName: `${sequence.definition.targetName} revised`,
+          }),
+        ),
       },
     }),
   })
@@ -4845,10 +4917,12 @@ test('plan-draft fixture preserves UI-created fake definitions without run or ha
         planId: initial.plan.planId,
         expectedPlanRevision: initial.plan.revision,
         idempotencyKey: 'plan-draft-save',
-        sequences: initial.plan.sequences.map(({ viability, ...sequence }) => ({
-          ...sequence,
-          capture: `${sequence.capture} · saved`,
-        })),
+        sequences: initial.plan.sequences.map(
+          ({ viability: _viability, ...sequence }) =>
+            revisePlanSequence(sequence, {
+              targetName: `${sequence.definition.targetName} saved`,
+            }),
+        ),
       },
     }),
   })
@@ -4887,7 +4961,7 @@ test('plan-draft fixture preserves UI-created fake definitions without run or ha
         .get(),
     ).definition,
   )
-  assert.equal(definition.executor, 'fake')
+  assert.equal(definition.definition.executor, 'fake')
   assert.equal(
     databaseRow(
       CountRow,
@@ -5325,16 +5399,32 @@ test('canonical Plan commands persist draft readiness, immutable acceptance, ide
   const sequences = initial.plan.sequences.map(
     ({ viability, ...sequence }) => sequence,
   )
+  const firstSequence = sequences[0]
+  if (firstSequence === undefined)
+    throw new Error('Plan sequence is unavailable')
   const saved = await submitPlan(base, {
     _tag: 'SaveDraft',
     planId: initial.plan.planId,
     expectedPlanRevision: initial.plan.revision,
     idempotencyKey: 'canonical-plan-save',
-    sequences: sequences.map((sequence, index) =>
-      index === 1
-        ? { ...sequence, capture: `${sequence.capture} · shortened` }
-        : sequence,
-    ),
+    sequences: [
+      {
+        ...revisePlanSequence(firstSequence, {
+          exposureSeconds: firstSequence.definition.exposureSeconds - 1,
+          earliestStart: '2026-07-25T03:18:00.000Z',
+          latestEnd: '2026-07-25T05:30:00.000Z',
+          horizonClearanceDegrees: 20,
+        }),
+        window: {
+          startsAt: '1999-01-01T00:00:00.000Z',
+          endsAt: '1999-01-01T00:01:00.000Z',
+          usableMinutes: 1,
+          peakAltitudeDeg: -90,
+          horizonClearanceDeg: -50,
+        },
+        horizon: 'blocked',
+      },
+    ],
   })
   assert.equal(saved.response.status, 202)
   assert.equal(saved.body._tag, 'Accepted')
@@ -5349,8 +5439,46 @@ test('canonical Plan commands persist draft readiness, immutable acceptance, ide
     sequences: [sequences[0], sequences[0]],
   })
   assert.equal(duplicate.response.status, 400)
+  const empty = await submitPlan(base, {
+    _tag: 'SaveDraft',
+    planId: initial.plan.planId,
+    expectedPlanRevision: initial.plan.revision,
+    idempotencyKey: 'canonical-plan-empty',
+    sequences: [],
+  })
+  assert.equal(empty.response.status, 400)
+  const mismatched = await submitPlan(base, {
+    _tag: 'SaveDraft',
+    planId: initial.plan.planId,
+    expectedPlanRevision: initial.plan.revision,
+    idempotencyKey: 'canonical-plan-mismatched-sequence',
+    sequences: [
+      {
+        ...firstSequence,
+        definition: {
+          ...firstSequence.definition,
+          sequenceId: 'different-sequence',
+        },
+      },
+    ],
+  })
+  assert.equal(mismatched.response.status, 400)
   const draft = saved.body.snapshot.plan
   if (draft === undefined) throw new Error('Saved Plan is unavailable')
+  assert.equal(
+    draft.sequences[0]?.window.startsAt,
+    draft.sequences[0]?.definition.earliestStart,
+  )
+  assert.equal(
+    draft.sequences[0]?.window.endsAt,
+    draft.sequences[0]?.definition.latestEnd,
+  )
+  assert.equal(draft.sequences[0]?.window.usableMinutes, 104)
+  assert.equal(draft.sequences[0]?.window.peakAltitudeDeg, 62)
+  assert.equal(draft.sequences[0]?.window.horizonClearanceDeg, 28)
+  assert.equal(draft.sequences[0]?.definition.horizonClearanceDegrees, 20)
+  assert.equal(draft.sequences[0]?.horizon, 'clear')
+  assert.equal(draft.sequences[0]?.viability, 'viable')
   const accepted = await submitPlan(base, {
     _tag: 'AcceptRunDefinition',
     planId: draft.planId,
@@ -5379,10 +5507,11 @@ test('canonical Plan commands persist draft readiness, immutable acceptance, ide
     planId: draft.planId,
     expectedPlanRevision: draft.revision,
     idempotencyKey: 'canonical-later-draft',
-    sequences: sequences.map((sequence) => ({
-      ...sequence,
-      capture: '48 × 180s · L',
-    })),
+    sequences: draft.sequences.map((sequence) =>
+      revisePlanSequence(sequence, {
+        targetName: `${sequence.definition.targetName} later`,
+      }),
+    ),
   })
   assert.equal(later.response.status, 202)
   const definition = databaseRow(
@@ -5390,8 +5519,8 @@ test('canonical Plan commands persist draft readiness, immutable acceptance, ide
     service.database.prepare('SELECT definition FROM run_definitions').get(),
   )
   assert.notEqual(
-    JSON.parse(definition.definition).plan.sequences[0].capture,
-    '48 × 180s · L',
+    JSON.parse(definition.definition).plan.sequences[0].target,
+    `${firstSequence.definition.targetName} later`,
   )
   await reader?.cancel()
   await listener.close()

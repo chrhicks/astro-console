@@ -48,6 +48,11 @@ function projectSnapshot(
   const fresh = freshness === 'current'
   const control = sharedControl(snapshot, fresh)
   const hasEligibleAction = eligibleActionProjected(snapshot)
+  const holdsCurrentControl =
+    fresh &&
+    snapshot.membership.capability === 'controlCapable' &&
+    snapshot.control.state === 'held' &&
+    snapshot.control.holderClientId === snapshot.membership.clientId
   const connection = fresh
     ? `Current bootstrap snapshot confirmed at ${snapshot.generatedAt}`
     : `${freshness === 'stale' ? 'Last-confirmed' : 'Reconnecting'} snapshot from ${snapshot.generatedAt}`
@@ -61,7 +66,7 @@ function projectSnapshot(
     service: health[0]?.detail ?? 'Service health unknown',
     environment: 'Authoritative projection',
     attention: fresh ? attention(health) : 'attention',
-    readOnly: !fresh || !hasEligibleAction,
+    readOnly: !holdsCurrentControl,
     currentRun: currentRun && {
       ...currentRun,
       phase: fresh ? currentRun.phase : `Last-confirmed ${currentRun.phase}`,
@@ -259,10 +264,14 @@ function observe(
     const terminal = source.terminalOutcome
     const polar = source.acquire?.mode === 'polar'
     const targetAcquisition = source.acquire?.acquisitionMethod !== undefined
-    const eligible = Object.values(source.actions).some(
+    const supervised = source.executor === 'real'
+    const projectedActions = Object.values(source.actions).filter(
+      (action) => action !== undefined,
+    )
+    const eligible = projectedActions.some(
       (action) => action._tag === 'Eligible',
     )
-    const controlRequired = Object.values(source.actions).every(
+    const controlRequired = projectedActions.every(
       (action) =>
         action._tag === 'Ineligible' && action.reason === 'controlRequired',
     )
@@ -279,8 +288,8 @@ function observe(
             ? 'Target acquisition guidance is current.'
             : 'Target acquisition session is complete.'
           : terminal === undefined
-            ? `Fake/fixture ${phaseLabel(source.phase).toLowerCase()} lifecycle is current.`
-            : `Fake/fixture run ${terminal}; no physical capture is claimed.`,
+            ? `${supervised ? 'Supervised' : 'Fake/fixture'} ${phaseLabel(source.phase).toLowerCase()} lifecycle is current.`
+            : `${supervised ? 'Supervised' : 'Fake/fixture'} run ${terminal}; no physical capture is claimed.`,
       tone:
         terminal === 'completed'
           ? 'safe'
@@ -296,7 +305,9 @@ function observe(
         ? 'Fixture provenance: measurement evidence is deterministic; no physical alignment is claimed.'
         : targetAcquisition
           ? 'Fixture provenance: target evidence is deterministic; no physical pointing is claimed.'
-          : 'All attempt evidence is fake/fixture only.',
+          : supervised
+            ? 'Durable executor work and later camera observations are service-owned. Captured bytes are not claimed.'
+            : 'All attempt evidence is fake/fixture only.',
       heading: polar
         ? terminal === undefined
           ? source.acquire.phase === 'completed'
@@ -309,9 +320,9 @@ function observe(
             : 'Target acquisition session complete'
           : terminal === undefined
             ? eligible
-              ? 'Manage the current fake/fixture run'
-              : 'Monitor the current fake/fixture run'
-            : 'Terminal fake/fixture outcome',
+              ? `Manage the current ${supervised ? 'supervised' : 'fake/fixture'} run`
+              : `Monitor the current ${supervised ? 'supervised' : 'fake/fixture'} run`
+            : `Terminal ${supervised ? 'supervised' : 'fake/fixture'} outcome`,
       trace: source.lifecycleFacts,
       facts: source.attemptFacts,
       lifecycle,
@@ -331,7 +342,9 @@ function observe(
               }
             : source.phase === 'paused' && source.resumablePhase !== undefined
               ? {
-                  recovery: `Resume returns to ${phaseLabel(source.resumablePhase)}. Stop ends this fake/fixture run; park is policy only.`,
+                  recovery: supervised
+                    ? `This supervised run is paused at ${phaseLabel(source.resumablePhase)}. Stop ends it; unsupported policies stay unavailable.`
+                    : `Resume returns to ${phaseLabel(source.resumablePhase)}. Stop ends this fake/fixture run; park is policy only.`,
                 }
               : source.phase === 'parkRequested'
                 ? {
@@ -339,8 +352,11 @@ function observe(
                       'Park is policy only; no mount moved. Return to Plan when ready.',
                   }
                 : {
-                    recovery:
-                      'Stop, skip, retry once, or request park only when currently eligible.',
+                    recovery: supervised
+                      ? source.phase === 'verify'
+                        ? 'The camera was later observed idle. Captured bytes and Library intake are the next milestone.'
+                        : 'Use only the actions advertised by the current supervised run projection.'
+                      : 'Stop, skip, retry once, or request park only when currently eligible.',
                   }),
       source,
     }

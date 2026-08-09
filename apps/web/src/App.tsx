@@ -773,6 +773,9 @@ export function App() {
         <BetaObserveApp
           projection={projection}
           loading={!projectionReceived}
+          {...(submitObserve === undefined || projection.shell.readOnly
+            ? {}
+            : { submit: submitObserve })}
           {...(refreshPreflight === undefined ||
           projection.shell.readOnly ||
           projection.observe.source?.phase !== 'preflight'

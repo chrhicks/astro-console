@@ -9,11 +9,6 @@ import {
   StatusIndicator,
   type FlyoutTriggerProps,
 } from '@nightbook/ui'
-import {
-  BootstrapHttpSuccessEnvelope,
-  CameraCommandResponse,
-} from '@astro-console/v2-contracts'
-import { Schema } from 'effect'
 import { useEffect, useState, type ChangeEvent } from 'react'
 
 export type DevelopmentSimulationFrame = {
@@ -89,10 +84,10 @@ type SimulationControl =
   | { readonly action: 'reset' }
   | { readonly action: 'advance'; readonly milliseconds: number }
 
-export type SimulationCaptureResult = {
-  readonly assetId: string
-  readonly projection: DevelopmentSimulationProjection
-}
+let knownSimulationState: Exclude<
+  SimulationState,
+  { readonly _tag: 'loading' | 'absent' }
+> | null = null
 
 export async function readSimulationProjection(): Promise<SimulationState> {
   const response = await fetch('/api/simulation')
@@ -118,85 +113,22 @@ export async function sendSimulationControl(
   return value
 }
 
-export async function captureSimulationFrame(
-  metadata: Extract<
-    DevelopmentSimulationFrame['capture'],
-    { _tag: 'Available' }
-  >,
-): Promise<SimulationCaptureResult> {
-  const captureId = crypto.randomUUID()
-  const active = await ensureActiveSimulationRun()
-  await command('/api/observe/preflight', {
-    runId: active.run.runId,
-    expectedRunRevision: active.run.revision,
-  })
-  let snapshot = await readBootstrapSnapshot()
-  if (snapshot.activeRun._tag !== 'Active')
-    throw new Error('The active run changed during simulation preflight.')
-  await command('/api/acquire/commands', {
-    intent: {
-      _tag: 'StartCameraExposure',
-      expectedLeaseRevision: snapshot.control.revision,
-      expectedRunRevision: snapshot.activeRun.run.revision,
-      durationSeconds: metadata.exposureSeconds,
-      idempotencyKey: `simulation-${captureId}-start`,
-    },
-  })
-  const advanced = await sendSimulationControl({
-    action: 'advance',
-    milliseconds: metadata.exposureSeconds * 1_000 + 1_000,
-  })
-  snapshot = await readBootstrapSnapshot()
-  if (snapshot.activeRun._tag !== 'Active')
-    throw new Error('The active run changed before simulation intake.')
-  const value = Schema.decodeUnknownSync(CameraCommandResponse)(
-    await command('/api/acquire/commands', {
-      intent: {
-        _tag: 'CompleteCameraExposure',
-        expectedLeaseRevision: snapshot.control.revision,
-        expectedRunRevision: snapshot.activeRun.run.revision,
-        idempotencyKey: `simulation-${captureId}-complete`,
-        frameId: `simulated-${captureId}`,
-        capturedAt: metadata.capturedAt,
-        exposureSeconds: metadata.exposureSeconds,
-        filter: metadata.filter,
-        binning: metadata.binning,
-        frameType: metadata.frameType,
-      },
-    }),
-  )
-  if (value._tag !== 'Completed')
-    throw new Error('The simulated camera image was not retained in Library.')
-  const current = await readSimulationProjection()
-  return {
-    assetId: value.assetId,
-    projection: current._tag === 'available' ? current.projection : advanced,
-  }
-}
-
-export async function projectSimulationPreflight(): Promise<DevelopmentSimulationProjection> {
-  const active = await ensureActiveSimulationRun()
-  await command('/api/observe/preflight', {
-    runId: active.run.runId,
-    expectedRunRevision: active.run.revision,
-  })
-  const current = await readSimulationProjection()
-  if (current._tag !== 'available')
-    throw new Error('The simulator projection is unavailable after Preflight.')
-  return current.projection
-}
-
 export function DevelopmentSimulationStrip({
   readOnly,
 }: {
   readOnly: boolean
 }) {
-  const [state, setState] = useState<SimulationState>({ _tag: 'loading' })
+  const [state, setState] = useState<SimulationState>(
+    knownSimulationState ?? { _tag: 'loading' },
+  )
   useEffect(() => {
     let current = true
     void readSimulationProjection().then(
       (value) => {
-        if (current) setState(value)
+        if (!current) return
+        if (value._tag === 'available' || value._tag === 'unavailable')
+          knownSimulationState = value
+        setState(value)
       },
       () => {
         if (current) setState({ _tag: 'absent' })
@@ -229,7 +161,6 @@ export function DevelopmentSimulationSurface({
   )
   const [pending, setPending] = useState(false)
   const [message, setMessage] = useState<string>()
-  const [capturedAssetId, setCapturedAssetId] = useState<string>()
   const [detailsOpen, setDetailsOpen] = useState(false)
   const phone = usePhoneProjection()
   const protectedControls = phone || readOnly
@@ -240,22 +171,15 @@ export function DevelopmentSimulationSurface({
   const frame = projection?.evidence.lastFrame ?? projection?.evidence.nextFrame
   const shortSha = frame?.sha256?.slice(0, 10)
   const captureMetadata = projection?.evidence.nextFrame?.capture
-  const captureDriverAvailable =
-    projection?.guide.driver._tag === 'Available' &&
-    projection.guide.driver.action === 'capture-test-frame'
-  const preflightDriverAvailable =
-    projection?.guide.driver._tag === 'Available' &&
-    projection.guide.driver.action === 'refresh-preflight'
-  const captureAvailable =
-    captureDriverAvailable && captureMetadata?._tag === 'Available'
   const apply = (value: SimulationControl, success: string) => {
     if (pending || protectedControls) return
     setPending(true)
-    setCapturedAssetId(undefined)
     setMessage('Applying simulation control…')
     void control(value).then(
       (next) => {
-        setCurrent({ _tag: 'available', projection: next })
+        const state = { _tag: 'available' as const, projection: next }
+        knownSimulationState = state
+        setCurrent(state)
         setSelectedScenario(next.scenario)
         setPending(false)
         setMessage(`${success} ${scenarioStatus(next)}`)
@@ -266,61 +190,6 @@ export function DevelopmentSimulationSurface({
           cause instanceof Error
             ? cause.message
             : 'Simulation control is unavailable.',
-        )
-      },
-    )
-  }
-  const capture = () => {
-    if (
-      pending ||
-      protectedControls ||
-      projection === undefined ||
-      !captureAvailable
-    )
-      return
-    setPending(true)
-    setCapturedAssetId(undefined)
-    setMessage('Capturing a real FITS test frame through Observe…')
-    void captureSimulationFrame(captureMetadata).then(
-      (result) => {
-        setCurrent({ _tag: 'available', projection: result.projection })
-        setCapturedAssetId(result.assetId)
-        setPending(false)
-        setMessage('M101 test frame retained as durable Library evidence.')
-      },
-      (cause: unknown) => {
-        setPending(false)
-        setMessage(
-          cause instanceof Error
-            ? cause.message
-            : 'The simulation capture is unavailable.',
-        )
-      },
-    )
-  }
-  const preflight = () => {
-    if (
-      pending ||
-      protectedControls ||
-      projection === undefined ||
-      !preflightDriverAvailable
-    )
-      return
-    setPending(true)
-    setCapturedAssetId(undefined)
-    setMessage('Running simulated Alpaca preflight through Observe…')
-    void projectSimulationPreflight().then(
-      (next) => {
-        setCurrent({ _tag: 'available', projection: next })
-        setPending(false)
-        setMessage(`${next.scenario} preflight projected into Observe.`)
-      },
-      (cause: unknown) => {
-        setPending(false)
-        setMessage(
-          cause instanceof Error
-            ? cause.message
-            : 'The simulated preflight is unavailable.',
         )
       },
     )
@@ -391,37 +260,15 @@ export function DevelopmentSimulationSurface({
             disabled={pending}
             onClick={() =>
               apply(
-                { action: 'advance', milliseconds: 1_000 },
-                'Simulation clock advanced by one second.',
+                { action: 'advance', milliseconds: 16_000 },
+                'Simulation clock advanced by sixteen seconds.',
               )
             }
           >
-            Advance 1s
+            Advance 16s
           </Button>
-          {preflightDriverAvailable ? (
-            <Button
-              size="small"
-              tone="primary"
-              disabled={pending}
-              onClick={preflight}
-            >
-              Run preflight test
-            </Button>
-          ) : (
-            <Button
-              size="small"
-              tone="primary"
-              disabled={pending || !captureAvailable}
-              onClick={capture}
-            >
-              Capture test frame
-            </Button>
-          )}
-          {captureMetadata?._tag === 'Unavailable' ? (
-            <span className="beta-simulation-denial">
-              {captureMetadata.reason}
-            </span>
-          ) : null}
+          <a href="/plan?ui=beta">Plan</a>
+          <a href="/observe?ui=beta">Observe</a>
         </div>
       ) : (
         <span className="beta-simulation-protection">
@@ -513,60 +360,10 @@ export function DevelopmentSimulationSurface({
         {message ??
           (projection === undefined
             ? unavailable?.message
-            : scenarioStatus(projection))}{' '}
-        {capturedAssetId === undefined ? null : (
-          <a
-            className="beta-simulation-library-link"
-            href={`/library/assets/${encodeURIComponent(capturedAssetId)}?ui=beta`}
-          >
-            Review captured frame
-          </a>
-        )}
+            : scenarioStatus(projection))}
       </span>
     </section>
   )
-}
-
-async function readBootstrapSnapshot() {
-  const response = await fetch('/api/snapshot')
-  const value: unknown = await response.json().catch(() => undefined)
-  if (!response.ok)
-    throw new Error('The current service projection is unavailable.')
-  return Schema.decodeUnknownSync(BootstrapHttpSuccessEnvelope)(value).data
-}
-
-async function ensureActiveSimulationRun() {
-  let snapshot = await readBootstrapSnapshot()
-  if (snapshot.activeRun._tag === 'None') {
-    if (snapshot.plan === undefined)
-      throw new Error(
-        'Accept a Plan before running a simulation Observe workflow.',
-      )
-    await command('/api/plan/commands', {
-      intent: {
-        _tag: 'StartAcceptedRun',
-        planId: snapshot.plan.planId,
-        expectedPlanRevision: snapshot.plan.revision,
-        expectedLeaseRevision: snapshot.control.revision,
-        idempotencyKey: crypto.randomUUID(),
-      },
-    })
-    snapshot = await readBootstrapSnapshot()
-  }
-  if (snapshot.activeRun._tag !== 'Active')
-    throw new Error('A current active run is required for this test.')
-  return { snapshot, run: snapshot.activeRun.run }
-}
-
-async function command(path: string, body: object) {
-  const response = await fetch(path, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  const value: unknown = await response.json().catch(() => undefined)
-  if (!response.ok) throw new Error(simulationFailureMessage(value))
-  return value
 }
 
 function usePhoneProjection() {
@@ -647,7 +444,7 @@ function isScenarioGuide(value: unknown) {
 function scenarioStatus(projection: DevelopmentSimulationProjection) {
   const driver = projection.guide.driver
   return driver._tag === 'Available'
-    ? `${projection.guide.summary} Next: ${driver.label}. Load selects simulator state; it does not run this action.`
+    ? `${projection.guide.summary} Continue through Plan and Observe. Load selects simulator state only.`
     : `${projection.guide.summary} ${driver.reason}`
 }
 

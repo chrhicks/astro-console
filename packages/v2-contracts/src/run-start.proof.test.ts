@@ -41,6 +41,7 @@ const initialState = {
       {
         sequenceId: 'm27-wide',
         targetName: 'M27',
+        acquisitionMode: 'deepSkyPlateSolve',
         rightAscensionHours: 19.9934,
         declinationDegrees: 22.7212,
         exposureSeconds: 180,
@@ -60,6 +61,7 @@ const initialState = {
       {
         sequenceId: 'm31-wide',
         targetName: 'M31',
+        acquisitionMode: 'deepSkyPlateSolve',
         rightAscensionHours: 0.712,
         declinationDegrees: 41.269,
         exposureSeconds: 180,

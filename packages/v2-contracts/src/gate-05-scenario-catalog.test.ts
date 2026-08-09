@@ -105,6 +105,7 @@ const run = () =>
 const futureSequence = decode(RunSequenceDefinition, {
   sequenceId: 'sh2-101',
   targetName: 'Sh2-101',
+  acquisitionMode: 'deepSkyPlateSolve',
   rightAscensionHours: 20.3,
   declinationDegrees: 40.7,
   exposureSeconds: 180,
@@ -124,6 +125,7 @@ const futureSequence = decode(RunSequenceDefinition, {
 const runDefinition = () =>
   decode(RunDefinition, {
     runId: 'run-1',
+    executor: 'real',
     sourcePlanId: 'plan-1',
     sourcePlanRevision: 7,
     acceptedAt: '2026-07-22T23:30:00Z',

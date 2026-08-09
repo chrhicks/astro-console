@@ -26,6 +26,7 @@ const controller = ActorContext.cases.Member.make({
 const m27 = RunSequenceDefinition.make({
   sequenceId: 'm27',
   targetName: 'M27',
+  acquisitionMode: 'deepSkyPlateSolve',
   rightAscensionHours: 19.9934,
   declinationDegrees: 22.7212,
   exposureSeconds: 180,
@@ -46,6 +47,7 @@ const m27 = RunSequenceDefinition.make({
 const initialState = () => ({
   definition: RunDefinition.make({
     runId: RunId.make('run-1'),
+    executor: 'fake',
     sourcePlanId: PlanId.make('plan-1'),
     sourcePlanRevision: PlanRevision.make(7),
     acceptedAt: '2026-07-23T00:00:00Z',

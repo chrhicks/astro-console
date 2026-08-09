@@ -93,23 +93,27 @@ export function acceptRun(
   if (current.run !== null) return reject('ActiveRunConflict')
   db.exec('BEGIN IMMEDIATE')
   try {
-    const fixture = definition.executor === 'fixture'
+    const fixture = definition.definition.executor === 'fixture'
     const run: Run = fixture
       ? {
           id: 'run-m27-001',
           revision: 1,
           phase: 'capture',
-          target: definition.plan.sequences[0]?.target ?? current.plan.target,
+          target:
+            definition.definition.sequences[0]?.targetName ??
+            current.plan.target,
           progress: 0,
           sourceDefinitionId: definition.id,
           activeSequenceIndex: 0,
           completedSequenceCount: 0,
         }
       : {
-          id: `run-${definition.id}`,
+          id: definition.definition.runId,
           revision: 1,
           phase: 'preflight',
-          target: definition.plan.sequences[0]?.target ?? current.plan.target,
+          target:
+            definition.definition.sequences[0]?.targetName ??
+            current.plan.target,
           progress: 0,
           sourceDefinitionId: definition.id,
           activeSequenceIndex: 0,
@@ -142,6 +146,15 @@ export function acceptRun(
       'RunStarted',
       JSON.stringify(result),
     )
+    if (definition.definition.executor === 'real')
+      db.prepare(
+        "INSERT INTO run_executor_work (work_id,run_id,kind,payload,state) VALUES (?,?,?,?, 'pending')",
+      ).run(
+        `${run.id}:begin`,
+        run.id,
+        'BeginRun',
+        JSON.stringify({ sequenceIndex: 0 }),
+      )
     db.exec('COMMIT')
     return {
       status: 202,
@@ -177,8 +190,8 @@ function legacyStartReplay(
       stored.snapshot.plan.revision === input.expectedPlanRevision &&
       stored.snapshot.control.revision === input.expectedLeaseRevision &&
       definition !== undefined &&
-      definition.sourcePlanId === input.planId &&
-      definition.sourcePlanRevision === input.expectedPlanRevision &&
+      definition.definition.sourcePlanId === input.planId &&
+      definition.definition.sourcePlanRevision === input.expectedPlanRevision &&
       stored.run?.sourceDefinitionId === definition.id
         ? { status: 200, body: stored }
         : reject('IdempotencyConflict'),
@@ -206,7 +219,7 @@ export function advanceFakeRunState(
   const definition = Schema.decodeUnknownSync(StoredRunDefinition)(
     JSON.parse(definitionRow.definition),
   )
-  if (definition.executor !== 'fake') return undefined
+  if (definition.definition.executor !== 'fake') return undefined
   const transition = nextFakeRunTransition(current.run, definition)
   if (transition === undefined) return undefined
   db.exec('BEGIN IMMEDIATE')
@@ -274,7 +287,7 @@ function nextFakeRunTransition(
   if (completedSequenceCount === undefined || activeSequenceIndex === undefined)
     return undefined
   const completed = completedSequenceCount + 1
-  const next = definition.plan.sequences[activeSequenceIndex + 1]
+  const next = definition.definition.sequences[activeSequenceIndex + 1]
   if (next === undefined)
     return {
       eventType: 'RunCompleted',
@@ -292,9 +305,9 @@ function nextFakeRunTransition(
       ...run,
       revision: run.revision + 1,
       phase: 'preflight' as const,
-      target: next.target,
+      target: next.targetName,
       progress: Math.floor(
-        (completed / definition.plan.sequences.length) * 100,
+        (completed / definition.definition.sequences.length) * 100,
       ),
       activeSequenceIndex: activeSequenceIndex + 1,
       completedSequenceCount: completed,
@@ -302,23 +315,23 @@ function nextFakeRunTransition(
   }
 }
 
-function hasFakeRunDefinition(
+function activeExecutor(
   db: DatabaseSync,
   stateRepository: StateSqliteRepositoryShape,
 ) {
   const run = stateRepository.state().run
-  if (run?.sourceDefinitionId === undefined) return false
+  if (run?.sourceDefinitionId === undefined) return undefined
   const raw: unknown = db
     .prepare('SELECT definition FROM run_definitions WHERE run_definition_id=?')
     .get(run.sourceDefinitionId)
   const row = Schema.decodeUnknownSync(
     Schema.optional(Schema.Struct({ definition: Schema.String })),
   )(raw)
-  if (row === undefined) return false
+  if (row === undefined) return undefined
   const definition = Schema.decodeUnknownSync(StoredRunDefinition)(
     JSON.parse(row.definition),
   )
-  return definition.executor === 'fake' || definition.executor === 'fixture'
+  return definition.definition.executor
 }
 export function hasFakeExecutor(
   db: DatabaseSync,
@@ -335,7 +348,7 @@ export function hasFakeExecutor(
   if (row === undefined) return false
   return (
     Schema.decodeUnknownSync(StoredRunDefinition)(JSON.parse(row.definition))
-      .executor === 'fake'
+      .definition.executor === 'fake'
   )
 }
 
@@ -347,7 +360,8 @@ export function acceptRunIntervention(
   identity: LocalIdentity,
 ) {
   if (identity.capability === 'readOnly') return reject('ClientReadOnly')
-  if (!hasFakeRunDefinition(db, stateRepository))
+  const executor = activeExecutor(db, stateRepository)
+  if (executor === undefined || (executor === 'real' && intent !== 'pause'))
     return reject('RunRevisionConflict')
   stateRepository.expireReconnectGrace()
   const current = stateRepository.state()
@@ -385,6 +399,12 @@ export function acceptRunIntervention(
         }
       : reject('IdempotencyConflict')
   if (current.run === null) return reject('RunRevisionConflict')
+  if (
+    executor === 'real' &&
+    intent === 'pause' &&
+    current.run.phase === 'verify'
+  )
+    return reject('PolicyUnavailable')
   if (
     current.run.phase === 'completed' ||
     current.run.phase === 'stopped' ||
@@ -452,6 +472,7 @@ export function acceptRunIntervention(
       eventType,
       JSON.stringify(result),
     )
+    if (intent === 'pause') enqueueExposureAbort(db, nextRun.id)
     db.exec('COMMIT')
     return { status: 202, body: result, event: { type: eventType, cursor } }
   } catch (error) {
@@ -468,7 +489,8 @@ export function acceptFakePolicy(
   identity: LocalIdentity,
 ) {
   if (identity.capability === 'readOnly') return reject('ClientReadOnly')
-  if (!hasFakeRunDefinition(db, stateRepository))
+  const executor = activeExecutor(db, stateRepository)
+  if (executor === undefined || (executor === 'real' && path !== 'stop'))
     return reject('RunRevisionConflict')
   const current = stateRepository.state()
   if (
@@ -603,6 +625,7 @@ export function acceptFakePolicy(
         input.idempotencyKey,
         JSON.stringify(body),
       )
+    if (path === 'stop') enqueueExposureAbort(db, nextRun.id)
     db.prepare('INSERT INTO events VALUES (?,?,?)').run(
       cursor,
       eventType,
@@ -614,4 +637,14 @@ export function acceptFakePolicy(
     db.exec('ROLLBACK')
     throw error
   }
+}
+
+function enqueueExposureAbort(db: DatabaseSync, runId: string) {
+  const settledAt = new Date().toISOString()
+  db.prepare(
+    "UPDATE run_executor_work SET state='cancelled',settled_at=?,last_error='Cancelled by run intervention before provider command.' WHERE run_id=? AND kind IN ('BeginRun','StartExposure') AND state='pending'",
+  ).run(settledAt, runId)
+  db.prepare(
+    "INSERT OR IGNORE INTO run_executor_work (work_id,run_id,kind,payload,state) SELECT ?,?,'AbortExposure',?,'pending' WHERE EXISTS (SELECT 1 FROM run_executor_work WHERE run_id=? AND kind='StartExposure' AND state IN ('commandAttempted','observing','reconciling'))",
+  ).run(`${runId}:abort`, runId, JSON.stringify({ sequenceIndex: 0 }), runId)
 }

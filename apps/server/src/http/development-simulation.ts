@@ -288,7 +288,8 @@ function scenarioGuide(
       }
     case 'exposure-success':
       return {
-        summary: 'One 15-second M101 exposure can enter Library.',
+        summary:
+          'One 15-second M101 exposure can reach Verify. Library remains unchanged.',
         driver: {
           _tag: 'Available',
           action: 'capture-test-frame',

@@ -133,6 +133,27 @@ camera command accepts that duration.
   replay.
 - Project exact action eligibility and consequences into Plan and Observe.
 
+Completed August 8, 2026. Plan now freezes structured acquisition and capture
+facts instead of trusting presentation strings. A real origin-owned executor
+persists work before provider calls, claims camera writes once, reconciles
+uncertain work with GET-only observations after restart, and never replays a
+claimed write. Pause and Stop settle pending work and issue at most one abort
+for a claimed exposure. Existing beta Plan and accepted-definition rows are
+upgraded before strict decoding.
+
+The supported development path installs one M101 `cameraOnly` sequence with one
+15-second frame. The normal beta Plan and Observe controls reached Capture and
+then Verify after an active camera observation followed by idle. Observe shows
+the durable work trail, exact eligibility, and the explicit no-bytes boundary;
+Library remained unchanged. Wider or deeper definitions fail before a provider
+write. The first active-camera observation is published once; later polls while
+the same exposure remains active do not create repeated projection events.
+Fresh held-desktop control also remains available across workspaces even when
+Plan and Observe have no currently eligible action. Contracts passed 187/187,
+server 138/138, and web 124/124. Functional
+browser and Designer proof passed at 1440 px, 768 px, and 390 px. No live
+provider or hardware was contacted.
+
 ### 5. Indoor camera-to-Library path
 
 - Start and separately abort an owner-approved bounded exposure.

@@ -1,4 +1,4 @@
-import { Effect, Exit, Match, Schema, Scope } from 'effect'
+import { Effect, Exit, Fiber, Match, Schedule, Schema, Scope } from 'effect'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import {
   BootstrapHttpSuccessEnvelope,
@@ -51,6 +51,7 @@ import { installPublishedLibraryFixture } from '../persistence/library-sqlite-re
 import { createOriginRouter } from '../http/origin-router.ts'
 import {
   initializeRuntimeState,
+  installDevelopmentSimulationPlan,
   installM27Fixture,
 } from '../services/runtime-bootstrap.ts'
 import {
@@ -108,6 +109,7 @@ import {
   executeCameraCommand,
   type CameraProviderShape,
 } from '../services/camera-command-service.ts'
+import { createRunExecutorWorker } from '../workers/run-executor-worker.ts'
 import {
   acquireSqliteRepository,
   polarSession,
@@ -140,6 +142,7 @@ import {
   AssetId,
   AttemptId,
   RecoverySeriesId,
+  RunExecutionContext,
   recordCorrectionAcknowledgement,
   recordManagedCapture,
   recordLiveFrameEvidence,
@@ -183,6 +186,8 @@ export function createLocalWebService(
     readonly frameInspectionStorage?: FrameInspectionStorage
     readonly plateSolveWorker?: PlateSolveWorkerConfig
     readonly simulation?: DevelopmentSimulationConfig
+    readonly runExecutionContext?: typeof RunExecutionContext.Type
+    readonly runExecutorProviderOrigin?: string
   } = {},
 ) {
   const database = openOriginDatabase(databasePath)
@@ -198,6 +203,8 @@ export function createLocalWebService(
     if (options.fixture === 'library-published')
       installPublishedLibraryFixture(database)
   } else initializeRuntimeState(database)
+  if (options.simulation !== undefined)
+    installDevelopmentSimulationPlan(database)
   prepareProcessingWorkspaceAfterRestart(database)
   const acquireRepository = acquireSqliteRepository(database)
   const stateRepository: StateSqliteRepositoryShape = Effect.runSync(
@@ -213,7 +220,21 @@ export function createLocalWebService(
   const runRepository: RunSqliteRepositoryShape = Effect.runSync(
     RunSqliteRepository.pipe(
       Effect.provide(
-        runSqliteRepositoryLayer(database, stateRepository, reject),
+        runSqliteRepositoryLayer(
+          database,
+          stateRepository,
+          reject,
+          options.runExecutionContext === undefined ||
+            (options.simulation !== undefined &&
+              options.runExecutorProviderOrigin !== options.simulation.origin)
+            ? options.cameraProvider === undefined
+              ? { executor: 'fake' }
+              : { executor: 'unavailable' }
+            : {
+                executor: 'real',
+                executionContext: options.runExecutionContext,
+              },
+        ),
       ),
     ),
   )
@@ -480,6 +501,32 @@ export function createLocalWebService(
   let closed = false
   const publish = (type: string, cursor: number) =>
     Effect.runSync(projectionPublication.publish(type, cursor))
+  const runExecutor =
+    options.cameraProvider === undefined ||
+    options.runExecutionContext === undefined ||
+    (options.simulation !== undefined &&
+      options.runExecutorProviderOrigin !== options.simulation.origin)
+      ? undefined
+      : createRunExecutorWorker({
+          database,
+          stateRepository,
+          cameraProvider: options.cameraProvider,
+          publish,
+        })
+  const runExecutorFiber =
+    runExecutor === undefined
+      ? undefined
+      : Effect.runFork(
+          Effect.tryPromise({
+            try: () => runExecutor.pass(),
+            catch: (cause) => cause,
+          }).pipe(
+            Effect.catch((cause) =>
+              Effect.logError('RunExecutor.pass failed', cause),
+            ),
+            Effect.repeat(Schedule.spaced('250 millis')),
+          ),
+        )
   const targetAcquisitionProvider =
     options.targetAcquisitionProvider ??
     (options.fixture === 'target-deep-sky' ||
@@ -1093,6 +1140,8 @@ export function createLocalWebService(
   const close = () => {
     if (closed) return
     closed = true
+    if (runExecutorFiber !== undefined)
+      Effect.runSync(Fiber.interrupt(runExecutorFiber))
     Effect.runSync(projectionPublication.close())
     database.close()
   }
@@ -1243,6 +1292,9 @@ export function createLocalWebService(
     solveRetainedFrame,
     cleanupSavedOrphans,
     advanceFakeRun,
+    runExecutorPass: () => runExecutor?.pass(),
+    enqueueRunExposureAbort: (runId: string) =>
+      runExecutor?.enqueueAbort(runId),
   }
 }
 
@@ -1545,6 +1597,29 @@ export const startOrigin = () =>
                     cameraProvider: alpacaCameraProvider(
                       config.preflightProvider,
                     ),
+                    runExecutorProviderOrigin: new URL(
+                      `http://${config.preflightProvider.host}:${config.preflightProvider.port}`,
+                    ).origin,
+                    ...(config.preflightProvider.devices.camera.uniqueId ===
+                    undefined
+                      ? {}
+                      : {
+                          runExecutionContext: RunExecutionContext.make({
+                            rigId: config.preflightProvider.rigId,
+                            cameraDeviceId:
+                              config.preflightProvider.devices.camera.uniqueId,
+                            ...(config.preflightProvider.devices.telescope
+                              ?.uniqueId === undefined
+                              ? {}
+                              : {
+                                  mountDeviceId:
+                                    config.preflightProvider.devices.telescope
+                                      .uniqueId,
+                                }),
+                            completionBehavior: 'hold',
+                            unsafeBehavior: 'pauseAndPark',
+                          }),
+                        }),
                   }),
             }),
         webDistPath: config.runtime.webDistPath,

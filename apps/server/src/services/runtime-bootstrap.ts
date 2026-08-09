@@ -1,12 +1,16 @@
 import { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
 import type {
+  AcceptedRunDefinitionRecord,
   DraftSequence,
   PlanProjection,
   PlanReadiness,
-  RunDefinition,
 } from './domain-state.ts'
-import { PlanWorkspaceProjection } from '@astro-console/v2-contracts'
+import {
+  PlanWorkspaceProjection,
+  RunDefinition,
+  planSequencePresentation,
+} from '@astro-console/v2-contracts'
 import { seedLibrary } from '../persistence/library-sqlite-repository.ts'
 
 const StoredRow = Schema.Struct({ value: Schema.String })
@@ -150,31 +154,59 @@ const seedFixtureState = (db: DatabaseSync) =>
     },
   })
 
-const fixtureSequences: ReadonlyArray<DraftSequence> = [
+const fixtureSequenceDefinitions = [
   {
     sequenceId: 'sequence-m27-luminance',
-    target: 'M27 · Dumbbell Nebula',
-    capture: '24 × 180s · L',
-    acquisition: 'Solve, center, focus, then start capture.',
-    stopCondition: 'Stop at 24 verified frames or 01:02 local.',
-    window: {
-      startsAt: '2026-07-25T03:18:00.000Z',
-      endsAt: '2026-07-25T05:02:00.000Z',
-      usableMinutes: 104,
-      peakAltitudeDeg: 62,
-      horizonClearanceDeg: 28,
-    },
-    estimatedMinutes: 72,
-    storageForecastMb: 1800,
-    horizon: 'clear',
-    storage: 'available',
+    targetName: 'M27 · Dumbbell Nebula',
+    acquisitionMode: 'deepSkyPlateSolve' as const,
+    rightAscensionHours: 19.9934,
+    declinationDegrees: 22.7212,
+    exposureSeconds: 180,
+    frameCount: 24,
+    binning: 1,
+    filterName: 'L',
+    earliestStart: '2026-07-25T03:18:00.000Z',
+    latestEnd: '2026-07-25T05:02:00.000Z',
+    minimumAltitudeDegrees: 25,
+    horizonClearanceDegrees: 5,
+    recenterThresholdArcsec: 30,
+    maxSolveAttempts: 3,
+    maxCaptureRetries: 2,
+    acquireFailure: 'pause' as const,
+    captureFailure: 'retry' as const,
+    estimatedDurationSeconds: 4320,
+    estimatedStorageBytes: 1_800_000_000,
+    priority: 0,
   },
   {
     sequenceId: 'sequence-m27-color',
-    target: 'M27 · Dumbbell Nebula',
-    capture: '18 × 180s · RGB',
-    acquisition: 'Continue after luminance with the same solved center.',
-    stopCondition: 'Stop at 18 verified frames or window end.',
+    targetName: 'M27 · Dumbbell Nebula',
+    acquisitionMode: 'deepSkyPlateSolve' as const,
+    rightAscensionHours: 19.9934,
+    declinationDegrees: 22.7212,
+    exposureSeconds: 180,
+    frameCount: 18,
+    binning: 1,
+    filterName: 'RGB',
+    earliestStart: '2026-07-25T03:18:00.000Z',
+    latestEnd: '2026-07-25T05:02:00.000Z',
+    minimumAltitudeDegrees: 25,
+    horizonClearanceDegrees: 5,
+    recenterThresholdArcsec: 30,
+    maxSolveAttempts: 3,
+    maxCaptureRetries: 2,
+    acquireFailure: 'pause' as const,
+    captureFailure: 'retry' as const,
+    estimatedDurationSeconds: 3240,
+    estimatedStorageBytes: 1_350_000_000,
+    priority: 1,
+  },
+]
+
+const fixtureSequences: ReadonlyArray<DraftSequence> =
+  fixtureSequenceDefinitions.map((definition) => ({
+    sequenceId: definition.sequenceId,
+    ...planSequencePresentation(definition),
     window: {
       startsAt: '2026-07-25T03:18:00.000Z',
       endsAt: '2026-07-25T05:02:00.000Z',
@@ -182,12 +214,67 @@ const fixtureSequences: ReadonlyArray<DraftSequence> = [
       peakAltitudeDeg: 62,
       horizonClearanceDeg: 28,
     },
-    estimatedMinutes: 54,
-    storageForecastMb: 1350,
     horizon: 'clear',
     storage: 'available',
-  },
-]
+    definition,
+  }))
+
+const developmentSimulationDefinition = {
+  sequenceId: 'sequence-m101-camera',
+  targetName: 'M101 · Pinwheel Galaxy',
+  acquisitionMode: 'cameraOnly' as const,
+  rightAscensionHours: 14.0535,
+  declinationDegrees: 54.3489,
+  exposureSeconds: 15,
+  frameCount: 1,
+  binning: 1,
+  filterName: 'No filter',
+  minimumAltitudeDegrees: 20,
+  horizonClearanceDegrees: 5,
+  recenterThresholdArcsec: 30,
+  maxSolveAttempts: 1,
+  maxCaptureRetries: 1,
+  acquireFailure: 'pause' as const,
+  captureFailure: 'pause' as const,
+  estimatedDurationSeconds: 15,
+  estimatedStorageBytes: 51_000_000,
+  priority: 0,
+}
+
+export const installDevelopmentSimulationPlan = (database: DatabaseSync) => {
+  const sequence: DraftSequence = {
+    sequenceId: developmentSimulationDefinition.sequenceId,
+    ...planSequencePresentation(developmentSimulationDefinition),
+    window: {
+      startsAt: '2026-08-08T00:00:00.000Z',
+      endsAt: '2026-08-09T00:00:00.000Z',
+      usableMinutes: 1440,
+      peakAltitudeDeg: 72,
+      horizonClearanceDeg: 35,
+    },
+    horizon: 'clear',
+    storage: 'available',
+    definition: developmentSimulationDefinition,
+  }
+  const plan = evaluatePlan({
+    planId: 'plan-m27',
+    revision: 3,
+    sequences: [sequence],
+  })
+  database
+    .prepare(
+      'INSERT INTO observing_plans (plan_id,revision,projection,run_eligible) VALUES (?,?,?,0) ON CONFLICT(plan_id) DO UPDATE SET revision=excluded.revision,projection=excluded.projection,run_eligible=0',
+    )
+    .run(plan.planId, plan.revision, JSON.stringify(plan))
+  database
+    .prepare(
+      "INSERT INTO workspace_projections (name,value) VALUES ('plan',?) ON CONFLICT(name) DO UPDATE SET value=excluded.value",
+    )
+    .run(JSON.stringify(plan))
+  database
+    .prepare("UPDATE state SET value=? WHERE key='planRevision'")
+    .run(JSON.stringify(plan.revision))
+}
 
 const seedWorkspaces = (db: DatabaseSync) => {
   const plan = evaluatePlan({
@@ -222,25 +309,40 @@ export const installM27Fixture = (
       JSON.parse(Schema.decodeUnknownSync(StoredRow)(raw).value),
     )
     if (definitionKind === false) return
-    const definition: RunDefinition = {
+    const definition: AcceptedRunDefinitionRecord = {
       id:
         definitionKind === 'fake'
           ? 'run-definition-m27-preflight'
           : 'run-definition-m27-fixture',
-      sourcePlanId: plan.planId,
-      sourcePlanRevision: plan.revision,
-      acceptedAt: '2026-07-25T00:00:00.000Z',
-      executor: definitionKind,
+      definition: Schema.decodeUnknownSync(RunDefinition)({
+        runId: definitionKind === 'fake' ? 'run-m27-fake' : 'run-m27-fixture',
+        executor: definitionKind,
+        sourcePlanId: plan.planId,
+        sourcePlanRevision: plan.revision,
+        acceptedAt: '2026-07-25T00:00:00.000Z',
+        acceptedLimitations: [],
+        executionContext: {
+          rigId: 'fixture-rig',
+          mountDeviceId: 'fixture-mount',
+          cameraDeviceId: 'fixture-camera',
+          latitudeDegrees: 39.95,
+          longitudeDegrees: -75.16,
+          elevationMeters: 30,
+          completionBehavior: 'hold',
+          unsafeBehavior: 'pauseAndPark',
+        },
+        sequences: plan.sequences.map((sequence) => sequence.definition),
+      }),
       plan,
     }
     database
       .prepare('INSERT OR IGNORE INTO run_definitions VALUES (?,?,?,?,?)')
       .run(
         definition.id,
-        definition.sourcePlanId,
-        definition.sourcePlanRevision,
+        definition.definition.sourcePlanId,
+        definition.definition.sourcePlanRevision,
         JSON.stringify(definition),
-        definition.acceptedAt,
+        definition.definition.acceptedAt,
       )
   } catch {}
 }

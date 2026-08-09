@@ -40,6 +40,7 @@ const StoredRun = Schema.Struct({
     'acquire',
     'capture',
     'verify',
+    'recover',
     'completed',
     'paused',
     'stopped',
@@ -51,10 +52,10 @@ const StoredRun = Schema.Struct({
   activeSequenceIndex: Schema.optionalKey(Schema.Int),
   completedSequenceCount: Schema.optionalKey(Schema.Int),
   resumablePhase: Schema.optionalKey(
-    Schema.Literals(['preflight', 'acquire', 'capture', 'verify']),
+    Schema.Literals(['preflight', 'acquire', 'capture', 'verify', 'recover']),
   ),
   retryPhase: Schema.optionalKey(
-    Schema.Literals(['preflight', 'acquire', 'capture', 'verify']),
+    Schema.Literals(['preflight', 'acquire', 'capture', 'verify', 'recover']),
   ),
   appliedMutations: Schema.optionalKey(
     Schema.Array(

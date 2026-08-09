@@ -13,17 +13,17 @@ export { RunSequenceDefinition } from './commands.js'
 
 export const RunExecutionContext = Schema.Struct({
   rigId: Schema.NonEmptyString,
-  mountDeviceId: Schema.NonEmptyString,
+  mountDeviceId: Schema.optionalKey(Schema.NonEmptyString),
   cameraDeviceId: Schema.NonEmptyString,
   focuserDeviceId: Schema.optionalKey(Schema.NonEmptyString),
   filterWheelDeviceId: Schema.optionalKey(Schema.NonEmptyString),
-  latitudeDegrees: Schema.Finite.check(
-    Schema.isBetween({ minimum: -90, maximum: 90 }),
+  latitudeDegrees: Schema.optionalKey(
+    Schema.Finite.check(Schema.isBetween({ minimum: -90, maximum: 90 })),
   ),
-  longitudeDegrees: Schema.Finite.check(
-    Schema.isBetween({ minimum: -180, maximum: 180 }),
+  longitudeDegrees: Schema.optionalKey(
+    Schema.Finite.check(Schema.isBetween({ minimum: -180, maximum: 180 })),
   ),
-  elevationMeters: Schema.Finite,
+  elevationMeters: Schema.optionalKey(Schema.Finite),
   completionBehavior: Schema.Literals(['park', 'hold']),
   unsafeBehavior: Schema.Literals(['pauseAndPark', 'stopAndPark']),
 })
@@ -75,6 +75,7 @@ export const RunStartReadiness = Schema.TaggedUnion({
 
 export const RunDefinition = Schema.Struct({
   runId: RunId,
+  executor: Schema.Literals(['fake', 'fixture', 'real']),
   sourcePlanId: PlanId,
   sourcePlanRevision: PlanRevision,
   acceptedAt: Schema.NonEmptyString,
@@ -87,12 +88,28 @@ export const RunDefinition = Schema.Struct({
   executionContext: RunExecutionContext,
   sequences: Schema.NonEmptyArray(RunSequenceDefinition),
 }).check(
-  Schema.makeFilter((definition) =>
-    uniqueRunInputs(
+  Schema.makeFilter((definition) => {
+    const uniqueness = uniqueRunInputs(
       definition.sequences.map(({ sequenceId }) => sequenceId),
       definition.acceptedLimitations.map(({ limitationId }) => limitationId),
-    ),
-  ),
+    )
+    if (uniqueness !== undefined) return uniqueness
+    if (
+      definition.sequences.some(
+        (sequence) => sequence.acquisitionMode === 'deepSkyPlateSolve',
+      ) &&
+      (definition.executionContext.mountDeviceId === undefined ||
+        definition.executionContext.latitudeDegrees === undefined ||
+        definition.executionContext.longitudeDegrees === undefined ||
+        definition.executionContext.elevationMeters === undefined)
+    )
+      return {
+        path: ['executionContext'],
+        issue:
+          'deepSkyPlateSolve requires mount identity and complete site coordinates',
+      }
+    return undefined
+  }),
 )
 
 export interface RunDefinition extends Schema.Schema.Type<
@@ -248,6 +265,7 @@ export const decideStartRun = (input: StartRunInput): StartRunDecision => {
       }
       const definition = RunDefinition.make({
         runId: input.assignedRunId,
+        executor: 'real',
         sourcePlanId: input.plan.planId,
         sourcePlanRevision: input.plan.revision,
         acceptedAt: input.acceptedAt,

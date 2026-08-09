@@ -30,6 +30,32 @@ import {
   ProcessSourceHandoff,
   ObserveWorkspaceProjection,
 } from '@astro-console/v2-contracts'
+
+const executionDefinition = (
+  sequenceId: string,
+  targetName: string,
+  priority: number,
+) => ({
+  sequenceId,
+  targetName,
+  acquisitionMode: 'deepSkyPlateSolve' as const,
+  rightAscensionHours: 19.9934,
+  declinationDegrees: 22.7212,
+  exposureSeconds: 180,
+  frameCount: 1,
+  binning: 1,
+  minimumAltitudeDegrees: 25,
+  horizonClearanceDegrees: 5,
+  recenterThresholdArcsec: 30,
+  maxSolveAttempts: 3,
+  maxCaptureRetries: 2,
+  acquireFailure: 'pause' as const,
+  captureFailure: 'retry' as const,
+  estimatedDurationSeconds: 180,
+  estimatedStorageBytes: 50_000_000,
+  priority,
+})
+
 test('routes parse stable IDs and build escaped URLs', () => {
   assert.deepEqual(parseRoute('/library/assets/asset%2Fone'), {
     kind: 'asset',
@@ -193,6 +219,7 @@ test('Plan presents formatted sequence evidence instead of raw projection string
           horizon: 'clear',
           storage: 'available',
           viability: 'viable',
+          definition: executionDefinition('seq-1', 'M27', 0),
         },
         {
           sequenceId: 'seq-2',
@@ -212,6 +239,7 @@ test('Plan presents formatted sequence evidence instead of raw projection string
           horizon: 'limited',
           storage: 'available',
           viability: 'limited',
+          definition: executionDefinition('seq-2', 'M31', 1),
         },
       ],
     },
@@ -276,6 +304,7 @@ test('Plan distinguishes saved drafts, unsaved edits, immutable definitions, and
           horizon: 'clear',
           storage: 'available',
           viability: 'viable',
+          definition: executionDefinition('seq-1', 'M27', 0),
         },
       ],
       acceptedRunDefinition: {

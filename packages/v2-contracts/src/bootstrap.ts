@@ -19,6 +19,49 @@ import {
   RunRevision,
   SnapshotVersion,
 } from './primitives.js'
+import { RunSequenceDefinition } from './commands.js'
+
+export const planSequencePresentation = (
+  definition: typeof RunSequenceDefinition.Type,
+) => ({
+  target: definition.targetName,
+  capture: `${definition.frameCount} × ${definition.exposureSeconds}s · ${definition.filterName ?? 'No filter'}`,
+  acquisition:
+    definition.acquisitionMode === 'cameraOnly'
+      ? 'Camera only; no pointing acquisition.'
+      : 'Solve, center, focus, then start capture.',
+  stopCondition: `Stop after ${definition.frameCount} verified frame${definition.frameCount === 1 ? '' : 's'}.`,
+  estimatedMinutes: Math.max(
+    1,
+    Math.ceil(definition.estimatedDurationSeconds / 60),
+  ),
+  storageForecastMb: Math.ceil(definition.estimatedStorageBytes / 1_000_000),
+})
+
+export const planSequenceWindow = (
+  definition: typeof RunSequenceDefinition.Type,
+  observed: {
+    readonly startsAt: string
+    readonly endsAt: string
+    readonly usableMinutes: number
+    readonly peakAltitudeDeg: number
+    readonly horizonClearanceDeg: number
+  },
+) => {
+  const startsAt = definition.earliestStart ?? observed.startsAt
+  const endsAt = definition.latestEnd ?? observed.endsAt
+  const start = Date.parse(startsAt)
+  const end = Date.parse(endsAt)
+  return {
+    ...observed,
+    startsAt,
+    endsAt,
+    usableMinutes:
+      Number.isFinite(start) && Number.isFinite(end) && end > start
+        ? Math.min(observed.usableMinutes, Math.floor((end - start) / 60_000))
+        : observed.usableMinutes,
+  }
+}
 
 export const PlanSequenceDetail = Schema.Struct({
   sequenceId: Schema.NonEmptyString,
@@ -38,6 +81,7 @@ export const PlanSequenceDetail = Schema.Struct({
   horizon: Schema.Literals(['clear', 'limited', 'blocked', 'missing']),
   storage: Schema.Literals(['available', 'limited', 'blocked', 'missing']),
   viability: Schema.Literals(['viable', 'limited', 'blocked']),
+  definition: RunSequenceDefinition,
 })
 
 export interface PlanSequenceDetail extends Schema.Schema.Type<
@@ -48,7 +92,7 @@ export const AcceptedRunDefinitionSummary = Schema.Struct({
   id: Schema.NonEmptyString,
   sourcePlanRevision: PlanRevision,
   acceptedAt: Schema.NonEmptyString,
-  executor: Schema.Literal('fake'),
+  executor: Schema.Literals(['fake', 'fixture', 'real']),
 })
 
 export const PlanActionEligibility = Schema.TaggedUnion({
@@ -149,6 +193,7 @@ export const ActiveRunSummary = Schema.Struct({
     'acquire',
     'capture',
     'verify',
+    'recover',
     'completed',
     'paused',
     'stopped',

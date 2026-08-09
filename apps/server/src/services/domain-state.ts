@@ -1,11 +1,16 @@
 import type { LocalIdentity } from '../auth/identity.ts'
-import type { PreflightSnapshot } from '@astro-console/v2-contracts'
+import type {
+  PreflightSnapshot,
+  RunDefinition,
+  RunSequenceDefinition,
+} from '@astro-console/v2-contracts'
 
 export type RunPhase =
   | 'preflight'
   | 'acquire'
   | 'capture'
   | 'verify'
+  | 'recover'
   | 'completed'
   | 'paused'
   | 'stopped'
@@ -27,7 +32,8 @@ export type Run = {
     RunPhase,
     'paused' | 'completed' | 'stopped' | 'parkRequested'
   >
-  readonly retryPhase?: 'preflight' | 'acquire' | 'capture' | 'verify'
+  readonly retryPhase?:
+    'preflight' | 'acquire' | 'capture' | 'verify' | 'recover'
   readonly appliedMutations?: ReadonlyArray<RunMutation>
   readonly preflight?: PreflightSnapshot
 }
@@ -39,7 +45,8 @@ export const resumableRunPhase = (
   phase === 'preflight' ||
   phase === 'acquire' ||
   phase === 'capture' ||
-  phase === 'verify'
+  phase === 'verify' ||
+  phase === 'recover'
     ? phase
     : undefined
 export type Evidence = {
@@ -81,6 +88,7 @@ export type DraftSequence = {
   readonly storageForecastMb: number
   readonly horizon: 'clear' | 'limited' | 'blocked' | 'missing'
   readonly storage: 'available' | 'limited' | 'blocked' | 'missing'
+  readonly definition: RunSequenceDefinition
 }
 export type PlanProjection = {
   readonly planId: string
@@ -92,12 +100,9 @@ export type PlanProjection = {
     DraftSequence & { readonly viability: 'viable' | 'limited' | 'blocked' }
   >
 }
-export type RunDefinition = {
+export type AcceptedRunDefinitionRecord = {
   readonly id: string
-  readonly sourcePlanId: string
-  readonly sourcePlanRevision: number
-  readonly acceptedAt: string
-  readonly executor: 'fake' | 'fixture'
+  readonly definition: RunDefinition
   readonly plan: PlanProjection
 }
 export type Snapshot = {
@@ -199,7 +204,7 @@ export type SavePlanDraftResult =
 export type AcceptRunDefinitionResult =
   | {
       readonly outcome: 'accepted'
-      readonly runDefinition: RunDefinition
+      readonly runDefinition: AcceptedRunDefinitionRecord
       readonly snapshot: Snapshot
     }
   | {

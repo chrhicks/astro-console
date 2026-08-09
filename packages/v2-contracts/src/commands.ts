@@ -39,6 +39,7 @@ const SourceSelection = {
 export const RunSequenceDefinition = Schema.Struct({
   sequenceId: Schema.NonEmptyString,
   targetName: Schema.NonEmptyString,
+  acquisitionMode: Schema.Literals(['cameraOnly', 'deepSkyPlateSolve']),
   rightAscensionHours: Schema.Finite.check(
     Schema.isBetween({ minimum: 0, maximum: 24 }),
   ),

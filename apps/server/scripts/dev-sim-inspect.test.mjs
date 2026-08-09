@@ -14,7 +14,7 @@ import {
 
 describe('dev simulation inspector arguments', () => {
   it('uses the beta Observe exposure-success defaults', () => {
-    assert.equal(devSimInspectFixture, 'preflight')
+    assert.equal(devSimInspectFixture, 'plan-draft')
     assert.deepEqual(parseDevSimInspectArguments([]), {
       scenario: 'exposure-success',
       client: 'owner',

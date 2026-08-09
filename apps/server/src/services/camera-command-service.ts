@@ -7,14 +7,23 @@ import {
 export interface CameraProviderShape {
   readonly startExposure: (
     durationSeconds: number,
-  ) => Effect.Effect<unknown, unknown>
-  readonly abortExposure: () => Effect.Effect<unknown, unknown>
+  ) => Effect.Effect<CameraProviderCommandOutcome | void, unknown>
+  readonly abortExposure: () => Effect.Effect<
+    CameraProviderCommandOutcome | void,
+    unknown
+  >
   readonly readState: () => Effect.Effect<unknown, unknown>
   readonly readImageArray?: () => Effect.Effect<
-    { readonly bytes: Uint8Array; readonly format: 'cameraRaw' | 'fits' | 'tiff' },
+    {
+      readonly bytes: Uint8Array
+      readonly format: 'cameraRaw' | 'fits' | 'tiff'
+    },
     unknown
   >
 }
+export type CameraProviderCommandOutcome =
+  | { readonly _tag: 'Acknowledged' }
+  | { readonly _tag: 'Rejected'; readonly summary: string }
 export class CameraProvider extends Context.Service<
   CameraProvider,
   CameraProviderShape
@@ -46,6 +55,11 @@ export const executeCameraCommand = Effect.fn('CameraCommandService.execute')(
       return {
         _tag: 'Unavailable' as const,
         summary: `The camera provider did not acknowledge the command. ${boundedDiagnostic(acknowledgement.cause)}`,
+      }
+    if (acknowledgement.value?._tag === 'Rejected')
+      return {
+        _tag: 'Rejected' as const,
+        summary: acknowledgement.value.summary,
       }
     const observed = yield* provider.value
       .readState()

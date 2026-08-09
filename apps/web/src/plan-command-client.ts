@@ -5,6 +5,8 @@ import {
   PlanCommandRequest,
   PlanCommandResponse,
   PreviewId,
+  planSequencePresentation,
+  planSequenceWindow,
   type BootstrapSnapshot,
   type PlanWorkspaceProjection,
 } from '@astro-console/v2-contracts'
@@ -269,15 +271,11 @@ function requestFor(
           idempotencyKey,
           sequences: action.sequences.map((sequence) => ({
             sequenceId: sequence.sequenceId,
-            target: sequence.target,
-            capture: sequence.capture,
-            acquisition: sequence.acquisition,
-            stopCondition: sequence.stopCondition,
-            window: sequence.window,
-            estimatedMinutes: sequence.estimatedMinutes,
-            storageForecastMb: sequence.storageForecastMb,
+            ...planSequencePresentation(sequence.definition),
+            window: planSequenceWindow(sequence.definition, sequence.window),
             horizon: sequence.horizon,
             storage: sequence.storage,
+            definition: sequence.definition,
           })),
         },
       }

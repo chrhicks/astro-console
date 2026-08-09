@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createServer } from 'node:http'
-import { ConfigProvider, Effect } from 'effect'
+import { ConfigProvider, Effect, Schema } from 'effect'
+import { RunExecutionContext } from '@astro-console/v2-contracts'
 import { createLocalWebService } from '../app/origin-service.ts'
 import { originServerConfig } from '../config/environment-config.ts'
 import { developmentCaptureMetadata } from '../http/development-simulation.ts'
 import { createAlpacaSimulator } from '../simulator/alpaca-simulator.ts'
+
+const CountRow = Schema.Struct({ count: Schema.Int })
 
 test('pinned M101 capture metadata follows the next filename', () => {
   assert.deepEqual(developmentCaptureMetadata('m101-clouded-light.fits'), {
@@ -31,6 +34,11 @@ test('development configuration accepts only a known loopback Alpaca simulation'
             ASTRO_SIMULATION_MODE: 'alpaca',
             ASTRO_SIMULATOR_ORIGIN: 'http://127.0.0.1:32324',
             ASTRO_SIMULATOR_SCENARIO: 'exposure-success',
+            ASTRO_PREFLIGHT_PROVIDER: 'alpaca',
+            ASTRO_PREFLIGHT_ALPACA_HOST: '127.0.0.1',
+            ASTRO_PREFLIGHT_ALPACA_PORT: '32324',
+            ASTRO_PREFLIGHT_ALPACA_CAMERA_DEVICE_NUMBER: '0',
+            ASTRO_PREFLIGHT_ALPACA_CAMERA_UNIQUE_ID: 'sim-camera',
           }),
         ),
       ),
@@ -55,6 +63,100 @@ test('development configuration accepts only a known loopback Alpaca simulation'
     ),
   )
   assert.equal(nonLoopback._tag, 'Failure')
+
+  const mismatchedProvider = await Effect.runPromiseExit(
+    originServerConfig.pipe(
+      Effect.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromUnknown({
+            ASTRO_SIMULATION_MODE: 'alpaca',
+            ASTRO_SIMULATOR_ORIGIN: 'http://127.0.0.1:32324',
+            ASTRO_SIMULATOR_SCENARIO: 'exposure-success',
+            ASTRO_PREFLIGHT_PROVIDER: 'alpaca',
+            ASTRO_PREFLIGHT_ALPACA_HOST: '127.0.0.1',
+            ASTRO_PREFLIGHT_ALPACA_PORT: '32325',
+            ASTRO_PREFLIGHT_ALPACA_CAMERA_DEVICE_NUMBER: '0',
+            ASTRO_PREFLIGHT_ALPACA_CAMERA_UNIQUE_ID: 'sim-camera',
+          }),
+        ),
+      ),
+    ),
+  )
+  assert.equal(mismatchedProvider._tag, 'Failure')
+})
+
+test('mismatched simulation provider origin cannot create real executor work', async (t) => {
+  let starts = 0
+  const simulator = createAlpacaSimulator({
+    corpusRoot: '/unused',
+    initialScenario: 'exposure-success',
+  })
+  const simulatorListener = await simulator.listen()
+  const service = createLocalWebService(
+    ':memory:',
+    undefined,
+    undefined,
+    undefined,
+    {
+      simulation: {
+        origin: simulatorListener.origin,
+        launchScenario: 'exposure-success',
+      },
+      runExecutorProviderOrigin: 'http://127.0.0.1:1',
+      runExecutionContext: RunExecutionContext.make({
+        rigId: 'simulated-rig',
+        cameraDeviceId: 'sim-camera',
+        completionBehavior: 'hold',
+        unsafeBehavior: 'pauseAndPark',
+      }),
+      cameraProvider: {
+        startExposure: () => {
+          starts += 1
+          return Effect.succeed({ _tag: 'Acknowledged' as const })
+        },
+        abortExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
+        readState: () =>
+          Effect.succeed({
+            observedAt: '2026-08-08T18:00:00.000Z',
+            cameraState: 'idle',
+          }),
+      },
+    },
+  )
+  const listener = await service.listen()
+  t.after(async () => {
+    await listener.close()
+    service.close()
+    await simulatorListener.close()
+  })
+  const base = `http://127.0.0.1:${listener.port}`
+  const snapshot = await fetch(`${base}/api/snapshot`).then((response) =>
+    response.json(),
+  )
+  const accepted = await fetch(`${base}/api/plan/commands`, {
+    method: 'POST',
+    body: JSON.stringify({
+      intent: {
+        _tag: 'AcceptRunDefinition',
+        planId: snapshot.data.plan.planId,
+        expectedPlanRevision: snapshot.data.plan.revision,
+        expectedLeaseRevision: snapshot.data.control.revision,
+        idempotencyKey: 'mismatched-simulator-provider',
+      },
+    }),
+  })
+  assert.equal(accepted.status, 409)
+  assert.equal(starts, 0)
+  assert.equal(
+    Schema.decodeUnknownSync(CountRow)(
+      service.database
+        .prepare(
+          "SELECT count(*) AS count FROM run_executor_work WHERE kind='BeginRun'",
+        )
+        .get(),
+    ).count,
+    0,
+  )
 })
 
 test('development simulation is absent from a normal origin', async (t) => {
@@ -104,7 +206,8 @@ test('origin projects and controls loopback simulation without exposing its cont
   assert.equal(projection.scenario, 'exposure-success')
   assert.equal(projection.evidence.nextFrame.filename, 'm101-good-light.fits')
   assert.deepEqual(projection.guide, {
-    summary: 'One 15-second M101 exposure can enter Library.',
+    summary:
+      'One 15-second M101 exposure can reach Verify. Library remains unchanged.',
     driver: {
       _tag: 'Available',
       action: 'capture-test-frame',

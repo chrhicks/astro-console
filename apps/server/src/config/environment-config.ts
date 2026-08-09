@@ -373,6 +373,14 @@ function originServer(input: {
           'Fixture admission requires loopback development binding',
         )
       const simulation = yield* configuredDevelopmentSimulation(input)
+      if (
+        simulation !== undefined &&
+        (preflightProvider === undefined ||
+          alpacaProviderOrigin(preflightProvider) !== simulation.origin)
+      )
+        return yield* configFailure(
+          'Alpaca simulation requires the executor Alpaca host and port to match the simulator origin.',
+        )
       return yield* Effect.succeed<OriginServerConfig>({
         runtime: {
           databasePath,
@@ -532,6 +540,10 @@ function isSimulationScenario(
   value: string,
 ): value is AlpacaSimulationScenario {
   return alpacaSimulationScenarios.some((scenario) => scenario === value)
+}
+
+function alpacaProviderOrigin(provider: PreflightProviderConfig) {
+  return new URL(`http://${provider.host}:${provider.port}`).origin
 }
 
 function configuredPreflightProvider(input: {

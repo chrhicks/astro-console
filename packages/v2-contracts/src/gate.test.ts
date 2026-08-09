@@ -32,6 +32,7 @@ const decodeInput = Schema.decodeUnknownSync(CommandGateInput)
 const m31Sequence = {
   sequenceId: 'sequence-2',
   targetName: 'M31',
+  acquisitionMode: 'deepSkyPlateSolve' as const,
   rightAscensionHours: 0.712,
   declinationDegrees: 41.269,
   exposureSeconds: 180,

@@ -7,7 +7,8 @@ import {
   PreviewId,
   RunRevision,
 } from './primitives.js'
-import { BootstrapSnapshot } from './bootstrap.js'
+import { BootstrapSnapshot, planSequencePresentation } from './bootstrap.js'
+import { RunSequenceDefinition } from './commands.js'
 
 const PlanDraftSequence = Schema.Struct({
   sequenceId: Schema.NonEmptyString,
@@ -26,7 +27,31 @@ const PlanDraftSequence = Schema.Struct({
   storageForecastMb: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   horizon: Schema.Literals(['clear', 'limited', 'blocked', 'missing']),
   storage: Schema.Literals(['available', 'limited', 'blocked', 'missing']),
-})
+  definition: RunSequenceDefinition,
+}).check(
+  Schema.makeFilter((sequence) => {
+    if (sequence.sequenceId !== sequence.definition.sequenceId)
+      return {
+        path: ['definition', 'sequenceId'],
+        issue: 'definition sequence identity must match the Plan sequence',
+      }
+    const presentation = planSequencePresentation(sequence.definition)
+    for (const key of [
+      'target',
+      'capture',
+      'acquisition',
+      'stopCondition',
+      'estimatedMinutes',
+      'storageForecastMb',
+    ] as const)
+      if (sequence[key] !== presentation[key])
+        return {
+          path: [key],
+          issue: `${key} must be derived from the structured executor definition`,
+        }
+    return undefined
+  }),
+)
 
 const RunMutation = Schema.Literals([
   'reprioritizeSecond',
@@ -39,7 +64,7 @@ export const PlanIntent = Schema.TaggedUnion({
     planId: PlanId,
     expectedPlanRevision: PlanRevision,
     idempotencyKey: IdempotencyKey,
-    sequences: Schema.Array(PlanDraftSequence),
+    sequences: Schema.NonEmptyArray(PlanDraftSequence),
   },
   AcceptRunDefinition: {
     planId: PlanId,

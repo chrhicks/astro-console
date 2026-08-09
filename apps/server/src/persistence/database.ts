@@ -3,6 +3,19 @@ import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
 
+const PlanMigrationRow = Schema.Struct({
+  plan_id: Schema.String,
+  projection: Schema.String,
+})
+const WorkspaceMigrationRow = Schema.Struct({
+  name: Schema.String,
+  value: Schema.String,
+})
+const RunDefinitionMigrationRow = Schema.Struct({
+  run_definition_id: Schema.String,
+  definition: Schema.String,
+})
+
 export class DatabasePathNotAppOwned extends Schema.TaggedErrorClass<DatabasePathNotAppOwned>()(
   'Database.PathNotAppOwned',
   { databasePath: Schema.String, allowedRoot: Schema.String },
@@ -63,4 +76,220 @@ function initializeSchema(database: DatabaseSync) {
   database.exec(
     'CREATE TABLE IF NOT EXISTS processing_workspace (id INTEGER PRIMARY KEY CHECK(id=1),state TEXT NOT NULL)',
   )
+  database.exec(
+    'CREATE TABLE IF NOT EXISTS run_executor_work (work_id TEXT PRIMARY KEY,run_id TEXT NOT NULL,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL,command_attempted_at TEXT,acknowledged_at TEXT,settled_at TEXT,last_error TEXT)',
+  )
+  migrateStructuredRunDefinitions(database)
+}
+
+function migrateStructuredRunDefinitions(database: DatabaseSync) {
+  database.exec('BEGIN IMMEDIATE')
+  try {
+    const planRows = Schema.decodeUnknownSync(Schema.Array(PlanMigrationRow))(
+      database.prepare('SELECT plan_id,projection FROM observing_plans').all(),
+    )
+    for (const row of planRows) {
+      const plan = parseRecord(row.projection)
+      const upgraded = upgradePlan(plan)
+      if (upgraded !== plan)
+        database
+          .prepare('UPDATE observing_plans SET projection=? WHERE plan_id=?')
+          .run(JSON.stringify(upgraded), row.plan_id)
+    }
+
+    const workspaceRows = Schema.decodeUnknownSync(
+      Schema.Array(WorkspaceMigrationRow),
+    )(
+      database
+        .prepare(
+          "SELECT name,value FROM workspace_projections WHERE name='plan'",
+        )
+        .all(),
+    )
+    for (const row of workspaceRows) {
+      const plan = parseRecord(row.value)
+      const upgraded = upgradePlan(plan)
+      if (upgraded !== plan)
+        database
+          .prepare('UPDATE workspace_projections SET value=? WHERE name=?')
+          .run(JSON.stringify(upgraded), row.name)
+    }
+
+    const definitionRows = Schema.decodeUnknownSync(
+      Schema.Array(RunDefinitionMigrationRow),
+    )(
+      database
+        .prepare('SELECT run_definition_id,definition FROM run_definitions')
+        .all(),
+    )
+    for (const row of definitionRows) {
+      const stored = parseRecord(row.definition)
+      if (stored === undefined) continue
+      const plan = upgradePlan(recordValue(stored, 'plan'))
+      if (plan === undefined) continue
+      const currentDefinition = recordValue(stored, 'definition')
+      const definition =
+        currentDefinition === undefined
+          ? upgradeLegacyDefinition(stored, plan, row.run_definition_id)
+          : currentDefinition
+      if (definition === undefined) continue
+      if (
+        currentDefinition === undefined ||
+        plan !== recordValue(stored, 'plan')
+      )
+        database
+          .prepare(
+            'UPDATE run_definitions SET definition=? WHERE run_definition_id=?',
+          )
+          .run(
+            JSON.stringify({
+              id: stringValue(stored, 'id') ?? row.run_definition_id,
+              definition,
+              plan,
+            }),
+            row.run_definition_id,
+          )
+    }
+    database.exec('COMMIT')
+  } catch (error) {
+    database.exec('ROLLBACK')
+    throw error
+  }
+}
+
+function upgradePlan(plan: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(plan) || !Array.isArray(plan.sequences)) return undefined
+  let changed = false
+  const sequences = plan.sequences.map((value, index) => {
+    if (!isRecord(value) || isRecord(value.definition)) return value
+    changed = true
+    return { ...value, definition: deriveSequenceDefinition(value, index) }
+  })
+  return changed ? { ...plan, sequences } : plan
+}
+
+function upgradeLegacyDefinition(
+  stored: Record<string, unknown>,
+  plan: Record<string, unknown>,
+  definitionId: string,
+) {
+  const executor = stringValue(stored, 'executor')
+  const sourcePlanId = stringValue(stored, 'sourcePlanId')
+  const sourcePlanRevision = numberValue(stored, 'sourcePlanRevision')
+  const acceptedAt = stringValue(stored, 'acceptedAt')
+  if (
+    (executor !== 'fake' && executor !== 'fixture') ||
+    sourcePlanId === undefined ||
+    sourcePlanRevision === undefined ||
+    acceptedAt === undefined ||
+    !Array.isArray(plan.sequences)
+  )
+    return undefined
+  const sequences = plan.sequences
+    .map((sequence) => recordValue(sequence, 'definition'))
+    .filter(isRecord)
+  if (sequences.length === 0) return undefined
+  const requiresSite = sequences.some(
+    (sequence) => sequence.acquisitionMode === 'deepSkyPlateSolve',
+  )
+  return {
+    runId: executor === 'fixture' ? 'run-m27-001' : `run-${definitionId}`,
+    executor,
+    sourcePlanId,
+    sourcePlanRevision,
+    acceptedAt,
+    acceptedLimitations: Array.isArray(plan.limitations)
+      ? plan.limitations
+          .filter((summary): summary is string => typeof summary === 'string')
+          .map((summary, index) => ({
+            limitationId: `legacy-limitation-${index + 1}`,
+            summary,
+          }))
+      : [],
+    executionContext: {
+      rigId: `legacy-${executor}-rig`,
+      cameraDeviceId: `legacy-${executor}-camera`,
+      ...(requiresSite
+        ? {
+            mountDeviceId: `legacy-${executor}-mount`,
+            latitudeDegrees: 0,
+            longitudeDegrees: 0,
+            elevationMeters: 0,
+          }
+        : {}),
+      completionBehavior: 'hold',
+      unsafeBehavior: 'pauseAndPark',
+    },
+    sequences,
+  }
+}
+
+function deriveSequenceDefinition(
+  sequence: Record<string, unknown>,
+  priority: number,
+) {
+  const capture = stringValue(sequence, 'capture') ?? ''
+  const captureMatch = capture.match(/(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)s/i)
+  const windowValue = recordValue(sequence, 'window')
+  const window = isRecord(windowValue) ? windowValue : undefined
+  const acquisition = stringValue(sequence, 'acquisition') ?? ''
+  const estimatedMinutes = numberValue(sequence, 'estimatedMinutes') ?? 1
+  const storageForecastMb = numberValue(sequence, 'storageForecastMb') ?? 1
+  return {
+    sequenceId:
+      stringValue(sequence, 'sequenceId') ?? `legacy-sequence-${priority + 1}`,
+    targetName: stringValue(sequence, 'target') ?? 'Legacy target',
+    acquisitionMode: /solve|center/i.test(acquisition)
+      ? 'deepSkyPlateSolve'
+      : 'cameraOnly',
+    rightAscensionHours: 0,
+    declinationDegrees: 0,
+    exposureSeconds: captureMatch === null ? 1 : Number(captureMatch[2]),
+    frameCount: captureMatch === null ? 1 : Number(captureMatch[1]),
+    binning: 1,
+    ...(typeof window?.['startsAt'] === 'string'
+      ? { earliestStart: window['startsAt'] }
+      : {}),
+    ...(typeof window?.['endsAt'] === 'string'
+      ? { latestEnd: window['endsAt'] }
+      : {}),
+    minimumAltitudeDegrees: 0,
+    horizonClearanceDegrees: 0,
+    recenterThresholdArcsec: 30,
+    maxSolveAttempts: 1,
+    maxCaptureRetries: 0,
+    acquireFailure: 'pause',
+    captureFailure: 'pause',
+    estimatedDurationSeconds: Math.max(1, estimatedMinutes * 60),
+    estimatedStorageBytes: Math.max(
+      1,
+      Math.round(storageForecastMb * 1_000_000),
+    ),
+    priority,
+  }
+}
+
+function parseRecord(value: string) {
+  const parsed: unknown = JSON.parse(value)
+  return isRecord(parsed) ? parsed : undefined
+}
+
+function recordValue(value: unknown, key: string) {
+  return isRecord(value) && key in value ? value[key] : undefined
+}
+
+function stringValue(value: unknown, key: string) {
+  const candidate = recordValue(value, key)
+  return typeof candidate === 'string' ? candidate : undefined
+}
+
+function numberValue(value: unknown, key: string) {
+  const candidate = recordValue(value, key)
+  return typeof candidate === 'number' && Number.isFinite(candidate)
+    ? candidate
+    : undefined
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

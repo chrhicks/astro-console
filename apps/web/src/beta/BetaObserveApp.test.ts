@@ -32,6 +32,7 @@ const preflightProjection = () =>
           lifecycleFacts: ['Fixture preflight lifecycle started.'],
           attemptFacts: ['No provider facts read yet.'],
           actions: {
+            refreshPreflight: { _tag: 'Eligible' },
             pause: { _tag: 'Eligible' },
             resume: { _tag: 'Ineligible', reason: 'pausedRunRequired' },
             stop: { _tag: 'Eligible' },
@@ -223,6 +224,45 @@ test('keeps preflight refresh disabled without current control', () => {
   assert.match(markup, /Current control is required/)
   assert.match(markup, /<button[^>]*disabled[^>]*>Refresh preflight/)
   assert.doesNotMatch(markup, /\sinert(?:=|\s|>)/)
+})
+
+test('keeps Verify inside Capture while leading with durable executor evidence', () => {
+  const base = preflightProjection()
+  const source = base.observe.source
+  assert.ok(source)
+  const projection = {
+    ...base,
+    observe: {
+      ...base.observe,
+      phase: 'Verify' as const,
+      source: {
+        ...source,
+        executor: 'real' as const,
+        phase: 'verify' as const,
+        lifecycleFacts: [
+          'Camera was later observed idle after the provisional acknowledgement.',
+        ] as const,
+        attemptFacts: ['Captured bytes are not yet retained.'] as const,
+        executorWork: [
+          {
+            workId: 'work-start-exposure-1',
+            kind: 'StartExposure' as const,
+            state: 'completed' as const,
+          },
+        ],
+      },
+    },
+  }
+  const markup = renderToStaticMarkup(
+    createElement(BetaObserveApp, { projection, loading: false }),
+  )
+  assert.match(markup, /<h1>Verify<\/h1>/)
+  assert.match(markup, /Capture/)
+  assert.doesNotMatch(markup, /<h1>Complete<\/h1>/)
+  assert.ok(
+    markup.indexOf('Durable executor work') < markup.indexOf('Fact 1'),
+    'durable executor work should precede supporting evidence facts',
+  )
 })
 
 test('renders the real target-acquisition projection with only its advertised capture action', () => {

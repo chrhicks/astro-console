@@ -12,6 +12,7 @@ import {
   advanceFakeRunState,
 } from './run/lifecycle.ts'
 import { applyRunMutation, previewRunMutation } from './run/mutations.ts'
+import type { RunDefinitionAuthority } from './run/shared.ts'
 
 type StartRun = Extract<
   typeof PlanIntent.Type,
@@ -100,13 +101,14 @@ export const runSqliteRepositoryLayer = (
   db: DatabaseSync,
   stateRepository: StateSqliteRepositoryShape,
   reject: RunReject,
+  authority: RunDefinitionAuthority = { executor: 'fake' },
 ) =>
   Layer.sync(RunSqliteRepository, () =>
     RunSqliteRepository.of({
       saveDraft: (input, identity) =>
         acceptPlanDraft(db, stateRepository, input, identity),
       acceptRunDefinition: (input, identity) =>
-        acceptRunDefinition(db, stateRepository, input, identity),
+        acceptRunDefinition(db, stateRepository, input, identity, authority),
       startAcceptedRun: (input, identity) =>
         acceptRun(db, stateRepository, input, identity),
       previewRunMutation: (input, identity) => {

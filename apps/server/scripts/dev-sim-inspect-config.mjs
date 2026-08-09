@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { alpacaSimulationScenarios } from '../src/simulator/alpaca-simulator.ts'
 
 const clients = ['owner', 'friend', 'phone']
-export const devSimInspectFixture = 'preflight'
+export const devSimInspectFixture = 'plan-draft'
 
 export function parseDevSimInspectArguments(arguments_) {
   const values = new Map()

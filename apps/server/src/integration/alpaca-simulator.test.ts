@@ -442,10 +442,10 @@ test('provider and post-ack reconciliation errors remain distinct', async (t) =>
   const fixture = await simulatorFixture(t)
   const camera = cameraProvider(fixture.port)
   await fixture.scenario('provider-error')
-  await assert.rejects(
-    Effect.runPromise(camera.startExposure(15)),
-    /Simulated camera provider error/,
-  )
+  assert.deepEqual(await Effect.runPromise(camera.startExposure(15)), {
+    _tag: 'Rejected',
+    summary: 'Simulated camera provider error.',
+  })
 
   await fixture.scenario('reconciliation-failure')
   await Effect.runPromise(camera.startExposure(15))

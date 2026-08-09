@@ -12,6 +12,31 @@ import { projectBootstrapState } from '../bootstrap-projection'
 import { unavailableProjection } from '../future-adapter'
 import { BetaPlanApp, BetaPlanPhone } from './BetaPlanApp'
 
+const executionDefinition = (
+  sequenceId: string,
+  targetName: string,
+  priority: number,
+) => ({
+  sequenceId,
+  targetName,
+  acquisitionMode: 'deepSkyPlateSolve' as const,
+  rightAscensionHours: 19.9934,
+  declinationDegrees: 22.7212,
+  exposureSeconds: 180,
+  frameCount: 1,
+  binning: 1,
+  minimumAltitudeDegrees: 25,
+  horizonClearanceDegrees: 5,
+  recenterThresholdArcsec: 30,
+  maxSolveAttempts: 3,
+  maxCaptureRetries: 2,
+  acquireFailure: 'pause' as const,
+  captureFailure: 'retry' as const,
+  estimatedDurationSeconds: 180,
+  estimatedStorageBytes: 50_000_000,
+  priority,
+})
+
 const sequences = [
   {
     sequenceId: 'sequence-one',
@@ -31,6 +56,7 @@ const sequences = [
     horizon: 'clear',
     storage: 'available',
     viability: 'viable',
+    definition: executionDefinition('sequence-one', 'M27', 0),
   },
   {
     sequenceId: 'sequence-two',
@@ -50,6 +76,7 @@ const sequences = [
     horizon: 'clear',
     storage: 'available',
     viability: 'viable',
+    definition: executionDefinition('sequence-two', 'M33', 1),
   },
 ] as const
 
@@ -59,6 +86,7 @@ const overlappingSequences = [
     ...sequences[1],
     sequenceId: 'sequence-overlap',
     target: 'NGC 7000',
+    definition: executionDefinition('sequence-overlap', 'NGC 7000', 1),
     window: {
       ...sequences[1].window,
       startsAt: '2026-08-08T03:00:00.000Z',

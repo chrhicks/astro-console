@@ -41,6 +41,7 @@ const plan = Schema.decodeUnknownSync(ValidatedObservingPlan)({
     {
       sequenceId: 'm27',
       targetName: 'M27',
+      acquisitionMode: 'deepSkyPlateSolve',
       rightAscensionHours: 19.9934,
       declinationDegrees: 22.7212,
       exposureSeconds: 180,
@@ -60,6 +61,7 @@ const plan = Schema.decodeUnknownSync(ValidatedObservingPlan)({
     {
       sequenceId: 'm31',
       targetName: 'M31',
+      acquisitionMode: 'deepSkyPlateSolve',
       rightAscensionHours: 0.712,
       declinationDegrees: 41.269,
       exposureSeconds: 180,

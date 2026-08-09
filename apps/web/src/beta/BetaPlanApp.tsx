@@ -22,6 +22,9 @@ import {
 import {
   IdempotencyKey,
   PlanCommandResult,
+  planSequencePresentation,
+  planSequenceWindow,
+  type RunSequenceDefinition,
   type PlanWorkspaceProjection,
 } from '@astro-console/v2-contracts'
 import {
@@ -114,6 +117,9 @@ const dateTimeLocal = (value: string) => {
 
 const dateTimeUtc = (value: string) =>
   value.length === 0 ? value : new Date(`${value}:00.000Z`).toISOString()
+
+const sequencePresentation = (sequence: PlanSequence) =>
+  planSequencePresentation(sequence.definition)
 
 const eligibilityReason = (eligibility: PlanEligibility | undefined) => {
   if (eligibility === undefined) return 'Plan action availability is unknown.'
@@ -250,125 +256,268 @@ function PlanEditor({
   disabled: boolean
   onChange: (next: PlanSequence) => void
 }) {
+  const definition = sequence.definition
+  const update = (next: RunSequenceDefinition) =>
+    onChange({
+      ...sequence,
+      ...planSequencePresentation(next),
+      window: planSequenceWindow(next, sequence.window),
+      definition: next,
+    })
   const text =
-    (key: 'target' | 'capture' | 'acquisition' | 'stopCondition') =>
+    (key: 'targetName' | 'filterName') =>
     (event: ChangeEvent<HTMLInputElement>) =>
-      onChange({ ...sequence, [key]: event.currentTarget.value })
+      update({
+        ...definition,
+        [key]: event.currentTarget.value || undefined,
+      } as RunSequenceDefinition)
   const numeric =
-    (key: 'estimatedMinutes' | 'storageForecastMb') =>
+    (
+      key:
+        | 'rightAscensionHours'
+        | 'declinationDegrees'
+        | 'exposureSeconds'
+        | 'frameCount'
+        | 'gain'
+        | 'binning'
+        | 'minimumAltitudeDegrees'
+        | 'horizonClearanceDegrees'
+        | 'recenterThresholdArcsec'
+        | 'maxSolveAttempts'
+        | 'maxCaptureRetries'
+        | 'estimatedDurationSeconds'
+        | 'estimatedStorageBytes'
+        | 'priority',
+    ) =>
     (event: ChangeEvent<HTMLInputElement>) =>
-      onChange({
-        ...sequence,
-        [key]: Math.max(0, Number(event.currentTarget.value)),
-      })
+      update({ ...definition, [key]: Number(event.currentTarget.value) })
   const select =
-    (key: 'horizon' | 'storage') => (event: ChangeEvent<HTMLSelectElement>) =>
-      onChange({
-        ...sequence,
+    (key: 'acquisitionMode' | 'acquireFailure' | 'captureFailure') =>
+    (event: ChangeEvent<HTMLSelectElement>) =>
+      update({
+        ...definition,
         [key]: event.currentTarget.value,
-      } as PlanSequence)
+      } as RunSequenceDefinition)
   const window =
-    (key: 'startsAt' | 'endsAt') => (event: ChangeEvent<HTMLInputElement>) =>
-      onChange({
-        ...sequence,
-        window: {
-          ...sequence.window,
-          [key]: dateTimeUtc(event.currentTarget.value),
-        },
+    (key: 'earliestStart' | 'latestEnd') =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const value = dateTimeUtc(event.currentTarget.value)
+      update({
+        ...definition,
+        [key]: value.length === 0 ? undefined : value,
       })
+    }
   return (
     <>
       <PlanFieldGroup title="Sequence">
         <Field label="Target">
           <TextField
-            value={sequence.target}
+            value={definition.targetName}
             disabled={disabled}
-            onChange={text('target')}
+            onChange={text('targetName')}
           />
         </Field>
-        <Field label="Capture">
-          <TextField
-            value={sequence.capture}
+        <Field label="Acquisition mode">
+          <Select
+            value={definition.acquisitionMode}
             disabled={disabled}
-            onChange={text('capture')}
+            onChange={select('acquisitionMode')}
+          >
+            <option value="cameraOnly">Camera only</option>
+            <option value="deepSkyPlateSolve">Deep sky plate solve</option>
+          </Select>
+        </Field>
+        <Field label="Right ascension" hint="Hours">
+          <NumberField
+            min={0}
+            max={24}
+            step={0.0001}
+            value={definition.rightAscensionHours}
+            disabled={disabled}
+            onChange={numeric('rightAscensionHours')}
           />
         </Field>
-        <Field label="Acquire">
-          <TextField
-            value={sequence.acquisition}
+        <Field label="Declination" hint="Degrees">
+          <NumberField
+            min={-90}
+            max={90}
+            step={0.0001}
+            value={definition.declinationDegrees}
             disabled={disabled}
-            onChange={text('acquisition')}
+            onChange={numeric('declinationDegrees')}
+          />
+        </Field>
+        <Field label="Priority">
+          <NumberField
+            min={0}
+            step={1}
+            value={definition.priority}
+            disabled={disabled}
+            onChange={numeric('priority')}
           />
         </Field>
       </PlanFieldGroup>
-      <PlanFieldGroup title="Window">
-        <Field label="Start UTC">
-          <TextField
-            type="datetime-local"
-            value={dateTimeLocal(sequence.window.startsAt)}
+      <PlanFieldGroup title="Capture">
+        <Field label="Exposure" hint="Seconds">
+          <NumberField
+            min={0.001}
+            step={1}
+            value={definition.exposureSeconds}
             disabled={disabled}
-            onChange={window('startsAt')}
+            onChange={numeric('exposureSeconds')}
           />
         </Field>
-        <Field label="End UTC">
-          <TextField
-            type="datetime-local"
-            value={dateTimeLocal(sequence.window.endsAt)}
-            disabled={disabled}
-            onChange={window('endsAt')}
-          />
-        </Field>
-        <Field label="Duration" hint="Estimated minutes">
+        <Field label="Frame count">
           <NumberField
             min={1}
             step={1}
-            value={sequence.estimatedMinutes}
+            value={definition.frameCount}
             disabled={disabled}
-            onChange={numeric('estimatedMinutes')}
+            onChange={numeric('frameCount')}
+          />
+        </Field>
+        <Field label="Gain">
+          <NumberField
+            min={0}
+            step={1}
+            value={definition.gain ?? 0}
+            disabled={disabled}
+            onChange={numeric('gain')}
+          />
+        </Field>
+        <Field label="Binning">
+          <NumberField
+            min={1}
+            step={1}
+            value={definition.binning}
+            disabled={disabled}
+            onChange={numeric('binning')}
+          />
+        </Field>
+        <Field label="Filter">
+          <TextField
+            value={definition.filterName ?? ''}
+            disabled={disabled}
+            onChange={text('filterName')}
+          />
+        </Field>
+        <Field label="Estimated duration" hint="Seconds">
+          <NumberField
+            min={1}
+            step={1}
+            value={definition.estimatedDurationSeconds}
+            disabled={disabled}
+            onChange={numeric('estimatedDurationSeconds')}
+          />
+        </Field>
+        <Field label="Estimated storage" hint="Bytes">
+          <NumberField
+            min={1}
+            step={1_000_000}
+            value={definition.estimatedStorageBytes}
+            disabled={disabled}
+            onChange={numeric('estimatedStorageBytes')}
           />
         </Field>
       </PlanFieldGroup>
-      <PlanFieldGroup title="Constraints">
-        <Field label="Stop when">
+      <PlanFieldGroup title="Window & bounds">
+        <Field label="Earliest start UTC">
           <TextField
-            value={sequence.stopCondition}
+            type="datetime-local"
+            value={dateTimeLocal(definition.earliestStart ?? '')}
             disabled={disabled}
-            onChange={text('stopCondition')}
+            onChange={window('earliestStart')}
           />
         </Field>
-        <Field label="Storage" hint="Forecast MB">
+        <Field label="Latest end UTC">
+          <TextField
+            type="datetime-local"
+            value={dateTimeLocal(definition.latestEnd ?? '')}
+            disabled={disabled}
+            onChange={window('latestEnd')}
+          />
+        </Field>
+        <Field label="Minimum altitude" hint="Degrees">
+          <NumberField
+            min={-90}
+            max={90}
+            value={definition.minimumAltitudeDegrees}
+            disabled={disabled}
+            onChange={numeric('minimumAltitudeDegrees')}
+          />
+        </Field>
+        <Field label="Horizon clearance" hint="Degrees">
           <NumberField
             min={0}
-            step={50}
-            value={sequence.storageForecastMb}
+            value={definition.horizonClearanceDegrees}
             disabled={disabled}
-            onChange={numeric('storageForecastMb')}
+            onChange={numeric('horizonClearanceDegrees')}
           />
         </Field>
-        <Field label="Horizon">
-          <Select
-            value={sequence.horizon}
+        <Field label="Recenter threshold" hint="Arcsec">
+          <NumberField
+            min={1}
+            value={definition.recenterThresholdArcsec}
             disabled={disabled}
-            onChange={select('horizon')}
+            onChange={numeric('recenterThresholdArcsec')}
+          />
+        </Field>
+        <Field label="Solve attempts">
+          <NumberField
+            min={1}
+            step={1}
+            value={definition.maxSolveAttempts}
+            disabled={disabled}
+            onChange={numeric('maxSolveAttempts')}
+          />
+        </Field>
+        <Field label="Capture retries">
+          <NumberField
+            min={0}
+            step={1}
+            value={definition.maxCaptureRetries}
+            disabled={disabled}
+            onChange={numeric('maxCaptureRetries')}
+          />
+        </Field>
+        <Field label="Acquire failure">
+          <Select
+            value={definition.acquireFailure}
+            disabled={disabled}
+            onChange={select('acquireFailure')}
           >
-            <option value="clear">Clear</option>
-            <option value="limited">Limited</option>
-            <option value="blocked">Blocked</option>
-            <option value="missing">Missing</option>
+            <option value="pause">Pause</option>
+            <option value="skip">Skip</option>
+            <option value="stop">Stop</option>
           </Select>
         </Field>
-        <Field label="Capacity">
+        <Field label="Capture failure">
           <Select
-            value={sequence.storage}
+            value={definition.captureFailure}
             disabled={disabled}
-            onChange={select('storage')}
+            onChange={select('captureFailure')}
           >
-            <option value="available">Available</option>
-            <option value="limited">Limited</option>
-            <option value="blocked">Blocked</option>
-            <option value="missing">Missing</option>
+            <option value="retry">Retry</option>
+            <option value="pause">Pause</option>
+            <option value="skip">Skip</option>
+            <option value="stop">Stop</option>
           </Select>
         </Field>
+      </PlanFieldGroup>
+      <PlanFieldGroup title="Observed environment · read only">
+        <DataList>
+          <DataListItem
+            label="Observed window"
+            value={`${time(sequence.window.startsAt)}–${time(sequence.window.endsAt)} UTC`}
+            detail={`${sequence.window.usableMinutes}m usable · peak ${sequence.window.peakAltitudeDeg}°`}
+          />
+          <DataListItem
+            label="Horizon"
+            value={titleCase(sequence.horizon)}
+            detail={`${sequence.window.horizonClearanceDeg}° observed clearance`}
+          />
+          <DataListItem label="Storage" value={titleCase(sequence.storage)} />
+        </DataList>
       </PlanFieldGroup>
     </>
   )
@@ -422,7 +571,8 @@ function PlanSequenceList({
               onClick={() => onSelect(index)}
             >
               <b>
-                {String(index + 1).padStart(2, '0')} · {sequence.target}
+                {String(index + 1).padStart(2, '0')} ·{' '}
+                {sequence.definition.targetName}
               </b>
               <span>
                 {state === 'done'
@@ -431,10 +581,10 @@ function PlanSequenceList({
                     ? 'Current'
                     : 'Queued'}
               </span>
-              <small>{sequence.capture}</small>
+              <small>{sequencePresentation(sequence).capture}</small>
               <small>
                 {time(sequence.window.startsAt)}–{time(sequence.window.endsAt)}{' '}
-                UTC · {sequence.estimatedMinutes}m
+                UTC · {sequencePresentation(sequence).estimatedMinutes}m
               </small>
             </button>
           )
@@ -503,11 +653,11 @@ function PlanSchedule({
                 >
                   <b>
                     {String(sourceIndex + 1).padStart(2, '0')} ·{' '}
-                    {sequence.target}
+                    {sequence.definition.targetName}
                   </b>
                   <small>
                     {time(sequence.window.startsAt)} UTC ·{' '}
-                    {sequence.estimatedMinutes}m
+                    {sequencePresentation(sequence).estimatedMinutes}m
                   </small>
                 </article>
               ),
@@ -569,9 +719,12 @@ function PlanReview({
               {draft.map((sequence, index) => (
                 <div className="beta-plan-frozen-row" key={sequence.sequenceId}>
                   <b>
-                    {String(index + 1).padStart(2, '0')} · {sequence.target}
+                    {String(index + 1).padStart(2, '0')} ·{' '}
+                    {sequence.definition.targetName}
                   </b>
-                  <span>{sequence.estimatedMinutes}m</span>
+                  <span>
+                    {sequencePresentation(sequence).estimatedMinutes}m
+                  </span>
                 </div>
               ))}
               <p className="beta-plan-muted">
@@ -597,13 +750,18 @@ function PlanReview({
                   <label className="beta-plan-change" key={sequence.sequenceId}>
                     <Checkbox checked readOnly />
                     <div>
-                      <b>{sequence.target}</b>
+                      <b>{sequence.definition.targetName}</b>
                       <StatusIndicator tone="warning" label="Draft" />
                     </div>
                     <p>
-                      {prior?.estimatedMinutes ?? '—'}m →{' '}
-                      {sequence.estimatedMinutes}m · {prior?.capture ?? '—'} →{' '}
-                      {sequence.capture}
+                      {prior === undefined
+                        ? '—'
+                        : sequencePresentation(prior).estimatedMinutes}
+                      m → {sequencePresentation(sequence).estimatedMinutes}m ·{' '}
+                      {prior === undefined
+                        ? '—'
+                        : sequencePresentation(prior).capture}{' '}
+                      → {sequencePresentation(sequence).capture}
                     </p>
                   </label>
                 ))}
@@ -733,9 +891,10 @@ export function BetaPlanPhone({
             {(source?.sequences ?? []).map((sequence, index) => (
               <article key={sequence.sequenceId}>
                 <b>
-                  {String(index + 1).padStart(2, '0')} · {sequence.target}
+                  {String(index + 1).padStart(2, '0')} ·{' '}
+                  {sequence.definition.targetName}
                 </b>
-                <span>{sequence.capture}</span>
+                <span>{sequencePresentation(sequence).capture}</span>
                 <small>
                   {time(sequence.window.startsAt)}–
                   {time(sequence.window.endsAt)} UTC

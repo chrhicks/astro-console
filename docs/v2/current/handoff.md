@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phase 4 complete; first beta real-truth bundle complete**
+Status: **V2.0 complete; V2.1 Phase 4 complete; beta supervised execution spine complete**
 
 ## Current Position
 
@@ -52,6 +52,13 @@ The first local bundle now provides:
 - and a live GET-only `ready` projection for the ASI2600MC Pro, ASI Mount, and ZWO
   EAF after matching current device numbers and `UniqueID` values.
 
+The next beta milestone is also complete. Plan now keeps one structured sequence
+as execution authority, the service owns a real durable executor, accepted work
+is persisted before provider calls, and uncertain writes reconcile through
+GET-only observation without replay. Observe projects the exact work states,
+timestamps, eligibility, consequences, and Verify boundary through the
+Nightbook evidence grammar.
+
 The corpus remains ignored and local. The first foundation is committed as
 `10e5b34` (`feat: add beta real-truth foundation`).
 
@@ -65,23 +72,35 @@ referenced local FITS copies against the committed SHA-256 manifest.
 
 All beta workspaces show a persistent **Simulation - not live hardware** strip.
 Desktop owners can select and reset scenarios and advance deterministic time.
-**Load** changes simulator state only. `ready-rig` and
-`optional-device-unavailable` provide **Run preflight test**, which starts the
-accepted fixture run when needed and runs the normal Observe preflight.
-`exposure-success` provides **Capture test frame**, which runs one 15-second
-M101 exposure through the normal Plan, Preflight, camera command, immutable
-original, and Library paths. Every other selectable scenario says that its
-beta UI driver is not implemented yet and keeps capture disabled; those states
-remain available for direct simulator and adapter tests. Phone and read-only
-clients see the same context without mutation controls. NGC 7000 test capture
-also remains disabled because its truthful 120-second exposure is outside the
-current 60-second camera-command boundary.
+**Load** changes simulator state only. The isolated inspection service installs
+one development-only M101 `cameraOnly` Plan with one 15-second frame. The user
+then follows the normal beta workflow: accept the definition, start it, refresh
+Preflight in Observe, inspect durable work during Capture, use **Advance 16s**
+to advance simulator time, and inspect the later camera observation at Verify.
+The browser no longer sends provider exposure commands or invented completion
+metadata. Phone and read-only clients see the same context without mutation
+controls.
 
-Current automated proof is green: server 121/121 and web 126/126. Functional
-and Designer browser review covered the supported preflight and
-capture-to-Library paths, unsupported-driver guidance, and Library preview
-containment at wide, 768 px, and 390 px widths. This inspection work contacted
-no provider or hardware.
+The supervised executor deliberately stops at Verify. It does not retrieve
+bytes or create Library truth, and the inspected Library identity set remained
+unchanged. Definitions outside the current boundary -- more than one sequence,
+more than one frame, deep-sky acquisition, or a camera-only exposure over 60
+seconds -- fail before a camera write. Development simulation also requires the
+executor Alpaca origin to match the loopback simulator origin.
+
+The active-exposure observation is published once when Capture becomes proven;
+later worker polls do not repeat the same event while the camera remains active.
+This keeps the browser on one current projection instead of forcing repeated
+snapshot-gap recovery. Simulation and Library review controls follow the fresh
+held desktop lease, not whether Plan or Observe happens to have another eligible
+action, so moving between workspaces does not make the controller read-only.
+
+Current automated proof is green: contracts 187/187, server 138/138, and web
+124/124. Functional browser proof covered the normal Plan-to-Verify workflow,
+fresh acceptance projection, restart/no-replay, abort and reconciliation
+states, and unchanged Library truth. Designer review passed at 1440 px, 768 px,
+and 390 px with no overflow or console error; phone remained read-only. This
+inspection work contacted no live provider or hardware.
 
 ## Proof Boundary
 
@@ -96,12 +115,12 @@ tools, a new physical exposure, or physical image quality.
 
 ## Next Action
 
-Use the one-command simulator inspection for the next supervised execution
-spine: replace presentation-only acquisition and capture strings with
-structured facts, add durable service-owned work, and reconcile accepted work
-after restart without replay. The owner has approved small, bounded slews,
-focus adjustments, and camera use for endpoint and behavior verification. Ask
-before any larger action so the owner can monitor it in person.
+Build the indoor camera-to-Library path on the supervised executor. Prove image
+retrieval, immutable original retention, Library intake, and inspection against
+the loopback simulator first, without browser-supplied completion metadata.
+Then use the owner-approved bounded live camera path while the owner can monitor
+it. Small focus or slew probes remain permitted for endpoint behavior; ask
+before any larger action.
 
 Completed chronology and former authority are indexed in the
 [documentation archive](../archive/README.md).

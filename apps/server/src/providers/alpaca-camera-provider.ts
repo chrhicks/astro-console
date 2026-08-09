@@ -1,6 +1,9 @@
 import { Effect, Schema } from 'effect'
 import type { PreflightProviderConfig } from '../config/environment-config.ts'
-import type { CameraProviderShape } from '../services/camera-command-service.ts'
+import type {
+  CameraProviderCommandOutcome,
+  CameraProviderShape,
+} from '../services/camera-command-service.ts'
 
 const Envelope = Schema.Struct({
   Value: Schema.optionalKey(Schema.Unknown),
@@ -26,7 +29,7 @@ export const alpacaCameraProvider = (
   const base = `http://${config.host}:${config.port}/api/v1/camera/${device.deviceNumber}`
   return {
     startExposure: (durationSeconds) =>
-      command(
+      cameraCommand(
         request,
         `${base}/startexposure`,
         new URLSearchParams({
@@ -34,7 +37,7 @@ export const alpacaCameraProvider = (
           Light: 'true',
         }),
       ),
-    abortExposure: () => command(request, `${base}/abortexposure`),
+    abortExposure: () => cameraCommand(request, `${base}/abortexposure`),
     readState: () =>
       read(request, `${base}/camerastate`).pipe(
         Effect.map((value) => ({
@@ -48,7 +51,11 @@ export const alpacaCameraProvider = (
     readImageArray: () => readImageArray(request, `${base}/imagearray`),
   }
 }
-function command(request: typeof fetch, url: string, body?: URLSearchParams) {
+function cameraCommand(
+  request: typeof fetch,
+  url: string,
+  body?: URLSearchParams,
+): Effect.Effect<CameraProviderCommandOutcome, unknown> {
   return Effect.tryPromise({
     try: (signal) =>
       request(url, {
@@ -65,7 +72,49 @@ function command(request: typeof fetch, url: string, body?: URLSearchParams) {
             }),
       }),
     catch: (cause) => cause,
-  }).pipe(Effect.flatMap(decode))
+  }).pipe(
+    Effect.flatMap((response) =>
+      response.ok
+        ? Effect.tryPromise({
+            try: () => response.json(),
+            catch: (cause) => cause,
+          }).pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(Envelope)),
+            Effect.flatMap(commandOutcome),
+          )
+        : Effect.tryPromise({
+            try: () => response.text(),
+            catch: (cause) => cause,
+          }).pipe(
+            Effect.flatMap((text) => {
+              try {
+                const envelope = Schema.decodeUnknownSync(Envelope)(
+                  JSON.parse(text),
+                )
+                return commandOutcome(envelope)
+              } catch {
+                return Effect.fail(
+                  new Error(
+                    `Alpaca camera request failed: ${boundedProviderText(text, response.status)}`,
+                  ),
+                )
+              }
+            }),
+          ),
+    ),
+  )
+}
+function commandOutcome(
+  envelope: typeof Envelope.Type,
+): Effect.Effect<CameraProviderCommandOutcome, Error> {
+  return envelope.ErrorNumber === 0
+    ? Effect.succeed({ _tag: 'Acknowledged' })
+    : Effect.succeed({
+        _tag: 'Rejected',
+        summary:
+          envelope.ErrorMessage ??
+          `Alpaca camera provider error ${envelope.ErrorNumber}.`,
+      })
 }
 function read(request: typeof fetch, url: string) {
   return Effect.tryPromise({
