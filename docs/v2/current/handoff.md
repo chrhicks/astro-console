@@ -281,9 +281,12 @@ SQL text or values, process arguments, or environment values.
 
 Deployment examples route the origin and publisher containers to the host
 collector through `host.docker.internal:4318` with the Compose host-gateway
-mapping. This reconciled branch has local deterministic receiver proof only and
-has not been deployed. Earlier production and isolated-candidate SigNoZ proof,
-trace IDs, historical test counts, and rollout notes are in the
+mapping. Final isolated-candidate proof on Arch covered healthy Plan, Library,
+snapshot, and live routes plus stored traces, logs, operational/SQLite/runtime
+metrics, correct metric units, and cross-signal privacy exclusions. The
+candidate exited cleanly; production Astro Console and SigNoZ were unchanged.
+Exact candidate identity, signal results, earlier trace IDs, historical test
+counts, and rollout notes are in the
 [OTEL observability delivery record](../archive/handoffs/otel-observability-2026-08-09.md).
 The dashboard, infrastructure agent, and alert definitions remain owned by the
 separate `arch-sig-noz` repository.

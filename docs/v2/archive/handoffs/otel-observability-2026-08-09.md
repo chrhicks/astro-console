@@ -71,6 +71,42 @@ families without publishing host ports. The dashboard and four rules were
 present and all rules evaluated as OK at the time of proof; no notification
 channel was configured.
 
+## Final reconciliation gate
+
+The final immutable image was
+`astro-console-origin:otel-reconcile-20260809-3`. It ran as isolated candidate
+`astro-console-otel-reconcile-candidate-3` on loopback port `28098` with its
+own volume. The following candidate routes returned HTTP 200:
+
+- `/health/live`
+- `/api/workspaces/plan`
+- `/api/library`
+- `/api/snapshot`
+
+SigNoZ stored exactly one occurrence of each expected request and business
+boundary:
+
+- `HTTP GET /api/workspaces/plan` and `Plan.workspace.read`
+- `HTTP GET /api/library` and `Library.catalog.page`
+- `HTTP GET /api/snapshot`, `Projection.snapshot.deliver`, and
+  `SQLite.projection.snapshot.read`
+- `Origin.startup.config.decode`, `Origin.startup.service.create`, and
+  `Origin.startup.listener.bind`
+
+The stored trace set contained zero
+`Server.LibraryService.projectLibraryRow` spans. Stored metrics included the
+operational, SQLite, and Node.js runtime families. SQLite duration, Node.js
+event-loop delay, and GC duration used unit `s`; heap metrics used `By`; and
+utilization and count metrics used `1`. No metric data-point series retained a
+`unit` or `time_unit` label.
+
+Cross-signal SigNoZ queries returned zero trace, metric, or log hits for the
+privacy needles `owner-chicks`, `desktop-owner`, `plan-m27`, `asset-m27`,
+`private`, and the right-ascension/declination needles. The candidate exited
+with status 0. Production origin container ID, image, and start time, and the
+SigNoZ ingester container ID and start time, stayed unchanged. The production
+health route remained alive.
+
 ## Historical rollout note
 
 During one comparison, a body-discarded local-owner
