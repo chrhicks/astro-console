@@ -2,6 +2,11 @@ import { Effect, Option, Schema } from 'effect'
 import { PreflightSnapshot } from '@astro-console/v2-contracts'
 import { type PreflightProviderConfig } from '../config/environment-config.ts'
 import { type ReadOnlyPreflightProviderShape } from '../services/preflight-service.ts'
+import {
+  alpacaFetch,
+  alpacaOperation,
+  type AlpacaRequestMetadata,
+} from './alpaca-observability.ts'
 
 const AlpacaEnvelope = Schema.Struct({
   Value: Schema.optionalKey(Schema.Unknown),
@@ -35,6 +40,11 @@ export const alpacaPreflightProvider = (
       const configured = yield* read(
         request,
         `${base}/management/v1/configureddevices`,
+        {
+          method: 'GET',
+          operation: 'preflight.inventory',
+          route: '/management/v1/configureddevices',
+        },
       ).pipe(
         Effect.flatMap((value) =>
           Schema.decodeUnknownEffect(ConfiguredDevices)(value),
@@ -171,16 +181,18 @@ function observeDevice(
         'The configured device was not returned by Alpaca management.',
       )
     const endpoint = `${base}/api/v1/${alpacaType(kind)}/${device.deviceNumber}`
-    const connected = yield* readBoolean(request, `${endpoint}/connected`).pipe(
-      Effect.option,
-    )
+    const connected = yield* readBoolean(
+      request,
+      `${endpoint}/connected`,
+      kind,
+    ).pipe(Effect.option)
     if (Option.isNone(connected))
       return unavailableDevice(
         kind,
         at,
         'The configured device did not return a connection fact.',
       )
-    const name = yield* readString(request, `${endpoint}/name`).pipe(
+    const name = yield* readString(request, `${endpoint}/name`, kind).pipe(
       Effect.option,
     )
     const facts = yield* deviceFacts(request, endpoint, kind).pipe(
@@ -242,7 +254,7 @@ function deviceFacts(request: typeof fetch, base: string, kind: DeviceKind) {
     filterWheel: [['position', 'position']],
   }
   return Effect.forEach(reads[kind], ([path, label]) =>
-    read(request, `${base}/${path}`).pipe(
+    read(request, `${base}/${path}`, deviceReadMetadata(kind)).pipe(
       Effect.map((value) => [path, label, value] as const),
     ),
   ).pipe(
@@ -297,22 +309,36 @@ function alpacaType(kind: DeviceKind) {
 function check(key: string, state: State, at: string, reason: string) {
   return { key, state, observedAt: at, reason }
 }
-function readBoolean(request: typeof fetch, url: string) {
-  return read(request, url).pipe(
+function readBoolean(request: typeof fetch, url: string, kind: DeviceKind) {
+  return read(request, url, deviceReadMetadata(kind)).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(Schema.Boolean)),
   )
 }
-function readString(request: typeof fetch, url: string) {
-  return read(request, url).pipe(
+function readString(request: typeof fetch, url: string, kind: DeviceKind) {
+  return read(request, url, deviceReadMetadata(kind)).pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(Schema.String)),
   )
 }
-function read(request: typeof fetch, url: string) {
-  return Effect.fn('AlpacaPreflightProvider.read')(function* () {
-    const response = yield* Effect.tryPromise({
-      try: (signal) => request(url, { method: 'GET', signal }),
-      catch: (cause) => cause,
-    })
+function deviceReadMetadata(kind: DeviceKind): AlpacaRequestMetadata {
+  return {
+    method: 'GET',
+    operation: 'preflight.device.read',
+    route: '/api/v1/:deviceKind/:deviceNumber/:property',
+    deviceKind: kind,
+  }
+}
+function read(
+  request: typeof fetch,
+  url: string,
+  metadata: AlpacaRequestMetadata,
+) {
+  const operation = Effect.gen(function* () {
+    const response = yield* alpacaFetch(
+      request,
+      url,
+      { method: 'GET' },
+      metadata,
+    )
     if (!response.ok)
       return yield* Effect.fail(
         new Error(`Alpaca GET failed: HTTP ${response.status}`),
@@ -328,5 +354,6 @@ function read(request: typeof fetch, url: string) {
         ),
       )
     return envelope.Value
-  })()
+  })
+  return alpacaOperation(operation, metadata)
 }

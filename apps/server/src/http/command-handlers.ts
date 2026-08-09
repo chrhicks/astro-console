@@ -68,9 +68,7 @@ const sqlitePlanPersistenceLayer = (
         catch: (cause) => cause,
       }),
   })
-export const planCommandFromRequest = Effect.fn(
-  'Server.planCommandFromRequest',
-)(
+export const planCommandFromRequest = Effect.fnUntraced(
   function* (
     request: Promise<unknown | undefined | typeof BodyTooLarge>,
     runRepository: RunSqliteRepositoryShape,
@@ -145,9 +143,7 @@ const sqliteObservePersistenceLayer = (
         catch: (cause) => cause,
       }),
   })
-export const observeCommandFromRequest = Effect.fn(
-  'Server.observeCommandFromRequest',
-)(
+export const observeCommandFromRequest = Effect.fnUntraced(
   function* (
     request: Promise<unknown | undefined | typeof BodyTooLarge>,
     runRepository: RunSqliteRepositoryShape,
@@ -183,18 +179,17 @@ export const observeCommandFromRequest = Effect.fn(
       ),
     ),
 )
-export const observeServiceResponse = Effect.fn(
-  'Server.observeServiceResponse',
-)(function* (_failure: 'ObserveServiceUnavailable', summary: string) {
+export const observeServiceResponse = Effect.fnUntraced(function* (
+  _failure: 'ObserveServiceUnavailable',
+  summary: string,
+) {
   const body = yield* Schema.decodeUnknownEffect(ObserveCommandResponse)({
     _tag: 'Unavailable',
     failure: { _tag: 'ObserveServiceUnavailable', summary },
   })
   return { status: 503, body }
 })
-export const observeInvalidResponse = Effect.fn(
-  'Server.observeInvalidResponse',
-)(function* (
+export const observeInvalidResponse = Effect.fnUntraced(function* (
   stateRepository: StateSqliteRepositoryShape,
   identity: LocalIdentity,
 ) {

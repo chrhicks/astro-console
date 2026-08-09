@@ -4,6 +4,11 @@ import type {
   CameraProviderCommandOutcome,
   CameraProviderShape,
 } from '../services/camera-command-service.ts'
+import {
+  alpacaFetch,
+  alpacaOperation,
+  type AlpacaRequestMetadata,
+} from './alpaca-observability.ts'
 
 const Envelope = Schema.Struct({
   Value: Schema.optionalKey(Schema.Unknown),
@@ -34,14 +39,31 @@ export const alpacaCameraProvider = (
       cameraCommand(
         request,
         `${base}/startexposure`,
+        {
+          method: 'PUT',
+          operation: 'camera.start_exposure',
+          route: '/api/v1/camera/:deviceNumber/startexposure',
+          deviceKind: 'camera',
+        },
         new URLSearchParams({
           Duration: String(durationSeconds),
           Light: 'true',
         }),
       ),
-    abortExposure: () => cameraCommand(request, `${base}/abortexposure`),
+    abortExposure: () =>
+      cameraCommand(request, `${base}/abortexposure`, {
+        method: 'PUT',
+        operation: 'camera.abort_exposure',
+        route: '/api/v1/camera/:deviceNumber/abortexposure',
+        deviceKind: 'camera',
+      }),
     readState: () =>
-      read(request, `${base}/camerastate`).pipe(
+      read(request, `${base}/camerastate`, {
+        method: 'GET',
+        operation: 'camera.read_state',
+        route: '/api/v1/camera/:deviceNumber/camerastate',
+        deviceKind: 'camera',
+      }).pipe(
         Effect.map((value) => ({
           observedAt: new Date().toISOString(),
           cameraState:
@@ -50,31 +72,37 @@ export const alpacaCameraProvider = (
               : 'unknown',
         })),
       ),
-    readImageArray: () => readImageArray(request, `${base}/imagearray`),
+    readImageArray: () =>
+      readImageArray(request, `${base}/imagearray`, {
+        method: 'GET',
+        operation: 'camera.read_image',
+        route: '/api/v1/camera/:deviceNumber/imagearray',
+        deviceKind: 'camera',
+      }),
   }
 }
 function cameraCommand(
   request: typeof fetch,
   url: string,
+  metadata: AlpacaRequestMetadata,
   body?: URLSearchParams,
 ): Effect.Effect<CameraProviderCommandOutcome, unknown> {
-  return Effect.tryPromise({
-    try: (signal) =>
-      request(url, {
-        method: 'PUT',
-        signal,
-        ...(body === undefined
-          ? {}
-          : {
-              body,
-              headers: {
-                'content-type':
-                  'application/x-www-form-urlencoded;charset=UTF-8',
-              },
-            }),
-      }),
-    catch: (cause) => cause,
-  }).pipe(
+  const operation = alpacaFetch(
+    request,
+    url,
+    {
+      method: 'PUT',
+      ...(body === undefined
+        ? {}
+        : {
+            body,
+            headers: {
+              'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
+            },
+          }),
+    },
+    metadata,
+  ).pipe(
     Effect.flatMap((response) =>
       response.ok
         ? Effect.tryPromise({
@@ -105,6 +133,7 @@ function cameraCommand(
           ),
     ),
   )
+  return alpacaOperation(operation, metadata)
 }
 function commandOutcome(
   envelope: typeof Envelope.Type,
@@ -118,14 +147,16 @@ function commandOutcome(
           `Alpaca camera provider error ${envelope.ErrorNumber}.`,
       })
 }
-function read(request: typeof fetch, url: string) {
-  return Effect.tryPromise({
-    try: (signal) => request(url, { method: 'GET', signal }),
-    catch: (cause) => cause,
-  }).pipe(
+function read(
+  request: typeof fetch,
+  url: string,
+  metadata: AlpacaRequestMetadata,
+) {
+  const operation = alpacaFetch(request, url, { method: 'GET' }, metadata).pipe(
     Effect.flatMap(decode),
     Effect.map((envelope) => envelope.Value),
   )
+  return alpacaOperation(operation, metadata)
 }
 function decode(response: Response) {
   if (!response.ok)
@@ -175,12 +206,17 @@ function boundedProviderText(text: string, status: number) {
   return trimmed.slice(0, 240)
 }
 
-function readImageArray(request: typeof fetch, url: string) {
-  return Effect.tryPromise({
-    try: (signal) =>
-      request(url, { headers: { accept: 'application/imagebytes' }, signal }),
-    catch: (cause) => cause,
-  }).pipe(
+function readImageArray(
+  request: typeof fetch,
+  url: string,
+  metadata: AlpacaRequestMetadata,
+) {
+  const operation = alpacaFetch(
+    request,
+    url,
+    { headers: { accept: 'application/imagebytes' } },
+    metadata,
+  ).pipe(
     Effect.flatMap((response) => {
       if (!response.ok)
         return Effect.tryPromise({
@@ -246,6 +282,7 @@ function readImageArray(request: typeof fetch, url: string) {
       )
     }),
   )
+  return alpacaOperation(operation, metadata)
 }
 
 function jsonImageBytes(value: unknown) {

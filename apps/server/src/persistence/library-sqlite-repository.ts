@@ -153,7 +153,7 @@ export const sqliteLibraryServiceLayer = (
   libraryServiceLayer.pipe(
     Layer.provide(
       libraryPersistenceLayer({
-        page: Effect.fn('Server.LibraryService.page')(function* (query) {
+        page: Effect.fnUntraced(function* (query) {
           const order = {
             capturedAtDescending: 'captured_at DESC, asset_id ASC',
             sharpestFirst: 'sharpness DESC, asset_id ASC',
@@ -197,7 +197,7 @@ export const sqliteLibraryServiceLayer = (
             catalogChanged: false,
           }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
         }),
-        detail: Effect.fn('Server.LibraryService.detail')(function* (assetId) {
+        detail: Effect.fnUntraced(function* (assetId) {
           const detail = yield* libraryStoredDetail(db, assetId)
           const publication = yield* libraryPublication(db, assetId)
           return yield* Schema.decodeUnknownEffect(LibraryAssetDetail)({
@@ -205,30 +205,28 @@ export const sqliteLibraryServiceLayer = (
             actions: libraryActions(detail.availability, publication),
           }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
         }),
-        processSource: Effect.fn('Server.LibraryService.processSource')(
-          function* (assetId) {
-            const detail = yield* libraryStoredDetail(db, assetId, false)
-            if (detail.availability !== 'availableLocally')
-              return yield* Effect.fail(
-                new LibraryAssetUnavailable({ reason: 'AssetUnavailable' }),
-              )
-            return yield* Schema.decodeUnknownEffect(ProcessSourceHandoff)({
-              sourceAssetId: detail.assetId,
-              revision: detail.revision,
-              role: detail.role,
-              format: detail.format,
-              availability: detail.availability,
-              comparisonGroupId: detail.comparisonGroupId,
-              lineage: detail.lineage,
-              processing: {
-                availability: 'unavailable',
-                currentFixtureFacts: [
-                  'Interactive processing is not available in this workspace.',
-                ],
-              },
-            }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
-          },
-        ),
+        processSource: Effect.fnUntraced(function* (assetId) {
+          const detail = yield* libraryStoredDetail(db, assetId, false)
+          if (detail.availability !== 'availableLocally')
+            return yield* Effect.fail(
+              new LibraryAssetUnavailable({ reason: 'AssetUnavailable' }),
+            )
+          return yield* Schema.decodeUnknownEffect(ProcessSourceHandoff)({
+            sourceAssetId: detail.assetId,
+            revision: detail.revision,
+            role: detail.role,
+            format: detail.format,
+            availability: detail.availability,
+            comparisonGroupId: detail.comparisonGroupId,
+            lineage: detail.lineage,
+            processing: {
+              availability: 'unavailable',
+              currentFixtureFacts: [
+                'Interactive processing is not available in this workspace.',
+              ],
+            },
+          }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
+        }),
         download: Effect.fn('Server.LibraryService.download')(
           function* (assetId) {
             yield* libraryAssetId(assetId)

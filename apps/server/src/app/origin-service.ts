@@ -116,6 +116,13 @@ import {
   tracedHttpRequest,
   type OriginTelemetry,
 } from '../observability/origin-telemetry.ts'
+import { tracedPlanWorkspaceRead } from '../observability/plan-telemetry.ts'
+import { tracedLibraryOperation } from '../observability/library-telemetry.ts'
+import {
+  annotateProcessCommandIntent,
+  processCommandIntent,
+  tracedProcessOperation,
+} from '../observability/process-telemetry.ts'
 import { createRunExecutorWorker } from '../workers/run-executor-worker.ts'
 import {
   acquireSqliteRepository,
@@ -766,7 +773,9 @@ export function createLocalWebService(
             route: '/api/workspaces/plan',
             workspace: 'plan',
           },
-          Effect.sync(() => workspace(response, database, 'plan')),
+          tracedPlanWorkspaceRead(
+            Effect.sync(() => workspace(response, database, 'plan')),
+          ),
         ),
       processWorkspace: (response, url, identity) =>
         runHttp(
@@ -777,11 +786,15 @@ export function createLocalWebService(
             workspace: 'process',
           },
           url.searchParams.has('sourceAssetId')
-            ? processWorkspace(
+            ? tracedProcessOperation(
                 response,
-                database,
-                url,
-                () => stateRepository.state().snapshotVersion,
+                'workspace.open',
+                processWorkspace(
+                  response,
+                  database,
+                  url,
+                  () => stateRepository.state().snapshotVersion,
+                ),
               )
             : Effect.sync(() =>
                 json(response, 200, processSnapshot(database, identity)),
@@ -854,13 +867,17 @@ export function createLocalWebService(
             route: '/api/library/assets/:assetId/review',
             workspace: 'library',
           },
-          Effect.promise(() =>
-            libraryReview(
-              response,
-              database,
-              identity,
-              request,
-              encodedAssetId,
+          tracedLibraryOperation(
+            response,
+            'asset.review',
+            Effect.promise(() =>
+              libraryReview(
+                response,
+                database,
+                identity,
+                request,
+                encodedAssetId,
+              ),
             ),
           ),
         ),
@@ -926,23 +943,40 @@ export function createLocalWebService(
             route: '/api/process/commands',
             workspace: 'process',
           },
-          Effect.promise(async () => {
-            const result = executeProcessCommand(
-              database,
-              await body(request),
-              identity,
-            )
-            if (result.outcome === 'accepted')
-              publish(
-                'ProcessingProjected',
-                stateRepository.state().eventCursor,
-              )
-            return json(
-              response,
-              result.outcome === 'accepted' ? 202 : 409,
-              result,
-            )
-          }),
+          tracedProcessOperation(
+            response,
+            'command.execute',
+            Effect.promise(() => body(request)).pipe(
+              Effect.flatMap((raw) => {
+                const intent = processCommandIntent(raw)
+                return (
+                  intent === undefined
+                    ? Effect.void
+                    : annotateProcessCommandIntent(intent)
+                ).pipe(
+                  Effect.flatMap(() =>
+                    Effect.sync(() => {
+                      const result = executeProcessCommand(
+                        database,
+                        raw,
+                        identity,
+                      )
+                      if (result.outcome === 'accepted')
+                        publish(
+                          'ProcessingProjected',
+                          stateRepository.state().eventCursor,
+                        )
+                      return json(
+                        response,
+                        result.outcome === 'accepted' ? 202 : 409,
+                        result,
+                      )
+                    }),
+                  ),
+                )
+              }),
+            ),
+          ),
         ),
       refreshPreflight: async (response, identity, request) => {
         if (identity.capability !== 'controlCapable')

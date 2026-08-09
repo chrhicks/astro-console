@@ -18,6 +18,7 @@ import {
 } from '../services/library-service.ts'
 import { planWorkspaceProjection } from '../services/runtime-bootstrap.ts'
 import { json, responseHeaders } from './response.ts'
+import { tracedLibraryOperation } from '../observability/library-telemetry.ts'
 
 export type DownloadGrantConfig = {
   readonly issuer: DownloadGrantIssuer
@@ -87,7 +88,7 @@ export function libraryPage(
   url: URL,
   snapshotVersion: () => number,
 ) {
-  return decodeLibraryQuery(url).pipe(
+  const operation = decodeLibraryQuery(url).pipe(
     Effect.flatMap((query) =>
       LibraryService.pipe(Effect.flatMap((library) => library.page(query))),
     ),
@@ -101,6 +102,7 @@ export function libraryPage(
     Effect.provide(sqliteLibraryServiceLayer(db, snapshotVersion)),
     Effect.map((result) => json(response, result.status, result.body)),
   )
+  return tracedLibraryOperation(response, 'catalog.page', operation)
 }
 function decodeLibraryQuery(url: URL) {
   const allowed = new Set(['queryId', 'cursor', 'pageSize', 'role', 'sort'])
@@ -127,7 +129,7 @@ export function libraryDetail(
   encodedAssetId: string,
   snapshotVersion: () => number,
 ) {
-  return LibraryService.pipe(
+  const operation = LibraryService.pipe(
     Effect.flatMap((library) => library.detail(decodedAssetId(encodedAssetId))),
     Effect.map((body) => ({ status: 200, body })),
     Effect.catchTags({
@@ -141,6 +143,7 @@ export function libraryDetail(
     Effect.provide(sqliteLibraryServiceLayer(db, snapshotVersion)),
     Effect.map((result) => json(response, result.status, result.body)),
   )
+  return tracedLibraryOperation(response, 'asset.detail', operation)
 }
 const previewLimitBytes = 64 * 1024
 const previewRefreshMs = 1_000

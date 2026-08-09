@@ -7,6 +7,10 @@ import {
   type BootstrapSnapshot,
 } from '@astro-console/v2-contracts'
 import type { LocalIdentity } from '../auth/identity.ts'
+import {
+  tracedObserveCommand,
+  tracedObserveCommandStage,
+} from '../observability/observe-telemetry.ts'
 
 export class ObserveCommandInputInvalid extends Schema.TaggedErrorClass<ObserveCommandInputInvalid>()(
   'Server.ObserveCommandInputInvalid',
@@ -82,28 +86,27 @@ export const observeServiceLayer = Layer.effect(
   Effect.gen(function* () {
     const persistence = yield* ObservePersistence
     return ObserveService.of({
-      execute: Effect.fn('ObserveService.execute')(
-        function* (intent, identity) {
+      execute: Effect.fnUntraced(function* (intent, identity) {
+        const applyIntent = (): Effect.Effect<ObserveTransition, unknown> => {
           if (ObserveIntent.guards.PauseRun(intent))
-            return yield* persistence.pause(intent, identity)
+            return persistence.pause(intent, identity)
           if (ObserveIntent.guards.ResumeRun(intent))
-            return yield* persistence.resume(intent, identity)
+            return persistence.resume(intent, identity)
           if (ObserveIntent.guards.StopRun(intent))
-            return yield* persistence.stop(intent, identity)
+            return persistence.stop(intent, identity)
           if (ObserveIntent.guards.SkipSequence(intent))
-            return yield* persistence.skip(intent, identity)
+            return persistence.skip(intent, identity)
           if (ObserveIntent.guards.RetryPhase(intent))
-            return yield* persistence.retry(intent, identity)
-          return yield* persistence.park(intent, identity)
-        },
-      ),
+            return persistence.retry(intent, identity)
+          return persistence.park(intent, identity)
+        }
+        return yield* tracedObserveCommandStage(applyIntent(), 'applyIntent')
+      }),
     })
   }),
 )
 
-export const executeObserveRequest = Effect.fn(
-  'ObserveCommandService.executeRequest',
-)(function* (
+export const executeObserveRequest = Effect.fnUntraced(function* (
   request: Promise<unknown | undefined | symbol>,
   bodyTooLarge: symbol,
   identity: LocalIdentity,
@@ -114,48 +117,50 @@ export const executeObserveRequest = Effect.fn(
   const decoded = yield* Schema.decodeUnknownEffect(ObserveCommandRequest)(
     raw,
   ).pipe(Effect.mapError(() => new ObserveCommandInputInvalid()))
-  yield* Effect.annotateCurrentSpan({
-    'astro.workspace': 'observe',
-    'astro.command.intent': decoded.intent._tag,
-  })
-  const persistence = yield* ObservePersistence
-  const service = yield* ObserveService
-  const transition = yield* service
-    .execute(decoded.intent, identity)
-    .pipe(Effect.mapError(() => new ObserveServiceUnavailable()))
-  yield* Effect.annotateCurrentSpan({
-    'astro.command.outcome': isRejected(transition.body)
-      ? 'rejected'
-      : 'accepted',
-  })
-  if (isRejected(transition.body)) {
-    const snapshot = yield* persistence
-      .snapshot(identity)
-      .pipe(Effect.mapError(() => new ObserveServiceUnavailable()))
-    return {
-      status: transition.status,
-      body: yield* Schema.decodeUnknownEffect(ObserveCommandResponse)({
-        _tag: 'Rejected',
-        failure: {
-          _tag: 'Rejected',
-          reason: transition.body.reason,
-          summary: transition.body.message,
-        },
-        snapshot,
-      }).pipe(Effect.mapError(() => new ObserveServiceUnavailable())),
-    }
-  }
-  if (transition.event !== undefined)
-    yield* persistence
-      .publish(transition.event.type, transition.event.cursor)
-      .pipe(Effect.mapError(() => new ObserveServiceUnavailable()))
-  return {
-    status: transition.status,
-    body: yield* Schema.decodeUnknownEffect(ObserveCommandResponse)({
-      _tag: 'Accepted',
-      result: resultFor(decoded.intent),
-    }).pipe(Effect.mapError(() => new ObserveServiceUnavailable())),
-  }
+  return yield* tracedObserveCommand(
+    Effect.gen(function* () {
+      const persistence = yield* ObservePersistence
+      const service = yield* ObserveService
+      const transition = yield* service
+        .execute(decoded.intent, identity)
+        .pipe(Effect.mapError(() => new ObserveServiceUnavailable()))
+      if (isRejected(transition.body)) {
+        const snapshot = yield* tracedObserveCommandStage(
+          persistence
+            .snapshot(identity)
+            .pipe(Effect.mapError(() => new ObserveServiceUnavailable())),
+          'readSnapshot',
+        )
+        return {
+          status: transition.status,
+          body: yield* Schema.decodeUnknownEffect(ObserveCommandResponse)({
+            _tag: 'Rejected',
+            failure: {
+              _tag: 'Rejected',
+              reason: transition.body.reason,
+              summary: transition.body.message,
+            },
+            snapshot,
+          }).pipe(Effect.mapError(() => new ObserveServiceUnavailable())),
+        }
+      }
+      if (transition.event !== undefined)
+        yield* tracedObserveCommandStage(
+          persistence
+            .publish(transition.event.type, transition.event.cursor)
+            .pipe(Effect.mapError(() => new ObserveServiceUnavailable())),
+          'publishChange',
+        )
+      return {
+        status: transition.status,
+        body: yield* Schema.decodeUnknownEffect(ObserveCommandResponse)({
+          _tag: 'Accepted',
+          result: resultFor(decoded.intent),
+        }).pipe(Effect.mapError(() => new ObserveServiceUnavailable())),
+      }
+    }),
+    decoded.intent._tag,
+  )
 })
 
 function isRejected(value: unknown): value is {

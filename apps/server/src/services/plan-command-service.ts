@@ -6,6 +6,10 @@ import {
   type BootstrapSnapshot,
 } from '@astro-console/v2-contracts'
 import type { LocalIdentity } from '../auth/identity.ts'
+import {
+  tracedPlanCommand,
+  tracedPlanCommandStage,
+} from '../observability/plan-telemetry.ts'
 
 export class PlanCommandInputInvalid extends Schema.TaggedErrorClass<PlanCommandInputInvalid>()(
   'Server.PlanCommandInputInvalid',
@@ -84,24 +88,26 @@ export const planServiceLayer = Layer.effect(
   Effect.gen(function* () {
     const persistence = yield* PlanPersistence
     return PlanService.of({
-      execute: Effect.fn('PlanService.execute')(function* (intent, identity) {
-        if (PlanIntent.guards.SaveDraft(intent))
-          return yield* persistence.saveDraft(intent, identity)
-        if (PlanIntent.guards.AcceptRunDefinition(intent))
-          return yield* persistence.acceptRunDefinition(intent, identity)
-        if (PlanIntent.guards.StartAcceptedRun(intent))
-          return yield* persistence.startAcceptedRun(intent, identity)
-        if (PlanIntent.guards.PreviewRunMutation(intent))
-          return yield* persistence.previewRunMutation(intent, identity)
-        return yield* persistence.applyRunMutation(intent, identity)
+      execute: Effect.fnUntraced(function* (intent, identity) {
+        const applyIntent = (): Effect.Effect<PlanTransition, unknown> => {
+          if (PlanIntent.guards.SaveDraft(intent))
+            return persistence.saveDraft(intent, identity)
+          if (PlanIntent.guards.AcceptRunDefinition(intent))
+            return persistence.acceptRunDefinition(intent, identity)
+          if (PlanIntent.guards.StartAcceptedRun(intent))
+            return persistence.startAcceptedRun(intent, identity)
+          if (PlanIntent.guards.PreviewRunMutation(intent))
+            return persistence.previewRunMutation(intent, identity)
+          return persistence.applyRunMutation(intent, identity)
+        }
+        const transition = applyIntent()
+        return yield* tracedPlanCommandStage(transition, 'applyIntent')
       }),
     })
   }),
 )
 
-export const executePlanRequest = Effect.fn(
-  'PlanCommandService.executeRequest',
-)(function* (
+export const executePlanRequest = Effect.fnUntraced(function* (
   request: Promise<unknown | undefined | symbol>,
   bodyTooLarge: symbol,
   identity: LocalIdentity,
@@ -112,35 +118,38 @@ export const executePlanRequest = Effect.fn(
   const decoded = yield* Schema.decodeUnknownEffect(PlanCommandRequest)(
     raw,
   ).pipe(Effect.mapError(() => new PlanCommandInputInvalid()))
-  yield* Effect.annotateCurrentSpan({
-    'astro.workspace': 'plan',
-    'astro.command.intent': decoded.intent._tag,
-  })
-  const service = yield* PlanService
-  const persistence = yield* PlanPersistence
-  const transition = yield* service
-    .execute(decoded.intent, identity)
-    .pipe(Effect.mapError(() => new PlanServiceUnavailable()))
-  if (transition.event !== undefined)
-    yield* persistence.publish(transition.event.type, transition.event.cursor)
-  const snapshot = yield* persistence
-    .snapshot(identity)
-    .pipe(Effect.mapError(() => new PlanServiceUnavailable()))
-  yield* Effect.annotateCurrentSpan({
-    'astro.command.outcome':
-      transition.status >= 200 && transition.status < 300
-        ? 'accepted'
-        : 'rejected',
-  })
-  return {
-    status: transition.status,
-    body: yield* responseFor(decoded.intent, transition.body, snapshot).pipe(
-      Effect.mapError(() => new PlanServiceUnavailable()),
-    ),
-  }
+  return yield* tracedPlanCommand(
+    Effect.gen(function* () {
+      const service = yield* PlanService
+      const persistence = yield* PlanPersistence
+      const transition = yield* service
+        .execute(decoded.intent, identity)
+        .pipe(Effect.mapError(() => new PlanServiceUnavailable()))
+      if (transition.event !== undefined)
+        yield* tracedPlanCommandStage(
+          persistence.publish(transition.event.type, transition.event.cursor),
+          'publishChange',
+        )
+      const snapshot = yield* tracedPlanCommandStage(
+        persistence
+          .snapshot(identity)
+          .pipe(Effect.mapError(() => new PlanServiceUnavailable())),
+        'readSnapshot',
+      )
+      return {
+        status: transition.status,
+        body: yield* responseFor(
+          decoded.intent,
+          transition.body,
+          snapshot,
+        ).pipe(Effect.mapError(() => new PlanServiceUnavailable())),
+      }
+    }),
+    decoded.intent._tag,
+  )
 })
 
-const responseFor = Effect.fn('PlanCommandService.responseFor')(function* (
+const responseFor = Effect.fnUntraced(function* (
   intent: typeof PlanIntent.Type,
   raw: unknown,
   snapshot: BootstrapSnapshot,

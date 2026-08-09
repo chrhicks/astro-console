@@ -272,6 +272,37 @@ records the stable route, `library` workspace, HTTP 200 status, production
 environment, and `otel-20260808-1` service version. No identity, request body,
 image, coordinate, secret, or provider response is attached.
 
+A follow-on local slice, not yet deployed, adds one complete
+`AlpacaProvider.operation` span and one nested `AlpacaProvider.fetch` span for
+preflight inventory and device reads, camera start and abort commands, camera
+state reads, and ImageBytes transfer and validation. It keeps only stable Astro
+provider fields, HTTP methods, route templates, response status, and outcome.
+Fake transports and a local OTLP collector verify that host names, device
+numbers and IDs, form values, concrete URLs, and provider response text are not
+exported. This is local adapter proof only; it did not contact hardware.
+The follow-on full server suite passed 151 tests with 3 expected skips.
+
+A second local follow-on slice replaces generic service spans with intentional
+Plan, Observe, Library, and Process flow boundaries. Plan commands show execute,
+apply, conditional publish, and snapshot stages. Observe commands show execute,
+apply, conditional publish, and rejected-path snapshot stages. Library catalog,
+detail, and review requests each have one complete business span. Process source
+handoff and command execution each have one complete business span; a closed
+Process intent is attached only after command-envelope validation. Tests assert
+that identity, request bodies, domain IDs, annotations, idempotency values,
+filenames, and lineage are absent from exported payloads. The full server suite
+passed 155 tests with 3 expected skips.
+
+An isolated Arch `m27` fixture candidate exported each slice to the host SigNoz
+collector without changing the production container or database. SigNoz stored
+accepted Plan trace `8e27fd74a2ce4b1d831e2c63facecf95`, accepted Observe
+trace `b0274d90f90f03cf75cb4f27b6a928e3`, accepted Library catalog,
+detail, and review traces `b480290021cbb14ded9b01568a4bf624`,
+`bf0bb30aa28742242fd72e44ef978bbf`, and
+`4c4be5c62e7a32b32535e1391fa52dee`, and accepted Process trace
+`761780129fcd56928e0c8608668b9a97`. This is fixture deployment and trace-storage
+proof only; no provider or hardware action occurred.
+
 Local verification passed the server build and 150 tests with 3 expected
 skips. A clean Arch image build also passed the contracts, web, and server
 builds. The deployment Dockerfile now copies the checksum-pinned Nightbook
