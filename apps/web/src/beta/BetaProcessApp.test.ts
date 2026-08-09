@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { ProcessingProjection } from '@astro-console/v2-contracts'
+import {
+  ProcessingProjection,
+  ProcessSourceHandoff,
+} from '@astro-console/v2-contracts'
 import { Schema } from 'effect'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -128,6 +131,69 @@ test('does not confuse absent Plan or Observe eligibility with Process read-only
   assert.match(markup, /Control · you/)
   assert.match(markup, /This client has Process authority/)
   assert.doesNotMatch(markup, /Control · view|No active controller/)
+})
+
+test('shows the service-owned needs-review queue with evidence and blocks Build', () => {
+  const empty = Schema.decodeUnknownSync(ProcessingProjection)({
+    snapshotVersion: 1,
+    eventCursor: 1,
+    actions: [{ _tag: 'Eligible', action: 'StartProcessingSession' }],
+    sessions: [],
+    sessionActions: [],
+    assets: [],
+    pressure: { state: 'normal' },
+  })
+  const sourceHandoff = Schema.decodeUnknownSync(ProcessSourceHandoff)({
+    sourceAssetId: 'asset-m27-001',
+    revision: 1,
+    role: 'original',
+    format: 'cameraRaw',
+    availability: 'availableLocally',
+    comparisonGroupId: 'm27-stack-1',
+    lineage: { sourceAssetIds: ['asset-m27-001'] },
+    processing: {
+      availability: 'available',
+      currentFixtureFacts: ['Deterministic file-backed adapter.'],
+    },
+    recommendedSet: {
+      candidateCount: 2,
+      includedCount: 0,
+      excludedCount: 0,
+      needsReviewCount: 2,
+      frozen: false,
+      candidates: [
+        {
+          assetId: 'asset-m27-006',
+          assetRevision: 1,
+          reviewRevision: 0,
+          platformDecision: 'review',
+          manualDecision: 'unreviewed',
+          effectiveDecision: 'needsReview',
+          hardIneligible: false,
+          measuredSharpness: 994,
+          reason: 'Inspection evidence is unavailable; review this frame.',
+        },
+      ],
+    },
+  })
+  const markup = renderToStaticMarkup(
+    createElement(BetaProcessApp, {
+      projection: processControllerProjection,
+      loading: false,
+      sourceAssetId: 'asset-m27-001',
+      sourceHandoff,
+      initialWorkspace: empty,
+    }),
+  )
+  assert.match(markup, /Needs review/)
+  assert.match(markup, /Review evidence for asset-m27-006/)
+  assert.match(markup, /Sharpness/)
+  assert.match(markup, /2 candidates/)
+  assert.match(markup, /<button[^>]*disabled=""[^>]*>Accept<\/button>/)
+  assert.match(
+    markup,
+    /<button[^>]*disabled=""[^>]*>Build recommended set<\/button>/,
+  )
 })
 
 test('protects every Process mutation when current authority is unavailable', () => {

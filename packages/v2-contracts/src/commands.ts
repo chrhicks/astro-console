@@ -173,6 +173,7 @@ export const acceptedCommandTags = [
   'PreviewAssistantSuggestion',
   'MarkAssistantFindingViewed',
   'RetryProcessingStep',
+  'RetryProcessingBuild',
   'SwitchProcessingContext',
   'SaveProcessingArtifacts',
   'DiscardProcessingSession',
@@ -300,6 +301,7 @@ export const Command = Schema.TaggedUnion({
   },
   StartProcessingSession: {
     ...SourceSelection,
+    selection: Schema.optionalKey(Schema.Literal('recommended')),
     ...DurableMutation,
   },
   ResumeProcessingSession: {
@@ -340,6 +342,11 @@ export const Command = Schema.TaggedUnion({
     ...ProcessingFreshness,
     failedAttemptId: AttemptId,
     checkpointId: CheckpointId,
+    ...DurableMutation,
+  },
+  RetryProcessingBuild: {
+    ...ProcessingFreshness,
+    checkpoint: Schema.NonEmptyString,
     ...DurableMutation,
   },
   SwitchProcessingContext: {

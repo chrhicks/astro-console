@@ -80,6 +80,15 @@ function initializeSchema(database: DatabaseSync) {
     'CREATE TABLE IF NOT EXISTS processing_workspace (id INTEGER PRIMARY KEY CHECK(id=1),state TEXT NOT NULL)',
   )
   database.exec(
+    'CREATE TABLE IF NOT EXISTS processing_work (work_id TEXT PRIMARY KEY,session_id TEXT NOT NULL,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL,stage TEXT,checkpoint TEXT,claim_token TEXT,enqueued_at TEXT NOT NULL,claimed_at TEXT,settled_at TEXT,attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT)',
+  )
+  database.exec(
+    'CREATE TABLE IF NOT EXISTS processing_artifacts (artifact_id TEXT PRIMARY KEY,session_id TEXT NOT NULL,work_id TEXT NOT NULL,output_id TEXT,path TEXT NOT NULL,checksum TEXT NOT NULL,saved INTEGER NOT NULL DEFAULT 0)',
+  )
+  database.exec(
+    'CREATE TABLE IF NOT EXISTS processing_work_receipts (idempotency_key TEXT PRIMARY KEY,response TEXT NOT NULL)',
+  )
+  database.exec(
     'CREATE TABLE IF NOT EXISTS run_executor_work (work_id TEXT PRIMARY KEY,run_id TEXT NOT NULL,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL,command_attempted_at TEXT,acknowledged_at TEXT,settled_at TEXT,last_error TEXT)',
   )
   migrateStructuredRunDefinitions(database)

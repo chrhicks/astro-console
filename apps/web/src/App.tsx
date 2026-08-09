@@ -48,6 +48,7 @@ import {
   type LibraryPage,
   type LibraryQuery,
   type ProcessSourceHandoff,
+  type ReviewRequest,
 } from './library-client'
 import { ObserveView } from './workspaces/ObserveView'
 import { PlanView } from './workspaces/PlanView'
@@ -172,6 +173,7 @@ export function App() {
   const libraryPageGeneration = useRef(0)
   const libraryDetailGeneration = useRef(0)
   const processSourceGeneration = useRef(0)
+  const [processSourceRefresh, setProcessSourceRefresh] = useState(0)
   const liveFrameReviewGeneration = useRef(0)
   const [processSource, setProcessSource] = useState<{
     value: ProcessSourceHandoff | undefined
@@ -321,7 +323,7 @@ export function App() {
       processSourceGeneration.current += 1
       void runtime.dispose()
     }
-  }, [route])
+  }, [route, processSourceRefresh])
   useEffect(() => {
     const runtime = createBootstrapRuntime()
     setSubmitPlan(
@@ -675,6 +677,23 @@ export function App() {
       state: undefined,
     })
   }
+  const reviewProcessCandidate = async (
+    assetId: string,
+    request: ReviewRequest,
+  ) => {
+    const runtime = createLibraryRuntime()
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const client = yield* LibraryClient
+          return yield* client.reviewAsset(assetId, request)
+        }),
+      )
+      setProcessSourceRefresh((revision) => revision + 1)
+    } finally {
+      await runtime.dispose()
+    }
+  }
 
   const content =
     route.kind === 'not-found' ? (
@@ -884,6 +903,7 @@ export function App() {
           {...(processSource.state === undefined
             ? {}
             : { sourceHandoffState: processSource.state })}
+          onReviewCandidate={reviewProcessCandidate}
         />
       </Suspense>
     )

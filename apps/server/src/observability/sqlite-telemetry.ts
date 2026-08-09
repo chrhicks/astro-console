@@ -3,12 +3,14 @@ import { Effect, Exit, Metric } from 'effect'
 export type SqliteOperation =
   | 'executor.work.select'
   | 'executor.work.settle'
+  | 'process.work.select'
+  | 'process.work.settle'
   | 'publisher.outbox.claim'
   | 'publisher.outbox.settle'
   | 'projection.snapshot.read'
   | 'command.state.transaction'
 
-export type SqliteBacklog = 'executor' | 'publisher'
+export type SqliteBacklog = 'executor' | 'publisher' | 'process'
 
 export type SqliteTraceSync = <A>(operation: SqliteOperation, run: () => A) => A
 
@@ -45,6 +47,18 @@ const operationDefinitions = {
     operation: 'UPDATE',
     summary: 'executor work settlement',
     collection: 'run_executor_work',
+  },
+  'process.work.select': {
+    span: 'SQLite.process.work.select',
+    operation: 'SELECT',
+    summary: 'process work selection',
+    collection: 'processing_work',
+  },
+  'process.work.settle': {
+    span: 'SQLite.process.work.settle',
+    operation: 'UPDATE',
+    summary: 'process work settlement',
+    collection: 'processing_work',
   },
   'publisher.outbox.claim': {
     span: 'SQLite.publisher.outbox.claim',
@@ -133,7 +147,12 @@ export function tracedSqliteOperation<A, E, R>(
 }
 
 export function recordSqliteBacklog(backlog: SqliteBacklog, count: number) {
-  const collection = backlog === 'executor' ? 'run_executor_work' : 'outbox'
+  const collection =
+    backlog === 'executor'
+      ? 'run_executor_work'
+      : backlog === 'publisher'
+        ? 'outbox'
+        : 'processing_work'
   return Metric.update(
     Metric.withAttributes(backlogGauge, {
       'db.system.name': 'sqlite',

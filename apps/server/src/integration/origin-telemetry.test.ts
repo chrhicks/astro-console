@@ -1317,6 +1317,7 @@ test('Process HTTP flows export one safe business boundary each', async () => {
         })
         assert.equal(acceptedResponse.status, 202)
         await acceptedResponse.body?.cancel()
+        for (let stage = 0; stage < 6; stage += 1) service.processWorkPass()
 
         const rejectedResponse = await fetch(`${base}/api/process/commands`, {
           method: 'POST',
@@ -1358,6 +1359,16 @@ test('Process HTTP flows export one safe business boundary each', async () => {
   assert.match(payload, /rejected/)
   assert.equal(textOccurrences(payload, 'astro.command.intent'), 1)
   assert.equal(textOccurrences(payload, 'StartProcessingSession'), 1)
+  assert.equal(textOccurrences(payload, 'Process.worker.execute'), 6)
+  assert.match(payload, /astro\.process\.phase/)
+  assert.match(payload, /astro\.process\.work/)
+  assert.match(payload, /astro\.process\.stage/)
+  assert.match(payload, /astro\.process\.checkpoint\.state/)
+  assert.match(payload, /astro\.process\.retry/)
+  assert.match(payload, /astro\.process\.adapter/)
+  assert.match(payload, /astro\.process\.selection/)
+  assert.match(payload, /astro\.process\.pressure/)
+  assert.match(payload, /deterministic-file-v1/)
   assert.doesNotMatch(payload, /Server\.LibraryService\.processSource/)
   assert.doesNotMatch(payload, new RegExp(sourceAssetId))
   assert.doesNotMatch(payload, /owner-chicks/)

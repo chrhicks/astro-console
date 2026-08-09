@@ -161,6 +161,7 @@ test('Process HTTP workflow durably builds, fails locally, retries, and resumes 
     sourceAssetIds: [source.assetId],
     idempotencyKey: 'process-start',
   })
+  for (let stage = 0; stage < 6; stage += 1) activeService.processWorkPass()
   let workspace = Schema.decodeUnknownSync(ProcessingProjection)(
     await (await fetch(`${base}/api/workspaces/process`)).json(),
   )
@@ -177,6 +178,7 @@ test('Process HTTP workflow durably builds, fails locally, retries, and resumes 
     baseHistoryPosition: session.historyPosition,
     clientPreviewSequence: 1,
   })
+  activeService.processWorkPass()
   workspace = Schema.decodeUnknownSync(ProcessingProjection)(
     await (await fetch(`${base}/api/workspaces/process`)).json(),
   )
@@ -189,6 +191,7 @@ test('Process HTTP workflow durably builds, fails locally, retries, and resumes 
     previewId: session.preview?.previewId,
     idempotencyKey: 'process-apply-fail',
   })
+  activeService.processWorkPass()
   workspace = Schema.decodeUnknownSync(ProcessingProjection)(
     await (await fetch(`${base}/api/workspaces/process`)).json(),
   )
@@ -202,6 +205,7 @@ test('Process HTTP workflow durably builds, fails locally, retries, and resumes 
     checkpointId: session.failedAttempt?.checkpointId,
     idempotencyKey: 'process-retry',
   })
+  activeService.processWorkPass()
   await listener.close()
   service.close()
   const resumed = createFixtureService(databasePath)
@@ -248,26 +252,44 @@ test('Process HTTP workflow durably builds, fails locally, retries, and resumes 
   assert.equal(activeSession.history.length, 1)
   const outputId = activeSession.history[0]?.output.outputId
   assert.ok(outputId)
-  const save = await command({
+  await command({
     _tag: 'SaveProcessingArtifacts',
     sessionId: activeSession.sessionId,
     expectedProcessingRevision: activeSession.revision,
     artifacts: [{ outputId, format: 'tiff', role: 'final' }],
     idempotencyKey: 'process-save-after-resume',
   })
-  const savedAssetId = save.projection.assets[0]?.assetId
+  activeService.processWorkPass()
+  const savedWorkspace = Schema.decodeUnknownSync(ProcessingProjection)(
+    await (await fetch(`${base}/api/workspaces/process`)).json(),
+  )
+  const savedAssetId = savedWorkspace.assets[0]?.assetId
   assert.ok(savedAssetId)
   const savedDetail = Schema.decodeUnknownSync(LibraryAssetDetail)(
     await fetch(`${base}/api/library/assets/${savedAssetId}`).then((response) =>
       response.json(),
     ),
   )
-  assert.equal(savedDetail.checksum, `sha256:${outputId}`)
+  assert.match(savedDetail.checksum ?? '', /^sha256:[0-9a-f]{64}$/)
   assert.equal(savedDetail.lineage.processingSessionId, activeSession.sessionId)
   assert.equal(savedDetail.lineage.processingOutputId, outputId)
   assert.deepEqual(savedDetail.lineage.operationIds, [
     activeSession.history[0]?.operationId,
   ])
+  const savedFile = databaseRow(
+    SavedProcessArtifactRow,
+    resumed.database
+      .prepare(
+        "SELECT path,checksum FROM processing_artifacts WHERE session_id=? AND saved=1 AND path LIKE '%.tiff' LIMIT 1",
+      )
+      .get(activeSession.sessionId),
+  )
+  assert.equal(existsSync(savedFile.path), true)
+  assert.deepEqual(
+    [...readFileSync(savedFile.path).subarray(0, 4)],
+    [0x49, 0x49, 0x2a, 0x00],
+  )
+  assert.equal(savedDetail.checksum, savedFile.checksum)
   await listener.close()
   resumed.close()
 })
@@ -304,8 +326,10 @@ test('local plate solver records solved and no-solution evidence without a mount
             '--cpulimit',
             '45',
           ])
+          const backendConfigPath = args[1]
+          assert.ok(backendConfigPath)
           assert.equal(
-            readFileSync(args[1]!, 'utf8'),
+            readFileSync(backendConfigPath, 'utf8'),
             'add_path /home/chicks/.local/share/astrometry/indexes\nautoindex\n',
           )
           assert.deepEqual(args.slice(8, 20), [
@@ -360,14 +384,16 @@ test('local plate solver records solved and no-solution evidence without a mount
   assert.equal(solved.result, 'Solved')
   assert.equal(calls, 1)
   assert.equal(existsSync(join(originalsRoot, `${intake.assetId}.fits`)), true)
-  const evidence = service.database
-    .prepare('SELECT evidence FROM plate_solve_runs')
-    .get() as { evidence: string }
+  const evidence = databaseRow(
+    PlateSolveEvidenceRow,
+    service.database.prepare('SELECT evidence FROM plate_solve_runs').get(),
+  )
   assert.match(evidence.evidence, /astrometry.net/)
   assert.match(evidence.evidence, /asset-capture-plate-solve-001/)
-  const session = service.database
-    .prepare('SELECT session FROM acquire_sessions')
-    .get() as { session: string }
+  const session = databaseRow(
+    AcquireSessionRow,
+    service.database.prepare('SELECT session FROM acquire_sessions').get(),
+  )
   assert.match(session.session, /SolveAttempt/)
   assert.doesNotMatch(session.session, /CorrectionAccepted/)
 
@@ -375,12 +401,9 @@ test('local plate solver records solved and no-solution evidence without a mount
   const resumed = createLocalWebService(databasePath)
   t.after(() => resumed.close())
   assert.equal(
-    (
-      resumed.database
-        .prepare('SELECT evidence FROM plate_solve_runs')
-        .get() as {
-        evidence: string
-      }
+    databaseRow(
+      PlateSolveEvidenceRow,
+      resumed.database.prepare('SELECT evidence FROM plate_solve_runs').get(),
     ).evidence,
     evidence.evidence,
   )
@@ -440,9 +463,10 @@ test('local plate solver records a bounded failure as typed no-solution and reta
   if (outcome.outcome !== 'recorded') throw new Error('solve was not recorded')
   assert.equal(outcome.result, 'NoSolution')
   assert.equal(existsSync(join(originalsRoot, `${assetId}.fits`)), true)
-  const session = service.database
-    .prepare('SELECT session FROM acquire_sessions')
-    .get() as { session: string }
+  const session = databaseRow(
+    AcquireSessionRow,
+    service.database.prepare('SELECT session FROM acquire_sessions').get(),
+  )
   assert.match(session.session, /solver-failure/)
 })
 
@@ -492,9 +516,10 @@ test('local plate solver records normal solve-field exit 1 as no-solution', asyn
     execute: async () => ({ exitCode: 1, stdout: 'no match', stderr: '' }),
   }).solve(assetId)
   assert.equal(result.outcome, 'recorded')
-  const session = service.database
-    .prepare('SELECT session FROM acquire_sessions')
-    .get() as { session: string }
+  const session = databaseRow(
+    AcquireSessionRow,
+    service.database.prepare('SELECT session FROM acquire_sessions').get(),
+  )
   assert.match(session.session, /no-solution/)
   assert.doesNotMatch(session.session, /solver-failure/)
 })
@@ -4044,6 +4069,12 @@ const StatusRow = Schema.Struct({ state: Schema.String })
 const ProjectionRow = Schema.Struct({ value: Schema.String })
 const RunDefinitionEvidenceRow = Schema.Struct({ definition: Schema.String })
 const PublicationRow = Schema.Struct({ object_key: Schema.String })
+const SavedProcessArtifactRow = Schema.Struct({
+  path: Schema.String,
+  checksum: Schema.String,
+})
+const PlateSolveEvidenceRow = Schema.Struct({ evidence: Schema.String })
+const AcquireSessionRow = Schema.Struct({ session: Schema.String })
 const ClaimedOutboxRow = Schema.Struct({
   state: Schema.String,
   claim_token: Schema.NullOr(Schema.String),
@@ -4959,25 +4990,17 @@ test('authenticated workspace projections preserve future intent, bounded Librar
   const process = Schema.decodeUnknownSync(ProcessSourceHandoff)(
     await processResponse.json(),
   )
-  assert.deepEqual(process, {
-    sourceAssetId: assetId,
-    revision: 1,
-    role: 'preview',
-    format: 'fits',
-    availability: 'availableLocally',
-    comparisonGroupId: 'm27-stack-1',
-    lineage: {
-      sourceAssetIds: ['asset-m27-001'],
-      runId: 'run-m27-001',
-      solveAttemptId: 'solve-m27-001',
-    },
-    processing: {
-      availability: 'unavailable',
-      currentFixtureFacts: [
-        'Interactive processing is not available in this workspace.',
-      ],
-    },
-  })
+  assert.equal(process.sourceAssetId, assetId)
+  assert.equal(process.processing.availability, 'available')
+  assert.equal(process.recommendedSet?.candidateCount, 2)
+  assert.equal(process.recommendedSet?.includedCount, 0)
+  assert.equal(process.recommendedSet?.needsReviewCount, 2)
+  assert.deepEqual(
+    process.recommendedSet?.candidates.map(
+      (candidate) => candidate.effectiveDecision,
+    ),
+    ['needsReview', 'needsReview'],
+  )
   assert.equal('sessionId' in process, false)
   assert.equal('preview' in process, false)
   const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)

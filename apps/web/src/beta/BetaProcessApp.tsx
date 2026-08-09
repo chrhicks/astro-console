@@ -25,8 +25,9 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
-import type { ProcessSourceHandoff } from '../library-client'
+import type { ProcessSourceHandoff, ReviewRequest } from '../library-client'
 import type { Projection } from '../presentation'
 import { BetaCommandBar, type BetaControlPresentation } from './BetaObserveApp'
 import '@nightbook/ui/styles.css'
@@ -52,6 +53,9 @@ export type BetaProcessAppProps = {
   initialWorkspace?: ProcessWorkspace | undefined
   loadWorkspace?: (() => Promise<ProcessWorkspace>) | undefined
   sendCommand?: ((command: object) => Promise<unknown>) | undefined
+  onReviewCandidate?:
+    | ((assetId: string, request: ReviewRequest) => Promise<void>)
+    | undefined
 }
 
 const decodeWorkspace = (value: unknown) =>
@@ -246,6 +250,32 @@ const lifecycleSteps = (session: Session) => [
   },
 ]
 
+const buildStageNames = [
+  'validate',
+  'calibrate',
+  'debayer',
+  'align',
+  'evaluate',
+  'stack',
+] as const
+
+const buildStageItems = (
+  current: (typeof buildStageNames)[number] | undefined,
+) => {
+  const currentIndex = buildStageNames.indexOf(current ?? 'validate')
+  return buildStageNames.map((stage, index) => ({
+    id: stage,
+    label: titleCase(stage),
+    description: index < currentIndex ? 'Checkpoint complete' : undefined,
+    status:
+      index < currentIndex
+        ? ('complete' as const)
+        : index === currentIndex
+          ? ('current' as const)
+          : ('pending' as const),
+  }))
+}
+
 export function ProcessPhone({
   projection,
   workspace,
@@ -313,6 +343,15 @@ export function ProcessPhone({
               label="Saved"
               value={String(session?.savedAssetIds.length ?? 0)}
             />
+            <DataListItem
+              label="Frozen candidates"
+              value={String(session?.selection?.candidateCount ?? 0)}
+              detail={
+                session?.selection
+                  ? `${session.selection.includedCount} included · ${session.selection.excludedCount} excluded`
+                  : 'No recommended set is frozen.'
+              }
+            />
           </DataList>
         </PanelBody>
       </Panel>
@@ -347,6 +386,7 @@ function SourceEntry({
   disabled,
   disabledReason,
   start,
+  onReviewCandidate,
 }: {
   assetId: string | undefined
   handoff: ProcessSourceHandoff | undefined
@@ -354,9 +394,16 @@ function SourceEntry({
   disabled: boolean
   disabledReason: string | undefined
   start: () => void
+  onReviewCandidate:
+    | ((assetId: string, request: ReviewRequest) => Promise<void>)
+    | undefined
 }) {
+  const [reviewing, setReviewing] = useState<string>()
+  const recommendation = handoff?.recommendedSet
   const supported =
-    handoff?.role === 'original' || handoff?.role === 'linearMaster'
+    handoff?.role === 'original' ||
+    handoff?.role === 'linearMaster' ||
+    (recommendation?.candidateCount ?? 0) > 0
   const local = handoff?.availability === 'availableLocally'
   const detail =
     state === 'loading'
@@ -391,13 +438,97 @@ function SourceEntry({
         actions={
           handoff && supported && local ? (
             <Stack gap={4}>
+              {recommendation ? (
+                <DataList>
+                  <DataListItem
+                    label="Candidate set"
+                    value={String(recommendation.candidateCount)}
+                    detail="One compatible Library group"
+                  />
+                  <DataListItem
+                    label="Included"
+                    value={String(recommendation.includedCount)}
+                  />
+                  <DataListItem
+                    label="Excluded"
+                    value={String(recommendation.excludedCount)}
+                  />
+                  <DataListItem
+                    label="Needs review"
+                    value={String(recommendation.needsReviewCount)}
+                  />
+                </DataList>
+              ) : null}
+              {recommendation?.candidates
+                .filter(
+                  (candidate) => candidate.effectiveDecision === 'needsReview',
+                )
+                .slice(0, 3)
+                .map((candidate) => (
+                  <div className="beta-process-review" key={candidate.assetId}>
+                    <p>
+                      <b>{candidate.assetId}</b> · {candidate.reason}
+                      {' · '}sharpness {candidate.measuredSharpness}
+                    </p>
+                    <EvidenceViewport
+                      label={`Review evidence for ${candidate.assetId}`}
+                      fallback="A renderable preview is not available for this candidate."
+                      overlays={
+                        <MetricOverlay
+                          label="Candidate metrics"
+                          items={[
+                            {
+                              id: 'sharpness',
+                              label: 'Sharpness',
+                              value: String(candidate.measuredSharpness),
+                            },
+                            {
+                              id: 'group',
+                              label: 'Group',
+                              value: `${recommendation.candidateCount} candidates`,
+                            },
+                          ]}
+                        />
+                      }
+                      caption={candidate.reason}
+                    />
+                    <Cluster>
+                      {(['accepted', 'rejected'] as const).map((decision) => (
+                        <Button
+                          key={decision}
+                          disabled={
+                            reviewing !== undefined ||
+                            disabled ||
+                            onReviewCandidate === undefined
+                          }
+                          onClick={() => {
+                            setReviewing(candidate.assetId)
+                            if (onReviewCandidate === undefined) return
+                            void onReviewCandidate(candidate.assetId, {
+                              expectedAssetRevision: candidate.assetRevision,
+                              expectedReviewRevision: candidate.reviewRevision,
+                              decision,
+                              idempotencyKey: crypto.randomUUID(),
+                            }).finally(() => setReviewing(undefined))
+                          }}
+                        >
+                          {decision === 'accepted' ? 'Accept' : 'Reject'}
+                        </Button>
+                      ))}
+                    </Cluster>
+                  </div>
+                ))}
               <Button
                 tone="primary"
-                disabled={disabled}
+                disabled={
+                  disabled ||
+                  reviewing !== undefined ||
+                  (recommendation?.needsReviewCount ?? 0) > 0
+                }
                 title={disabledReason}
                 onClick={start}
               >
-                Start durable session
+                Build recommended set
               </Button>
               <ProcessActionDenial
                 reason={disabled ? disabledReason : undefined}
@@ -430,6 +561,7 @@ function ProcessDesktop({
   setAmount,
   setAdapter,
   command,
+  onReviewCandidate,
 }: {
   projection: Projection
   workspace: ProcessWorkspace | undefined
@@ -443,8 +575,15 @@ function ProcessDesktop({
   setAmount: (value: number) => void
   setAdapter: (value: string) => void
   command: (command: object, label: string) => void
+  onReviewCandidate:
+    | ((assetId: string, request: ReviewRequest) => Promise<void>)
+    | undefined
 }) {
   const session = selectedSession(workspace)
+  const buildWork = workspace?.work?.find(
+    (work) => work.sessionId === session?.sessionId && work.kind === 'build',
+  )
+  const [showReference, setShowReference] = useState(false)
   const authorityReason = processCommandsProtected(projection)
     ? 'Current desktop owner authority is not confirmed.'
     : undefined
@@ -478,12 +617,20 @@ function ProcessDesktop({
             command(
               {
                 _tag: 'StartProcessingSession',
-                sourceAssetIds: [sourceHandoff.sourceAssetId],
+                selection: 'recommended',
+                sourceAssetIds: sourceHandoff.recommendedSet?.candidates
+                  .filter(
+                    (candidate) => candidate.effectiveDecision === 'include',
+                  )
+                  .map((candidate) => candidate.assetId) ?? [
+                  sourceHandoff.sourceAssetId,
+                ],
                 idempotencyKey: crypto.randomUUID(),
               },
               'Starting session',
             )
           }
+          onReviewCandidate={onReviewCandidate}
         />
       </main>
     )
@@ -508,8 +655,9 @@ function ProcessDesktop({
       : session.preview
         ? `Preview ${session.preview.state}`
         : 'Current image'
-  const previewFallback =
-    session.phase === 'build'
+  const previewFallback = showReference
+    ? 'Reference comparison · durable base image'
+    : session.phase === 'build'
       ? 'A durable linear master is building from protected local Library sources.'
       : session.failedAttempt
         ? 'The last valid image and checkpoint remain durable.'
@@ -567,6 +715,25 @@ function ProcessDesktop({
                 activeId={session.phase === 'build' ? 'build' : 'develop'}
                 items={lifecycleSteps(session)}
               />
+              {session.phase === 'build' ? (
+                <StepRail
+                  label="Build stages"
+                  activeId={
+                    workspace?.work?.find(
+                      (work) =>
+                        work.sessionId === session.sessionId &&
+                        work.kind === 'build',
+                    )?.stage ?? 'validate'
+                  }
+                  items={buildStageItems(
+                    workspace?.work?.find(
+                      (work) =>
+                        work.sessionId === session.sessionId &&
+                        work.kind === 'build',
+                    )?.stage,
+                  )}
+                />
+              ) : null}
               {session.lifecycle === 'unfinished' ? (
                 <Stack gap={4}>
                   <Button
@@ -783,6 +950,23 @@ function ProcessDesktop({
                   <ProcessActionDenial
                     reason={actionReason('ApplyProcessingPreview')}
                   />
+                  <Button
+                    onPointerDown={() => setShowReference(true)}
+                    onPointerUp={() => setShowReference(false)}
+                    onPointerCancel={() => setShowReference(false)}
+                    onPointerLeave={() => setShowReference(false)}
+                    onKeyDown={(event: ReactKeyboardEvent) => {
+                      if (event.key === ' ' || event.key === 'Enter')
+                        setShowReference(true)
+                    }}
+                    onKeyUp={(event: ReactKeyboardEvent) => {
+                      if (event.key === ' ' || event.key === 'Enter')
+                        setShowReference(false)
+                    }}
+                    onBlur={() => setShowReference(false)}
+                  >
+                    Hold to compare reference
+                  </Button>
                   <Cluster>
                     <Button
                       disabled={protectedAction('UndoProcessingStep')}
@@ -851,12 +1035,42 @@ function ProcessDesktop({
                   />
                 </>
               ) : (
-                <AttentionCard
-                  tone="info"
-                  statusLabel="Build active"
-                  title="Develop controls are protected"
-                  description="The durable base image must exist before preview or apply."
-                />
+                <Stack>
+                  <AttentionCard
+                    tone={buildWork?.state === 'failed' ? 'danger' : 'info'}
+                    statusLabel={
+                      buildWork?.state === 'failed'
+                        ? 'Build stage failed'
+                        : 'Build active'
+                    }
+                    title={
+                      buildWork?.state === 'failed'
+                        ? `${titleCase(buildWork.stage ?? 'build')} stopped at the last checkpoint`
+                        : 'Develop controls are protected'
+                    }
+                    description="The durable base image must exist before preview or apply."
+                  />
+                  {buildWork?.state === 'failed' && buildWork.checkpoint ? (
+                    <Button
+                      tone="primary"
+                      disabled={!!pending || authorityReason !== undefined}
+                      onClick={() =>
+                        command(
+                          {
+                            _tag: 'RetryProcessingBuild',
+                            sessionId: session.sessionId,
+                            expectedProcessingRevision: session.revision,
+                            checkpoint: buildWork.checkpoint,
+                            idempotencyKey: crypto.randomUUID(),
+                          },
+                          `Retrying ${titleCase(buildWork.stage ?? 'build')} from checkpoint`,
+                        )
+                      }
+                    >
+                      Retry {titleCase(buildWork.stage ?? 'build')} → Stack
+                    </Button>
+                  ) : null}
+                </Stack>
               )}
               <DataList>
                 <DataListItem
@@ -987,6 +1201,18 @@ export function BetaProcessApp(props: BetaProcessAppProps) {
     props.projection.observe.snapshotVersion,
     refresh,
   ])
+  useEffect(() => {
+    if (
+      !workspace?.work?.some(
+        (work) => work.state === 'pending' || work.state === 'claimed',
+      )
+    )
+      return
+    const timer = window.setInterval(() => {
+      if (!pendingRef.current) void refresh('Worker progress · current')
+    }, 500)
+    return () => window.clearInterval(timer)
+  }, [refresh, workspace?.work])
   const command = useCallback(
     (value: object, label: string) => {
       if (pendingRef.current || processCommandsProtected(props.projection))
@@ -1056,6 +1282,7 @@ export function BetaProcessApp(props: BetaProcessAppProps) {
           setAmount={setAmount}
           setAdapter={setAdapter}
           command={command}
+          onReviewCandidate={props.onReviewCandidate}
         />
       )}
       <ProcessStatusStrip projection={props.projection} workspace={workspace} />

@@ -537,9 +537,39 @@ export const ProcessSourceHandoff = Schema.Struct({
     operationIds: Schema.optionalKey(Schema.Array(OperationId)),
   }),
   processing: Schema.Struct({
-    availability: Schema.Literal('unavailable'),
+    availability: Schema.Literals(['available', 'unavailable']),
     currentFixtureFacts: Schema.Array(Schema.NonEmptyString),
   }),
+  recommendedSet: Schema.optionalKey(
+    Schema.Struct({
+      candidateCount: NonNegativeInt,
+      includedCount: NonNegativeInt,
+      excludedCount: NonNegativeInt,
+      needsReviewCount: NonNegativeInt,
+      frozen: Schema.Boolean,
+      candidates: Schema.Array(
+        Schema.Struct({
+          assetId: AssetId,
+          assetRevision: AssetRevision,
+          reviewRevision: AssetRevision,
+          platformDecision: Schema.Literals(['include', 'exclude', 'review']),
+          manualDecision: Schema.Literals([
+            'accepted',
+            'rejected',
+            'unreviewed',
+          ]),
+          effectiveDecision: Schema.Literals([
+            'include',
+            'exclude',
+            'needsReview',
+          ]),
+          hardIneligible: Schema.Boolean,
+          measuredSharpness: NonNegativeNumber,
+          reason: Schema.NonEmptyString,
+        }),
+      ),
+    }),
+  ),
 })
 
 export const LibraryPage = Schema.Struct({

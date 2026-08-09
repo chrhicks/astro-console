@@ -51,6 +51,13 @@ const LibraryAssetRow = Schema.Struct({
   comparison_group_id: Schema.String,
   detail: Schema.String,
 })
+const ProcessCandidateRow = Schema.Struct({
+  asset_id: Schema.String,
+  revision: Schema.Int,
+  availability: LibraryAssetRow.fields.availability,
+  sharpness: Schema.Number,
+  detail: Schema.String,
+})
 const LibraryDetail = Schema.Struct({
   assetId: Schema.String,
   revision: Schema.Int,
@@ -211,6 +218,10 @@ export const sqliteLibraryServiceLayer = (
             return yield* Effect.fail(
               new LibraryAssetUnavailable({ reason: 'AssetUnavailable' }),
             )
+          const recommendedSet = processRecommendedSet(
+            db,
+            detail.comparisonGroupId,
+          )
           return yield* Schema.decodeUnknownEffect(ProcessSourceHandoff)({
             sourceAssetId: detail.assetId,
             revision: detail.revision,
@@ -220,11 +231,13 @@ export const sqliteLibraryServiceLayer = (
             comparisonGroupId: detail.comparisonGroupId,
             lineage: detail.lineage,
             processing: {
-              availability: 'unavailable',
+              availability: 'available',
               currentFixtureFacts: [
-                'Interactive processing is not available in this workspace.',
+                'Processing uses a deterministic file-backed adapter.',
+                'This adapter does not claim Siril or RC Astro compatibility.',
               ],
             },
+            recommendedSet,
           }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
         }),
         download: Effect.fn('Server.LibraryService.download')(
@@ -254,6 +267,75 @@ export const sqliteLibraryServiceLayer = (
       }),
     ),
   )
+
+export function processRecommendedSet(
+  db: DatabaseSync,
+  comparisonGroupId: string,
+) {
+  const rows = Schema.decodeUnknownSync(Schema.Array(ProcessCandidateRow))(
+    db
+      .prepare(
+        "SELECT asset_id,revision,availability,sharpness,detail FROM library_assets WHERE comparison_group_id=? AND role='original' ORDER BY sharpness DESC,asset_id ASC",
+      )
+      .all(comparisonGroupId),
+  )
+  const candidates = rows.map((row) => {
+    const stored = Schema.decodeUnknownSync(LibraryDetail)(
+      JSON.parse(row.detail),
+    )
+    const manualDecision = stored.review?.decision ?? 'unreviewed'
+    const hardIneligible = row.availability !== 'availableLocally'
+    const inspectionDecision =
+      stored.inspection?._tag === 'Available'
+        ? stored.inspection.rationale.decision
+        : 'unreviewed'
+    const platformDecision = hardIneligible
+      ? ('exclude' as const)
+      : inspectionDecision === 'accepted'
+        ? ('include' as const)
+        : inspectionDecision === 'rejected'
+          ? ('exclude' as const)
+          : ('review' as const)
+    const effectiveDecision = hardIneligible
+      ? ('exclude' as const)
+      : manualDecision === 'accepted'
+        ? ('include' as const)
+        : manualDecision === 'rejected'
+          ? ('exclude' as const)
+          : platformDecision === 'review'
+            ? ('needsReview' as const)
+            : platformDecision
+    return {
+      assetId: row.asset_id,
+      assetRevision: row.revision,
+      reviewRevision: stored.review?.revision ?? 0,
+      platformDecision,
+      manualDecision,
+      effectiveDecision,
+      hardIneligible,
+      measuredSharpness: row.sharpness,
+      reason: hardIneligible
+        ? 'Original bytes are not available locally.'
+        : stored.inspection?._tag === 'Available'
+          ? stored.inspection.rationale.summary
+          : 'Inspection evidence is unavailable; review this frame.',
+    }
+  })
+  const includedCount = candidates.filter(
+    (candidate) => candidate.effectiveDecision === 'include',
+  ).length
+  const needsReviewCount = candidates.filter(
+    (candidate) => candidate.effectiveDecision === 'needsReview',
+  ).length
+  return {
+    candidateCount: candidates.length,
+    includedCount,
+    excludedCount: candidates.length - includedCount - needsReviewCount,
+    needsReviewCount,
+    frozen: false,
+    candidates,
+  }
+}
 
 const projectLibraryRow = Effect.fnUntraced(function* (
   asset: typeof LibraryAssetRow.Type,

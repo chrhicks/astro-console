@@ -41,6 +41,13 @@
 .beta-process-empty .nb-attention {
   max-width: 760px;
 }
+.beta-process-review {
+  min-width: 0;
+}
+.beta-process-review .nb-evidence,
+.beta-process-review .nb-evidence-canvas {
+  min-height: 150px;
+}
 .beta-process-operation a {
   color: var(--nb-accent);
   font: 9px var(--nb-font-mono);

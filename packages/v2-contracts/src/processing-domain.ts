@@ -7,6 +7,7 @@ import {
   CheckpointId,
   FindingId,
   NonNegativeInt,
+  NonNegativeNumber,
   OperationId,
   PreviewId,
   ProcessingOutputId,
@@ -90,12 +91,32 @@ export const AssistantFinding = Schema.Struct({
   input: ProcessingImageRef,
 })
 
+export const FrozenProcessingSelection = Schema.Struct({
+  comparisonGroupId: Schema.NonEmptyString,
+  candidateCount: NonNegativeInt,
+  includedCount: NonNegativeInt,
+  excludedCount: NonNegativeInt,
+  candidates: Schema.Array(
+    Schema.Struct({
+      assetId: AssetId,
+      assetRevision: AssetRevision,
+      platformDecision: Schema.Literals(['include', 'exclude', 'review']),
+      manualDecision: Schema.Literals(['accepted', 'rejected', 'unreviewed']),
+      effectiveDecision: Schema.Literals(['include', 'exclude']),
+      hardIneligible: Schema.Boolean,
+      measuredSharpness: NonNegativeNumber,
+      reason: Schema.NonEmptyString,
+    }),
+  ),
+})
+
 export const ProcessingSession = Schema.Struct({
   sessionId: ProcessingSessionId,
   revision: ProcessingRevision,
   lifecycle: Schema.Literals(['active', 'unfinished', 'discarded']),
   phase: Schema.Literals(['build', 'develop']),
   sources: Schema.NonEmptyArray(ProcessingSourceRef),
+  selection: Schema.optionalKey(FrozenProcessingSelection),
   baseImage: Schema.optionalKey(ProcessingImageRef),
   history: Schema.Array(AppliedProcessingOperation),
   historyPosition: NonNegativeInt,

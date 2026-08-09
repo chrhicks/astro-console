@@ -48,8 +48,9 @@ verify that SigNoz shows `astro-console-origin`, the expected release resource,
 one stable `HTTP ...` root span, its nested operation spans, structured
 operation logs, and operation-count metrics. Service health alone does not
 prove telemetry export. Browser-only cursor-gap reasons are not observable by
-the server and have no diagnostics endpoint. Queue depth and SQLite internals
-remain follow-on signals.
+the server and have no diagnostics endpoint. App-owned executor, publisher,
+and Process work expose bounded SQLite or durable-backlog signals; raw SQLite
+internals remain outside the telemetry contract.
 
 ## Local plate solver
 

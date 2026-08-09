@@ -218,6 +218,12 @@ const commandFixtures: ReadonlyArray<unknown> = [
     idempotencyKey: 'i-19',
   },
   {
+    _tag: 'RetryProcessingBuild',
+    ...processingFreshness,
+    checkpoint: 'debayer',
+    idempotencyKey: 'i-19-build',
+  },
+  {
     _tag: 'SwitchProcessingContext',
     ...processingFreshness,
     destination: { _tag: 'SavedAsset', assetId: 'asset-2' },
@@ -252,7 +258,7 @@ const commandFixtures: ReadonlyArray<unknown> = [
 
 describe('Gate 5 contract foundation', () => {
   it('keeps the accepted command vocabulary closed', () => {
-    assert.equal(commandTags.length, 40)
+    assert.equal(commandTags.length, 41)
     assert.deepEqual(commandTags, acceptedCommandTags)
     assert.deepEqual(
       commandTags,

@@ -1,5 +1,8 @@
 import { Effect, Exit, Fiber, Match, Schedule, Schema, Scope } from 'effect'
+import { randomUUID } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   BootstrapHttpSuccessEnvelope,
   CommandHttpFailureEnvelope,
@@ -125,7 +128,11 @@ import { tracedLibraryOperation } from '../observability/library-telemetry.ts'
 import {
   annotateProcessCommandIntent,
   processCommandIntent,
+  processCommandSelection,
+  recordProcessBacklog,
+  recordProcessPressureMetric,
   tracedProcessOperation,
+  tracedProcessWorker,
 } from '../observability/process-telemetry.ts'
 import { tracedExecutorWork } from '../observability/executor-telemetry.ts'
 import { tracedProjectionDelivery } from '../observability/projection-telemetry.ts'
@@ -147,6 +154,7 @@ import {
   tracedSqliteOperation,
 } from '../observability/sqlite-telemetry.ts'
 import { createRunExecutorWorker } from '../workers/run-executor-worker.ts'
+import { createProcessWorkWorker } from '../workers/process-work-worker.ts'
 import {
   acquireSqliteRepository,
   polarSession,
@@ -235,6 +243,8 @@ export function createLocalWebService(
     readonly runExecutorProviderOrigin?: string
     readonly telemetry?: OriginTelemetry
     readonly admissionObservability?: AdmissionObservation
+    readonly processWorkRoot?: string
+    readonly processFailBuildStage?: 'align'
   } = {},
 ) {
   const database = openOriginDatabase(databasePath)
@@ -628,6 +638,42 @@ export function createLocalWebService(
             Effect.repeat(Schedule.spaced('250 millis')),
           ),
         )
+  const processWorkWorker = createProcessWorkWorker({
+    database,
+    outputRoot:
+      options.processWorkRoot ??
+      (databasePath === ':memory:'
+        ? join(tmpdir(), `astro-console-process-${randomUUID()}`)
+        : `${databasePath}.process-work`),
+    ...(options.processFailBuildStage === undefined
+      ? {}
+      : { failBuildStage: options.processFailBuildStage }),
+    ...(options.telemetry === undefined
+      ? {}
+      : {
+          traceWork: (kind, stage, run) =>
+            telemetry.runSync(
+              tracedProcessWorker(kind, stage, Effect.sync(run)),
+            ),
+          observeBacklog: (count, oldestAgeSeconds) =>
+            telemetry.runSync(
+              Effect.all([
+                recordProcessBacklog(count, oldestAgeSeconds),
+                recordSqliteBacklog('process', count),
+              ]),
+            ),
+          observePressure: (state) =>
+            telemetry.runSync(recordProcessPressureMetric(state)),
+        }),
+  })
+  const processWorkFiber = Effect.runFork(
+    Effect.sync(() => processWorkWorker.pass()).pipe(
+      Effect.catch((cause) =>
+        Effect.logError('ProcessWorkWorker.pass failed', cause),
+      ),
+      Effect.repeat(Schedule.spaced('250 millis')),
+    ),
+  )
   const targetAcquisitionProvider =
     options.targetAcquisitionProvider ??
     (options.configuredTargetProvider !== undefined &&
@@ -1035,7 +1081,10 @@ export function createLocalWebService(
                 return (
                   intent === undefined
                     ? Effect.void
-                    : annotateProcessCommandIntent(intent)
+                    : annotateProcessCommandIntent(
+                        intent,
+                        processCommandSelection(raw),
+                      )
                 ).pipe(
                   Effect.flatMap(() =>
                     Effect.sync(() => {
@@ -1265,57 +1314,66 @@ export function createLocalWebService(
                     ),
             ),
           )
-          const body =
-            result._tag === 'Observed'
-              ? CameraCommandResponse.cases.Accepted.make({
-                  observation: result.observation,
-                })
-              : result._tag === 'Rejected'
-                ? CameraCommandResponse.cases.Rejected.make({
-                    summary: result.summary,
-                  })
-                : CameraCommandResponse.cases.Unavailable.make({
-                    summary: result.summary,
-                  })
-          const status = result._tag === 'Observed' ? 202 : 503
+          const cameraOutcome = Match.value(result).pipe(
+            Match.when({ _tag: 'Observed' }, (observed) => ({
+              observed: true as const,
+              body: CameraCommandResponse.cases.Accepted.make({
+                observation: observed.observation,
+              }),
+              observation: observed.observation,
+              summary: 'Camera state was read after acknowledgement.',
+            })),
+            Match.when({ _tag: 'Rejected' }, (rejected) => ({
+              observed: false as const,
+              body: CameraCommandResponse.cases.Rejected.make({
+                summary: rejected.summary,
+              }),
+              summary: rejected.summary,
+            })),
+            Match.orElse((unavailable) => ({
+              observed: false as const,
+              body: CameraCommandResponse.cases.Unavailable.make({
+                summary: unavailable.summary,
+              }),
+              summary: unavailable.summary,
+            })),
+          )
+          const body = cameraOutcome.body
+          const status = cameraOutcome.observed ? 202 : 503
           const observedAt = new Date().toISOString()
           const previous = current.run.preflight
           const preflight = Schema.decodeUnknownSync(PreflightSnapshot)({
             observedAt,
-            verdict:
-              result._tag === 'Observed'
-                ? (previous?.verdict ?? 'unknown')
-                : 'unavailable',
-            nextAction:
-              result._tag === 'Observed'
-                ? (previous?.nextAction ??
-                  'Camera state was read after the command acknowledgement.')
-                : 'Restore the camera provider, then refresh its state. The command will not replay.',
+            verdict: cameraOutcome.observed
+              ? (previous?.verdict ?? 'unknown')
+              : 'unavailable',
+            nextAction: cameraOutcome.observed
+              ? (previous?.nextAction ??
+                'Camera state was read after the command acknowledgement.')
+              : 'Restore the camera provider, then refresh its state. The command will not replay.',
             checks: previous?.checks ?? [
               {
                 key: 'camera-provider',
-                state: result._tag === 'Observed' ? 'unknown' : 'unavailable',
+                state: cameraOutcome.observed ? 'unknown' : 'unavailable',
                 observedAt,
-                reason:
-                  result._tag === 'Observed'
-                    ? 'No prior full rig inventory is available.'
-                    : result.summary,
+                reason: cameraOutcome.observed
+                  ? 'No prior full rig inventory is available.'
+                  : cameraOutcome.summary,
               },
             ],
             ...(previous?.rig === undefined ? {} : { rig: previous.rig }),
-            camera:
-              result._tag === 'Observed'
-                ? result.observation
-                : { observedAt, cameraState: 'unknown' },
+            camera: cameraOutcome.observed
+              ? cameraOutcome.observation
+              : { observedAt, cameraState: 'unknown' },
           })
           const persisted = stateRepository.persistPreflight(preflight)
           publish('CameraObservationRecorded', persisted.cursor)
-          if (result._tag === 'Observed') {
+          if (cameraOutcome.observed) {
             database
               .prepare(
                 'INSERT OR REPLACE INTO camera_observations (run_id,observation) VALUES (?,?)',
               )
-              .run(current.run.id, JSON.stringify(result.observation))
+              .run(current.run.id, JSON.stringify(cameraOutcome.observation))
           }
           acquireRepository.saveReceipt(
             camera.intent.idempotencyKey,
@@ -1541,6 +1599,7 @@ export function createLocalWebService(
     closed = true
     if (runExecutorFiber !== undefined)
       Effect.runSync(Fiber.interrupt(runExecutorFiber))
+    Effect.runSync(Fiber.interrupt(processWorkFiber))
     Effect.runSync(projectionPublication.close())
     database.close()
   }
@@ -1629,24 +1688,42 @@ export function createLocalWebService(
         outcome: 'rejected' as const,
         reason: 'MaterializationFailed' as const,
       }
+    const input = Schema.decodeUnknownSync(
+      Schema.Record(Schema.String, Schema.Unknown),
+    )(raw)
     const result = ingestCapturedFrame(
-      { ...(raw as object), format: image.value.format },
+      { ...input, format: image.value.format },
       image.value.bytes,
     )
     if (result.outcome === 'accepted') {
-      const row = database
-        .prepare('SELECT detail FROM library_assets WHERE asset_id=?')
-        .get(result.assetId) as { detail: string }
-      const detail = JSON.parse(row.detail) as {
-        representations: Array<unknown>
-      }
-      detail.representations.push({
-        label: 'Preview unavailable for this retained camera original',
-        state: 'unavailable',
-      })
+      const row = Schema.decodeUnknownSync(
+        Schema.Struct({ detail: Schema.String }),
+      )(
+        database
+          .prepare('SELECT detail FROM library_assets WHERE asset_id=?')
+          .get(result.assetId),
+      )
+      const detail = Schema.decodeUnknownSync(
+        Schema.Record(Schema.String, Schema.Unknown),
+      )(JSON.parse(row.detail))
+      const representations = Schema.decodeUnknownSync(
+        Schema.Array(Schema.Unknown),
+      )(detail.representations)
       database
         .prepare('UPDATE library_assets SET detail=? WHERE asset_id=?')
-        .run(JSON.stringify(detail), result.assetId)
+        .run(
+          JSON.stringify({
+            ...detail,
+            representations: [
+              ...representations,
+              {
+                label: 'Preview unavailable for this retained camera original',
+                state: 'unavailable',
+              },
+            ],
+          }),
+          result.assetId,
+        )
     }
     return result
   }
@@ -1707,6 +1784,7 @@ export function createLocalWebService(
     cleanupSavedOrphans,
     advanceFakeRun,
     runExecutorPass: () => runExecutor?.pass(),
+    processWorkPass: () => processWorkWorker.pass(),
     enqueueRunExposureAbort: (runId: string) =>
       runExecutor?.enqueueAbort(runId),
   }

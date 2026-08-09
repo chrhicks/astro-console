@@ -117,6 +117,7 @@ export const commandPolicies = {
   PreviewAssistantSuggestion: { authority: 'owner', requiresDesktop: true },
   MarkAssistantFindingViewed: { authority: 'owner', requiresDesktop: true },
   RetryProcessingStep: { authority: 'owner', requiresDesktop: true },
+  RetryProcessingBuild: { authority: 'owner', requiresDesktop: true },
   SwitchProcessingContext: { authority: 'owner', requiresDesktop: true },
   SaveProcessingArtifacts: { authority: 'owner', requiresDesktop: true },
   DiscardProcessingSession: { authority: 'owner', requiresDesktop: true },

@@ -4,6 +4,8 @@ import {
   LibraryQuery as LibraryQuerySchema,
   LibraryCursor,
   LibraryQueryId,
+  ReviewAssetRequest,
+  AssetRevision,
 } from '@astro-console/v2-contracts'
 import { Effect, Layer } from 'effect'
 import {
@@ -144,6 +146,46 @@ test('decodes a direct Process source handoff without a session', async () => {
     ),
   )
   assert.deepEqual(result, handoff)
+})
+
+test('decodes a durable typed review result for Process source review', async () => {
+  const review = await Effect.runPromise(
+    Effect.gen(function* () {
+      const client = yield* LibraryClient
+      return yield* client.reviewAsset(
+        'asset-1',
+        ReviewAssetRequest.make({
+          expectedAssetRevision: AssetRevision.make(1),
+          expectedReviewRevision: AssetRevision.make(0),
+          decision: 'accepted',
+          idempotencyKey: 'review-process-source',
+        }),
+      )
+    }).pipe(
+      Effect.provide(layer),
+      Effect.provide(
+        Layer.succeed(
+          LibraryTransport,
+          LibraryTransport.of({
+            loadPage: () => Effect.die('unused'),
+            loadDetail: () => Effect.die('unused'),
+            loadProcessSourceHandoff: () => Effect.die('unused'),
+            reviewAsset: () =>
+              Effect.succeed({
+                outcome: 'accepted',
+                review: {
+                  revision: 1,
+                  decision: 'accepted',
+                  updatedAt: '2026-08-09T00:00:00.000Z',
+                },
+              }),
+          }),
+        ),
+      ),
+    ),
+  )
+  assert.equal(review.decision, 'accepted')
+  assert.equal(review.revision, 1)
 })
 
 test('keeps Process source route failures unavailable', async () => {

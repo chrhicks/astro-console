@@ -77,6 +77,7 @@ import { versionedSemanticHash } from './semantic-hash.js'
 const ProcessCommand = Schema.TaggedUnion({
   StartProcessingSession: {
     sourceAssetIds: Command.cases.StartProcessingSession.fields.sourceAssetIds,
+    selection: Command.cases.StartProcessingSession.fields.selection,
     idempotencyKey: Command.cases.StartProcessingSession.fields.idempotencyKey,
   },
   ResumeProcessingSession: {
@@ -129,6 +130,7 @@ export const ProcessingAction = Schema.Literals([
   'PreviewAssistantSuggestion',
   'MarkAssistantFindingViewed',
   'RetryProcessingStep',
+  'RetryProcessingBuild',
   'SwitchProcessingContext',
   'SaveProcessingArtifacts',
   'DiscardProcessingSession',
@@ -174,6 +176,40 @@ export const ProcessingProjection = Schema.Struct({
   ),
   assets: Schema.Array(LibraryAsset),
   pressure: PressureProjection,
+  work: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        sessionId: ProcessingSessionId,
+        kind: Schema.Literals([
+          'build',
+          'preview',
+          'apply',
+          'retry',
+          'save',
+          'cleanup',
+        ]),
+        state: Schema.Literals([
+          'pending',
+          'claimed',
+          'failed',
+          'settled',
+          'superseded',
+        ]),
+        stage: Schema.optionalKey(
+          Schema.Literals([
+            'validate',
+            'calibrate',
+            'debayer',
+            'align',
+            'evaluate',
+            'stack',
+          ]),
+        ),
+        checkpoint: Schema.optionalKey(Schema.NonEmptyString),
+        attempts: NonNegativeInt,
+      }),
+    ),
+  ),
 })
 
 export interface ProcessingProjection extends Schema.Schema.Type<

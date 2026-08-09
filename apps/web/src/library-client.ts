@@ -4,6 +4,8 @@ import {
   LibraryPage as LibraryPageSchema,
   LibraryQuery as LibraryQuerySchema,
   ProcessSourceHandoff as ProcessSourceHandoffSchema,
+  AssetReview,
+  ReviewAssetRequest,
 } from '@astro-console/v2-contracts'
 
 export type LibraryAssetDetail = Schema.Schema.Type<
@@ -14,6 +16,11 @@ export type LibraryQuery = Schema.Schema.Type<typeof LibraryQuerySchema>
 export type ProcessSourceHandoff = Schema.Schema.Type<
   typeof ProcessSourceHandoffSchema
 >
+export type ReviewRequest = Schema.Schema.Type<typeof ReviewAssetRequest>
+const ReviewResponse = Schema.Struct({
+  outcome: Schema.Literal('accepted'),
+  review: AssetReview,
+})
 
 export class LibraryNotFound extends Schema.TaggedErrorClass<LibraryNotFound>()(
   'Web.LibraryNotFound',
@@ -43,6 +50,10 @@ export interface LibraryTransportShape {
     unknown,
     LibraryNotFound | LibraryAssetUnavailable | LibraryUnavailable
   >
+  readonly reviewAsset?: (
+    assetId: string,
+    request: ReviewRequest,
+  ) => Effect.Effect<unknown, LibraryUnavailable>
 }
 
 export class LibraryTransport extends Context.Service<
@@ -63,6 +74,10 @@ export interface LibraryClientShape {
     ProcessSourceHandoff,
     LibraryNotFound | LibraryAssetUnavailable | LibraryUnavailable
   >
+  readonly reviewAsset: (
+    assetId: string,
+    request: ReviewRequest,
+  ) => Effect.Effect<typeof AssetReview.Type, LibraryUnavailable>
 }
 
 export class LibraryClient extends Context.Service<
@@ -125,6 +140,33 @@ export const layer = Layer.effect(
           )
         },
       ),
+      reviewAsset: Effect.fn('LibraryClient.reviewAsset')(function* (
+        assetId: string,
+        request: ReviewRequest,
+      ) {
+        const input = yield* Schema.decodeUnknownEffect(ReviewAssetRequest)(
+          request,
+        ).pipe(
+          Effect.mapError(
+            () =>
+              new LibraryUnavailable({ reason: 'Review input is invalid.' }),
+          ),
+        )
+        if (transport.reviewAsset === undefined)
+          return yield* Effect.fail(
+            new LibraryUnavailable({ reason: 'Review is unavailable.' }),
+          )
+        const response = yield* transport.reviewAsset(assetId, input)
+        const decoded = yield* Schema.decodeUnknownEffect(ReviewResponse)(
+          response,
+        ).pipe(
+          Effect.mapError(
+            () =>
+              new LibraryUnavailable({ reason: 'Review was not accepted.' }),
+          ),
+        )
+        return decoded.review
+      }),
     })
   }),
 )
@@ -200,6 +242,31 @@ export const browserLibraryTransportLayer = Layer.succeed(
         true,
         true,
       ),
+    reviewAsset: (assetId, request) =>
+      Effect.tryPromise({
+        try: async (signal) => {
+          const response = await fetch(
+            `/api/library/assets/${encodeURIComponent(assetId)}/review`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(request),
+              signal,
+            },
+          )
+          if (!response.ok)
+            throw new LibraryUnavailable({
+              reason: 'The review was not accepted.',
+            })
+          return response.json()
+        },
+        catch: (error) =>
+          error instanceof LibraryUnavailable
+            ? error
+            : new LibraryUnavailable({
+                reason: 'The review service is unavailable.',
+              }),
+      }),
   }),
 )
 
