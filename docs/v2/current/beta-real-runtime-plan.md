@@ -1,6 +1,6 @@
 # Nightbook Beta Real-Runtime Plan
 
-Status: **accepted — supervised live camera-to-Library proof complete; live abort pending**
+Status: **accepted — simulator Acquire preparation complete; outdoor proof and optional live abort pending**
 
 Accepted: August 8, 2026
 
@@ -210,10 +210,19 @@ download, and restart boundary. It does not prove sky image quality because the
 camera was covered indoors. A separate owner-observed live abort remains
 pending if required for this delivery step.
 
-### 6. Outdoor Acquire and modest capture
+### 6. Prepare live Acquire indoors, then complete outdoor proof
 
-- With the owner present, add bounded telescope slew, correction, and park
-  confirmation behind the service.
+- Activate a configured Alpaca target provider behind the durable Acquire
+  service and connect retained frames to the local solve worker.
+- Prove the configured-provider workflow, claim-before-write behavior,
+  reconciliation, and restart without replay through the simulator before a
+  physical command.
+- Keep the first bounded completion behavior at `hold`; do not add park or
+  filter-wheel behavior incidentally.
+- With the owner present, use only an approved small indoor movement or live
+  abort when it supplies missing provider evidence.
+- During the outdoor proof, use bounded telescope slew and correction behind
+  the service.
 - Use the existing local solver for image-backed target verification.
 - Complete Preflight, Session Acquire, Target Acquire, Capture, Recover, and
   Complete for one selected target and rig.
@@ -232,19 +241,26 @@ final Capture uses the centered frame. These facts do not claim a live solver
 invocation or physical hardware movement. This bounded development executor
 accepts only `hold` completion; it rejects `park` before a provider write and
 does not claim park confirmation. The owner-observed outdoor half of this step
-remains open.
+remains open. The accepted simulator checkpoint is `cde00c9`
+(`feat: simulate deep-sky target acquisition`).
 
-### 7. Complete Library and Process
+### 7. Complete beta Library judgment and Process entry
 
-- Finish Library review, rating, annotation, compare, related representations,
-  delivery lifecycle, and Process-output lineage against real assets.
+- Finish Library organization, review, rating, annotation, related-frame
+  comparison, representation state, delivery lifecycle, and Process-output
+  lineage against real assets.
+- Make `Open in Process` an exact service-owned handoff from an eligible local
+  asset while keeping phone Library evidence read-only.
+
+### 8. Move Process onto worker-owned execution
+
 - Replace the synchronous Process simulation wrapper with durable worker-owned
   Build and Develop workflows, checkpoints, retry, save, discard, and measured
   pressure.
 - Select one production processing adapter only through a separate owner
   decision; current V2.1 does not yet select one.
 
-### 8. Promote the beta
+### 9. Audit and promote the beta
 
 - Verify every exact Nightbook workflow and shell state against current service
   truth.

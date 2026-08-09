@@ -1,6 +1,6 @@
 # V2.1 Delivery Plan — Real Alpaca Rig Operation
 
-Status: **accepted — Phases 1–4 complete**
+Status: **accepted — Phases 1–4 complete; Phase 5 simulator preparation complete**
 
 V2.1 moves the V2.0 service from deterministic provider proof to one bounded,
 real-rig operation path. Alpaca is the only hardware integration boundary for
@@ -179,6 +179,7 @@ enters bounded Recover and succeeds only after one materially changed retry.
 The development path uses standard loopback Alpaca telescope and camera
 traffic with durable per-attempt write claims. It accepts `hold` completion
 only and does not claim park confirmation.
+
 The remaining Phase 5 proof is the owner-observed outdoor provider and physical
 run; simulation does not satisfy it.
 
@@ -186,6 +187,23 @@ Exit evidence: the service record, captured original, solve evidence, and
 Library review agree on the same outdoor attempt. The proof states what the
 device confirmed, what image evidence confirmed, and any remaining physical
 uncertainty.
+
+## Accepted Follow-on Order
+
+The owner accepted these as the next four delivery items on August 9, 2026:
+
+1. prepare the configured live Acquire and local-solver path indoors, then
+   leave physical pointing, centering, and sky-quality proof for the supervised
+   outdoor run;
+2. complete the beta Library judgment, comparison, and `Open in Process`
+   workflow with retained real assets;
+3. replace the Process simulation wrapper with durable worker-owned Build and
+   Develop execution; and
+4. audit all four Nightbook beta workspaces and make route promotion an
+   explicit owner decision.
+
+The detailed scope and proof boundaries remain in the
+[Nightbook beta real-runtime plan](beta-real-runtime-plan.md).
 
 ## Implementation Rules
 

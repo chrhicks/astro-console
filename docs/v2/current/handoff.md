@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phase 4 complete; supervised live camera-to-Library proof complete**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; Phase 5 simulator Acquire preparation complete**
 
 ## Current Position
 
@@ -8,7 +8,9 @@ Astro Console provides a rig-local service and web workspaces for Plan,
 Observe, Library, and Process. V2.0 includes remote viewing, bounded shared
 desktop control, durable service-owned state, and reconnect behavior. V2.1
 Phases 1–4 add one configured Alpaca rig boundary, bounded camera exposure and
-abort, immutable original intake, and local solve evidence.
+abort, immutable original intake, and local solve evidence. Phase 5 simulator
+preparation adds the complete beta target-acquisition and recovery journey; the
+owner-observed outdoor half remains open.
 
 The existing workspace presentation remains the default route. It is retained
 only until the newer beta presentation is ready to replace it; its local visual
@@ -112,10 +114,13 @@ This live run found and closed one provider timing gap. ASCOM can acknowledge
 `StartExposure` before its first state read changes from idle to exposing. The
 executor now waits for at most two seconds with GET-only observation after an
 acknowledgement. It never replays the write; persistent idle still becomes an
-ambiguous Recover result. The full server suite now passes 151/151.
+ambiguous Recover result. At that checkpoint, the full server suite passed
+151/151.
 
 The corpus remains ignored and local. The first foundation is committed as
-`10e5b34` (`feat: add beta real-truth foundation`).
+`10e5b34` (`feat: add beta real-truth foundation`). The latest accepted
+simulator Acquire checkpoint is `cde00c9`
+(`feat: simulate deep-sky target acquisition`).
 
 ## Development Simulation Inspection
 
@@ -127,22 +132,35 @@ referenced local FITS copies against the committed SHA-256 manifest.
 
 All beta workspaces show a persistent **Simulation - not live hardware** strip.
 Desktop owners can select and reset scenarios and advance deterministic time.
-**Load** changes simulator state only. The isolated inspection service installs
-one development-only M101 `cameraOnly` Plan with one 15-second frame. The user
-then follows the normal beta workflow: accept the definition, start it, refresh
-Preflight in Observe, inspect durable work during Capture, and use **Advance
-16s** to advance simulator time. Observe then reaches Verify after the service
-retrieves and retains the frame. Select **Review captured frame in Library** to
-open the exact beta Library detail, inspect the real pixel preview, download the
-local original, and record an Accept or Reject review. The browser sends no
-provider exposure command or completion metadata. Phone and read-only clients
-see the same context without mutation controls.
+**Load** changes simulator state only; it does not replace the installed Plan
+or provider. When a loaded scenario does not match the launch scenario, the UI
+shows the exact `npm run dev:sim:inspect -- --scenario=...` restart command
+instead of advertising an incompatible workflow.
 
-The supervised executor holds at Verify after Library retention. Definitions
-outside the current boundary -- more than one sequence,
-more than one frame, deep-sky acquisition, or a camera-only exposure over 60
-seconds -- fail before a camera write. Development simulation also requires the
-executor Alpaca origin to match the loopback simulator origin.
+The normal `exposure-success` launch installs one development-only M101
+`cameraOnly` Plan with one 15-second frame. Accept and start the definition,
+refresh Preflight in Observe, inspect durable work during Capture, and use
+**Advance 16s**. Observe reaches Verify after the service retrieves and retains
+the frame. **Review captured frame in Library** opens the exact beta detail for
+preview, download, and Accept or Reject review.
+
+The `target-evidence-progression` launch installs the NGC 7000 deep-sky Plan.
+The normal Plan and Observe controls reach a retained initial solve, explicit
+correction approval, provisional acknowledgement, a fresh centered verification
+solve, final Capture, **Advance 121s**, Complete, and the exact Library handoff.
+The `solve-success-no-solution` launch uses two clouded M101 results to enter
+Recover, exposes one changed 15-second retry, then reaches final Capture and
+Library intake after **Advance 16s**. Phone and read-only clients keep the same
+evidence without mutation controls.
+
+The camera-only executor holds at Verify after Library retention. The bounded
+development target executor reaches Complete only for one deep-sky sequence,
+one frame of at most 120 seconds, a matching launch scenario, and `hold`
+completion. More than one sequence or frame, camera-only exposure over 60
+seconds, target exposure over 120 seconds, and `park` fail before a provider
+write. Simulator target Skip and Abort remain hidden and are rejected without
+state change. Development execution also requires the executor Alpaca origin to
+match the loopback simulator origin.
 
 ImageBytes intake validates metadata, dimensions, exact payload length, and a
 64 MiB transfer limit even when `Content-Length` is absent. Binary ImageBytes
@@ -182,15 +200,32 @@ production deployment of the beta, mount movement, live abort behavior,
 production processing tools, or sky image quality from the covered indoor
 frame.
 
-## Next Action
+## Accepted Next Four Items
 
-Prepare the supervised live half of bounded outdoor Acquire and modest capture.
-With the owner present, choose one safe target and use only a small slew,
-image-backed solve, bounded correction, focus check, and modest capture. Keep
-the unavailable filter wheel explicit and ask before any larger movement or
-exposure sequence. Compare the live provider acknowledgement, later device
-observation, solve evidence, retained original, and Library review without
-claiming unattended operation. A separate live abort remains optional.
+1. **Prepare live Acquire indoors.** Activate a configured Alpaca target
+   provider behind the durable Acquire service, connect retained camera frames
+   to the local solve worker, and preserve the existing claim-before-write and
+   restart-without-replay rules. Prove the complete path through the simulator
+   first. GET-only hardware checks remain indoor-safe; any small mount movement
+   or live abort requires the owner to be present. Physical pointing,
+   image-backed centering, and sky quality remain outdoor proof.
+2. **Complete beta Library judgment and Process entry.** Add the Nightbook
+   catalog, organization, rating, annotation, related-frame comparison,
+   representation state, exact lineage, and `Open in Process` handoff using
+   retained real-frame assets. Phone remains a useful read-only projection.
+3. **Move Process onto worker-owned execution.** Replace the synchronous
+   simulation wrapper with durable Build and Develop work, checkpoints, retry,
+   synchronized Preview, explicit Apply history, save, discard, and measured
+   host-pressure behavior. Selecting a production processing adapter remains a
+   separate owner decision.
+4. **Audit and promote the beta.** Verify all four exact Nightbook workflows
+   and shell states against service truth, run functional and Designer review
+   at wide, compact, and 390 px phone widths, and make route promotion an
+   explicit owner decision. Retire the old presentation only after promotion.
+
+The unavailable filter wheel stays explicit throughout this sequence. The
+current bounded target path continues to use `hold`; park is not added as an
+incidental part of indoor preparation.
 
 Completed chronology and former authority are indexed in the
 [documentation archive](../archive/README.md).

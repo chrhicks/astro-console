@@ -1,11 +1,12 @@
 # V2 Product Specification
 
-Status: **living product specification — V2.0 complete; V2.1 Phases 1–4 complete**
+Status: **living product specification — V2.0 complete; V2.1 Phases 1–4 and Phase 5 simulator preparation complete**
 
-Last reconciled: August 5, 2026 against the delivered V2.0 workspaces and
-remote-access model, the V2.1 Alpaca inventory and camera boundaries, and the
-local plate-solve evidence worker. V2.1 outdoor acquisition and capture remain
-planned work.
+Last reconciled: August 9, 2026 against the delivered V2.0 workspaces and
+remote-access model, the V2.1 Alpaca inventory and camera boundaries, the local
+plate-solve evidence worker, and the simulator-backed target-acquisition and
+recovery journey. Owner-observed outdoor acquisition and capture remain planned
+work.
 
 Read this only when workspace behavior or product-entity detail is needed. The
 default V2 context begins at [Start Here](../README.md).
@@ -673,9 +674,9 @@ reintroduced without new evidence:
 - the final controller reconnect-grace duration and control-request audience;
 - how several accepted active-run changes are summarized in durable history;
 - a future control-capable phone experience;
-- V2.1 Phase 5 outdoor target selection, slew, image-backed centering, and a
-  modest captured target; Phases 1–4 do not establish sky position or image
-  quality;
+- V2.1 Phase 5 owner-observed outdoor target selection, slew, image-backed
+  centering, and a modest captured target; simulator preparation does not
+  establish physical sky position or image quality;
 - unattended or all-night operation, automatic multi-target operation, and
   simultaneous control of more than one configured rig;
 - a generic Alpaca configuration or device-control panel;
