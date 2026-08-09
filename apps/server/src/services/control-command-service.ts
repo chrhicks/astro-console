@@ -128,6 +128,10 @@ export const executeControlRequest = Effect.fn(
   const command = yield* Schema.decodeUnknownEffect(controlEnvelopeCommand)(
     envelope.command,
   ).pipe(Effect.mapError(() => new CommandInputInvalid()))
+  yield* Effect.annotateCurrentSpan({
+    'astro.workspace': 'control',
+    'astro.command.intent': command._tag,
+  })
   const persistence = yield* ControlPersistence
   const service = yield* ControlService
   const transition = yield* service.execute(
@@ -135,6 +139,12 @@ export const executeControlRequest = Effect.fn(
     command,
     identity,
   )
+  yield* Effect.annotateCurrentSpan({
+    'astro.command.outcome':
+      transition.status >= 200 && transition.status < 300
+        ? 'accepted'
+        : 'rejected',
+  })
   if (transition.event !== undefined)
     yield* persistence.publish(transition.event.type, transition.event.cursor)
   return { status: transition.status, body: transition.body }

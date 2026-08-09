@@ -114,6 +114,10 @@ export const executeTargetAcquisitionCommand = Effect.fn(
       _tag: 'Rejected' as const,
       summary: 'The target acquisition command is invalid.',
     }
+  yield* Effect.annotateCurrentSpan({
+    'astro.workspace': 'acquire',
+    'astro.command.intent': input.value.intent._tag,
+  })
   const persistence = yield* AcquirePersistence
   const session = persistence.current()
   if (session === undefined || session.acquisitionMethod === undefined)

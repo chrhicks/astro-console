@@ -110,6 +110,12 @@ import {
   executeCameraCommand,
   type CameraProviderShape,
 } from '../services/camera-command-service.ts'
+import {
+  createOriginTelemetry,
+  defaultOriginTelemetry,
+  tracedHttpRequest,
+  type OriginTelemetry,
+} from '../observability/origin-telemetry.ts'
 import { createRunExecutorWorker } from '../workers/run-executor-worker.ts'
 import {
   acquireSqliteRepository,
@@ -197,6 +203,7 @@ export function createLocalWebService(
     readonly simulation?: DevelopmentSimulationConfig
     readonly runExecutionContext?: typeof RunExecutionContext.Type
     readonly runExecutorProviderOrigin?: string
+    readonly telemetry?: OriginTelemetry
   } = {},
 ) {
   const database = openOriginDatabase(databasePath)
@@ -545,6 +552,21 @@ export function createLocalWebService(
             ? {}
             : { frameInspectionStorage: options.frameInspectionStorage }),
           publish,
+          ...(options.telemetry === undefined
+            ? {}
+            : {
+                traceWork: (kind, run) =>
+                  telemetry.runPromise(
+                    Effect.promise(run).pipe(
+                      Effect.withSpan('RunExecutor.pass', {
+                        attributes: {
+                          'astro.workspace': 'observe',
+                          'astro.executor.work.kind': kind,
+                        },
+                      }),
+                    ),
+                  ),
+              }),
         })
   const runExecutorFiber =
     runExecutor === undefined
@@ -608,6 +630,12 @@ export function createLocalWebService(
       : undefined)
   const cameraProvider = options.cameraProvider
   const developmentSimulation = options.simulation
+  const telemetry = options.telemetry ?? defaultOriginTelemetry
+  const runHttp = <A, E>(
+    response: ServerResponse,
+    input: Parameters<typeof tracedHttpRequest>[1],
+    effect: Effect.Effect<A, E>,
+  ) => telemetry.runPromise(tracedHttpRequest(response, input, effect))
 
   const handler = (requestAdmission: RequestAdmission = identityResolver) =>
     createOriginRouter({
@@ -637,7 +665,13 @@ export function createLocalWebService(
           projectionPublication.stream(request, response, identity),
         ),
       control: (response, identity, request) =>
-        Effect.runPromise(
+        runHttp(
+          response,
+          {
+            method: 'POST',
+            route: '/api/commands/control',
+            workspace: 'control',
+          },
           controlCommandFromEnvelope(
             body(request),
             BodyTooLarge,
@@ -666,8 +700,9 @@ export function createLocalWebService(
                   })),
                 ),
             }),
+            Effect.map(({ status, body }) => json(response, status, body)),
           ),
-        ).then(({ status, body }) => json(response, status, body)),
+        ),
       ...(developmentSimulation === undefined
         ? {}
         : {
@@ -723,22 +758,45 @@ export function createLocalWebService(
               }
             },
           }),
-      planWorkspace: (response) => workspace(response, database, 'plan'),
-      processWorkspace: (response, url, identity) =>
-        url.searchParams.has('sourceAssetId')
-          ? processWorkspace(
-              response,
-              database,
-              url,
-              () => stateRepository.state().snapshotVersion,
-            )
-          : json(response, 200, processSnapshot(database, identity)),
-      libraryPage: (response, url) =>
-        libraryPage(
+      planWorkspace: (response) =>
+        runHttp(
           response,
-          database,
-          url,
-          () => stateRepository.state().snapshotVersion,
+          {
+            method: 'GET',
+            route: '/api/workspaces/plan',
+            workspace: 'plan',
+          },
+          Effect.sync(() => workspace(response, database, 'plan')),
+        ),
+      processWorkspace: (response, url, identity) =>
+        runHttp(
+          response,
+          {
+            method: 'GET',
+            route: '/api/workspaces/process',
+            workspace: 'process',
+          },
+          url.searchParams.has('sourceAssetId')
+            ? processWorkspace(
+                response,
+                database,
+                url,
+                () => stateRepository.state().snapshotVersion,
+              )
+            : Effect.sync(() =>
+                json(response, 200, processSnapshot(database, identity)),
+              ),
+        ),
+      libraryPage: (response, url) =>
+        runHttp(
+          response,
+          { method: 'GET', route: '/api/library', workspace: 'library' },
+          libraryPage(
+            response,
+            database,
+            url,
+            () => stateRepository.state().snapshotVersion,
+          ),
         ),
       libraryDownload: (response, url) =>
         downloadAsset(
@@ -750,11 +808,19 @@ export function createLocalWebService(
           options.capturedFrameStorage?.originalsRoot,
         ),
       libraryDetail: (response, encodedAssetId) =>
-        libraryDetail(
+        runHttp(
           response,
-          database,
-          encodedAssetId,
-          () => stateRepository.state().snapshotVersion,
+          {
+            method: 'GET',
+            route: '/api/library/assets/:assetId',
+            workspace: 'library',
+          },
+          libraryDetail(
+            response,
+            database,
+            encodedAssetId,
+            () => stateRepository.state().snapshotVersion,
+          ),
         ),
       libraryPreview: (response, encodedAssetId, identity) =>
         libraryPreview(
@@ -781,9 +847,31 @@ export function createLocalWebService(
             ),
         ),
       libraryReview: (response, identity, request, encodedAssetId) =>
-        libraryReview(response, database, identity, request, encodedAssetId),
+        runHttp(
+          response,
+          {
+            method: 'POST',
+            route: '/api/library/assets/:assetId/review',
+            workspace: 'library',
+          },
+          Effect.promise(() =>
+            libraryReview(
+              response,
+              database,
+              identity,
+              request,
+              encodedAssetId,
+            ),
+          ),
+        ),
       planCommand: (response, identity, request) =>
-        Effect.runPromise(
+        runHttp(
+          response,
+          {
+            method: 'POST',
+            route: '/api/plan/commands',
+            workspace: 'plan',
+          },
           planCommandFromRequest(
             body(request),
             runRepository,
@@ -804,7 +892,13 @@ export function createLocalWebService(
           ),
         ),
       observeCommand: (response, identity, request) =>
-        Effect.runPromise(
+        runHttp(
+          response,
+          {
+            method: 'POST',
+            route: '/api/observe/commands',
+            workspace: 'observe',
+          },
           observeCommandFromRequest(
             body(request),
             runRepository,
@@ -824,16 +918,32 @@ export function createLocalWebService(
             Effect.map(({ status, body }) => json(response, status, body)),
           ),
         ),
-      processCommand: async (response, identity, request) => {
-        const result = executeProcessCommand(
-          database,
-          await body(request),
-          identity,
-        )
-        if (result.outcome === 'accepted')
-          publish('ProcessingProjected', stateRepository.state().eventCursor)
-        return json(response, result.outcome === 'accepted' ? 202 : 409, result)
-      },
+      processCommand: (response, identity, request) =>
+        runHttp(
+          response,
+          {
+            method: 'POST',
+            route: '/api/process/commands',
+            workspace: 'process',
+          },
+          Effect.promise(async () => {
+            const result = executeProcessCommand(
+              database,
+              await body(request),
+              identity,
+            )
+            if (result.outcome === 'accepted')
+              publish(
+                'ProcessingProjected',
+                stateRepository.state().eventCursor,
+              )
+            return json(
+              response,
+              result.outcome === 'accepted' ? 202 : 409,
+              result,
+            )
+          }),
+        ),
       refreshPreflight: async (response, identity, request) => {
         if (identity.capability !== 'controlCapable')
           return json(
@@ -855,29 +965,39 @@ export function createLocalWebService(
           Effect.flatMap(refreshPreflight),
           Effect.provide(persistence),
         )
-        const result = await Effect.runPromise(
-          options.preflightProvider === undefined
+        return runHttp(
+          response,
+          {
+            method: 'POST',
+            route: '/api/observe/preflight',
+            workspace: 'observe',
+          },
+          (options.preflightProvider === undefined
             ? program
             : program.pipe(
                 Effect.provideService(
                   ReadOnlyPreflightProvider,
                   options.preflightProvider,
                 ),
-              ),
+              )
+          ).pipe(
+            Effect.map((result) => {
+              if ('response' in result) {
+                publish('PreflightRefreshed', result.cursor)
+                return RefreshPreflightResponse.match(result.response, {
+                  Refreshed: (body) => json(response, 200, body),
+                  Rejected: (body) => json(response, 409, body),
+                  Unavailable: (body) => json(response, 503, body),
+                })
+              }
+              return RefreshPreflightResponse.match(result, {
+                Refreshed: (body) => json(response, 200, body),
+                Rejected: (body) => json(response, 409, body),
+                Unavailable: (body) => json(response, 503, body),
+              })
+            }),
+          ),
         )
-        if ('response' in result) {
-          publish('PreflightRefreshed', result.cursor)
-          return RefreshPreflightResponse.match(result.response, {
-            Refreshed: (body) => json(response, 200, body),
-            Rejected: (body) => json(response, 409, body),
-            Unavailable: (body) => json(response, 503, body),
-          })
-        }
-        return RefreshPreflightResponse.match(result, {
-          Refreshed: (body) => json(response, 200, body),
-          Rejected: (body) => json(response, 409, body),
-          Unavailable: (body) => json(response, 503, body),
-        })
       },
       polarCommand: async (response, identity, request) => {
         if (identity.capability !== 'controlCapable')
@@ -958,24 +1078,32 @@ export function createLocalWebService(
                 }),
               },
             )
-            const completed = await ingestCompletedCameraExposure({
-              assetId: `asset-capture-${camera.intent.idempotencyKey}`,
-              frameId: camera.intent.frameId,
-              capturedAt: camera.intent.capturedAt,
-              equipment,
-              capture: {
-                exposureSeconds: camera.intent.exposureSeconds,
-                filter: camera.intent.filter,
-                binning: camera.intent.binning,
-                frameType: camera.intent.frameType,
+            const completed = await runHttp(
+              response,
+              {
+                method: 'POST',
+                route: '/api/acquire/commands',
+                workspace: 'acquire',
               },
-              lineage: {
-                runId: current.run.id,
-                sequenceId: 'camera-exposure',
-                acquisitionId: 'camera-exposure',
-              },
-              idempotencyKey: camera.intent.idempotencyKey,
-            })
+              completedCameraExposure({
+                assetId: `asset-capture-${camera.intent.idempotencyKey}`,
+                frameId: camera.intent.frameId,
+                capturedAt: camera.intent.capturedAt,
+                equipment,
+                capture: {
+                  exposureSeconds: camera.intent.exposureSeconds,
+                  filter: camera.intent.filter,
+                  binning: camera.intent.binning,
+                  frameType: camera.intent.frameType,
+                },
+                lineage: {
+                  runId: current.run.id,
+                  sequenceId: 'camera-exposure',
+                  acquisitionId: 'camera-exposure',
+                },
+                idempotencyKey: camera.intent.idempotencyKey,
+              }),
+            )
             const body =
               completed.outcome === 'accepted'
                 ? CameraCommandResponse.cases.Completed.make({
@@ -1004,7 +1132,13 @@ export function createLocalWebService(
               }),
             },
           )
-          const result = await Effect.runPromise(
+          const result = await runHttp(
+            response,
+            {
+              method: 'POST',
+              route: '/api/acquire/commands',
+              workspace: 'acquire',
+            },
             executeCameraCommand(raw).pipe(
               cameraProvider === undefined
                 ? (effect) => effect
@@ -1203,7 +1337,13 @@ export function createLocalWebService(
           ),
         )
         const result: PolarCommandResult | TargetAcquisitionCommandResult =
-          await Effect.runPromise(
+          await runHttp(
+            response,
+            {
+              method: 'POST',
+              route: '/api/acquire/commands',
+              workspace: 'acquire',
+            },
             program.pipe(
               (effect) =>
                 polarMeasurementProvider === undefined
@@ -1390,6 +1530,12 @@ export function createLocalWebService(
     }
     return result
   }
+  const completedCameraExposure = (raw: unknown) =>
+    Effect.promise(() => ingestCompletedCameraExposure(raw)).pipe(
+      Effect.withSpan('CapturedFrameIntake.complete', {
+        attributes: { 'astro.workspace': 'acquire' },
+      }),
+    )
   const inspectFrame = (assetId: string) =>
     options.frameInspectionStorage === undefined
       ? undefined
@@ -1742,119 +1888,166 @@ export const createLocalOwnerAdmission = () =>
 export const startOrigin = () =>
   runExecutable('origin server', async () => {
     const config = await Effect.runPromise(originServerConfig)
-    const admission = createRemoteReadOnlyAdmission(config)
-    const issuer = configuredDownloadGrantIssuer(config.downloadGrant)
-    const service = createLocalWebService(
-      config.runtime.databasePath,
-      admission,
-      undefined,
-      issuer === undefined ? undefined : { issuer },
-      {
-        ...(config.fixture === undefined ? {} : { fixture: config.fixture }),
-        ...(config.preflightProvider === undefined
-          ? {}
-          : {
-              preflightProvider: alpacaPreflightProvider(
-                config.preflightProvider,
-              ),
-              ...(config.preflightProvider.devices.camera === undefined
-                ? {}
-                : {
-                    cameraProvider: alpacaCameraProvider(
-                      config.preflightProvider,
-                    ),
-                    runExecutorProviderOrigin: new URL(
-                      `http://${config.preflightProvider.host}:${config.preflightProvider.port}`,
-                    ).origin,
-                    ...(config.preflightProvider.devices.camera.uniqueId ===
-                    undefined
-                      ? {}
-                      : {
-                          runExecutionContext: RunExecutionContext.make({
-                            rigId: config.preflightProvider.rigId,
-                            cameraDeviceId:
-                              config.preflightProvider.devices.camera.uniqueId,
-                            ...(config.preflightProvider.devices.telescope
-                              ?.uniqueId === undefined
-                              ? {}
-                              : {
-                                  mountDeviceId:
-                                    config.preflightProvider.devices.telescope
-                                      .uniqueId,
-                                  ...(config.preflightProvider.site ===
-                                  undefined
-                                    ? config.simulation === undefined
-                                      ? {}
-                                      : {
-                                          latitudeDegrees: 39.755,
-                                          longitudeDegrees: -74.2677777778,
-                                          elevationMeters: 0,
-                                        }
-                                    : config.preflightProvider.site),
-                                }),
-                            completionBehavior: 'hold',
-                            unsafeBehavior: 'pauseAndPark',
+    const telemetry = createOriginTelemetry()
+    const listeners: Array<{ readonly close: () => Promise<void> }> = []
+    let service: ReturnType<typeof createLocalWebService> | undefined
+    try {
+      await telemetry.initialize()
+      const admission = createRemoteReadOnlyAdmission(config)
+      const issuer = configuredDownloadGrantIssuer(config.downloadGrant)
+      service = createLocalWebService(
+        config.runtime.databasePath,
+        admission,
+        undefined,
+        issuer === undefined ? undefined : { issuer },
+        {
+          ...(config.fixture === undefined ? {} : { fixture: config.fixture }),
+          ...(config.preflightProvider === undefined
+            ? {}
+            : {
+                preflightProvider: alpacaPreflightProvider(
+                  config.preflightProvider,
+                ),
+                ...(config.preflightProvider.devices.camera === undefined
+                  ? {}
+                  : {
+                      cameraProvider: alpacaCameraProvider(
+                        config.preflightProvider,
+                      ),
+                      runExecutorProviderOrigin: new URL(
+                        `http://${config.preflightProvider.host}:${config.preflightProvider.port}`,
+                      ).origin,
+                      ...(config.preflightProvider.devices.camera.uniqueId ===
+                      undefined
+                        ? {}
+                        : {
+                            runExecutionContext: RunExecutionContext.make({
+                              rigId: config.preflightProvider.rigId,
+                              cameraDeviceId:
+                                config.preflightProvider.devices.camera
+                                  .uniqueId,
+                              ...(config.preflightProvider.devices.telescope
+                                ?.uniqueId === undefined
+                                ? {}
+                                : {
+                                    mountDeviceId:
+                                      config.preflightProvider.devices.telescope
+                                        .uniqueId,
+                                    ...(config.preflightProvider.site ===
+                                    undefined
+                                      ? config.simulation === undefined
+                                        ? {}
+                                        : {
+                                            latitudeDegrees: 39.755,
+                                            longitudeDegrees: -74.2677777778,
+                                            elevationMeters: 0,
+                                          }
+                                      : config.preflightProvider.site),
+                                  }),
+                              completionBehavior: 'hold',
+                              unsafeBehavior: 'pauseAndPark',
+                            }),
                           }),
-                        }),
-                  }),
-            }),
-        webDistPath: config.runtime.webDistPath,
-        previewRoot: config.runtime.previewRoot,
-        capturedFrameStorage: {
-          originalsRoot: config.runtime.originalsRoot,
+                    }),
+              }),
+          webDistPath: config.runtime.webDistPath,
+          previewRoot: config.runtime.previewRoot,
+          capturedFrameStorage: {
+            originalsRoot: config.runtime.originalsRoot,
+          },
+          frameInspectionStorage: {
+            originalsRoot: config.runtime.originalsRoot,
+            previewsRoot: config.runtime.previewRoot,
+          },
+          plateSolveWorker: {
+            originalsRoot: config.runtime.originalsRoot,
+            executable: config.plateSolve.executable,
+            indexesRoot: config.plateSolve.indexesRoot,
+            timeoutMs: config.plateSolve.timeoutMs,
+            solverVersion: config.plateSolve.solverVersion,
+            scaleLowDeg: config.plateSolve.scaleLowDeg,
+            scaleHighDeg: config.plateSolve.scaleHighDeg,
+            searchRadiusDeg: config.plateSolve.searchRadiusDeg,
+          },
+          ...(config.simulation === undefined &&
+          config.preflightProvider?.site !== undefined &&
+          config.preflightProvider.devices.camera?.uniqueId !== undefined &&
+          config.preflightProvider.devices.telescope?.uniqueId !== undefined
+            ? { configuredTargetProvider: config.preflightProvider }
+            : {}),
+          ...(config.simulation === undefined
+            ? {}
+            : { simulation: config.simulation }),
+          telemetry,
         },
-        frameInspectionStorage: {
-          originalsRoot: config.runtime.originalsRoot,
-          previewsRoot: config.runtime.previewRoot,
-        },
-        plateSolveWorker: {
-          originalsRoot: config.runtime.originalsRoot,
-          executable: config.plateSolve.executable,
-          indexesRoot: config.plateSolve.indexesRoot,
-          timeoutMs: config.plateSolve.timeoutMs,
-          solverVersion: config.plateSolve.solverVersion,
-          scaleLowDeg: config.plateSolve.scaleLowDeg,
-          scaleHighDeg: config.plateSolve.scaleHighDeg,
-          searchRadiusDeg: config.plateSolve.searchRadiusDeg,
-        },
-        ...(config.simulation === undefined &&
-        config.preflightProvider?.site !== undefined &&
-        config.preflightProvider.devices.camera?.uniqueId !== undefined &&
-        config.preflightProvider.devices.telescope?.uniqueId !== undefined
-          ? { configuredTargetProvider: config.preflightProvider }
-          : {}),
-        ...(config.simulation === undefined
-          ? {}
-          : { simulation: config.simulation }),
-      },
-    )
-    const remote = await service.listen(
-      config.runtime.port,
-      config.runtime.host,
-    )
-    if (config.admission.mode === 'development') {
-      console.log(
-        `Astro Console ${config.runtime.release}: http://127.0.0.1:${remote.port}`,
       )
-      return
+      const remote = await service.listen(
+        config.runtime.port,
+        config.runtime.host,
+      )
+      listeners.push(remote)
+      if (config.admission.mode === 'development') {
+        console.log(
+          `Astro Console ${config.runtime.release}: http://127.0.0.1:${remote.port}`,
+        )
+        installOriginShutdown(service, telemetry, [remote])
+        return
+      }
+      const localOwnerPort = config.runtime.localOwnerPort
+      if (localOwnerPort === undefined)
+        throw new Error('Production origin requires ASTRO_LOCAL_OWNER_PORT')
+      const local = await service.listen(
+        localOwnerPort,
+        config.runtime.host,
+        createLocalOwnerAdmission(),
+      )
+      listeners.push(local)
+      const remoteDesktop =
+        config.runtime.remoteDesktopPort === undefined
+          ? undefined
+          : await service.listen(
+              config.runtime.remoteDesktopPort,
+              config.runtime.host,
+              createRemoteDesktopAdmission(config),
+            )
+      if (remoteDesktop !== undefined) listeners.push(remoteDesktop)
+      console.log(
+        `Astro Console ${config.runtime.release}: remote phone http://${config.runtime.host}:${remote.port};${remoteDesktop === undefined ? '' : ` remote desktop http://${config.runtime.host}:${remoteDesktop.port};`} local owner http://${config.runtime.host}:${local.port}`,
+      )
+      installOriginShutdown(
+        service,
+        telemetry,
+        remoteDesktop === undefined
+          ? [remote, local]
+          : [remote, local, remoteDesktop],
+      )
+    } catch (cause) {
+      await Promise.allSettled(listeners.map((listener) => listener.close()))
+      try {
+        service?.close()
+      } finally {
+        await telemetry.dispose()
+      }
+      throw cause
     }
-    const localOwnerPort = config.runtime.localOwnerPort
-    if (localOwnerPort === undefined)
-      throw new Error('Production origin requires ASTRO_LOCAL_OWNER_PORT')
-    const local = await service.listen(
-      localOwnerPort,
-      config.runtime.host,
-      createLocalOwnerAdmission(),
-    )
-    const remoteDesktop =
-      config.runtime.remoteDesktopPort === undefined
-        ? undefined
-        : await service.listen(
-            config.runtime.remoteDesktopPort,
-            config.runtime.host,
-            createRemoteDesktopAdmission(config),
-          )
-    console.log(
-      `Astro Console ${config.runtime.release}: remote phone http://${config.runtime.host}:${remote.port};${remoteDesktop === undefined ? '' : ` remote desktop http://${config.runtime.host}:${remoteDesktop.port};`} local owner http://${config.runtime.host}:${local.port}`,
-    )
   })
+
+function installOriginShutdown(
+  service: ReturnType<typeof createLocalWebService>,
+  telemetry: OriginTelemetry,
+  listeners: ReadonlyArray<{ readonly close: () => Promise<void> }>,
+) {
+  let closing = false
+  const close = async () => {
+    if (closing) return
+    closing = true
+    await Promise.allSettled(listeners.map((listener) => listener.close()))
+    try {
+      service.close()
+    } finally {
+      await telemetry.dispose()
+    }
+  }
+  process.once('SIGINT', () => void close())
+  process.once('SIGTERM', () => void close())
+}

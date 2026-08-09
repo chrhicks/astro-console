@@ -39,6 +39,11 @@ export const executeCameraCommand = Effect.fn('CameraCommandService.execute')(
         _tag: 'Rejected' as const,
         summary: 'The camera command is invalid.',
       }
+    yield* Effect.annotateCurrentSpan({
+      'astro.workspace': 'acquire',
+      'astro.command.intent': input.value.intent._tag,
+      'astro.device.kind': 'camera',
+    })
     const provider = yield* Effect.serviceOption(CameraProvider)
     if (Option.isNone(provider))
       return {

@@ -112,6 +112,10 @@ export const executePlanRequest = Effect.fn(
   const decoded = yield* Schema.decodeUnknownEffect(PlanCommandRequest)(
     raw,
   ).pipe(Effect.mapError(() => new PlanCommandInputInvalid()))
+  yield* Effect.annotateCurrentSpan({
+    'astro.workspace': 'plan',
+    'astro.command.intent': decoded.intent._tag,
+  })
   const service = yield* PlanService
   const persistence = yield* PlanPersistence
   const transition = yield* service
@@ -122,6 +126,12 @@ export const executePlanRequest = Effect.fn(
   const snapshot = yield* persistence
     .snapshot(identity)
     .pipe(Effect.mapError(() => new PlanServiceUnavailable()))
+  yield* Effect.annotateCurrentSpan({
+    'astro.command.outcome':
+      transition.status >= 200 && transition.status < 300
+        ? 'accepted'
+        : 'rejected',
+  })
   return {
     status: transition.status,
     body: yield* responseFor(decoded.intent, transition.body, snapshot).pipe(

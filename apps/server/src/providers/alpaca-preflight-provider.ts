@@ -27,6 +27,10 @@ export const alpacaPreflightProvider = (
   unavailableSnapshot: () => unavailableSnapshot(config),
   observe: () =>
     Effect.fn('AlpacaPreflightProvider.observe')(function* () {
+      yield* Effect.annotateCurrentSpan({
+        'astro.provider': 'alpaca',
+        'astro.workspace': 'observe',
+      })
       const base = `http://${config.host}:${config.port}`
       const configured = yield* read(
         request,

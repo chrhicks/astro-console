@@ -114,11 +114,20 @@ export const executeObserveRequest = Effect.fn(
   const decoded = yield* Schema.decodeUnknownEffect(ObserveCommandRequest)(
     raw,
   ).pipe(Effect.mapError(() => new ObserveCommandInputInvalid()))
+  yield* Effect.annotateCurrentSpan({
+    'astro.workspace': 'observe',
+    'astro.command.intent': decoded.intent._tag,
+  })
   const persistence = yield* ObservePersistence
   const service = yield* ObserveService
   const transition = yield* service
     .execute(decoded.intent, identity)
     .pipe(Effect.mapError(() => new ObserveServiceUnavailable()))
+  yield* Effect.annotateCurrentSpan({
+    'astro.command.outcome': isRejected(transition.body)
+      ? 'rejected'
+      : 'accepted',
+  })
   if (isRejected(transition.body)) {
     const snapshot = yield* persistence
       .snapshot(identity)

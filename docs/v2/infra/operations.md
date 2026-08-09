@@ -199,6 +199,14 @@ update/migration, restore, and credential rotation.
 Do not send raw FITS, previews, secrets, observer coordinates, or high-volume
 telemetry to a third-party log service by default.
 
+The origin can export traces over OTLP/HTTP protobuf to the host-local SigNoz
+collector. Export is opt-in through standard `OTEL_*` variables. Trace selected
+command and service boundaries, but exclude health checks, static assets, SSE
+lifetimes, previews, and idle executor polls. Keep span attributes to stable
+route, workspace, intent, outcome, device-kind, and provider-kind facts; do not
+attach identity data, request bodies, image data, secrets, coordinates, or raw
+provider responses.
+
 ### Alert Classes
 
 - **Action:** rig uncertainty, critical disk, or repeated service crash. Show a

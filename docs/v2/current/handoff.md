@@ -260,6 +260,31 @@ compact Observe panels and added the exact read-only Library handoff to phone
 Observe. The 390 px projection has no horizontal overflow or mutation control,
 and an idle interval produced no refresh churn.
 
+## Origin Trace Export
+
+The production origin on the Arch host now exports selected traces to the
+host-local SigNoz collector over OTLP/HTTP protobuf. The deployed image is
+`astro-console-origin:otel-20260808-1`; the container remained running with no
+restart after a local-owner `GET /api/library` returned HTTP 200. SigNoz stored
+trace `eedc7a4479b237022e778a63b69132a5` with the server root
+`HTTP GET /api/library` and its child `Server.LibraryService.page`. The root
+records the stable route, `library` workspace, HTTP 200 status, production
+environment, and `otel-20260808-1` service version. No identity, request body,
+image, coordinate, secret, or provider response is attached.
+
+Local verification passed the server build and 150 tests with 3 expected
+skips. A clean Arch image build also passed the contracts, web, and server
+builds. The deployment Dockerfile now copies the checksum-pinned Nightbook
+vendor package before `npm ci`, which makes the image reproducible from a clean
+build context.
+
+During rollout, a body-discarded local-owner `GET /api/workspaces/plan` returned
+an empty reply and exited both the prior uninstrumented production image and the
+traced candidate. This is a pre-existing production route/state defect, not an
+OTEL regression. Origin was restarted after each comparison. The defect is not
+fixed in this instrumentation change; use the healthy Library route for trace
+verification until it is investigated separately.
+
 ## Proof Boundary
 
 Completed evidence covers local contracts, service behavior, SQLite/HTTP/SSE,

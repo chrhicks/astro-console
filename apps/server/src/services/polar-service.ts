@@ -67,6 +67,10 @@ export const executePolarCommand = Effect.fn('PolarService.execute')(function* (
       _tag: 'Rejected' as const,
       summary: 'The Polar command is invalid.',
     }
+  yield* Effect.annotateCurrentSpan({
+    'astro.workspace': 'acquire',
+    'astro.command.intent': input.value.intent._tag,
+  })
   const persistence = yield* AcquirePersistence
   const session = persistence.current()
   if (session === undefined)

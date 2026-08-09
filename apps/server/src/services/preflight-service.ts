@@ -43,6 +43,10 @@ export const refreshPreflight = Effect.fn('PreflightService.refresh')(
       return RefreshPreflightResponse.cases.Rejected.make({
         summary: 'The preflight refresh request is invalid.',
       })
+    yield* Effect.annotateCurrentSpan({
+      'astro.workspace': 'observe',
+      'astro.command.intent': 'RefreshPreflight',
+    })
     const input = decoded.value
     const persistence = yield* PreflightPersistence
     const run = persistence.activeRun()

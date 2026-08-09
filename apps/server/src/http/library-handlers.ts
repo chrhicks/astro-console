@@ -39,7 +39,7 @@ export function workspace(
   return json(response, 200, planWorkspaceProjection(db, name))
 }
 
-export async function processWorkspace(
+export function processWorkspace(
   response: ServerResponse,
   db: DatabaseSync,
   url: URL,
@@ -47,60 +47,60 @@ export async function processWorkspace(
 ) {
   const sourceAssetId = url.searchParams.get('sourceAssetId')
   if (sourceAssetId !== null) {
-    const result = await Effect.runPromise(
-      LibraryService.pipe(
-        Effect.flatMap((library) => library.processSource(sourceAssetId)),
-        Effect.map((body) => ({ status: 200, body })),
-        Effect.catchTags({
-          'Server.LibraryInputInvalid': () =>
-            Effect.succeed({ status: 400, reason: 'InvalidInput' }),
-          'Server.LibraryAssetNotFound': () =>
-            Effect.succeed({ status: 404, reason: 'AssetNotFound' }),
-          'Server.LibraryAssetUnavailable': () =>
-            Effect.succeed({ status: 409, reason: 'AssetUnavailable' }),
-          'Server.LibraryPersistenceUnavailable': () =>
-            Effect.succeed({ status: 503, reason: 'LibraryUnavailable' }),
-        }),
-        Effect.provide(sqliteLibraryServiceLayer(db, snapshotVersion)),
-      ),
+    return LibraryService.pipe(
+      Effect.flatMap((library) => library.processSource(sourceAssetId)),
+      Effect.map((body) => ({ status: 200, body })),
+      Effect.catchTags({
+        'Server.LibraryInputInvalid': () =>
+          Effect.succeed({ status: 400, reason: 'InvalidInput' }),
+        'Server.LibraryAssetNotFound': () =>
+          Effect.succeed({ status: 404, reason: 'AssetNotFound' }),
+        'Server.LibraryAssetUnavailable': () =>
+          Effect.succeed({ status: 409, reason: 'AssetUnavailable' }),
+        'Server.LibraryPersistenceUnavailable': () =>
+          Effect.succeed({ status: 503, reason: 'LibraryUnavailable' }),
+      }),
+      Effect.provide(sqliteLibraryServiceLayer(db, snapshotVersion)),
+      Effect.map((result) => {
+        if ('reason' in result)
+          return json(response, result.status, {
+            outcome: 'rejected',
+            reason: result.reason,
+            ...(result.status === 409
+              ? {
+                  message:
+                    'This asset is temporarily unavailable and cannot open in Process.',
+                }
+              : {}),
+          })
+        return json(response, result.status, result.body)
+      }),
     )
-    if ('reason' in result)
-      return json(response, result.status, {
-        outcome: 'rejected',
-        reason: result.reason,
-        ...(result.status === 409
-          ? {
-              message:
-                'This asset is temporarily unavailable and cannot open in Process.',
-            }
-          : {}),
-      })
-    return json(response, result.status, result.body)
   }
-  return json(response, 400, { outcome: 'rejected', reason: 'InvalidInput' })
+  return Effect.sync(() =>
+    json(response, 400, { outcome: 'rejected', reason: 'InvalidInput' }),
+  )
 }
-export async function libraryPage(
+export function libraryPage(
   response: ServerResponse,
   db: DatabaseSync,
   url: URL,
   snapshotVersion: () => number,
 ) {
-  const result = await Effect.runPromise(
-    decodeLibraryQuery(url).pipe(
-      Effect.flatMap((query) =>
-        LibraryService.pipe(Effect.flatMap((library) => library.page(query))),
-      ),
-      Effect.map((body) => ({ status: 200, body })),
-      Effect.catchTags({
-        'Server.LibraryInputInvalid': () =>
-          Effect.succeed({ status: 400, body: libraryInvalidBody }),
-        'Server.LibraryPersistenceUnavailable': () =>
-          Effect.succeed({ status: 503, body: libraryUnavailableBody }),
-      }),
-      Effect.provide(sqliteLibraryServiceLayer(db, snapshotVersion)),
+  return decodeLibraryQuery(url).pipe(
+    Effect.flatMap((query) =>
+      LibraryService.pipe(Effect.flatMap((library) => library.page(query))),
     ),
+    Effect.map((body) => ({ status: 200, body })),
+    Effect.catchTags({
+      'Server.LibraryInputInvalid': () =>
+        Effect.succeed({ status: 400, body: libraryInvalidBody }),
+      'Server.LibraryPersistenceUnavailable': () =>
+        Effect.succeed({ status: 503, body: libraryUnavailableBody }),
+    }),
+    Effect.provide(sqliteLibraryServiceLayer(db, snapshotVersion)),
+    Effect.map((result) => json(response, result.status, result.body)),
   )
-  return json(response, result.status, result.body)
 }
 function decodeLibraryQuery(url: URL) {
   const allowed = new Set(['queryId', 'cursor', 'pageSize', 'role', 'sort'])
@@ -121,30 +121,26 @@ function decodeLibraryQuery(url: URL) {
     sort: url.searchParams.get('sort') ?? 'capturedAtDescending',
   }).pipe(Effect.mapError(() => new LibraryInputInvalid()))
 }
-export async function libraryDetail(
+export function libraryDetail(
   response: ServerResponse,
   db: DatabaseSync,
   encodedAssetId: string,
   snapshotVersion: () => number,
 ) {
-  const result = await Effect.runPromise(
-    LibraryService.pipe(
-      Effect.flatMap((library) =>
-        library.detail(decodedAssetId(encodedAssetId)),
-      ),
-      Effect.map((body) => ({ status: 200, body })),
-      Effect.catchTags({
-        'Server.LibraryInputInvalid': () =>
-          Effect.succeed({ status: 400, body: libraryInvalidBody }),
-        'Server.LibraryAssetNotFound': () =>
-          Effect.succeed({ status: 404, body: libraryNotFoundBody }),
-        'Server.LibraryPersistenceUnavailable': () =>
-          Effect.succeed({ status: 503, body: libraryUnavailableBody }),
-      }),
-      Effect.provide(sqliteLibraryServiceLayer(db, snapshotVersion)),
-    ),
+  return LibraryService.pipe(
+    Effect.flatMap((library) => library.detail(decodedAssetId(encodedAssetId))),
+    Effect.map((body) => ({ status: 200, body })),
+    Effect.catchTags({
+      'Server.LibraryInputInvalid': () =>
+        Effect.succeed({ status: 400, body: libraryInvalidBody }),
+      'Server.LibraryAssetNotFound': () =>
+        Effect.succeed({ status: 404, body: libraryNotFoundBody }),
+      'Server.LibraryPersistenceUnavailable': () =>
+        Effect.succeed({ status: 503, body: libraryUnavailableBody }),
+    }),
+    Effect.provide(sqliteLibraryServiceLayer(db, snapshotVersion)),
+    Effect.map((result) => json(response, result.status, result.body)),
   )
-  return json(response, result.status, result.body)
 }
 const previewLimitBytes = 64 * 1024
 const previewRefreshMs = 1_000

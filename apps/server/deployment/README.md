@@ -23,6 +23,26 @@ keys.
 Do not add router forwarding, home-directory mounts, device credentials, or
 tunnel tokens to this folder.
 
+## Local SigNoz traces
+
+The origin has one process-owned, traces-only Effect OTLP runtime. It stays
+inactive unless `OTEL_TRACES_EXPORTER=otlp`. The sample `config.example` sends
+OTLP/HTTP protobuf to SigNoz on the Arch host through Docker's
+`host.docker.internal` host-gateway entry. Keep `OTEL_SERVICE_NAME` stable and
+set `OTEL_SERVICE_VERSION` to the same immutable release as `ASTRO_RELEASE`.
+
+Exported spans cover selected Plan, Observe, Control, Acquire, preflight,
+camera, frame-intake, Process, and Library operations. Health checks, static
+assets, SSE connection lifetimes, previews, and idle executor polls are not
+traced. Trace attributes contain stable route and operation facts only. Do not
+add identity data, request bodies, FITS or preview data, secrets, coordinates,
+or raw provider responses.
+
+After activation, perform one non-hardware command or read-only preflight and
+verify that SigNoz shows `astro-console-origin`, the expected release resource,
+one stable `HTTP ...` root span, and its nested Effect operation spans. Service
+health alone does not prove trace export.
+
 ## Local plate solver
 
 The origin image includes Debian's `astrometry.net` package. The origin service

@@ -108,6 +108,10 @@ export const createRunExecutorWorker = (options: {
   readonly developmentDeepSkyHold?: boolean
   readonly now?: () => Date
   readonly publish?: (type: string, cursor: number) => void
+  readonly traceWork?: (
+    kind: (typeof WorkRow.Type)['kind'],
+    run: () => Promise<RunExecutorPassResult>,
+  ) => Promise<RunExecutorPassResult>
 }) => {
   const db = options.database
   const now = options.now ?? (() => new Date())
@@ -120,6 +124,15 @@ export const createRunExecutorWorker = (options: {
       .get()
     const row = Schema.decodeUnknownSync(Schema.optional(WorkRow))(raw)
     if (row === undefined) return continueCompletedAcquire()
+    const run = () => runWork(row)
+    return options.traceWork === undefined
+      ? run()
+      : options.traceWork(row.kind, run)
+  }
+
+  const runWork = async (
+    row: typeof WorkRow.Type,
+  ): Promise<RunExecutorPassResult> => {
     if (row.kind === 'BeginRun') return beginRun(row)
     if (row.kind === 'RetrieveFrame') return retrieveFrame(row)
     let currentRow = row

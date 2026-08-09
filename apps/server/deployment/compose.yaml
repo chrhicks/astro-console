@@ -9,6 +9,8 @@ services:
       ASTRO_SERVER_BIND: 0.0.0.0
       ASTRO_LOCAL_OWNER_PORT: 8081
       ASTRO_REMOTE_DESKTOP_PORT: 8082
+    extra_hosts:
+      - host.docker.internal:host-gateway
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
