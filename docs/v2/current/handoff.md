@@ -82,6 +82,32 @@ reopened the same Verify run and Library asset without changing the single
 command attempt. Camera 1 remained idle after restart. No mount, focuser,
 filter-wheel, guide-camera, or Camera 2 command was sent.
 
+The simulator-first part of outdoor Acquire preparation is now complete. The
+`target-evidence-progression` scenario installs one NGC 7000 deep-sky Plan with
+a five-arcsecond centering threshold, two solve attempts, and one 120-second
+capture. The normal beta workflow now runs from accepted Plan and Preflight
+through a retained checksum-bound ImageBytes solve, an explicit 10.8-arcsecond
+correction approval, provisional provider acknowledgement, a later retained
+verification solve, Capture, Complete, and the exact Library review. The
+`solve-success-no-solution` scenario exhausts the initial M101 solve series,
+enters Recover, and permits one materially changed 15-second retry using the
+pinned good frame. Both scenarios use the durable Acquire domain and executor;
+the browser does not complete acquisition or invent solve evidence.
+
+The development Acquire provider is simulation-only. It uses standard Alpaca
+telescope coordinate and camera exposure, state, and ImageArray routes. The
+simulator supplies pixels from the ignored local FITS corpus; Astro Console
+retains them through normal `alpaca-imagearray` intake and binds recorded solve
+facts to stable ImageBytes pixel-payload checksums. Every simulated slew,
+acquisition exposure, and correction is durably claimed by run and attempt
+before its Alpaca write, so a duplicate or restart does not replay it. The final
+capture uses the later centered frame, not the initial off-center evidence.
+This proves repeatable orchestration against pinned image evidence and
+simulated provider traffic. It does not prove a new live `solve-field`
+invocation, physical telescope movement, sky position, or outdoor image
+quality. This bounded development path accepts `hold` completion only; it
+rejects `park` before a provider write and does not claim park confirmation.
+
 This live run found and closed one provider timing gap. ASCOM can acknowledge
 `StartExposure` before its first state read changes from idle to exposing. The
 executor now waits for at most two seconds with GET-only observation after an
@@ -132,8 +158,8 @@ snapshot-gap recovery. Simulation and Library review controls follow the fresh
 held desktop lease, not whether Plan or Observe happens to have another eligible
 action, so moving between workspaces does not make the controller read-only.
 
-Current automated proof is green: contracts 187/187, server 151/151, and web
-126/126. Functional browser proof covered the normal Plan-to-Verify workflow,
+Current automated proof is green: contracts 187/187, server 154/154, and web
+127/127. Functional browser proof covered the normal Plan-to-Verify workflow,
 fresh acceptance projection, restart/no-replay, abort and reconciliation
 states. Automated browser projections cover the exact Observe-to-Library link
 and Library review state. Final read-only Designer review of the matching live
@@ -158,12 +184,13 @@ frame.
 
 ## Next Action
 
-Prepare the next accepted delivery step: bounded outdoor Acquire and modest
-capture. Use the simulator to complete the target-acquisition and recovery
-states first, then use only owner-observed small slew, focus, and camera probes
-for live provider evidence. Keep the unavailable filter wheel explicit and ask
-before any larger movement or exposure sequence. A separate live abort can be
-added if the owner wants that remaining indoor hardware proof before Acquire.
+Prepare the supervised live half of bounded outdoor Acquire and modest capture.
+With the owner present, choose one safe target and use only a small slew,
+image-backed solve, bounded correction, focus check, and modest capture. Keep
+the unavailable filter wheel explicit and ask before any larger movement or
+exposure sequence. Compare the live provider acknowledgement, later device
+observation, solve evidence, retained original, and Library review without
+claiming unattended operation. A separate live abort remains optional.
 
 Completed chronology and former authority are indexed in the
 [documentation archive](../archive/README.md).

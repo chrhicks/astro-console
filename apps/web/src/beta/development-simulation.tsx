@@ -55,7 +55,10 @@ export type DevelopmentSimulationProjection = {
     readonly driver:
       | {
           readonly _tag: 'Available'
-          readonly action: 'refresh-preflight' | 'capture-test-frame'
+          readonly action:
+            | 'refresh-preflight'
+            | 'capture-test-frame'
+            | 'target-acquire'
           readonly label: string
         }
       | { readonly _tag: 'Unavailable'; readonly reason: string }
@@ -260,12 +263,22 @@ export function DevelopmentSimulationSurface({
             disabled={pending}
             onClick={() =>
               apply(
-                { action: 'advance', milliseconds: 16_000 },
-                'Simulation clock advanced by sixteen seconds.',
+                {
+                  action: 'advance',
+                  milliseconds:
+                    captureMetadata?._tag === 'Available'
+                      ? (captureMetadata.exposureSeconds + 1) * 1_000
+                      : 16_000,
+                },
+                `Simulation clock advanced by ${captureMetadata?._tag === 'Available' ? captureMetadata.exposureSeconds + 1 : 16} seconds.`,
               )
             }
           >
-            Advance 16s
+            Advance{' '}
+            {captureMetadata?._tag === 'Available'
+              ? captureMetadata.exposureSeconds + 1
+              : 16}
+            s
           </Button>
           <a href="/plan?ui=beta">Plan</a>
           <a href="/observe?ui=beta">Observe</a>
@@ -437,7 +450,8 @@ function isScenarioGuide(value: unknown) {
     'action' in value.driver &&
     hasStringFields(value.driver, ['action', 'label']) &&
     (value.driver.action === 'refresh-preflight' ||
-      value.driver.action === 'capture-test-frame')
+      value.driver.action === 'capture-test-frame' ||
+      value.driver.action === 'target-acquire')
   )
 }
 

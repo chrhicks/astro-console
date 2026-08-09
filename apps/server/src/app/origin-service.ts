@@ -128,6 +128,7 @@ import {
   type TargetAcquisitionCommandResult,
   type TargetAcquisitionProviderShape,
 } from '../services/target-acquisition-service.ts'
+import { developmentTargetAcquisitionProvider } from '../services/development-target-acquisition-provider.ts'
 import {
   createPlateSolveWorker,
   type PlateSolveWorkerConfig,
@@ -135,6 +136,7 @@ import {
 import {
   AcquireCommandRequest,
   AcquireCommandResponse,
+  AcquireActiveWork,
   AcquireIntent,
   CameraCommandRequest,
   CameraCommandResponse,
@@ -208,7 +210,10 @@ export function createLocalWebService(
       installPublishedLibraryFixture(database)
   } else initializeRuntimeState(database)
   if (options.simulation !== undefined)
-    installDevelopmentSimulationPlan(database)
+    installDevelopmentSimulationPlan(
+      database,
+      options.simulation.launchScenario,
+    )
   prepareProcessingWorkspaceAfterRestart(database)
   const acquireRepository = acquireSqliteRepository(database)
   const stateRepository: StateSqliteRepositoryShape = Effect.runSync(
@@ -216,7 +221,14 @@ export function createLocalWebService(
       Effect.provide(
         stateSqliteRepositoryLayer(database, {
           plan: bootstrapPlanWorkspaceProjection,
-          observe: observeWorkspaceProjection,
+          observe: (db, identity, current) =>
+            observeWorkspaceProjection(db, identity, current, {
+              suppressTargetTerminalActions:
+                options.simulation?.launchScenario ===
+                  'target-evidence-progression' ||
+                options.simulation?.launchScenario ===
+                  'solve-success-no-solution',
+            }),
         }),
       ),
     ),
@@ -515,6 +527,13 @@ export function createLocalWebService(
           database,
           stateRepository,
           cameraProvider: options.cameraProvider,
+          acquireRepository,
+          developmentDeepSkyHold:
+            options.simulation !== undefined &&
+            (options.simulation.launchScenario ===
+              'target-evidence-progression' ||
+              options.simulation.launchScenario ===
+                'solve-success-no-solution'),
           ...(options.capturedFrameStorage === undefined
             ? {}
             : { capturedFrameStorage: options.capturedFrameStorage }),
@@ -539,6 +558,22 @@ export function createLocalWebService(
         )
   const targetAcquisitionProvider =
     options.targetAcquisitionProvider ??
+    (options.simulation !== undefined &&
+    options.capturedFrameStorage !== undefined &&
+    options.cameraProvider !== undefined &&
+    (options.simulation.launchScenario === 'target-evidence-progression' ||
+      options.simulation.launchScenario === 'solve-success-no-solution')
+      ? developmentTargetAcquisitionProvider({
+          database,
+          simulation: options.simulation,
+          capturedFrameStorage: options.capturedFrameStorage,
+          cameraProvider: options.cameraProvider,
+          ...(options.frameInspectionStorage === undefined
+            ? {}
+            : { frameInspectionStorage: options.frameInspectionStorage }),
+          publish,
+        })
+      : undefined) ??
     (options.fixture === 'target-deep-sky' ||
     options.fixture === 'target-lunar' ||
     options.fixture === 'live-frame' ||
@@ -1022,6 +1057,7 @@ export function createLocalWebService(
           return json(response, status, body)
         }
         let decoded: typeof AcquireCommandRequest.Type | undefined
+        let providerEffect = false
         try {
           decoded = Schema.decodeUnknownSync(AcquireCommandRequest)(raw)
         } catch {}
@@ -1049,6 +1085,67 @@ export function createLocalWebService(
                 ),
               }),
             )
+          const acquire = acquireRepository.current(current.run.id)
+          if (
+            acquire === undefined ||
+            decoded.intent.expectedAcquireRevision !== acquire.revision
+          )
+            return json(
+              response,
+              409,
+              AcquireCommandResponse.cases.Rejected.make({
+                summary:
+                  'Target evidence changed. Read the current Observe projection.',
+                snapshot: Effect.runSync(
+                  stateRepository.bootstrapSnapshot(identity),
+                ),
+              }),
+            )
+          if (
+            (options.simulation?.launchScenario ===
+              'target-evidence-progression' ||
+              options.simulation?.launchScenario ===
+                'solve-success-no-solution') &&
+            (AcquireIntent.guards.SkipAcquireTarget(decoded.intent) ||
+              AcquireIntent.guards.AbortAcquire(decoded.intent))
+          ) {
+            const denied = AcquireCommandResponse.cases.Rejected.make({
+              summary:
+                'This bounded target simulation does not implement an outer-run Skip or Abort transition.',
+              snapshot: Effect.runSync(
+                stateRepository.bootstrapSnapshot(identity),
+              ),
+            })
+            acquireRepository.saveReceipt(
+              decoded.intent.idempotencyKey,
+              identity.clientId,
+              { status: 409, body: denied },
+            )
+            return json(response, 409, denied)
+          }
+          if (
+            AcquireIntent.guards.CaptureTargetAcquisitionEvidence(
+              decoded.intent,
+            ) &&
+            AcquireActiveWork.guards.SolveRequested(acquire.activeWork)
+          )
+            providerEffect = true
+          else if (
+            AcquireIntent.guards.ApprovePointingCorrection(decoded.intent) &&
+            acquire.pendingCorrectionProposal !== null
+          )
+            providerEffect = true
+          if (providerEffect) {
+            const pending = AcquireCommandResponse.cases.Unavailable.make({
+              summary:
+                'This provider work is in progress. Reconcile current Acquire evidence; it will not replay.',
+            })
+            acquireRepository.saveReceipt(
+              decoded.intent.idempotencyKey,
+              identity.clientId,
+              { status: 503, body: pending },
+            )
+          }
         }
         const program = Effect.succeed(raw).pipe(
           Effect.flatMap((input) =>
@@ -1664,6 +1761,13 @@ export const startOrigin = () =>
                                   mountDeviceId:
                                     config.preflightProvider.devices.telescope
                                       .uniqueId,
+                                  ...(config.simulation === undefined
+                                    ? {}
+                                    : {
+                                        latitudeDegrees: 39.755,
+                                        longitudeDegrees: -74.2677777778,
+                                        elevationMeters: 0,
+                                      }),
                                 }),
                             completionBehavior: 'hold',
                             unsafeBehavior: 'pauseAndPark',

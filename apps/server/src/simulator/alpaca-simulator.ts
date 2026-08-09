@@ -58,8 +58,10 @@ type SimulatorState = {
   frameCursor: number
   lastFrame: AlpacaScenarioFrame | null
   serverTransactionId: number
+  telescopeRightAscensionHours: number
+  telescopeDeclinationDegrees: number
   commandLog: Array<{
-    readonly name: 'startExposure' | 'abortExposure'
+    readonly name: 'startExposure' | 'abortExposure' | 'slewToCoordinates'
     readonly generation: number
     readonly atMs: number
   }>
@@ -87,6 +89,8 @@ export function createAlpacaSimulator(options: AlpacaSimulatorOptions) {
     frameCursor: 0,
     lastFrame: null,
     serverTransactionId: 0,
+    telescopeRightAscensionHours: 0,
+    telescopeDeclinationDegrees: 0,
     commandLog: [],
   }
   const server = createServer((request, response) => {
@@ -227,6 +231,14 @@ export function createAlpacaSimulator(options: AlpacaSimulatorOptions) {
         return
       }
     }
+    if (
+      type === 'telescope' &&
+      request.method === 'PUT' &&
+      property === 'slewtocoordinatesasync'
+    ) {
+      await slewToCoordinates(request, response)
+      return
+    }
     if (request.method !== 'GET') {
       json(
         response,
@@ -266,7 +278,7 @@ export function createAlpacaSimulator(options: AlpacaSimulatorOptions) {
       return
     }
 
-    const value = readOnlyValue(type, property)
+    const value = readOnlyValue(state, type, property)
     if (value === undefined) {
       json(
         response,
@@ -311,6 +323,38 @@ export function createAlpacaSimulator(options: AlpacaSimulatorOptions) {
     state.imageReady = false
     state.commandLog.push({
       name: 'startExposure',
+      generation: state.generation,
+      atMs: state.nowMs,
+    })
+    json(response, 200, envelope(undefined, 0, '', state))
+  }
+
+  async function slewToCoordinates(
+    request: IncomingMessage,
+    response: ServerResponse,
+  ) {
+    const body = new URLSearchParams(await textBody(request))
+    const rightAscensionHours = Number(body.get('RightAscension'))
+    const declinationDegrees = Number(body.get('Declination'))
+    if (
+      !Number.isFinite(rightAscensionHours) ||
+      rightAscensionHours < 0 ||
+      rightAscensionHours >= 24 ||
+      !Number.isFinite(declinationDegrees) ||
+      declinationDegrees < -90 ||
+      declinationDegrees > 90
+    ) {
+      json(
+        response,
+        200,
+        envelope(undefined, 1025, 'Coordinates are outside bounds.', state),
+      )
+      return
+    }
+    state.telescopeRightAscensionHours = rightAscensionHours
+    state.telescopeDeclinationDegrees = declinationDegrees
+    state.commandLog.push({
+      name: 'slewToCoordinates',
       generation: state.generation,
       atMs: state.nowMs,
     })
@@ -442,7 +486,11 @@ const configuredDevices = [
   },
 ] as const
 
-function readOnlyValue(type: string | undefined, property: string | undefined) {
+function readOnlyValue(
+  state: SimulatorState,
+  type: string | undefined,
+  property: string | undefined,
+) {
   const values: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
     camera: {
       connected: true,
@@ -456,6 +504,8 @@ function readOnlyValue(type: string | undefined, property: string | undefined) {
       atpark: false,
       slewing: false,
       canpark: true,
+      rightascension: state.telescopeRightAscensionHours,
+      declination: state.telescopeDeclinationDegrees,
     },
     focuser: {
       connected: true,
@@ -540,6 +590,8 @@ function resetScenario(
   state.nowMs = 0
   state.generation = 1
   state.serverTransactionId = 0
+  state.telescopeRightAscensionHours = 0
+  state.telescopeDeclinationDegrees = 0
   state.commandLog = []
   state.frameCursor = 0
   state.lastFrame = null
@@ -596,16 +648,27 @@ function scenarioFrames(
   if (scenario === 'solve-success-no-solution')
     return [
       {
-        id: 'm101-good-light',
+        id: 'm101-clouded-light-1',
+        filename: 'm101-clouded-light.fits',
+        purpose: 'solve-input',
+        solveInput: 'expected-no-solution',
+      },
+      {
+        id: 'm101-clouded-light-2',
+        filename: 'm101-clouded-light.fits',
+        purpose: 'solve-input',
+        solveInput: 'expected-no-solution',
+      },
+      {
+        id: 'm101-good-light-recovery',
         filename: 'm101-good-light.fits',
         purpose: 'solve-input',
         solveInput: 'expected-success',
       },
       {
-        id: 'm101-clouded-light',
-        filename: 'm101-clouded-light.fits',
-        purpose: 'solve-input',
-        solveInput: 'expected-no-solution',
+        id: 'm101-good-light-final',
+        filename: 'm101-good-light.fits',
+        purpose: 'exposure-success',
       },
     ]
   if (scenario === 'target-evidence-progression')
@@ -620,6 +683,12 @@ function scenarioFrames(
         id: 'ngc7000-dithered-light',
         filename: 'ngc7000-dithered-light.fits',
         purpose: 'target-observation',
+        targetStage: 'later-observation',
+      },
+      {
+        id: 'ngc7000-centered-final',
+        filename: 'ngc7000-dithered-light.fits',
+        purpose: 'exposure-success',
         targetStage: 'later-observation',
       },
     ]

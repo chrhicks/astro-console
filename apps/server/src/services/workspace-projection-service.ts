@@ -78,6 +78,7 @@ export const observeWorkspaceProjection = (
   db: DatabaseSync,
   identity: LocalIdentity,
   current: Snapshot,
+  options: { readonly suppressTargetTerminalActions?: boolean } = {},
 ) => {
   const run = current.run
   if (run === null || run.sourceDefinitionId === undefined) return undefined
@@ -151,6 +152,7 @@ export const observeWorkspaceProjection = (
             JSON.parse(acquireRow.session),
           ),
           writable && controller,
+          options.suppressTargetTerminalActions === true,
         )
   const executorWork = realExecutor
     ? Schema.decodeUnknownSync(Schema.Array(ExecutorWorkRow))(
@@ -329,6 +331,7 @@ function executorWorkFact(work: {
 function acquireSnapshot(
   session: typeof AcquireSession.Type,
   writable: boolean,
+  suppressTargetTerminalActions = false,
 ) {
   const latest = session.evidence.findLast(
     (evidence) =>
@@ -557,26 +560,32 @@ function acquireSnapshot(
                     _tag: 'Available' as const,
                     action: 'RetryPlateSolveWithParameters' as const,
                   },
-                  {
-                    _tag: 'Available' as const,
-                    action: 'SkipAcquireTarget' as const,
-                  },
-                  {
-                    _tag: 'Available' as const,
-                    action: 'AbortAcquire' as const,
-                  },
+                  ...(suppressTargetTerminalActions
+                    ? []
+                    : [
+                        {
+                          _tag: 'Available' as const,
+                          action: 'SkipAcquireTarget' as const,
+                        },
+                        {
+                          _tag: 'Available' as const,
+                          action: 'AbortAcquire' as const,
+                        },
+                      ]),
                 ]
               : writable &&
                   session.acquisitionMethod !== undefined &&
                   session.phase !== 'completed' &&
                   session.phase !== 'skipped' &&
                   session.phase !== 'aborted'
-                ? [
-                    {
-                      _tag: 'Available' as const,
-                      action: 'AbortAcquire' as const,
-                    },
-                  ]
+                ? suppressTargetTerminalActions
+                  ? []
+                  : [
+                      {
+                        _tag: 'Available' as const,
+                        action: 'AbortAcquire' as const,
+                      },
+                    ]
                 : writable &&
                     session.acquisitionMethod !== undefined &&
                     session.phase === 'completed'

@@ -345,21 +345,26 @@ test(
     let state = await postControl(listener.origin, '/__sim/scenario', {
       scenario: 'solve-success-no-solution',
     })
-    assert.equal(state.evidence.nextFrame?.id, 'm101-good-light')
-    assert.equal(state.evidence.nextFrame?.solveInput, 'expected-success')
+    assert.equal(state.evidence.nextFrame?.id, 'm101-clouded-light-1')
+    assert.equal(state.evidence.nextFrame?.solveInput, 'expected-no-solution')
     const solvedInput = await captureMetadata(camera, listener.origin)
     assert.deepEqual(
       [solvedInput.dimension1, solvedInput.dimension2],
       [6024, 4024],
     )
     state = await readSimulatorState(listener.origin)
-    assert.equal(state.evidence.lastFrame?.id, 'm101-good-light')
-    assert.equal(state.evidence.nextFrame?.id, 'm101-clouded-light')
+    assert.equal(state.evidence.lastFrame?.id, 'm101-clouded-light-1')
+    assert.equal(state.evidence.nextFrame?.id, 'm101-clouded-light-2')
     assert.equal(state.evidence.nextFrame?.solveInput, 'expected-no-solution')
     await captureMetadata(camera, listener.origin)
     state = await readSimulatorState(listener.origin)
-    assert.equal(state.evidence.lastFrame?.id, 'm101-clouded-light')
-    assert.equal(state.evidence.nextFrame, null)
+    assert.equal(state.evidence.lastFrame?.id, 'm101-clouded-light-2')
+    assert.equal(state.evidence.nextFrame?.id, 'm101-good-light-recovery')
+    assert.equal(state.evidence.nextFrame?.solveInput, 'expected-success')
+    await captureMetadata(camera, listener.origin)
+    state = await readSimulatorState(listener.origin)
+    assert.equal(state.evidence.lastFrame?.id, 'm101-good-light-recovery')
+    assert.equal(state.evidence.nextFrame?.id, 'm101-good-light-final')
 
     state = await postControl(listener.origin, '/__sim/scenario', {
       scenario: 'target-evidence-progression',
@@ -377,6 +382,7 @@ test(
     state = await readSimulatorState(listener.origin)
     assert.equal(state.evidence.lastFrame?.id, 'ngc7000-dithered-light')
     assert.equal(state.evidence.framesServed, 2)
+    assert.equal(state.evidence.nextFrame?.id, 'ngc7000-centered-final')
 
     state = await postControl(listener.origin, '/__sim/scenario', {
       scenario: 'focus-quality-degradation',

@@ -180,7 +180,7 @@ before its SQLite transaction without replacing bytes, while a mismatch is
 recorded and rejected. Retrieval failure settles once from Capture into Recover,
 and abort reads no image bytes. The real-frame loopback scenario passed the full
 supervised Plan-to-Observe-to-Library path and restart without replay. Contracts
-pass 187/187, server passes 151/151, and web passes 126/126.
+pass 187/187, server passes 154/154, and web passes 127/127.
 
 The owner-approved live start and retrieval proof completed August 8, 2026
 against ASCOM Camera 1, `ZWO ASI2600MC Pro`, UniqueID
@@ -217,6 +217,22 @@ pending if required for this delivery step.
 - Use the existing local solver for image-backed target verification.
 - Complete Preflight, Session Acquire, Target Acquire, Capture, Recover, and
   Complete for one selected target and rig.
+
+Simulator-first preparation completed 2026-08-09. The
+`target-evidence-progression` scenario uses pinned NGC 7000 FITS evidence to
+drive Preflight, Target Acquire, explicit correction approval, later solved
+verification, a 120-second Capture, Complete, and Library intake. The
+`solve-success-no-solution` scenario uses pinned clouded and good M101 evidence
+to prove bounded Recover and one changed retry. The simulator serves the pinned
+frames through standard Alpaca telescope and camera routes. Recorded solve
+facts are bound to exact ImageBytes pixel-payload checksums after normal
+`alpaca-imagearray` intake. Consequential simulator writes are durably claimed
+before the request and do not replay across duplicate commands or restart. The
+final Capture uses the centered frame. These facts do not claim a live solver
+invocation or physical hardware movement. This bounded development executor
+accepts only `hold` completion; it rejects `park` before a provider write and
+does not claim park confirmation. The owner-observed outdoor half of this step
+remains open.
 
 ### 7. Complete Library and Process
 

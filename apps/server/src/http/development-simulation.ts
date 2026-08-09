@@ -8,6 +8,7 @@ import {
 export type DevelopmentSimulationConfig = {
   readonly origin: string
   readonly launchScenario: AlpacaSimulationScenario
+  readonly corpusRoot?: string
 }
 
 type SimulatorFrame = {
@@ -64,7 +65,8 @@ export type DevelopmentSimulationScenarioGuide = {
   readonly driver:
     | {
         readonly _tag: 'Available'
-        readonly action: 'refresh-preflight' | 'capture-test-frame'
+        readonly action:
+          'refresh-preflight' | 'capture-test-frame' | 'target-acquire'
         readonly label: string
       }
     | { readonly _tag: 'Unavailable'; readonly reason: string }
@@ -75,7 +77,7 @@ export type DevelopmentSimulationFrame = SimulatorFrame & {
   readonly capture:
     | {
         readonly _tag: 'Available'
-        readonly exposureSeconds: 15
+        readonly exposureSeconds: 15 | 120
         readonly capturedAt: string
         readonly filter: 'None'
         readonly binning: 1
@@ -160,7 +162,7 @@ function simulationControl(value: unknown): DevelopmentSimulationControl {
     typeof value.milliseconds === 'number' &&
     Number.isFinite(value.milliseconds) &&
     value.milliseconds > 0 &&
-    value.milliseconds <= 60_000
+    value.milliseconds <= 180_000
   )
     return { action: 'advance', milliseconds: value.milliseconds }
   throw invalidControl()
@@ -169,7 +171,7 @@ function simulationControl(value: unknown): DevelopmentSimulationControl {
 function invalidControl() {
   return new DevelopmentSimulationControlRejected(
     400,
-    'Simulation controls require a known scenario, reset, or an advance from 1 to 60000 ms.',
+    'Simulation controls require a known scenario, reset, or an advance from 1 to 180000 ms.',
   )
 }
 
@@ -260,13 +262,15 @@ function projectSnapshot(
       nextFrame: frame(snapshot.evidence.nextFrame),
     },
     commandCount: snapshot.commandLog.length,
-    guide: scenarioGuide(snapshot.scenario),
+    guide: scenarioGuide(snapshot.scenario, config.launchScenario),
   }
 }
 
 function scenarioGuide(
   scenario: AlpacaSimulationScenario,
+  launchScenario: AlpacaSimulationScenario,
 ): DevelopmentSimulationScenarioGuide {
+  if (scenario !== launchScenario) return restartRequiredGuide(scenario)
   switch (scenario) {
     case 'ready-rig':
       return {
@@ -319,17 +323,42 @@ function scenarioGuide(
         'Simulator restart preserves the command log without replay.',
       )
     case 'target-evidence-progression':
-      return unavailableGuide(
-        'Two NGC 7000 frames represent initial and later target evidence.',
-      )
+      return {
+        summary:
+          'Two retained NGC 7000 frames drive correction approval, later solved verification, and one 120-second capture.',
+        driver: {
+          _tag: 'Available',
+          action: 'target-acquire',
+          label: 'Continue through Plan and Observe',
+        },
+      }
     case 'solve-success-no-solution':
-      return unavailableGuide(
-        'M101 good and clouded frames provide solve and no-solution inputs.',
-      )
+      return {
+        summary:
+          'Clouded M101 evidence exhausts the first solve series; a changed 15-second recovery uses the pinned good frame.',
+        driver: {
+          _tag: 'Available',
+          action: 'target-acquire',
+          label: 'Continue through Plan and Observe',
+        },
+      }
     case 'focus-quality-degradation':
       return unavailableGuide(
         'Two NGC 7000 frames preserve severe-focus quality facts.',
       )
+  }
+}
+
+function restartRequiredGuide(
+  scenario: AlpacaSimulationScenario,
+): DevelopmentSimulationScenarioGuide {
+  return {
+    summary:
+      'Load changed simulator state only. The installed Plan and target provider still belong to the launch scenario.',
+    driver: {
+      _tag: 'Unavailable',
+      reason: `Restart with npm run dev:sim:inspect -- --scenario=${scenario} to install this workflow.`,
+    },
   }
 }
 
@@ -373,6 +402,21 @@ export function developmentCaptureMetadata(
       _tag: 'Available',
       exposureSeconds: 15,
       capturedAt: '2026-06-22T02:59:31.277Z',
+      filter: 'None',
+      binning: 1,
+      frameType: 'light',
+    }
+  if (
+    filename === 'ngc7000-first-light.fits' ||
+    filename === 'ngc7000-dithered-light.fits'
+  )
+    return {
+      _tag: 'Available',
+      exposureSeconds: 120,
+      capturedAt:
+        filename === 'ngc7000-first-light.fits'
+          ? '2026-08-07T04:05:52.458Z'
+          : '2026-08-07T04:18:48.362Z',
       filter: 'None',
       binning: 1,
       frameType: 'light',

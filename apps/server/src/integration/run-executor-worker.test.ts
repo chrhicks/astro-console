@@ -41,6 +41,7 @@ import {
 } from '../services/runtime-bootstrap.ts'
 import { createRunExecutorWorker } from '../workers/run-executor-worker.ts'
 import type { CameraProviderShape } from '../services/camera-command-service.ts'
+import { acquireSqliteRepository } from '../persistence/acquire-sqlite-repository.ts'
 
 const identity = {
   personId: 'owner-chicks',
@@ -89,6 +90,7 @@ function prepare(
     readonly originalsRoot?: string
     readonly previewsRoot?: string
     readonly now?: () => Date
+    readonly developmentDeepSkyHold?: boolean
   } = {},
 ) {
   const database = openOriginDatabase(databasePath)
@@ -189,6 +191,12 @@ function prepare(
       database,
       stateRepository,
       cameraProvider: provider,
+      ...(options.developmentDeepSkyHold === true
+        ? {
+            developmentDeepSkyHold: true,
+            acquireRepository: acquireSqliteRepository(database),
+          }
+        : {}),
       ...(options.now === undefined ? {} : { now: options.now }),
       ...(options.originalsRoot === undefined
         ? {}
@@ -958,6 +966,25 @@ test('real executor fails closed without provider writes outside the single came
   assert.equal(await deepSky.worker.pass(), 'none')
   assert.equal(starts, 0)
   deepSky.database.close()
+
+  const parkDeepSky = prepare(':memory:', provider, {
+    acquisitionMode: 'deepSkyPlateSolve',
+    developmentDeepSkyHold: true,
+    executionContext: RunExecutionContext.make({
+      rigId: 'simulated-rig',
+      mountDeviceId: 'simulated-mount',
+      cameraDeviceId: 'simulated-camera',
+      latitudeDegrees: 39.95,
+      longitudeDegrees: -75.16,
+      elevationMeters: 30,
+      completionBehavior: 'park',
+      unsafeBehavior: 'pauseAndPark',
+    }),
+  })
+  assert.equal(await parkDeepSky.worker.pass(), 'rejected')
+  assert.equal(await parkDeepSky.worker.pass(), 'none')
+  assert.equal(starts, 0)
+  parkDeepSky.database.close()
 
   const tooLong = prepare(':memory:', provider, { exposureSeconds: 120 })
   assert.equal(await tooLong.worker.pass(), 'rejected')

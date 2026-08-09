@@ -162,16 +162,17 @@ test('ready-rig names the normal Observe path without a direct command button', 
   assert.match(markup, /href="\/observe\?ui=beta"/)
 })
 
-test('NGC 7000 frames show the camera-bound denial instead of the 15-second shortcut', () => {
+test('NGC 7000 target acquisition shows its 120-second advance and normal workflow guide', () => {
   const ngcProjection: DevelopmentSimulationProjection = {
     ...projection,
-    scenario: 'focus-quality-degradation',
+    scenario: 'target-evidence-progression',
     guide: {
-      summary: 'Two NGC 7000 frames preserve severe-focus quality facts.',
+      summary:
+        'Two retained NGC 7000 frames drive correction approval, later solved verification, and one 120-second capture.',
       driver: {
-        _tag: 'Unavailable',
-        reason:
-          'The beta UI driver is not implemented yet; Load changes simulator state only.',
+        _tag: 'Available',
+        action: 'target-acquire',
+        label: 'Continue through Plan and Observe',
       },
     },
     evidence: {
@@ -181,9 +182,12 @@ test('NGC 7000 frames show the camera-bound denial instead of the 15-second shor
         filename: 'ngc7000-first-light.fits',
         purpose: 'focus-quality',
         capture: {
-          _tag: 'Unavailable',
-          reason:
-            'This frame is not eligible for the 15-second test capture. NGC 7000 frames require 120 seconds, beyond the current 60-second camera command bound.',
+          _tag: 'Available',
+          exposureSeconds: 120,
+          capturedAt: '2026-08-07T04:05:52.458Z',
+          filter: 'None',
+          binning: 1,
+          frameType: 'light',
         },
       },
     },
@@ -195,10 +199,9 @@ test('NGC 7000 frames show the camera-bound denial instead of the 15-second shor
     }),
   )
   assert.doesNotMatch(markup, /Capture test frame/)
-  assert.match(
-    markup,
-    /Two NGC 7000 frames preserve severe-focus quality facts/,
-  )
+  assert.match(markup, />Advance 121s</)
+  assert.match(markup, /Continue through Plan and Observe/)
+  assert.match(markup, /Two retained NGC 7000 frames drive correction approval/)
 })
 
 test('an exhausted sequence keeps the last frame visible without capture claims', () => {
@@ -242,5 +245,31 @@ test('a simulator-only scenario names the missing UI driver', () => {
   )
   assert.match(markup, /Camera abort clears the active exposure/)
   assert.match(markup, /Load changes simulator state only/)
+  assert.doesNotMatch(markup, /Capture test frame/)
+})
+
+test('a dynamically loaded mismatch shows the restart command instead of a workflow driver', () => {
+  const mismatched: DevelopmentSimulationProjection = {
+    ...projection,
+    scenario: 'target-evidence-progression',
+    launchScenario: 'exposure-success',
+    guide: {
+      summary:
+        'Load changed simulator state only. The installed Plan and target provider still belong to the launch scenario.',
+      driver: {
+        _tag: 'Unavailable',
+        reason:
+          'Restart with npm run dev:sim:inspect -- --scenario=target-evidence-progression to install this workflow.',
+      },
+    },
+  }
+  const markup = renderToStaticMarkup(
+    createElement(DevelopmentSimulationSurface, {
+      state: { _tag: 'available' as const, projection: mismatched },
+      readOnly: false,
+    }),
+  )
+  assert.match(markup, /Load changed simulator state only/)
+  assert.match(markup, /--scenario=target-evidence-progression/)
   assert.doesNotMatch(markup, /Capture test frame/)
 })

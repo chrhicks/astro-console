@@ -219,7 +219,7 @@ const fixtureSequences: ReadonlyArray<DraftSequence> =
     definition,
   }))
 
-const developmentSimulationDefinition = {
+const cameraSimulationDefinition = {
   sequenceId: 'sequence-m101-camera',
   targetName: 'M101 · Pinwheel Galaxy',
   acquisitionMode: 'cameraOnly' as const,
@@ -241,7 +241,48 @@ const developmentSimulationDefinition = {
   priority: 0,
 }
 
-export const installDevelopmentSimulationPlan = (database: DatabaseSync) => {
+const targetSimulationDefinition = {
+  sequenceId: 'sequence-ngc7000-acquire',
+  targetName: 'NGC 7000 · North America Nebula',
+  acquisitionMode: 'deepSkyPlateSolve' as const,
+  rightAscensionHours: 20.9702585970534,
+  declinationDegrees: 44.1274120130098,
+  exposureSeconds: 120,
+  frameCount: 1,
+  binning: 1,
+  filterName: 'No filter',
+  minimumAltitudeDegrees: 20,
+  horizonClearanceDegrees: 5,
+  recenterThresholdArcsec: 5,
+  maxSolveAttempts: 2,
+  maxCaptureRetries: 1,
+  acquireFailure: 'pause' as const,
+  captureFailure: 'pause' as const,
+  estimatedDurationSeconds: 255,
+  estimatedStorageBytes: 55_000_000,
+  priority: 0,
+}
+
+const recoverySimulationDefinition = {
+  ...cameraSimulationDefinition,
+  sequenceId: 'sequence-m101-acquire-recovery',
+  acquisitionMode: 'deepSkyPlateSolve' as const,
+  rightAscensionHours: 14.0532684955997,
+  declinationDegrees: 54.3484963301173,
+  maxSolveAttempts: 2,
+  estimatedDurationSeconds: 50,
+}
+
+export const installDevelopmentSimulationPlan = (
+  database: DatabaseSync,
+  scenario: string = 'exposure-success',
+) => {
+  const developmentSimulationDefinition =
+    scenario === 'target-evidence-progression'
+      ? targetSimulationDefinition
+      : scenario === 'solve-success-no-solution'
+        ? recoverySimulationDefinition
+        : cameraSimulationDefinition
   const sequence: DraftSequence = {
     sequenceId: developmentSimulationDefinition.sequenceId,
     ...planSequencePresentation(developmentSimulationDefinition),

@@ -44,6 +44,10 @@ export const polarSession = (runId: string) =>
 export const targetAcquisitionSession = (
   runId: string,
   acquisitionMethod: 'deepSkyPlateSolve' | 'lunarDiskLimb',
+  options: {
+    readonly centeringToleranceArcsec?: number
+    readonly maxSolveAttemptsPerSeries?: number
+  } = {},
 ) => {
   const attemptId = AttemptId.make(`${acquisitionMethod}-initial-1`)
   const seriesId = RecoverySeriesId.make(`${acquisitionMethod}-initial`)
@@ -54,10 +58,10 @@ export const targetAcquisitionSession = (
     acquisitionMethod,
     phase: 'solving',
     policy: {
-      centeringToleranceArcsec: 30,
-      automaticCorrectionLimitArcsec: 60,
+      centeringToleranceArcsec: options.centeringToleranceArcsec ?? 30,
+      automaticCorrectionLimitArcsec: options.centeringToleranceArcsec ?? 60,
       hardCorrectionLimitArcsec: 180,
-      maxSolveAttemptsPerSeries: 2,
+      maxSolveAttemptsPerSeries: options.maxSolveAttemptsPerSeries ?? 2,
       maxCorrectionAttempts: 2,
       maxRecoverySeries: 1,
       polarToleranceArcsec: 60,
@@ -74,7 +78,7 @@ export const targetAcquisitionSession = (
               ? 'deep-sky-plate-solve'
               : 'lunar-disk-limb',
         },
-        maxAttempts: PositiveInt.make(2),
+        maxAttempts: PositiveInt.make(options.maxSolveAttemptsPerSeries ?? 2),
         verificationOfCorrectionAttemptId: null,
         completedAttemptIds: [],
       },

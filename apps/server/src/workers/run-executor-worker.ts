@@ -19,6 +19,12 @@ import {
   inspectCapturedFrame,
   type FrameInspectionStorage,
 } from '../services/frame-inspection.ts'
+import {
+  acquireSqliteRepository,
+  targetAcquisitionSession,
+} from '../persistence/acquire-sqlite-repository.ts'
+
+type AcquireRepository = ReturnType<typeof acquireSqliteRepository>
 
 const WorkRow = Schema.Struct({
   work_id: Schema.String,
@@ -98,6 +104,8 @@ export const createRunExecutorWorker = (options: {
   readonly cameraProvider: CameraProviderShape
   readonly capturedFrameStorage?: CapturedFrameStorage
   readonly frameInspectionStorage?: FrameInspectionStorage
+  readonly acquireRepository?: AcquireRepository
+  readonly developmentDeepSkyHold?: boolean
   readonly now?: () => Date
   readonly publish?: (type: string, cursor: number) => void
 }) => {
@@ -111,7 +119,7 @@ export const createRunExecutorWorker = (options: {
       )
       .get()
     const row = Schema.decodeUnknownSync(Schema.optional(WorkRow))(raw)
-    if (row === undefined) return 'none'
+    if (row === undefined) return continueCompletedAcquire()
     if (row.kind === 'BeginRun') return beginRun(row)
     if (row.kind === 'RetrieveFrame') return retrieveFrame(row)
     let currentRow = row
@@ -200,13 +208,18 @@ export const createRunExecutorWorker = (options: {
     )
     const definition = readDefinition(run)
     const sequence = definition.sequences[payload.sequenceIndex]
-    if (
-      definition.sequences.length !== 1 ||
-      sequence === undefined ||
-      sequence.acquisitionMode !== 'cameraOnly' ||
-      sequence.frameCount !== 1 ||
-      sequence.exposureSeconds > 60
-    ) {
+    const supported =
+      definition.sequences.length === 1 &&
+      sequence !== undefined &&
+      sequence.frameCount === 1 &&
+      ((sequence.acquisitionMode === 'cameraOnly' &&
+        sequence.exposureSeconds <= 60) ||
+        (sequence.acquisitionMode === 'deepSkyPlateSolve' &&
+          sequence.exposureSeconds <= 120 &&
+          definition.executionContext.completionBehavior === 'hold' &&
+          options.developmentDeepSkyHold === true &&
+          options.acquireRepository !== undefined))
+    if (!supported || sequence === undefined) {
       commitWorkTransition({
         runId: row.run_id,
         phase: 'recover',
@@ -215,7 +228,7 @@ export const createRunExecutorWorker = (options: {
           settle(
             row.work_id,
             'rejected',
-            'This executor milestone requires exactly one camera-only sequence with one frame and an exposure of at most 60 seconds.',
+            'This executor supports one camera-only frame up to 60 seconds or one deep-sky acquired frame up to 120 seconds with hold completion.',
           ),
       })
       return 'rejected'
@@ -224,19 +237,21 @@ export const createRunExecutorWorker = (options: {
     let published: { readonly type: string; readonly cursor: number }
     const result = 'captureReady' as const
     try {
-      const next = nextRun(run, 'capture', 25)
-      published = commitRun(next, 'RunCaptureReady')
-      db.prepare(
-        "INSERT INTO run_executor_work (work_id,run_id,kind,payload,state) VALUES (?,?,?,?, 'pending')",
-      ).run(
-        `${run.id}:sequence:${payload.sequenceIndex}:exposure`,
-        run.id,
-        'StartExposure',
-        JSON.stringify({
-          sequenceIndex: payload.sequenceIndex,
-          durationSeconds: sequence.exposureSeconds,
-        }),
+      const acquire = sequence.acquisitionMode === 'deepSkyPlateSolve'
+      const next = nextRun(run, acquire ? 'acquire' : 'capture', 25)
+      published = commitRun(
+        next,
+        acquire ? 'RunAcquireRequired' : 'RunCaptureReady',
       )
+      if (acquire)
+        options.acquireRepository?.install(
+          targetAcquisitionSession(run.id, 'deepSkyPlateSolve', {
+            centeringToleranceArcsec: sequence.recenterThresholdArcsec,
+            maxSolveAttemptsPerSeries: sequence.maxSolveAttempts,
+          }),
+        )
+      else
+        enqueueExposure(run.id, payload.sequenceIndex, sequence.exposureSeconds)
       db.prepare(
         "UPDATE run_executor_work SET state='completed',settled_at=?,last_error=NULL WHERE work_id=? AND state='pending'",
       ).run(now().toISOString(), row.work_id)
@@ -248,6 +263,50 @@ export const createRunExecutorWorker = (options: {
     options.publish?.(published.type, published.cursor)
     return result
   }
+
+  const continueCompletedAcquire = (): RunExecutorPassResult => {
+    const run = options.stateRepository.state().run
+    if (
+      run === null ||
+      run.phase !== 'acquire' ||
+      options.acquireRepository === undefined
+    )
+      return 'none'
+    const session = options.acquireRepository.current(run.id)
+    if (session === undefined || session.phase !== 'completed') return 'none'
+    const definition = readDefinition(run)
+    const sequenceIndex = run.activeSequenceIndex ?? 0
+    const sequence = definition.sequences[sequenceIndex]
+    if (sequence === undefined) return 'none'
+    db.exec('BEGIN IMMEDIATE')
+    let published: { readonly type: string; readonly cursor: number }
+    try {
+      published = commitRun(nextRun(run, 'capture', 50), 'RunCaptureReady')
+      enqueueExposure(run.id, sequenceIndex, sequence.exposureSeconds)
+      db.exec('COMMIT')
+    } catch (error) {
+      db.exec('ROLLBACK')
+      throw error
+    }
+    options.publish?.(published.type, published.cursor)
+    return 'captureReady'
+  }
+
+  const enqueueExposure = (
+    runId: string,
+    sequenceIndex: number,
+    durationSeconds: number,
+  ) =>
+    db
+      .prepare(
+        "INSERT OR IGNORE INTO run_executor_work (work_id,run_id,kind,payload,state) VALUES (?,?,?,?, 'pending')",
+      )
+      .run(
+        `${runId}:sequence:${sequenceIndex}:exposure`,
+        runId,
+        'StartExposure',
+        JSON.stringify({ sequenceIndex, durationSeconds }),
+      )
 
   const reconcile = async (
     row: typeof WorkRow.Type,
@@ -474,10 +533,15 @@ export const createRunExecutorWorker = (options: {
         options.publish?.('FrameInspectionUpdated', inspected.value.cursor)
       else inspectionError = boundedDiagnostic(inspected.cause)
     } else inspectionError = 'Bounded inspection storage is unavailable.'
+    const run = options.stateRepository.state().run
+    const definition = run?.id === row.run_id ? readDefinition(run) : undefined
+    const completed =
+      definition?.sequences[run?.activeSequenceIndex ?? 0]?.acquisitionMode ===
+      'deepSkyPlateSolve'
     commitWorkTransition({
       runId: row.run_id,
-      phase: 'verify',
-      progress: 75,
+      phase: completed ? 'completed' : 'verify',
+      progress: completed ? 100 : 75,
       eventType:
         inspectionError === undefined
           ? 'RunFrameInspectionUpdated'

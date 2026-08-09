@@ -171,6 +171,17 @@ Observe model through preflight, owner-confirmed slew/acquire, plate solve,
 bounded centering correction, a modest capture, Library intake, and review.
 Exercise one realistic interruption or restart only when it is safe to do so.
 
+Simulator preparation completed 2026-08-09: the normal beta Plan and Observe
+workflow now exercises retained real-FITS acquisition evidence, explicit
+correction approval, provisional acknowledgement, later solved verification,
+modest Capture, Complete, and Library handoff. A separate no-solution scenario
+enters bounded Recover and succeeds only after one materially changed retry.
+The development path uses standard loopback Alpaca telescope and camera
+traffic with durable per-attempt write claims. It accepts `hold` completion
+only and does not claim park confirmation.
+The remaining Phase 5 proof is the owner-observed outdoor provider and physical
+run; simulation does not satisfy it.
+
 Exit evidence: the service record, captured original, solve evidence, and
 Library review agree on the same outdoor attempt. The proof states what the
 device confirmed, what image evidence confirmed, and any remaining physical

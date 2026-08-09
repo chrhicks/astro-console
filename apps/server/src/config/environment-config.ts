@@ -82,6 +82,7 @@ export type OriginServerConfig = {
 export type DevelopmentSimulationEnvironment = {
   readonly origin: string
   readonly launchScenario: AlpacaSimulationScenario
+  readonly corpusRoot?: string
 }
 
 export type PreflightProviderConfig = {
@@ -176,6 +177,7 @@ export const originServerConfig = Config.all({
   simulationMode: text('ASTRO_SIMULATION_MODE', 'disabled'),
   simulatorOrigin: optional('ASTRO_SIMULATOR_ORIGIN'),
   simulatorScenario: optional('ASTRO_SIMULATOR_SCENARIO'),
+  simulatorCorpusRoot: optional('ASTRO_SIM_CORPUS_OUTPUT_ROOT'),
 }).pipe(
   Config.mapOrFail(
     (input): Effect.Effect<OriginServerConfig, Config.ConfigError> => {
@@ -292,6 +294,7 @@ function originServer(input: {
   readonly simulationMode: string
   readonly simulatorOrigin: Option.Option<string>
   readonly simulatorScenario: Option.Option<string>
+  readonly simulatorCorpusRoot: Option.Option<string>
 }) {
   return Effect.gen(function* () {
     const fixture =
@@ -500,6 +503,7 @@ function configuredDevelopmentSimulation(input: {
   readonly simulationMode: string
   readonly simulatorOrigin: Option.Option<string>
   readonly simulatorScenario: Option.Option<string>
+  readonly simulatorCorpusRoot: Option.Option<string>
 }) {
   if (input.simulationMode === 'disabled') return Effect.succeed(undefined)
   if (input.simulationMode !== 'alpaca')
@@ -533,6 +537,9 @@ function configuredDevelopmentSimulation(input: {
   return Effect.succeed({
     origin: url.origin,
     launchScenario,
+    ...(Option.isSome(input.simulatorCorpusRoot)
+      ? { corpusRoot: input.simulatorCorpusRoot.value }
+      : {}),
   })
 }
 

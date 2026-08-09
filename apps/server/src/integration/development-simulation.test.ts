@@ -10,7 +10,7 @@ import { createAlpacaSimulator } from '../simulator/alpaca-simulator.ts'
 
 const CountRow = Schema.Struct({ count: Schema.Int })
 
-test('pinned M101 capture metadata follows the next filename', () => {
+test('pinned capture metadata follows the next filename', () => {
   assert.deepEqual(developmentCaptureMetadata('m101-clouded-light.fits'), {
     _tag: 'Available',
     exposureSeconds: 15,
@@ -19,10 +19,14 @@ test('pinned M101 capture metadata follows the next filename', () => {
     binning: 1,
     frameType: 'light',
   })
-  assert.equal(
-    developmentCaptureMetadata('ngc7000-first-light.fits')._tag,
-    'Unavailable',
-  )
+  assert.deepEqual(developmentCaptureMetadata('ngc7000-first-light.fits'), {
+    _tag: 'Available',
+    exposureSeconds: 120,
+    capturedAt: '2026-08-07T04:05:52.458Z',
+    filter: 'None',
+    binning: 1,
+    frameType: 'light',
+  })
 })
 
 test('development configuration accepts only a known loopback Alpaca simulation', async () => {
@@ -237,20 +241,33 @@ test('origin projects and controls loopback simulation without exposing its cont
 
   projection = await post(origin, {
     action: 'select',
+    scenario: 'target-evidence-progression',
+  })
+  assert.equal(projection.guide.driver._tag, 'Unavailable')
+  assert.match(
+    projection.guide.driver.reason,
+    /--scenario=target-evidence-progression/,
+  )
+
+  projection = await post(origin, {
+    action: 'select',
     scenario: 'focus-quality-degradation',
   })
   assert.equal(projection.scenario, 'focus-quality-degradation')
   assert.equal(projection.guide.driver._tag, 'Unavailable')
   assert.match(
     projection.guide.driver.reason,
-    /Load changes simulator state only/,
+    /Restart with npm run dev:sim:inspect -- --scenario=focus-quality-degradation/,
   )
   assert.equal(projection.clock.nowMs, 0)
-  assert.equal(projection.evidence.nextFrame.capture._tag, 'Unavailable')
-  assert.match(
-    projection.evidence.nextFrame.capture.reason,
-    /NGC 7000 frames require 120 seconds/,
-  )
+  assert.deepEqual(projection.evidence.nextFrame.capture, {
+    _tag: 'Available',
+    exposureSeconds: 120,
+    capturedAt: '2026-08-07T04:05:52.458Z',
+    filter: 'None',
+    binning: 1,
+    frameType: 'light',
+  })
 
   await post(origin, { action: 'advance', milliseconds: 1_000 })
   projection = await post(origin, { action: 'reset' })

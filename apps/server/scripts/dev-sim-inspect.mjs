@@ -78,6 +78,7 @@ simulator = startChild(
     './scripts/alpaca-simulator.ts',
     '--port=0',
     `--scenario=${scenario}`,
+    '--pace-ms=1000',
   ],
   appRoot,
   (text) => {
@@ -143,6 +144,7 @@ function startOrigin(simulatorOrigin, simulatorPort) {
       ASTRO_SIMULATION_MODE: 'alpaca',
       ASTRO_SIMULATOR_ORIGIN: simulatorOrigin,
       ASTRO_SIMULATOR_SCENARIO: scenario,
+      ASTRO_SIM_CORPUS_OUTPUT_ROOT: corpusRoot,
     },
   )
 }
