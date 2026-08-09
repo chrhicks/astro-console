@@ -69,6 +69,12 @@ const LibraryDetail = Schema.Struct({
   ]),
   capturedAt: Schema.String,
   comparisonGroupId: Schema.String,
+  equipment: Schema.optionalKey(
+    Schema.Struct({
+      rigId: Schema.String,
+      cameraDeviceId: Schema.String,
+    }),
+  ),
   lineage: Schema.Struct({
     sourceAssetIds: Schema.Array(Schema.String),
     runId: Schema.optionalKey(Schema.String),
@@ -333,9 +339,10 @@ const libraryActions = (
   availability: (typeof LibraryDetail.Type)['availability'],
   publication: typeof DownloadAssetRow.Type | undefined,
 ) => [
-  publication?.state === 'published' &&
-  publication.object_key !== '' &&
-  availability === 'published'
+  availability === 'availableLocally' ||
+  (publication?.state === 'published' &&
+    publication.object_key !== '' &&
+    availability === 'published')
     ? { _tag: 'Eligible' as const, action: 'download' as const }
     : {
         _tag: 'Unavailable' as const,

@@ -31,6 +31,10 @@ export const CapturedFrameIntake = Schema.Struct({
   frameId: Schema.NonEmptyString,
   capturedAt: Schema.NonEmptyString,
   format: Schema.Literals(['cameraRaw', 'fits', 'tiff']),
+  equipment: Schema.Struct({
+    rigId: Schema.NonEmptyString,
+    cameraDeviceId: Schema.NonEmptyString,
+  }),
   capture: Schema.Struct({
     exposureSeconds: PositiveNumber,
     filter: Schema.NonEmptyString,
@@ -54,7 +58,10 @@ export const FrameInspection = Schema.TaggedUnion({
       format: Schema.Literal('png'),
       checksum: Schema.NonEmptyString,
       provenance: Schema.Struct({
-        algorithm: Schema.Literal('deterministic-fixture-v1'),
+        algorithm: Schema.Literals([
+          'deterministic-fixture-v1',
+          'bounded-pixel-preview-v1',
+        ]),
         sourceChecksum: Schema.NonEmptyString,
       }),
     }),
@@ -66,7 +73,7 @@ export const FrameInspection = Schema.TaggedUnion({
       driftArcsec: NonNegativeInt,
     }),
     rationale: Schema.Struct({
-      decision: Schema.Literals(['accepted', 'rejected']),
+      decision: Schema.Literals(['accepted', 'rejected', 'unreviewed']),
       summary: Schema.NonEmptyString,
     }),
   },

@@ -5,7 +5,12 @@ import { AcquireSnapshot } from './snapshots.js'
 
 export const ObserveExecutorWork = Schema.Struct({
   workId: Schema.NonEmptyString,
-  kind: Schema.Literals(['BeginRun', 'StartExposure', 'AbortExposure']),
+  kind: Schema.Literals([
+    'BeginRun',
+    'StartExposure',
+    'RetrieveFrame',
+    'AbortExposure',
+  ]),
   state: Schema.Literals([
     'pending',
     'commandAttempted',
@@ -67,6 +72,7 @@ export const ObserveWorkspaceProjection = Schema.Struct({
   lifecycleFacts: Schema.NonEmptyArray(Schema.NonEmptyString),
   attemptFacts: Schema.NonEmptyArray(Schema.NonEmptyString),
   executorWork: Schema.optionalKey(Schema.Array(ObserveExecutorWork)),
+  latestCapturedAssetId: Schema.optionalKey(Schema.NonEmptyString),
   actions: Schema.Struct({
     refreshPreflight: Schema.optionalKey(ObserveActionEligibility),
     pause: ObserveActionEligibility,

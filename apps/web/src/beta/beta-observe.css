@@ -845,6 +845,22 @@
   font: 700 18px/1.15 var(--nb-font-sans);
 }
 
+.beta-phone-library-link {
+  min-height: var(--nb-control-height);
+  border: 1px solid var(--nb-accent);
+  color: var(--nb-accent);
+  padding: 8px 10px;
+  font: 650 11px var(--nb-font-mono);
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+}
+
+.beta-phone-library-link:focus-visible {
+  outline: 2px solid var(--nb-focus);
+  outline-offset: 2px;
+}
+
 @media (min-width: 601px) and (max-width: 1120px) {
   .beta-command-bar {
     grid-template-columns: 145px auto minmax(180px, 1fr) auto;
@@ -931,6 +947,13 @@
   .beta-observe-stage {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto;
+    align-self: start;
+    height: max-content;
+  }
+
+  .beta-context-rail,
+  .beta-evidence-panel {
+    height: auto;
   }
 
   .beta-decision-rail {

@@ -207,7 +207,7 @@ test('origin projects and controls loopback simulation without exposing its cont
   assert.equal(projection.evidence.nextFrame.filename, 'm101-good-light.fits')
   assert.deepEqual(projection.guide, {
     summary:
-      'One 15-second M101 exposure can reach Verify. Library remains unchanged.',
+      'One 15-second M101 exposure reaches Verify with a retained Library original and preview.',
     driver: {
       _tag: 'Available',
       action: 'capture-test-frame',

@@ -4,10 +4,11 @@ import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { Effect, Schema } from 'effect'
 import { FrameInspection } from '@astro-console/v2-contracts'
+import { createPixelPreview } from './image-pixel-preview.ts'
 
 const AssetRow = Schema.Struct({
   asset_id: Schema.String,
-  format: Schema.Literals(['fits', 'tiff']),
+  format: Schema.Literals(['cameraRaw', 'fits', 'tiff']),
   detail: Schema.String,
 })
 const EventRow = Schema.Struct({ checksum: Schema.String })
@@ -119,7 +120,17 @@ function inspect(
       summary: 'The retained original did not match its recorded checksum.',
       diagnosticRef: `checksum:${actual}`,
     })
-  const previewBytes = Buffer.from(`deterministic-preview-v1:${checksum}`)
+  let preview
+  try {
+    preview = createPixelPreview(bytes, asset.format)
+  } catch (cause) {
+    return FrameInspection.cases.Failed.make({
+      summary:
+        'The original is retained, but its pixels could not be decoded into a bounded preview.',
+      diagnosticRef: `preview:${boundedDiagnostic(cause)}`,
+    })
+  }
+  const previewBytes = preview.png
   mkdirSync(storage.previewsRoot, { recursive: true })
   const previewChecksum = createHash('sha256')
     .update(previewBytes)
@@ -128,31 +139,32 @@ function inspect(
     join(storage.previewsRoot, `${asset.asset_id}.png`),
     previewBytes,
   )
-  const sharpness = parseInt(checksum.slice(0, 2), 16)
-  const accepted = sharpness >= 32
   return FrameInspection.cases.Available.make({
     preview: {
       format: 'png',
       checksum: previewChecksum,
       provenance: {
-        algorithm: 'deterministic-fixture-v1',
+        algorithm: 'bounded-pixel-preview-v1',
         sourceChecksum: checksum,
       },
     },
     metrics: {
-      clippingPercent: parseInt(checksum.slice(2, 4), 16) % 8,
-      framing: accepted ? 'inFrame' : 'attention',
-      sharpness,
-      shape: parseInt(checksum.slice(4, 6), 16),
-      driftArcsec: parseInt(checksum.slice(6, 8), 16) % 20,
+      clippingPercent: preview.clippingPercent,
+      framing: 'inFrame',
+      sharpness: preview.sharpness,
+      shape: preview.shape,
+      driftArcsec: 0,
     },
     rationale: {
-      decision: accepted ? 'accepted' : 'rejected',
-      summary: accepted
-        ? 'Deterministic inspection accepts this retained fixture frame.'
-        : 'Deterministic inspection rejects this retained fixture frame for low sharpness.',
+      decision: 'unreviewed',
+      summary: `A ${preview.width} x ${preview.height} inspection preview was generated from retained original pixels. Operator quality review remains unchanged.`,
     },
   })
+}
+function boundedDiagnostic(cause: unknown) {
+  return String(cause)
+    .replace(/[\r\n]+/g, ' ')
+    .slice(0, 160)
 }
 const StoredValue = Schema.Struct({ value: Schema.String })
 const stateNumber = (database: DatabaseSync, key: string) =>

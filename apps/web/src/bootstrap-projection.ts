@@ -306,7 +306,9 @@ function observe(
         : targetAcquisition
           ? 'Fixture provenance: target evidence is deterministic; no physical pointing is claimed.'
           : supervised
-            ? 'Durable executor work and later camera observations are service-owned. Captured bytes are not claimed.'
+            ? source.latestCapturedAssetId !== undefined
+              ? 'Durable executor work, camera observation, and captured frame retention are service-owned.'
+              : 'Durable executor work and later camera observations are service-owned. Captured bytes are not claimed.'
             : 'All attempt evidence is fake/fixture only.',
       heading: polar
         ? terminal === undefined
@@ -354,7 +356,9 @@ function observe(
                 : {
                     recovery: supervised
                       ? source.phase === 'verify'
-                        ? 'The camera was later observed idle. Captured bytes and Library intake are the next milestone.'
+                        ? source.latestCapturedAssetId !== undefined
+                          ? 'The captured frame is retained in Library. Review the exact asset before ending the run.'
+                          : 'The camera was later observed idle. Captured bytes and Library intake are the next milestone.'
                         : 'Use only the actions advertised by the current supervised run projection.'
                       : 'Stop, skip, retry once, or request park only when currently eligible.',
                   }),

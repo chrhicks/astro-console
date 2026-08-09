@@ -1031,6 +1031,14 @@ export function BetaObservePhone({
       ) : (
         <Evidence view={view} />
       )}
+      {view.source?.latestCapturedAssetId !== undefined ? (
+        <a
+          className="beta-phone-library-link"
+          href={`/library/assets/${encodeURIComponent(view.source.latestCapturedAssetId)}?ui=beta`}
+        >
+          Review captured frame in Library
+        </a>
+      ) : null}
       <Panel as="section">
         <PanelBody>
           <DataList aria-label="Phone operational facts">
@@ -1342,6 +1350,14 @@ function BetaObserveDesktop({
                     label="Durable executor work"
                     items={executorAttemptItems(source)}
                   />
+                ) : null}
+                {source?.latestCapturedAssetId !== undefined ? (
+                  <a
+                    className="beta-simulation-library-link"
+                    href={`/library/assets/${encodeURIComponent(source.latestCapturedAssetId)}?ui=beta`}
+                  >
+                    Review captured frame in Library
+                  </a>
                 ) : null}
                 <EvidenceFacts view={view} />
                 {source !== undefined ? (

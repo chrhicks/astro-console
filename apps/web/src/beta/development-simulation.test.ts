@@ -44,7 +44,7 @@ const projection: DevelopmentSimulationProjection = {
   commandCount: 1,
   guide: {
     summary:
-      'One 15-second M101 exposure can reach Verify. Library remains unchanged.',
+      'One 15-second M101 exposure reaches Verify with a retained Library original and preview.',
     driver: {
       _tag: 'Available',
       action: 'capture-test-frame',
@@ -118,7 +118,7 @@ test('simulation surface carries explicit real-frame context and desktop control
   assert.doesNotMatch(markup, /Library evidence/)
   assert.match(
     markup,
-    /One 15-second M101 exposure can reach Verify. Library remains unchanged./,
+    /One 15-second M101 exposure reaches Verify with a retained Library original and preview./,
   )
   assert.match(markup, /Load selects simulator state only/)
 })

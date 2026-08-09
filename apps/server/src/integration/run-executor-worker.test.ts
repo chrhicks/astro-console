@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -50,6 +57,25 @@ const context = RunExecutionContext.make({
 const StateRow = Schema.Struct({ value: Schema.String })
 const CountRow = Schema.Struct({ count: Schema.Int })
 const WorkStateRow = Schema.Struct({ state: Schema.String })
+const RetrievedLibraryDetail = Schema.Struct({
+  capturedAt: Schema.String,
+  equipment: Schema.Struct({
+    rigId: Schema.String,
+    cameraDeviceId: Schema.String,
+  }),
+  capture: Schema.Struct({
+    frameId: Schema.String,
+    exposureSeconds: Schema.Number,
+    filter: Schema.String,
+    binning: Schema.Number,
+    frameType: Schema.String,
+  }),
+  lineage: Schema.Struct({ runId: Schema.String, sequenceId: Schema.String }),
+  inspection: Schema.Struct({
+    _tag: Schema.String,
+    rationale: Schema.Struct({ decision: Schema.String }),
+  }),
+})
 
 function prepare(
   databasePath: string,
@@ -60,6 +86,9 @@ function prepare(
     readonly frameCount?: number
     readonly sequenceCount?: number
     readonly executionContext?: typeof RunExecutionContext.Type
+    readonly originalsRoot?: string
+    readonly previewsRoot?: string
+    readonly now?: () => Date
   } = {},
 ) {
   const database = openOriginDatabase(databasePath)
@@ -160,13 +189,33 @@ function prepare(
       database,
       stateRepository,
       cameraProvider: provider,
+      ...(options.now === undefined ? {} : { now: options.now }),
+      ...(options.originalsRoot === undefined
+        ? {}
+        : { capturedFrameStorage: { originalsRoot: options.originalsRoot } }),
+      ...(options.originalsRoot === undefined ||
+      options.previewsRoot === undefined
+        ? {}
+        : {
+            frameInspectionStorage: {
+              originalsRoot: options.originalsRoot,
+              previewsRoot: options.previewsRoot,
+            },
+          }),
     }),
     runRepository,
     runId: run.id,
   }
 }
 
-function reopen(databasePath: string, provider: CameraProviderShape) {
+function reopen(
+  databasePath: string,
+  provider: CameraProviderShape,
+  storage:
+    | { readonly originalsRoot: string; readonly previewsRoot: string }
+    | undefined = undefined,
+  now?: () => Date,
+) {
   const database = openOriginDatabase(databasePath)
   const stateRepository = Effect.runSync(
     StateSqliteRepository.pipe(
@@ -185,8 +234,27 @@ function reopen(databasePath: string, provider: CameraProviderShape) {
       database,
       stateRepository,
       cameraProvider: provider,
+      ...(now === undefined ? {} : { now }),
+      ...(storage === undefined
+        ? {}
+        : {
+            capturedFrameStorage: { originalsRoot: storage.originalsRoot },
+            frameInspectionStorage: storage,
+          }),
     }),
   }
+}
+
+function imageBytes2x2() {
+  const bytes = new Uint8Array(52)
+  const view = new DataView(bytes.buffer)
+  ;[1, 0, 0, 0, 44, 2, 8, 2, 2, 2, 0].forEach((value, index) =>
+    view.setUint32(index * 4, value, true),
+  )
+  ;[0, 20_000, 40_000, 65_535].forEach((value, index) =>
+    view.setUint16(44 + index * 2, value, true),
+  )
+  return bytes
 }
 
 test('startup upgrades an existing Plan and accepted run definition before projection', () => {
@@ -251,7 +319,7 @@ test('startup upgrades an existing Plan and accepted run definition before proje
   migrated.close()
 })
 
-test('real camera-only execution persists work before one provider write and observes completion into Verify', async () => {
+test('real camera-only execution keeps Capture while durable retrieval is pending', async () => {
   let starts = 0
   let state: 'exposing' | 'idle' = 'exposing'
   const provider: CameraProviderShape = {
@@ -272,9 +340,9 @@ test('real camera-only execution persists work before one provider write and obs
   assert.equal(await fixture.worker.pass(), 'observing')
   assert.equal(starts, 1)
   state = 'idle'
-  assert.equal(await fixture.worker.pass(), 'verified')
+  assert.equal(await fixture.worker.pass(), 'retrievalReady')
   assert.equal(starts, 1)
-  assert.equal(fixture.stateRepository.state().run?.phase, 'verify')
+  assert.equal(fixture.stateRepository.state().run?.phase, 'capture')
   assert.equal(
     JSON.parse(
       Schema.decodeUnknownSync(StateRow)(
@@ -283,44 +351,331 @@ test('real camera-only execution persists work before one provider write and obs
           .get(),
       ).value,
     ).phase,
-    'verify',
+    'capture',
   )
   const projected = observeWorkspaceProjection(
     fixture.database,
     identity,
     fixture.stateRepository.snapshot(identity),
   )
-  assert.deepEqual(projected?.actions.pause, {
-    _tag: 'Ineligible',
-    reason: 'policyUnavailable',
-  })
+  assert.equal(projected?.latestCapturedAssetId, undefined)
+  assert.deepEqual(projected?.actions.pause, { _tag: 'Eligible' })
   assert.deepEqual(projected?.actions.stop, { _tag: 'Eligible' })
-  const run = fixture.stateRepository.state().run
-  if (run === null) throw new Error('Verified run is unavailable.')
+  fixture.database.close()
+})
+
+test('service-observed completion retrieves one frame into Library with a real preview and exact handoff', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-run-frame-retrieval-'))
+  const storage = {
+    originalsRoot: join(root, 'originals'),
+    previewsRoot: join(root, 'previews'),
+  }
+  let cameraState: 'exposing' | 'idle' = 'exposing'
+  let imageReads = 0
+  const fixture = prepare(
+    ':memory:',
+    {
+      startExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
+      abortExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
+      readState: () =>
+        Effect.succeed({
+          observedAt: '2026-08-08T18:00:15.000Z',
+          cameraState,
+        }),
+      readImageArray: () => {
+        imageReads += 1
+        return Effect.succeed({
+          bytes: imageBytes2x2(),
+          format: 'cameraRaw' as const,
+        })
+      },
+    },
+    storage,
+  )
+  assert.equal(await fixture.worker.pass(), 'captureReady')
+  assert.equal(await fixture.worker.pass(), 'observing')
+  cameraState = 'idle'
+  assert.equal(await fixture.worker.pass(), 'retrievalReady')
+  assert.equal(imageReads, 0)
+  const pendingProjection = observeWorkspaceProjection(
+    fixture.database,
+    identity,
+    fixture.stateRepository.snapshot(identity),
+  )
+  assert.equal(pendingProjection?.phase, 'capture')
+  assert.equal(pendingProjection?.latestCapturedAssetId, undefined)
+  assert.equal(await fixture.worker.pass(), 'retrieved')
+  assert.equal(imageReads, 1)
+  assert.equal(fixture.stateRepository.state().run?.phase, 'verify')
+
+  const detail = Schema.decodeUnknownSync(
+    Schema.Struct({ asset_id: Schema.String, detail: Schema.String }),
+  )(
+    fixture.database
+      .prepare(
+        "SELECT asset_id,detail FROM library_assets WHERE role='original' ORDER BY captured_at DESC LIMIT 1",
+      )
+      .get(),
+  )
+  const parsed = Schema.decodeUnknownSync(RetrievedLibraryDetail)(
+    JSON.parse(detail.detail),
+  )
+  assert.equal(parsed.capturedAt, '2026-08-08T18:00:15.000Z')
+  assert.deepEqual(parsed.equipment, {
+    rigId: 'simulated-rig',
+    cameraDeviceId: 'simulated-camera',
+  })
+  assert.equal(parsed.capture.frameId.startsWith('frame-'), true)
+  assert.equal(parsed.capture.exposureSeconds, 15)
+  assert.equal(parsed.capture.filter, 'L')
+  assert.equal(parsed.capture.binning, 1)
+  assert.equal(parsed.capture.frameType, 'light')
+  assert.equal(parsed.lineage.runId, fixture.runId)
+  assert.equal(parsed.inspection._tag, 'Available')
+  assert.equal(parsed.inspection.rationale.decision, 'unreviewed')
+  const previewPath = join(storage.previewsRoot, `${detail.asset_id}.png`)
+  assert.equal(existsSync(previewPath), true)
+  assert.deepEqual(
+    [...readFileSync(previewPath).subarray(0, 8)],
+    [137, 80, 78, 71, 13, 10, 26, 10],
+  )
+  const projected = observeWorkspaceProjection(
+    fixture.database,
+    identity,
+    fixture.stateRepository.snapshot(identity),
+  )
+  assert.equal(projected?.latestCapturedAssetId, detail.asset_id)
+  assert.match(
+    projected?.attemptFacts.join(' ') ?? '',
+    /retained as Library asset/,
+  )
+  fixture.database.close()
+})
+
+test('restart after retained intake settles retrieval from its receipt without another image GET', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-run-frame-restart-'))
+  const databasePath = join(root, 'state.sqlite')
+  const storage = {
+    originalsRoot: join(root, 'originals'),
+    previewsRoot: join(root, 'previews'),
+  }
+  let cameraState: 'exposing' | 'idle' = 'exposing'
+  let imageReads = 0
+  const first = prepare(
+    databasePath,
+    {
+      startExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
+      abortExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
+      readState: () =>
+        Effect.succeed({
+          observedAt: '2026-08-08T18:00:15.000Z',
+          cameraState,
+        }),
+      readImageArray: () => {
+        imageReads += 1
+        return Effect.succeed({
+          bytes: imageBytes2x2(),
+          format: 'cameraRaw' as const,
+        })
+      },
+    },
+    storage,
+  )
+  assert.equal(await first.worker.pass(), 'captureReady')
+  assert.equal(await first.worker.pass(), 'observing')
+  cameraState = 'idle'
+  assert.equal(await first.worker.pass(), 'retrievalReady')
+  first.database.exec(
+    "CREATE TRIGGER fail_retrieve_settlement BEFORE UPDATE OF state ON run_executor_work WHEN OLD.kind='RetrieveFrame' AND NEW.state='completed' BEGIN SELECT RAISE(ABORT, 'simulated retrieval settlement interruption'); END;",
+  )
+  await assert.rejects(
+    first.worker.pass(),
+    /simulated retrieval settlement interruption/,
+  )
+  assert.equal(imageReads, 1)
   assert.equal(
-    fixture.runRepository.pause(
-      Schema.decodeUnknownSync(ObserveIntent.cases.PauseRun)({
-        _tag: 'PauseRun',
-        expectedLeaseRevision: 1,
-        expectedRunRevision: run.revision,
-        idempotencyKey: 'pause-verified-real-run',
-      }),
-      identity,
-    ).status,
-    409,
+    Schema.decodeUnknownSync(CountRow)(
+      first.database
+        .prepare('SELECT count(*) AS count FROM captured_frame_receipts')
+        .get(),
+    ).count,
+    1,
+  )
+  first.database.exec('DROP TRIGGER fail_retrieve_settlement')
+  first.database.close()
+
+  const second = reopen(
+    databasePath,
+    {
+      startExposure: () => Effect.die('start must not replay'),
+      abortExposure: () => Effect.die('abort must not run'),
+      readState: () => Effect.die('camera state is already settled'),
+      readImageArray: () => {
+        imageReads += 1
+        return Effect.die('image GET must not repeat after retained intake')
+      },
+    },
+    storage,
+  )
+  assert.equal(await second.worker.pass(), 'retrieved')
+  assert.equal(imageReads, 1)
+  assert.equal(await second.worker.pass(), 'none')
+  second.database.close()
+})
+
+test('restart reuses a matching retained original without a receipt and verifies once', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-run-frame-rename-crash-'))
+  const databasePath = join(root, 'state.sqlite')
+  const storage = {
+    originalsRoot: join(root, 'originals'),
+    previewsRoot: join(root, 'previews'),
+  }
+  const bytes = imageBytes2x2()
+  let cameraState: 'exposing' | 'idle' = 'exposing'
+  const first = prepare(
+    databasePath,
+    {
+      startExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
+      abortExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
+      readState: () =>
+        Effect.succeed({
+          observedAt: '2026-08-08T18:00:15.000Z',
+          cameraState,
+        }),
+      readImageArray: () => Effect.die('retrieval starts after restart'),
+    },
+    storage,
+  )
+  assert.equal(await first.worker.pass(), 'captureReady')
+  assert.equal(await first.worker.pass(), 'observing')
+  cameraState = 'idle'
+  assert.equal(await first.worker.pass(), 'retrievalReady')
+  const work = Schema.decodeUnknownSync(
+    Schema.Struct({ payload: Schema.String }),
+  )(
+    first.database
+      .prepare(
+        "SELECT payload FROM run_executor_work WHERE kind='RetrieveFrame'",
+      )
+      .get(),
+  )
+  const payload = Schema.decodeUnknownSync(
+    Schema.Struct({ assetId: Schema.String, idempotencyKey: Schema.String }),
+  )(JSON.parse(work.payload))
+  mkdirSync(storage.originalsRoot, { recursive: true })
+  const retainedPath = join(
+    storage.originalsRoot,
+    `${payload.assetId}.cameraRaw`,
+  )
+  writeFileSync(retainedPath, bytes)
+  const checksum = createHash('sha256').update(bytes).digest('hex')
+  first.database
+    .prepare('INSERT INTO captured_frame_orphans VALUES (?,?,?)')
+    .run(retainedPath, checksum, '2026-08-08T18:00:15.000Z')
+  first.database.close()
+
+  let imageReads = 0
+  const second = reopen(
+    databasePath,
+    {
+      startExposure: () => Effect.die('start must not replay'),
+      abortExposure: () => Effect.die('abort must not run'),
+      readState: () => Effect.die('camera state is already settled'),
+      readImageArray: () => {
+        imageReads += 1
+        return Effect.succeed({ bytes, format: 'cameraRaw' as const })
+      },
+    },
+    storage,
+  )
+  assert.equal(await second.worker.pass(), 'retrieved')
+  assert.equal(second.stateRepository.state().run?.phase, 'verify')
+  assert.equal(imageReads, 1)
+  assert.deepEqual([...readFileSync(retainedPath)], [...bytes])
+  assert.equal(
+    Schema.decodeUnknownSync(CountRow)(
+      second.database
+        .prepare(
+          'SELECT count(*) AS count FROM library_assets WHERE asset_id=?',
+        )
+        .get(payload.assetId),
+    ).count,
+    1,
   )
   assert.equal(
-    fixture.runRepository.stop(
-      Schema.decodeUnknownSync(ObserveIntent.cases.StopRun)({
-        _tag: 'StopRun',
-        expectedLeaseRevision: 1,
-        expectedRunRevision: run.revision,
-        idempotencyKey: 'stop-verified-real-run',
-      }),
-      identity,
-    ).status,
-    202,
+    Schema.decodeUnknownSync(CountRow)(
+      second.database
+        .prepare(
+          'SELECT count(*) AS count FROM captured_frame_receipts WHERE idempotency_key=?',
+        )
+        .get(payload.idempotencyKey),
+    ).count,
+    1,
   )
+  assert.equal(
+    Schema.decodeUnknownSync(CountRow)(
+      second.database
+        .prepare(
+          'SELECT count(*) AS count FROM captured_frame_orphans WHERE path=?',
+        )
+        .get(retainedPath),
+    ).count,
+    0,
+  )
+  second.database.close()
+})
+
+test('one failed image retrieval settles into Recover without a polling loop', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-run-frame-failure-'))
+  let cameraState: 'exposing' | 'idle' = 'exposing'
+  let imageReads = 0
+  const fixture = prepare(
+    ':memory:',
+    {
+      startExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
+      abortExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
+      readState: () =>
+        Effect.succeed({
+          observedAt: '2026-08-08T18:00:15.000Z',
+          cameraState,
+        }),
+      readImageArray: () => {
+        imageReads += 1
+        return Effect.fail(new Error('simulated image read failure'))
+      },
+    },
+    {
+      originalsRoot: join(root, 'originals'),
+      previewsRoot: join(root, 'previews'),
+    },
+  )
+  assert.equal(await fixture.worker.pass(), 'captureReady')
+  assert.equal(await fixture.worker.pass(), 'observing')
+  cameraState = 'idle'
+  assert.equal(await fixture.worker.pass(), 'retrievalReady')
+  assert.equal(fixture.stateRepository.state().run?.phase, 'capture')
+  assert.equal(
+    observeWorkspaceProjection(
+      fixture.database,
+      identity,
+      fixture.stateRepository.snapshot(identity),
+    )?.latestCapturedAssetId,
+    undefined,
+  )
+  assert.equal(await fixture.worker.pass(), 'rejected')
+  assert.equal(fixture.stateRepository.state().run?.phase, 'recover')
+  assert.equal(
+    Schema.decodeUnknownSync(CountRow)(
+      fixture.database
+        .prepare(
+          `SELECT count(*) AS count FROM events WHERE snapshot LIKE '%"phase":"verify"%'`,
+        )
+        .get(),
+    ).count,
+    0,
+  )
+  assert.equal(await fixture.worker.pass(), 'none')
+  assert.equal(imageReads, 1)
   fixture.database.close()
 })
 
@@ -398,9 +753,9 @@ test('restart after an uncertain provider write performs GET-only reconciliation
   const second = reopen(databasePath, reconciled)
   assert.equal(await second.worker.pass(), 'observing')
   recoveredState = 'idle'
-  assert.equal(await second.worker.pass(), 'verified')
+  assert.equal(await second.worker.pass(), 'retrievalReady')
   assert.equal(starts, 1)
-  assert.equal(second.stateRepository.state().run?.phase, 'verify')
+  assert.equal(second.stateRepository.state().run?.phase, 'capture')
   second.database.close()
 })
 
@@ -430,30 +785,118 @@ test('explicit provider rejection is distinct from an unavailable post-ack obser
   unavailable.database.close()
 })
 
-test('acknowledgement followed by immediate idle remains ambiguous and never becomes Verify', async () => {
+test('post-ack idle waits read-only and later active state settles without replay', async () => {
   let starts = 0
-  const fixture = prepare(':memory:', {
-    startExposure: () => {
-      starts += 1
-      return Effect.succeed({ _tag: 'Acknowledged' as const })
+  let observations = 0
+  let currentTime = new Date('2026-08-08T18:00:00.000Z')
+  const fixture = prepare(
+    ':memory:',
+    {
+      startExposure: () => {
+        starts += 1
+        return Effect.succeed({ _tag: 'Acknowledged' as const })
+      },
+      abortExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
+      readState: () => {
+        observations += 1
+        return Effect.succeed({
+          observedAt: currentTime.toISOString(),
+          cameraState: observations === 1 ? 'idle' : 'exposing',
+        })
+      },
     },
-    abortExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
-    readState: () =>
-      Effect.succeed({
-        observedAt: '2026-08-08T18:00:00.000Z',
-        cameraState: 'idle',
-      }),
-  })
+    { now: () => currentTime },
+  )
   assert.equal(await fixture.worker.pass(), 'captureReady')
-  assert.equal(await fixture.worker.pass(), 'reconciling')
+  assert.equal(await fixture.worker.pass(), 'awaitingObservation')
+  assert.equal(fixture.stateRepository.state().run?.phase, 'capture')
+  currentTime = new Date('2026-08-08T18:00:00.250Z')
+  assert.equal(await fixture.worker.pass(), 'observing')
+  assert.equal(starts, 1)
+  assert.equal(observations, 2)
+  assert.equal(fixture.stateRepository.state().run?.phase, 'capture')
+  fixture.database.close()
+})
+
+test('post-ack idle becomes ambiguous Recover after the bounded grace', async () => {
+  let starts = 0
+  let currentTime = new Date('2026-08-08T18:00:00.000Z')
+  const fixture = prepare(
+    ':memory:',
+    {
+      startExposure: () => {
+        starts += 1
+        return Effect.succeed({ _tag: 'Acknowledged' as const })
+      },
+      abortExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
+      readState: () =>
+        Effect.succeed({
+          observedAt: currentTime.toISOString(),
+          cameraState: 'idle',
+        }),
+    },
+    { now: () => currentTime },
+  )
+  assert.equal(await fixture.worker.pass(), 'captureReady')
+  assert.equal(await fixture.worker.pass(), 'awaitingObservation')
+  currentTime = new Date('2026-08-08T18:00:02.001Z')
   assert.equal(await fixture.worker.pass(), 'reconciling')
   assert.equal(starts, 1)
   assert.equal(fixture.stateRepository.state().run?.phase, 'recover')
   fixture.database.close()
 })
 
+test('restart inside post-ack grace observes only and never replays start', async () => {
+  const databasePath = join(
+    mkdtempSync(join(tmpdir(), 'astro-run-post-ack-grace-')),
+    'state.sqlite',
+  )
+  let starts = 0
+  let currentTime = new Date('2026-08-08T18:00:00.000Z')
+  const first = prepare(
+    databasePath,
+    {
+      startExposure: () => {
+        starts += 1
+        return Effect.succeed({ _tag: 'Acknowledged' as const })
+      },
+      abortExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
+      readState: () =>
+        Effect.succeed({
+          observedAt: currentTime.toISOString(),
+          cameraState: 'idle',
+        }),
+    },
+    { now: () => currentTime },
+  )
+  assert.equal(await first.worker.pass(), 'captureReady')
+  assert.equal(await first.worker.pass(), 'awaitingObservation')
+  first.database.close()
+
+  currentTime = new Date('2026-08-08T18:00:00.500Z')
+  const second = reopen(
+    databasePath,
+    {
+      startExposure: () => Effect.die('start must not replay after restart'),
+      abortExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
+      readState: () =>
+        Effect.succeed({
+          observedAt: currentTime.toISOString(),
+          cameraState: 'exposing',
+        }),
+    },
+    undefined,
+    () => currentTime,
+  )
+  assert.equal(await second.worker.pass(), 'observing')
+  assert.equal(starts, 1)
+  assert.equal(second.stateRepository.state().run?.phase, 'capture')
+  second.database.close()
+})
+
 test('abort intent is durable before one provider write and settles only after idle observation', async () => {
   let aborts = 0
+  let imageReads = 0
   let state: 'exposing' | 'idle' = 'exposing'
   const fixture = prepare(':memory:', {
     startExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
@@ -467,6 +910,10 @@ test('abort intent is durable before one provider write and settles only after i
         observedAt: '2026-08-08T18:00:15.000Z',
         cameraState: state,
       }),
+    readImageArray: () => {
+      imageReads += 1
+      return Effect.die('an aborted exposure must not read image bytes')
+    },
   })
   assert.equal(await fixture.worker.pass(), 'captureReady')
   assert.equal(await fixture.worker.pass(), 'observing')
@@ -476,6 +923,7 @@ test('abort intent is durable before one provider write and settles only after i
   assert.equal(aborts, 1)
   assert.equal(await fixture.worker.pass(), 'none')
   assert.equal(aborts, 1)
+  assert.equal(imageReads, 0)
   fixture.database.close()
 })
 

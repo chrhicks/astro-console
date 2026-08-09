@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phase 4 complete; beta supervised execution spine complete**
+Status: **V2.0 complete; V2.1 Phase 4 complete; supervised live camera-to-Library proof complete**
 
 ## Current Position
 
@@ -52,12 +52,41 @@ The first local bundle now provides:
 - and a live GET-only `ready` projection for the ASI2600MC Pro, ASI Mount, and ZWO
   EAF after matching current device numbers and `UniqueID` values.
 
-The next beta milestone is also complete. Plan now keeps one structured sequence
+The supervised execution milestone is complete. Plan now keeps one structured sequence
 as execution authority, the service owns a real durable executor, accepted work
 is persisted before provider calls, and uncertain writes reconcile through
 GET-only observation without replay. Observe projects the exact work states,
 timestamps, eligibility, consequences, and Verify boundary through the
 Nightbook evidence grammar.
+
+The next simulator-first slice is also complete. After the service observes an
+exposure return to idle, it durably records separate image-retrieval work while
+Capture remains current. Only accepted immutable intake advances the run to
+Verify and creates the exact Library handoff. The service performs one bounded
+GET-only ImageBytes read and retains the immutable original. Retained metadata
+records the rig and camera identity from the accepted run definition, never
+from browser completion fields. A pixel-derived PNG preview and metrics are
+generated when decoding succeeds. A preview failure does not remove the
+original. Library shows the unreviewed frame, local download, and review
+controls.
+
+The matching live proof is complete for one covered-camera frame. A fresh
+camera-only beta Plan used ASCOM Camera 1, `ZWO ASI2600MC Pro`, UniqueID
+`613D9519-B32A-4021-8FE9-830F9D09F22A`, for one 15-second Light exposure with
+no filter. Observe projected the active exposure, retained the returned
+52,183,340-byte original, and linked to the exact Library review. The Library
+download matched the retained original at SHA-256
+`faddf0214f64dd2190136e80eed49db1cc53df495ca68287af8947695d48baaf`;
+the service also generated a 250 x 168 pixel-derived PNG preview. Restart
+reopened the same Verify run and Library asset without changing the single
+command attempt. Camera 1 remained idle after restart. No mount, focuser,
+filter-wheel, guide-camera, or Camera 2 command was sent.
+
+This live run found and closed one provider timing gap. ASCOM can acknowledge
+`StartExposure` before its first state read changes from idle to exposing. The
+executor now waits for at most two seconds with GET-only observation after an
+acknowledgement. It never replays the write; persistent idle still becomes an
+ambiguous Recover result. The full server suite now passes 151/151.
 
 The corpus remains ignored and local. The first foundation is committed as
 `10e5b34` (`feat: add beta real-truth foundation`).
@@ -75,18 +104,26 @@ Desktop owners can select and reset scenarios and advance deterministic time.
 **Load** changes simulator state only. The isolated inspection service installs
 one development-only M101 `cameraOnly` Plan with one 15-second frame. The user
 then follows the normal beta workflow: accept the definition, start it, refresh
-Preflight in Observe, inspect durable work during Capture, use **Advance 16s**
-to advance simulator time, and inspect the later camera observation at Verify.
-The browser no longer sends provider exposure commands or invented completion
-metadata. Phone and read-only clients see the same context without mutation
-controls.
+Preflight in Observe, inspect durable work during Capture, and use **Advance
+16s** to advance simulator time. Observe then reaches Verify after the service
+retrieves and retains the frame. Select **Review captured frame in Library** to
+open the exact beta Library detail, inspect the real pixel preview, download the
+local original, and record an Accept or Reject review. The browser sends no
+provider exposure command or completion metadata. Phone and read-only clients
+see the same context without mutation controls.
 
-The supervised executor deliberately stops at Verify. It does not retrieve
-bytes or create Library truth, and the inspected Library identity set remained
-unchanged. Definitions outside the current boundary -- more than one sequence,
+The supervised executor holds at Verify after Library retention. Definitions
+outside the current boundary -- more than one sequence,
 more than one frame, deep-sky acquisition, or a camera-only exposure over 60
 seconds -- fail before a camera write. Development simulation also requires the
 executor Alpaca origin to match the loopback simulator origin.
+
+ImageBytes intake validates metadata, dimensions, exact payload length, and a
+64 MiB transfer limit even when `Content-Length` is absent. Binary ImageBytes
+content cannot bypass validation with a FITS signature; FITS requires an
+explicit FITS representation. Restart reuses a durable retained receipt or a
+checksum-matching final file without replacing stable bytes. Retrieval failure
+settles once from Capture into Recover, and abort does not read image bytes.
 
 The active-exposure observation is published once when Capture becomes proven;
 later worker polls do not repeat the same event while the camera remains active.
@@ -95,32 +132,38 @@ snapshot-gap recovery. Simulation and Library review controls follow the fresh
 held desktop lease, not whether Plan or Observe happens to have another eligible
 action, so moving between workspaces does not make the controller read-only.
 
-Current automated proof is green: contracts 187/187, server 138/138, and web
-124/124. Functional browser proof covered the normal Plan-to-Verify workflow,
+Current automated proof is green: contracts 187/187, server 151/151, and web
+126/126. Functional browser proof covered the normal Plan-to-Verify workflow,
 fresh acceptance projection, restart/no-replay, abort and reconciliation
-states, and unchanged Library truth. Designer review passed at 1440 px, 768 px,
-and 390 px with no overflow or console error; phone remained read-only. This
-inspection work contacted no live provider or hardware.
+states. Automated browser projections cover the exact Observe-to-Library link
+and Library review state. Final read-only Designer review of the matching live
+retained frame passed at wide, 768 px, and 390 px. It corrected compressed
+compact Observe panels and added the exact read-only Library handoff to phone
+Observe. The 390 px projection has no horizontal overflow or mutation control,
+and an idle interval produced no refresh churn.
 
 ## Proof Boundary
 
 Completed evidence covers local contracts, service behavior, SQLite/HTTP/SSE,
 browser presentation, the opt-in beta integration, deterministic simulated
-Alpaca behavior, real-frame transfer and intake, restart without replay, remote
+Alpaca behavior, real-frame executor retrieval and intake, pixel-derived local
+preview, one covered-camera physical exposure, live Alpaca ImageBytes transfer,
+restart without replay, remote
 ingress and control, one isolated real camera-original intake, local solve-only
 evidence, and current GET-only provider/device communication for the selected
 ASI mount, imaging camera, and focuser. It does not prove beta route promotion,
-production deployment of the beta, mount movement, production processing
-tools, a new physical exposure, or physical image quality.
+production deployment of the beta, mount movement, live abort behavior,
+production processing tools, or sky image quality from the covered indoor
+frame.
 
 ## Next Action
 
-Build the indoor camera-to-Library path on the supervised executor. Prove image
-retrieval, immutable original retention, Library intake, and inspection against
-the loopback simulator first, without browser-supplied completion metadata.
-Then use the owner-approved bounded live camera path while the owner can monitor
-it. Small focus or slew probes remain permitted for endpoint behavior; ask
-before any larger action.
+Prepare the next accepted delivery step: bounded outdoor Acquire and modest
+capture. Use the simulator to complete the target-acquisition and recovery
+states first, then use only owner-observed small slew, focus, and camera probes
+for live provider evidence. Keep the unavailable filter wheel explicit and ask
+before any larger movement or exposure sequence. A separate live abort can be
+added if the owner wants that remaining indoor hardware proof before Acquire.
 
 Completed chronology and former authority are indexed in the
 [documentation archive](../archive/README.md).

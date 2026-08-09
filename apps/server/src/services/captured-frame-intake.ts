@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
+  readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -89,9 +90,26 @@ export function materializeCapturedFrame(
       `${input.assetId}.${input.format}`,
     )
     temporary = appPath(storage.originalsRoot, `.${input.assetId}.tmp`)
-    if (existsSync(finalPath)) throw new Error('duplicate original')
-    writeFileSync(temporary, bytes, { flag: 'wx' })
-    renameSync(temporary, finalPath)
+    if (existsSync(finalPath)) {
+      const retainedChecksum = fileChecksum(finalPath)
+      if (retainedChecksum !== checksum) {
+        recordCapturedFrameOrphan(database, finalPath, retainedChecksum)
+        if (existsSync(temporary)) rmSync(temporary)
+        return { outcome: 'rejected', reason: 'MaterializationFailed' }
+      }
+      if (existsSync(temporary)) rmSync(temporary)
+    } else {
+      if (existsSync(temporary)) {
+        if (fileChecksum(temporary) === checksum) {
+          renameSync(temporary, finalPath)
+          temporary = ''
+        } else rmSync(temporary)
+      }
+      if (!existsSync(finalPath)) {
+        writeFileSync(temporary, bytes, { flag: 'wx' })
+        renameSync(temporary, finalPath)
+      }
+    }
     temporary = ''
   } catch {
     if (temporary && existsSync(temporary)) rmSync(temporary)
@@ -116,6 +134,7 @@ export function materializeCapturedFrame(
       availability: 'availableLocally',
       capturedAt,
       comparisonGroupId: `${input.lineage.runId}-${input.lineage.sequenceId}`,
+      equipment: input.equipment,
       lineage: {
         sourceAssetIds: [],
         runId: input.lineage.runId,
@@ -174,19 +193,34 @@ export function materializeCapturedFrame(
     database
       .prepare('INSERT INTO captured_frame_receipts VALUES (?,?,?)')
       .run(input.idempotencyKey, semanticKey, JSON.stringify(result))
+    database
+      .prepare('DELETE FROM captured_frame_orphans WHERE path=? AND checksum=?')
+      .run(finalPath, checksum)
     database.exec('COMMIT')
     return result
   } catch {
     try {
       database.exec('ROLLBACK')
     } catch {}
-    try {
-      database
-        .prepare('INSERT OR IGNORE INTO captured_frame_orphans VALUES (?,?,?)')
-        .run(finalPath, checksum, new Date().toISOString())
-    } catch {}
+    recordCapturedFrameOrphan(database, finalPath, checksum)
     return { outcome: 'rejected', reason: 'MaterializationFailed' }
   }
+}
+
+function fileChecksum(path: string) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
+function recordCapturedFrameOrphan(
+  database: DatabaseSync,
+  path: string,
+  checksum: string,
+) {
+  try {
+    database
+      .prepare('INSERT OR IGNORE INTO captured_frame_orphans VALUES (?,?,?)')
+      .run(path, checksum, new Date().toISOString())
+  } catch {}
 }
 
 function safeFitsHeader(bytes: Uint8Array) {
@@ -224,10 +258,10 @@ function safeImageBytesHeader(bytes: Uint8Array) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   return {
     headerVersion: view.getUint32(0, true),
-    dataStart: view.getUint32(12, true),
-    imageElementType: view.getUint32(16, true),
-    transmissionElementType: view.getUint32(20, true),
-    rank: view.getUint32(24, true),
+    dataStart: view.getUint32(16, true),
+    imageElementType: view.getUint32(20, true),
+    transmissionElementType: view.getUint32(24, true),
+    rank: view.getUint32(28, true),
   }
 }
 

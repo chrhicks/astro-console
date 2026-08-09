@@ -431,6 +431,12 @@ export const LibraryAssetDetail = Schema.Struct({
   availability: AssetSnapshot.fields.availability,
   capturedAt: ObservedAt,
   comparisonGroupId: Schema.NonEmptyString,
+  equipment: Schema.optionalKey(
+    Schema.Struct({
+      rigId: Schema.NonEmptyString,
+      cameraDeviceId: Schema.NonEmptyString,
+    }),
+  ),
   lineage: Schema.Struct({
     sourceAssetIds: Schema.Array(AssetId),
     runId: Schema.optionalKey(Schema.NonEmptyString),

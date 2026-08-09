@@ -27,6 +27,10 @@ const detail = Schema.decodeUnknownSync(LibraryAssetDetailSchema)({
   availability: 'availableLocally',
   capturedAt: '2026-08-07T02:13:00.000Z',
   comparisonGroupId: 'm27-night-1',
+  equipment: {
+    rigId: 'rig-backyard-primary',
+    cameraDeviceId: 'camera-asi2600mc-pro',
+  },
   lineage: {
     sourceAssetIds: [],
     runId: 'run-m27-001',
@@ -133,6 +137,10 @@ test('renders one real frame-review task from Library contracts', () => {
   assert.match(markup, /Previous/)
   assert.match(markup, /Next/)
   assert.match(markup, /asset-m27-002\?ui=beta/)
+  assert.match(markup, /<dt>Rig<\/dt>/)
+  assert.match(markup, /rig-backyard-primary/)
+  assert.match(markup, /<dt>Camera<\/dt>/)
+  assert.match(markup, /camera-asi2600mc-pro/)
   assert.match(markup, /Backyard observatory · beta/)
   assert.match(markup, /aria-current="page">Library/)
   assert.doesNotMatch(markup, /Compare/)
@@ -213,6 +221,10 @@ test('phone is evidence, availability, and lineage without mutation controls', (
   assert.match(markup, /Read-only on phone/)
   assert.match(markup, /Phone asset evidence and availability/)
   assert.match(markup, /<dt>Run<\/dt>/)
+  assert.match(markup, /<dt>Rig<\/dt>/)
+  assert.match(markup, /rig-backyard-primary/)
+  assert.match(markup, /<dt>Camera<\/dt>/)
+  assert.match(markup, /camera-asi2600mc-pro/)
   assert.match(markup, /<dt>Source<\/dt>/)
   assert.match(markup, /Inspection record/)
   assert.doesNotMatch(markup, /<button/)

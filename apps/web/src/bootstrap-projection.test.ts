@@ -244,6 +244,48 @@ test('Observe renders fake lifecycle evidence and omits terminal controls', () =
   assert.doesNotMatch(markup, /<button/)
 })
 
+test('projects retained Verify evidence without claiming Library intake is still pending', () => {
+  const projection = projectBootstrapState(
+    BootstrapClientState.Current({
+      snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)({
+        ...bootstrapFixtures.activeRun,
+        observe: {
+          runId: 'run-retained-001',
+          revision: 5,
+          executor: 'real',
+          phase: 'verify',
+          target: 'M101',
+          currentSequence: 0,
+          completedSequences: 0,
+          totalSequences: 1,
+          retryUsed: false,
+          lifecycleFacts: ['RetrieveFrame completed.'],
+          attemptFacts: ['The captured frame is retained.'],
+          executorWork: [
+            {
+              workId: 'work-retrieve-frame-1',
+              kind: 'RetrieveFrame',
+              state: 'completed',
+            },
+          ],
+          latestCapturedAssetId: 'asset-capture-retained-001',
+          actions: {
+            ...ineligibleObserveActions('policyUnavailable'),
+            stop: { _tag: 'Eligible' },
+          },
+        },
+      }),
+    }),
+  )
+
+  assert.match(projection.observe.annotation, /captured frame retention/)
+  assert.match(projection.observe.recovery ?? '', /retained in Library/)
+  assert.doesNotMatch(
+    `${projection.observe.annotation} ${projection.observe.recovery}`,
+    /Captured bytes are not claimed|Library intake are the next milestone/,
+  )
+})
+
 test('Observe promotes Polar alignment guidance and its action before fixture lifecycle detail', () => {
   const projection = projectBootstrapState(
     BootstrapClientState.Current({

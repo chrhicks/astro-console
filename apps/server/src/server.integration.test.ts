@@ -102,6 +102,32 @@ function retainedFitsWithHints() {
   )
 }
 
+function previewFits2x2() {
+  const card = (key: string, value: string) =>
+    `${key.padEnd(8)}= ${value}`.padEnd(80, ' ')
+  const header = [
+    card('SIMPLE', 'T'),
+    card('BITPIX', '16'),
+    card('NAXIS', '2'),
+    card('NAXIS1', '2'),
+    card('NAXIS2', '2'),
+    card('BZERO', '32768'),
+    'END'.padEnd(80, ' '),
+  ].join('')
+  const bytes = new Uint8Array(2888)
+  bytes.set(new TextEncoder().encode(header.padEnd(2880, ' ')))
+  const view = new DataView(bytes.buffer)
+  ;[-32_768, -10_000, 10_000, 32_767].forEach((value, index) =>
+    view.setInt16(2880 + index * 2, value, false),
+  )
+  return bytes
+}
+
+const capturedEquipment = {
+  rigId: 'fixture-rig',
+  cameraDeviceId: 'fixture-camera',
+}
+
 test('Process HTTP workflow durably builds, fails locally, retries, and resumes after restart', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'astro-process-workspace-'))
   const databasePath = join(root, 'state.sqlite')
@@ -310,6 +336,7 @@ test('local plate solver records solved and no-solution evidence without a mount
     frameId: 'plate-solve-001',
     capturedAt: '2026-08-05T10:00:00.000Z',
     format: 'fits' as const,
+    equipment: capturedEquipment,
     capture: {
       exposureSeconds: 30,
       filter: 'L',
@@ -378,6 +405,7 @@ test('local plate solver records a bounded failure as typed no-solution and reta
       frameId: 'plate-solve-timeout',
       capturedAt: '2026-08-05T10:00:00.000Z',
       format: 'fits',
+      equipment: capturedEquipment,
       capture: {
         exposureSeconds: 30,
         filter: 'L',
@@ -436,6 +464,7 @@ test('local plate solver records normal solve-field exit 1 as no-solution', asyn
       frameId: 'plate-solve-none',
       capturedAt: '2026-08-05T10:00:00.000Z',
       format: 'fits',
+      equipment: capturedEquipment,
       capture: {
         exposureSeconds: 30,
         filter: 'L',
@@ -497,6 +526,7 @@ test('materializes deterministic captured bytes as an immutable Library asset wi
       frameId: 'frame-m27-001',
       capturedAt: '2026-08-04T01:02:03.000Z',
       format: 'fits',
+      equipment: capturedEquipment,
       capture: {
         exposureSeconds: 180,
         filter: 'L',
@@ -510,7 +540,7 @@ test('materializes deterministic captured bytes as an immutable Library asset wi
       },
       idempotencyKey: 'capture-m27-001',
     },
-    new TextEncoder().encode('deterministic-fits-bytes'),
+    previewFits2x2(),
   )
   assert.equal(first.outcome, 'accepted')
   if (first.outcome !== 'accepted')
@@ -522,6 +552,7 @@ test('materializes deterministic captured bytes as an immutable Library asset wi
         frameId: 'frame-m27-001',
         capturedAt: '2026-08-04T01:02:03.000Z',
         format: 'fits',
+        equipment: capturedEquipment,
         capture: {
           exposureSeconds: 180,
           filter: 'L',
@@ -535,7 +566,7 @@ test('materializes deterministic captured bytes as an immutable Library asset wi
         },
         idempotencyKey: 'capture-m27-001',
       },
-      new TextEncoder().encode('deterministic-fits-bytes'),
+      previewFits2x2(),
     ),
     first,
   )
@@ -585,6 +616,7 @@ test('materializes deterministic captured bytes as an immutable Library asset wi
     binning: 1,
     frameType: 'light',
   })
+  assert.deepEqual(detail.equipment, capturedEquipment)
   assert.deepEqual(detail.lineage, {
     sourceAssetIds: [],
     runId: 'run-capture-m27',
@@ -595,11 +627,11 @@ test('materializes deterministic captured bytes as an immutable Library asset wi
   assert.equal(detail.inspection._tag, 'Available')
   assert.equal(
     detail.inspection.preview.provenance.algorithm,
-    'deterministic-fixture-v1',
+    'bounded-pixel-preview-v1',
   )
-  assert.equal(
-    readFileSync(join(originalsRoot, 'asset-capture-m27-001.fits'), 'utf8'),
-    'deterministic-fits-bytes',
+  assert.deepEqual(
+    [...readFileSync(join(originalsRoot, 'asset-capture-m27-001.fits'))],
+    [...previewFits2x2()],
   )
   await reader.cancel()
   await listener.close()
@@ -640,6 +672,7 @@ test('records a checksum-backed captured-frame orphan when the SQLite transactio
       frameId: 'frame-orphan-001',
       capturedAt: '2026-08-04T01:02:03.000Z',
       format: 'fits',
+      equipment: capturedEquipment,
       capture: {
         exposureSeconds: 180,
         filter: 'L',
@@ -669,6 +702,73 @@ test('records a checksum-backed captured-frame orphan when the SQLite transactio
     databaseRow(
       CountRow,
       database.prepare('SELECT count(*) AS count FROM library_assets').get(),
+    ).count,
+    0,
+  )
+  database.close()
+})
+
+test('rejects and records a mismatched retained original without creating Library truth', () => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-captured-frame-mismatch-'))
+  const database = openAppOwnedDatabase(join(root, 'state.sqlite'), `${root}/`)
+  const originalsRoot = join(root, 'originals')
+  mkdirSync(originalsRoot, { recursive: true })
+  const finalPath = join(originalsRoot, 'asset-capture-mismatch-001.fits')
+  const existingBytes = new TextEncoder().encode('different retained bytes')
+  writeFileSync(finalPath, existingBytes)
+  const result = materializeCapturedFrame(
+    database,
+    { originalsRoot },
+    {
+      assetId: 'asset-capture-mismatch-001',
+      frameId: 'frame-mismatch-001',
+      capturedAt: '2026-08-04T01:02:03.000Z',
+      format: 'fits',
+      equipment: capturedEquipment,
+      capture: {
+        exposureSeconds: 180,
+        filter: 'L',
+        binning: 1,
+        frameType: 'light',
+      },
+      lineage: {
+        runId: 'run-capture-m27',
+        sequenceId: 'sequence-l',
+        acquisitionId: 'acquire-m27-001',
+      },
+      idempotencyKey: 'capture-mismatch-001',
+    },
+    previewFits2x2(),
+  )
+  assert.deepEqual(result, {
+    outcome: 'rejected',
+    reason: 'MaterializationFailed',
+  })
+  assert.deepEqual([...readFileSync(finalPath)], [...existingBytes])
+  assert.equal(
+    databaseRow(
+      CountRow,
+      database
+        .prepare(
+          'SELECT count(*) AS count FROM captured_frame_orphans WHERE path=?',
+        )
+        .get(finalPath),
+    ).count,
+    1,
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      database.prepare('SELECT count(*) AS count FROM library_assets').get(),
+    ).count,
+    0,
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      database
+        .prepare('SELECT count(*) AS count FROM captured_frame_receipts')
+        .get(),
     ).count,
     0,
   )
@@ -713,6 +813,7 @@ test('Phase 4 deterministic chain carries one current captured frame through Lib
       frameId: 'frame-live-001',
       capturedAt: '2026-08-04T01:02:03.000Z',
       format: 'fits',
+      equipment: capturedEquipment,
       capture: {
         exposureSeconds: 180,
         filter: 'L',
@@ -726,7 +827,7 @@ test('Phase 4 deterministic chain carries one current captured frame through Lib
       },
       idempotencyKey: 'phase-4-capture-live',
     },
-    new TextEncoder().encode('phase-4-live-fits-bytes'),
+    previewFits2x2(),
   )
   assert.equal(first.outcome, 'accepted')
   assert.equal(
@@ -737,8 +838,8 @@ test('Phase 4 deterministic chain carries one current captured frame through Lib
     `${base}/api/library/assets/asset-capture-live-001`,
   ).then((response) => response.json())
   assert.equal(asset.inspection._tag, 'Available')
-  assert.equal(asset.inspection.metrics.sharpness, 128)
-  assert.match(asset.inspection.rationale.summary, /fixture/i)
+  assert.equal(asset.inspection.rationale.decision, 'unreviewed')
+  assert.match(asset.inspection.rationale.summary, /retained original pixels/i)
   const review = await fetch(
     `${base}/api/library/assets/asset-capture-live-001/review`,
     {
@@ -760,6 +861,7 @@ test('Phase 4 deterministic chain carries one current captured frame through Lib
       frameId: 'frame-live-002',
       capturedAt: '2026-08-04T01:02:04.000Z',
       format: 'fits',
+      equipment: capturedEquipment,
       capture: {
         exposureSeconds: 180,
         filter: 'L',
@@ -885,6 +987,7 @@ test('persists truthful unavailable inspection state when a retained original is
       frameId: 'frame-unavailable-001',
       capturedAt: '2026-08-04T01:02:03.000Z',
       format: 'fits',
+      equipment: capturedEquipment,
       capture: {
         exposureSeconds: 180,
         filter: 'L',
@@ -934,6 +1037,7 @@ test('persists truthful failed inspection state when a retained original changes
       frameId: 'frame-failed-001',
       capturedAt: '2026-08-04T01:02:03.000Z',
       format: 'fits',
+      equipment: capturedEquipment,
       capture: {
         exposureSeconds: 180,
         filter: 'L',
@@ -1367,10 +1471,30 @@ test('Alpaca camera adapter sends exact StartExposure form parameters in its PUT
   ])
 })
 
+function recordedImageBytes() {
+  const bytes = new Uint8Array(52)
+  const view = new DataView(bytes.buffer)
+  for (const [index, value] of [1, 0, 0, 0, 44, 2, 8, 2, 2, 2, 0].entries())
+    view.setUint32(index * 4, value, true)
+  for (const [index, value] of [0, 20_000, 40_000, 65_535].entries())
+    view.setUint16(44 + index * 2, value, true)
+  return bytes
+}
+
+const recordedCameraProvider = (response: () => Response) =>
+  alpacaCameraProvider(
+    {
+      kind: 'alpaca',
+      rigId: 'recorded-rig',
+      host: '192.168.4.104',
+      port: 11111,
+      devices: { camera: { deviceNumber: 0 } },
+    },
+    async () => response(),
+  )
+
 test('Alpaca camera adapter retains bounded ImageBytes binary as cameraRaw', async () => {
-  const bytes = new Uint8Array(32)
-  new DataView(bytes.buffer).setUint32(0, 1, true)
-  new DataView(bytes.buffer).setUint32(12, 8, true)
+  const bytes = recordedImageBytes()
   const provider = alpacaCameraProvider(
     {
       kind: 'alpaca',
@@ -1383,7 +1507,7 @@ test('Alpaca camera adapter retains bounded ImageBytes binary as cameraRaw', asy
       new Response(bytes, {
         headers: {
           'content-type': 'application/imagebytes',
-          'content-length': '32',
+          'content-length': String(bytes.byteLength),
         },
       }),
   )
@@ -1392,6 +1516,118 @@ test('Alpaca camera adapter retains bounded ImageBytes binary as cameraRaw', asy
   )
   assert.equal(image.format, 'cameraRaw')
   assert.deepEqual([...image.bytes], [...bytes])
+})
+
+test('Alpaca camera adapter rejects a FITS signature under ImageBytes content type', async () => {
+  const provider = recordedCameraProvider(
+    () =>
+      new Response(new TextEncoder().encode('SIMPLE truncated'), {
+        headers: { 'content-type': 'application/imagebytes' },
+      }),
+  )
+  await assert.rejects(
+    Effect.runPromise(
+      provider.readImageArray?.() ?? Effect.die('missing image reader'),
+    ),
+    /ImageBytes response is too short/,
+  )
+})
+
+test('Alpaca camera adapter accepts bounded FITS only with explicit FITS content type', async () => {
+  const bytes = previewFits2x2()
+  const provider = recordedCameraProvider(
+    () =>
+      new Response(bytes, {
+        headers: { 'content-type': 'application/fits' },
+      }),
+  )
+  const image = await Effect.runPromise(
+    provider.readImageArray?.() ?? Effect.die('missing image reader'),
+  )
+  assert.equal(image.format, 'fits')
+  assert.deepEqual(image.bytes, bytes)
+})
+
+test('Alpaca camera adapter validates streamed ImageBytes without Content-Length', async () => {
+  const bytes = recordedImageBytes()
+  const provider = recordedCameraProvider(
+    () =>
+      new Response(bytes, {
+        headers: { 'content-type': 'application/imagebytes' },
+      }),
+  )
+  const image = await Effect.runPromise(
+    provider.readImageArray?.() ?? Effect.die('missing image reader'),
+  )
+  assert.deepEqual(image.bytes, bytes)
+})
+
+test('Alpaca camera adapter rejects mismatched metadata and trailing ImageBytes', async () => {
+  for (const bytes of [
+    (() => {
+      const value = recordedImageBytes()
+      new DataView(value.buffer).setUint32(20, 0, true)
+      return value
+    })(),
+    Uint8Array.from([...recordedImageBytes(), 0]),
+  ]) {
+    const provider = recordedCameraProvider(
+      () =>
+        new Response(bytes, {
+          headers: { 'content-type': 'application/imagebytes' },
+        }),
+    )
+    await assert.rejects(
+      Effect.runPromise(
+        provider.readImageArray?.() ?? Effect.die('missing image reader'),
+      ),
+      /ImageBytes/,
+    )
+  }
+})
+
+test('Alpaca camera adapter stops an oversized stream without Content-Length', async () => {
+  const chunk = new Uint8Array(1024 * 1024)
+  let emitted = 0
+  const provider = recordedCameraProvider(
+    () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (emitted >= 65) controller.close()
+            else {
+              emitted += 1
+              controller.enqueue(chunk)
+            }
+          },
+        }),
+        { headers: { 'content-type': 'application/imagebytes' } },
+      ),
+  )
+  await assert.rejects(
+    Effect.runPromise(
+      provider.readImageArray?.() ?? Effect.die('missing image reader'),
+    ),
+    /outside the supported size/,
+  )
+})
+
+test('Alpaca camera adapter rejects oversized JSON before parsing', async () => {
+  const provider = recordedCameraProvider(
+    () =>
+      new Response('{"ErrorNumber":0,"Value":[]}', {
+        headers: {
+          'content-type': 'application/json',
+          'content-length': String(64 * 1024 * 1024 + 1),
+        },
+      }),
+  )
+  await assert.rejects(
+    Effect.runPromise(
+      provider.readImageArray?.() ?? Effect.die('missing image reader'),
+    ),
+    /outside the supported size/,
+  )
 })
 
 const readyCameraPreflightProvider = {
@@ -1828,6 +2064,7 @@ test('live frame evidence is durable, idempotent, published over SSE, and stays 
         frameId: 'frame-live-001',
         capturedAt: '2026-08-04T01:02:03.000Z',
         format: 'fits',
+        equipment: capturedEquipment,
         capture: {
           exposureSeconds: 180,
           filter: 'L',
@@ -4590,11 +4827,7 @@ test('Library detail uses stable identities and snapshot delivery remains catalo
   assert.equal(detail.assetId, 'asset-m27-001')
   assert.equal(detail.lineage.runId, 'run-m27-001')
   assert.deepEqual(detail.actions, [
-    {
-      _tag: 'Unavailable',
-      action: 'download',
-      reason: 'PublicationUnavailable',
-    },
+    { _tag: 'Eligible', action: 'download' },
     { _tag: 'Eligible', action: 'openInProcess' },
   ])
   assert.equal(JSON.stringify(detail).includes('objectKey'), false)

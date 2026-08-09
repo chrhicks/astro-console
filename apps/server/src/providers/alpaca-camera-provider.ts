@@ -18,6 +18,8 @@ const states = [
   'download',
   'error',
 ] as const
+const maxImageBytes = 64 * 1024 * 1024
+const imageBytesHeaderSize = 44
 
 export const alpacaCameraProvider = (
   config: Extract<PreflightProviderConfig, { readonly kind: 'alpaca' }>,
@@ -181,33 +183,58 @@ function readImageArray(request: typeof fetch, url: string) {
   }).pipe(
     Effect.flatMap((response) => {
       if (!response.ok)
-        return decode(response).pipe(Effect.as(undefined as never))
+        return Effect.tryPromise({
+          try: () => response.text(),
+          catch: (cause) => cause,
+        }).pipe(
+          Effect.flatMap((text) =>
+            Effect.fail(
+              new Error(
+                `Alpaca camera request failed: ${boundedProviderText(text, response.status)}`,
+              ),
+            ),
+          ),
+        )
       const contentType =
         response.headers.get('content-type')?.toLowerCase() ?? ''
       if (
         contentType.includes('application/imagebytes') ||
         contentType.includes('application/octet-stream')
       ) {
-        const declaredLength = Number(response.headers.get('content-length'))
+        const declared = response.headers.get('content-length')
+        const declaredLength = declared === null ? undefined : Number(declared)
         if (
-          Number.isFinite(declaredLength) &&
-          declaredLength > 64 * 1024 * 1024
+          declaredLength !== undefined &&
+          (!Number.isSafeInteger(declaredLength) ||
+            declaredLength <= 0 ||
+            declaredLength > maxImageBytes)
         )
           return Effect.fail(
             new Error('Alpaca image response is outside the supported size.'),
           )
-        return Effect.tryPromise({
-          try: () => response.arrayBuffer(),
-          catch: (cause) => cause,
-        }).pipe(
-          Effect.map((buffer) => new Uint8Array(buffer)),
-          Effect.flatMap(imageBytes),
+        return readBoundedBytes(response, maxImageBytes).pipe(
+          Effect.flatMap((bytes) => imageBytes(bytes, 'imageBytes')),
         )
       }
-      return Effect.tryPromise({
-        try: () => response.json(),
-        catch: (cause) => cause,
-      }).pipe(
+      if (
+        contentType.includes('application/fits') ||
+        contentType.includes('image/fits')
+      )
+        return readBoundedBytes(response, maxImageBytes).pipe(
+          Effect.flatMap((bytes) => imageBytes(bytes, 'fits')),
+        )
+      return readBoundedBytes(response, maxImageBytes).pipe(
+        Effect.flatMap((bytes) =>
+          Effect.try({
+            try: () => {
+              const parsed: unknown = JSON.parse(
+                new TextDecoder().decode(bytes),
+              )
+              return parsed
+            },
+            catch: (cause) => cause,
+          }),
+        ),
         Effect.flatMap(Schema.decodeUnknownEffect(Envelope)),
         Effect.flatMap((envelope) =>
           envelope.ErrorNumber === 0
@@ -223,7 +250,10 @@ function readImageArray(request: typeof fetch, url: string) {
 
 function jsonImageBytes(value: unknown) {
   if (typeof value === 'string')
-    return imageBytes(new Uint8Array(Buffer.from(value, 'base64')))
+    return imageBytes(
+      new Uint8Array(Buffer.from(value, 'base64')),
+      'compatibility',
+    )
   if (
     Array.isArray(value) &&
     value.every(
@@ -234,25 +264,177 @@ function jsonImageBytes(value: unknown) {
         entry <= 255,
     )
   )
-    return imageBytes(Uint8Array.from(value))
+    return imageBytes(Uint8Array.from(value), 'compatibility')
   return Effect.fail(
     new Error('Alpaca image response has an unsupported JSON representation.'),
   )
 }
 function imageBytes(
   bytes: Uint8Array,
+  representation: 'imageBytes' | 'fits' | 'compatibility',
 ): Effect.Effect<
   { readonly bytes: Uint8Array; readonly format: 'fits' | 'cameraRaw' },
   Error
 > {
-  if (bytes.byteLength === 0 || bytes.byteLength > 64 * 1024 * 1024)
+  if (bytes.byteLength === 0 || bytes.byteLength > maxImageBytes)
     return Effect.fail(
       new Error('Alpaca image response is outside the supported size.'),
     )
   const signature = new TextDecoder().decode(bytes.slice(0, 6))
-  if (signature === 'SIMPLE')
+  if (
+    signature === 'SIMPLE' &&
+    (representation === 'fits' || representation === 'compatibility')
+  )
     return Effect.succeed({ bytes, format: 'fits' as const })
-  if (bytes.byteLength < 32)
-    return Effect.fail(new Error('Alpaca ImageBytes response is too short.'))
+  if (representation === 'fits')
+    return Effect.fail(new Error('Alpaca FITS response has no SIMPLE header.'))
+  try {
+    validateImageBytes(bytes)
+  } catch (cause) {
+    return Effect.fail(
+      cause instanceof Error
+        ? cause
+        : new Error('Alpaca ImageBytes response is malformed.'),
+    )
+  }
   return Effect.succeed({ bytes, format: 'cameraRaw' as const })
+}
+
+function readBoundedBytes(response: Response, limit: number) {
+  return Effect.tryPromise({
+    try: async () => {
+      const declaredHeader = response.headers.get('content-length')
+      const declaredLength =
+        declaredHeader === null ? undefined : Number(declaredHeader)
+      if (
+        declaredLength !== undefined &&
+        (!Number.isSafeInteger(declaredLength) ||
+          declaredLength <= 0 ||
+          declaredLength > limit)
+      )
+        throw new Error('Alpaca image response is outside the supported size.')
+      if (response.body === null) {
+        if (declaredLength === undefined)
+          throw new Error(
+            'An unstreamable Alpaca image response requires a bounded Content-Length.',
+          )
+        const bytes = new Uint8Array(await response.arrayBuffer())
+        if (bytes.byteLength !== declaredLength || bytes.byteLength > limit)
+          throw new Error(
+            'Alpaca image response is outside the supported size.',
+          )
+        return bytes
+      }
+      const reader = response.body.getReader()
+      if (declaredLength !== undefined) {
+        const bytes = new Uint8Array(declaredLength)
+        let offset = 0
+        try {
+          for (;;) {
+            const next = await reader.read()
+            if (next.done) break
+            if (offset + next.value.byteLength > bytes.byteLength) {
+              await reader.cancel().catch(() => undefined)
+              throw new Error(
+                'Alpaca image response does not match its Content-Length.',
+              )
+            }
+            bytes.set(next.value, offset)
+            offset += next.value.byteLength
+          }
+        } finally {
+          reader.releaseLock()
+        }
+        if (offset !== bytes.byteLength)
+          throw new Error(
+            'Alpaca image response does not match its Content-Length.',
+          )
+        return bytes
+      }
+      const chunks: Uint8Array[] = []
+      let total = 0
+      try {
+        for (;;) {
+          const next = await reader.read()
+          if (next.done) break
+          total += next.value.byteLength
+          if (total > limit) {
+            await reader.cancel().catch(() => undefined)
+            throw new Error(
+              'Alpaca image response is outside the supported size.',
+            )
+          }
+          chunks.push(next.value)
+        }
+      } finally {
+        reader.releaseLock()
+      }
+      const bytes = new Uint8Array(total)
+      let offset = 0
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset)
+        offset += chunk.byteLength
+      }
+      return bytes
+    },
+    catch: (cause) => cause,
+  })
+}
+
+function validateImageBytes(bytes: Uint8Array) {
+  if (bytes.byteLength < imageBytesHeaderSize)
+    throw new Error('Alpaca ImageBytes response is too short.')
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const version = view.getUint32(0, true)
+  const errorNumber = view.getUint32(4, true)
+  const dataStart = view.getUint32(16, true)
+  const imageElementType = view.getUint32(20, true)
+  const transmissionElementType = view.getUint32(24, true)
+  const rank = view.getUint32(28, true)
+  const dimensions = [
+    view.getUint32(32, true),
+    view.getUint32(36, true),
+    view.getUint32(40, true),
+  ]
+  if (version !== 1)
+    throw new Error(`Unsupported Alpaca ImageBytes version ${version}.`)
+  if (errorNumber !== 0)
+    throw new Error(`Alpaca ImageBytes reported provider error ${errorNumber}.`)
+  if (dataStart < imageBytesHeaderSize || dataStart > bytes.byteLength)
+    throw new Error('Alpaca ImageBytes data start is invalid.')
+  if (rank !== 2 && rank !== 3)
+    throw new Error(`Unsupported Alpaca ImageBytes rank ${rank}.`)
+  if (
+    !Number.isInteger(imageElementType) ||
+    imageElementType < 1 ||
+    imageElementType > 9
+  )
+    throw new Error(
+      `Unsupported Alpaca ImageBytes image element type ${imageElementType}.`,
+    )
+  const activeDimensions = dimensions.slice(0, rank)
+  if (activeDimensions.some((value) => value === 0))
+    throw new Error('Alpaca ImageBytes dimensions must be positive.')
+  const elementBytes = transmissionElementBytes(transmissionElementType)
+  const pixelCount = activeDimensions.reduce((total, value) => total * value, 1)
+  if (!Number.isSafeInteger(pixelCount))
+    throw new Error(
+      'Alpaca ImageBytes dimensions are outside the supported size.',
+    )
+  const payloadBytes = pixelCount * elementBytes
+  if (
+    !Number.isSafeInteger(payloadBytes) ||
+    payloadBytes !== bytes.byteLength - dataStart
+  )
+    throw new Error(
+      'Alpaca ImageBytes payload length does not match its metadata.',
+    )
+}
+
+function transmissionElementBytes(type: number) {
+  if (type === 6) return 1
+  if (type === 1 || type === 8) return 2
+  if (type === 2 || type === 4 || type === 9) return 4
+  if (type === 3 || type === 5 || type === 7) return 8
+  throw new Error(`Unsupported Alpaca ImageBytes transmission type ${type}.`)
 }

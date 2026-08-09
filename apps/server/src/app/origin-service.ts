@@ -142,6 +142,7 @@ import {
   AssetId,
   AttemptId,
   RecoverySeriesId,
+  RunDefinition,
   RunExecutionContext,
   recordCorrectionAcknowledgement,
   recordManagedCapture,
@@ -152,6 +153,9 @@ export type DownloadGrantConfig = {
   readonly issuer: DownloadGrantIssuer
   readonly now?: () => Date
 }
+const AcceptedDefinitionRow = Schema.Struct({ definition: Schema.String })
+const AcceptedDefinitionRecord = Schema.Struct({ definition: RunDefinition })
+
 export function createLocalWebService(
   databasePath = ':memory:',
   identityResolver: RequestAdmission = createLocalFixtureAdmission({
@@ -511,6 +515,12 @@ export function createLocalWebService(
           database,
           stateRepository,
           cameraProvider: options.cameraProvider,
+          ...(options.capturedFrameStorage === undefined
+            ? {}
+            : { capturedFrameStorage: options.capturedFrameStorage }),
+          ...(options.frameInspectionStorage === undefined
+            ? {}
+            : { frameInspectionStorage: options.frameInspectionStorage }),
           publish,
         })
   const runExecutorFiber =
@@ -869,6 +879,19 @@ export function createLocalWebService(
               camera.intent,
             )
           ) {
+            const equipment = acceptedCaptureEquipment(
+              database,
+              current.run.sourceDefinitionId,
+            )
+            if (equipment === undefined)
+              return json(
+                response,
+                409,
+                CameraCommandResponse.cases.Rejected.make({
+                  summary:
+                    'The accepted run definition cannot supply capture equipment identity.',
+                }),
+              )
             acquireRepository.saveReceipt(
               camera.intent.idempotencyKey,
               identity.clientId,
@@ -884,6 +907,7 @@ export function createLocalWebService(
               assetId: `asset-capture-${camera.intent.idempotencyKey}`,
               frameId: camera.intent.frameId,
               capturedAt: camera.intent.capturedAt,
+              equipment,
               capture: {
                 exposureSeconds: camera.intent.exposureSeconds,
                 filter: camera.intent.filter,
@@ -1504,6 +1528,31 @@ function matchPolarCommandResult(
     ),
     Match.exhaustive,
   )
+}
+
+function acceptedCaptureEquipment(
+  database: import('node:sqlite').DatabaseSync,
+  runDefinitionId: string | undefined,
+) {
+  if (runDefinitionId === undefined) return undefined
+  try {
+    const row = Schema.decodeUnknownSync(AcceptedDefinitionRow)(
+      database
+        .prepare(
+          'SELECT definition FROM run_definitions WHERE run_definition_id=?',
+        )
+        .get(runDefinitionId),
+    )
+    const definition = Schema.decodeUnknownSync(AcceptedDefinitionRecord)(
+      JSON.parse(row.definition),
+    ).definition
+    return {
+      rigId: definition.executionContext.rigId,
+      cameraDeviceId: definition.executionContext.cameraDeviceId,
+    }
+  } catch {
+    return undefined
+  }
 }
 
 export function createOriginAdmission(

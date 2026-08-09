@@ -226,6 +226,42 @@ test('keeps preflight refresh disabled without current control', () => {
   assert.doesNotMatch(markup, /\sinert(?:=|\s|>)/)
 })
 
+test('keeps pending frame retrieval in Capture without a Library handoff', () => {
+  const base = preflightProjection()
+  const source = base.observe.source
+  assert.ok(source)
+  const projection = {
+    ...base,
+    observe: {
+      ...base.observe,
+      phase: 'Capture' as const,
+      source: {
+        ...source,
+        executor: 'real' as const,
+        phase: 'capture' as const,
+        lifecycleFacts: [
+          'Camera completion was observed; retained intake is pending.',
+        ] as const,
+        attemptFacts: ['No Library asset is retained yet.'] as const,
+        executorWork: [
+          {
+            workId: 'work-retrieve-frame-1',
+            kind: 'RetrieveFrame' as const,
+            state: 'pending' as const,
+          },
+        ],
+      },
+    },
+  }
+  const markup = renderToStaticMarkup(
+    createElement(BetaObserveApp, { projection, loading: false }),
+  )
+  assert.match(markup, /<h1>Capture<\/h1>/)
+  assert.match(markup, /Retrieve Frame/)
+  assert.doesNotMatch(markup, /Review captured frame in Library/)
+  assert.doesNotMatch(markup, /href="\/library\/assets\//)
+})
+
 test('keeps Verify inside Capture while leading with durable executor evidence', () => {
   const base = preflightProjection()
   const source = base.observe.source
@@ -249,7 +285,13 @@ test('keeps Verify inside Capture while leading with durable executor evidence',
             kind: 'StartExposure' as const,
             state: 'completed' as const,
           },
+          {
+            workId: 'work-retrieve-frame-1',
+            kind: 'RetrieveFrame' as const,
+            state: 'completed' as const,
+          },
         ],
+        latestCapturedAssetId: 'asset-capture-run-frame-1',
       },
     },
   }
@@ -263,6 +305,21 @@ test('keeps Verify inside Capture while leading with durable executor evidence',
     markup.indexOf('Durable executor work') < markup.indexOf('Fact 1'),
     'durable executor work should precede supporting evidence facts',
   )
+  assert.match(markup, /Review captured frame in Library/)
+  assert.match(
+    markup,
+    /href="\/library\/assets\/asset-capture-run-frame-1\?ui=beta"/,
+  )
+  assert.match(markup, /Retrieve Frame/)
+  const phoneMarkup = renderToStaticMarkup(
+    createElement(BetaObservePhone, { projection, loading: false }),
+  )
+  assert.match(phoneMarkup, /Review captured frame in Library/)
+  assert.match(
+    phoneMarkup,
+    /href="\/library\/assets\/asset-capture-run-frame-1\?ui=beta"/,
+  )
+  assert.doesNotMatch(phoneMarkup, /<button/)
 })
 
 test('renders the real target-acquisition projection with only its advertised capture action', () => {
@@ -487,6 +544,10 @@ test('defines the approved target-acquire and recovery responsive geometry', () 
   assert.match(
     styles,
     /@media \(min-width: 601px\) and \(max-width: 780px\)[\s\S]*?\.beta-target-stage\[data-mode='acquire'\],[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/,
+  )
+  assert.match(
+    styles,
+    /@media \(min-width: 601px\) and \(max-width: 780px\)[\s\S]*?\.beta-observe-stage\s*\{[^}]*height:\s*max-content[\s\S]*?\.beta-context-rail,\s*\.beta-evidence-panel\s*\{[^}]*height:\s*auto/,
   )
   assert.match(
     styles,

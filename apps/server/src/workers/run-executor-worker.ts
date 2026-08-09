@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { Effect, Exit, Schema } from 'effect'
 import {
@@ -10,11 +11,24 @@ import type {
   CameraProviderShape,
 } from '../services/camera-command-service.ts'
 import type { Run } from '../services/domain-state.ts'
+import {
+  materializeCapturedFrame,
+  type CapturedFrameStorage,
+} from '../services/captured-frame-intake.ts'
+import {
+  inspectCapturedFrame,
+  type FrameInspectionStorage,
+} from '../services/frame-inspection.ts'
 
 const WorkRow = Schema.Struct({
   work_id: Schema.String,
   run_id: Schema.String,
-  kind: Schema.Literals(['BeginRun', 'StartExposure', 'AbortExposure']),
+  kind: Schema.Literals([
+    'BeginRun',
+    'StartExposure',
+    'RetrieveFrame',
+    'AbortExposure',
+  ]),
   payload: Schema.String,
   state: Schema.Literals([
     'pending',
@@ -22,7 +36,9 @@ const WorkRow = Schema.Struct({
     'observing',
     'reconciling',
   ]),
+  acknowledged_at: Schema.NullOr(Schema.String),
 })
+const startExposurePostAckGraceMs = 2_000
 const DefinitionRow = Schema.Struct({ definition: Schema.String })
 const StoredDefinition = Schema.Struct({
   id: Schema.String,
@@ -35,14 +51,43 @@ const StartPayload = Schema.Struct({
     Schema.Finite.check(Schema.isGreaterThan(0)),
   ),
 })
+const RetrievePayload = Schema.Struct({
+  assetId: Schema.String,
+  frameId: Schema.String,
+  capturedAt: Schema.NonEmptyString,
+  equipment: Schema.Struct({
+    rigId: Schema.NonEmptyString,
+    cameraDeviceId: Schema.NonEmptyString,
+  }),
+  capture: Schema.Struct({
+    exposureSeconds: Schema.Finite.check(Schema.isGreaterThan(0)),
+    filter: Schema.NonEmptyString,
+    binning: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    frameType: Schema.Literal('light'),
+  }),
+  lineage: Schema.Struct({
+    runId: Schema.String,
+    sequenceId: Schema.NonEmptyString,
+    acquisitionId: Schema.NonEmptyString,
+  }),
+  idempotencyKey: Schema.NonEmptyString,
+})
+const CapturedReceipt = Schema.Struct({ response: Schema.String })
+const CapturedReceiptResponse = Schema.Struct({
+  outcome: Schema.Literal('accepted'),
+  assetId: Schema.String,
+  cursor: Schema.Int,
+})
 
 export type RunExecutorPassResult =
   | 'none'
   | 'waitingPreflight'
   | 'acquireRequired'
   | 'captureReady'
+  | 'awaitingObservation'
   | 'observing'
-  | 'verified'
+  | 'retrievalReady'
+  | 'retrieved'
   | 'aborted'
   | 'rejected'
   | 'reconciling'
@@ -51,6 +96,8 @@ export const createRunExecutorWorker = (options: {
   readonly database: DatabaseSync
   readonly stateRepository: StateSqliteRepositoryShape
   readonly cameraProvider: CameraProviderShape
+  readonly capturedFrameStorage?: CapturedFrameStorage
+  readonly frameInspectionStorage?: FrameInspectionStorage
   readonly now?: () => Date
   readonly publish?: (type: string, cursor: number) => void
 }) => {
@@ -60,12 +107,14 @@ export const createRunExecutorWorker = (options: {
   const pass = async (): Promise<RunExecutorPassResult> => {
     const raw: unknown = db
       .prepare(
-        "SELECT work_id,run_id,kind,payload,state FROM run_executor_work WHERE state IN ('pending','commandAttempted','observing','reconciling') ORDER BY CASE WHEN kind='AbortExposure' THEN 0 ELSE 1 END,rowid LIMIT 1",
+        "SELECT work_id,run_id,kind,payload,state,acknowledged_at FROM run_executor_work WHERE state IN ('pending','commandAttempted','observing','reconciling') ORDER BY CASE WHEN kind='AbortExposure' THEN 0 ELSE 1 END,rowid LIMIT 1",
       )
       .get()
     const row = Schema.decodeUnknownSync(Schema.optional(WorkRow))(raw)
     if (row === undefined) return 'none'
     if (row.kind === 'BeginRun') return beginRun(row)
+    if (row.kind === 'RetrieveFrame') return retrieveFrame(row)
+    let currentRow = row
     if (row.state === 'pending') {
       const run = options.stateRepository.state().run
       if (row.kind === 'StartExposure' && run?.phase !== 'capture') {
@@ -109,11 +158,17 @@ export const createRunExecutorWorker = (options: {
         })
         return 'rejected'
       }
+      const acknowledgedAt = now().toISOString()
       db.prepare(
         "UPDATE run_executor_work SET acknowledged_at=?,last_error=NULL WHERE work_id=? AND state='commandAttempted'",
-      ).run(now().toISOString(), row.work_id)
+      ).run(acknowledgedAt, row.work_id)
+      currentRow = {
+        ...row,
+        state: 'commandAttempted',
+        acknowledged_at: acknowledgedAt,
+      }
     }
-    return reconcile(row)
+    return reconcile(currentRow)
   }
 
   const beginRun = (row: typeof WorkRow.Type): RunExecutorPassResult => {
@@ -216,6 +271,8 @@ export const createRunExecutorWorker = (options: {
     }
     if (observation.value.cameraState === 'idle') {
       if (row.kind === 'StartExposure' && row.state !== 'observing') {
+        if (insideStartExposurePostAckGrace(row.acknowledged_at, now()))
+          return 'awaitingObservation'
         commitWorkTransition({
           runId: row.run_id,
           observation: observation.value,
@@ -246,15 +303,56 @@ export const createRunExecutorWorker = (options: {
         })
         return 'aborted'
       }
+      const payload = Schema.decodeUnknownSync(StartPayload)(
+        JSON.parse(row.payload),
+      )
+      const run = options.stateRepository.state().run
+      if (run?.id !== row.run_id)
+        throw new Error('The originating run is unavailable at completion.')
+      const definition = readDefinition(run)
+      const sequence = definition.sequences[payload.sequenceIndex]
+      if (sequence === undefined)
+        throw new Error('The accepted sequence is unavailable at completion.')
+      const identity = captureIdentity(row.run_id, sequence.sequenceId)
       commitWorkTransition({
         runId: row.run_id,
         observation: observation.value,
-        phase: 'verify',
-        progress: 75,
+        phase: 'capture',
+        progress: 60,
         eventType: 'RunExposureCompletionObserved',
-        updateWork: () => settle(row.work_id, 'completed'),
+        updateWork: () => {
+          db.prepare(
+            "INSERT OR IGNORE INTO run_executor_work (work_id,run_id,kind,payload,state) VALUES (?,?,?,?, 'pending')",
+          ).run(
+            `${row.run_id}:sequence:${payload.sequenceIndex}:retrieve-frame`,
+            row.run_id,
+            'RetrieveFrame',
+            JSON.stringify({
+              assetId: identity.assetId,
+              frameId: identity.frameId,
+              capturedAt: observation.value.observedAt,
+              equipment: {
+                rigId: definition.executionContext.rigId,
+                cameraDeviceId: definition.executionContext.cameraDeviceId,
+              },
+              capture: {
+                exposureSeconds: sequence.exposureSeconds,
+                filter: sequence.filterName ?? 'No filter',
+                binning: sequence.binning,
+                frameType: 'light',
+              },
+              lineage: {
+                runId: row.run_id,
+                sequenceId: sequence.sequenceId,
+                acquisitionId: `camera-${sequence.sequenceId}`,
+              },
+              idempotencyKey: `run-executor:${row.run_id}:sequence:${payload.sequenceIndex}:retrieve-frame`,
+            }),
+          )
+          settle(row.work_id, 'completed')
+        },
       })
-      return 'verified'
+      return 'retrievalReady'
     }
     if (
       observation.value.cameraState === 'waiting' ||
@@ -293,6 +391,116 @@ export const createRunExecutorWorker = (options: {
     })
     return 'reconciling'
   }
+
+  const retrieveFrame = async (
+    row: typeof WorkRow.Type,
+  ): Promise<RunExecutorPassResult> => {
+    const payload = Schema.decodeUnknownSync(RetrievePayload)(
+      JSON.parse(row.payload),
+    )
+    const receipt = Schema.decodeUnknownSync(Schema.optional(CapturedReceipt))(
+      db
+        .prepare(
+          'SELECT response FROM captured_frame_receipts WHERE idempotency_key=?',
+        )
+        .get(payload.idempotencyKey),
+    )
+    if (receipt !== undefined) {
+      const retained = Schema.decodeUnknownSync(CapturedReceiptResponse)(
+        JSON.parse(receipt.response),
+      )
+      if (retained.assetId !== payload.assetId) {
+        rejectRetrieval(
+          row,
+          'The retained-frame receipt does not match this work.',
+        )
+        return 'rejected'
+      }
+      return finishRetrievedFrame(row, retained.assetId)
+    }
+    const reader = options.cameraProvider.readImageArray
+    if (reader === undefined || options.capturedFrameStorage === undefined) {
+      rejectRetrieval(
+        row,
+        'The camera image reader or retained-original storage is unavailable.',
+      )
+      return 'rejected'
+    }
+    if (row.state === 'pending') {
+      const claimed = db
+        .prepare(
+          "UPDATE run_executor_work SET state='commandAttempted',command_attempted_at=?,last_error=NULL WHERE work_id=? AND state='pending'",
+        )
+        .run(now().toISOString(), row.work_id)
+      if (claimed.changes !== 1) return 'none'
+    }
+    const image = await Effect.runPromise(reader().pipe(Effect.exit))
+    if (Exit.isFailure(image)) {
+      rejectRetrieval(row, boundedDiagnostic(image.cause))
+      return 'rejected'
+    }
+    const retained = materializeCapturedFrame(
+      db,
+      options.capturedFrameStorage,
+      {
+        ...payload,
+        format: image.value.format,
+      },
+      image.value.bytes,
+    )
+    if (retained.outcome !== 'accepted') {
+      rejectRetrieval(
+        row,
+        `The completed camera image could not be retained: ${retained.reason}.`,
+      )
+      return 'rejected'
+    }
+    options.publish?.('CapturedFrameMaterialized', retained.cursor)
+    return finishRetrievedFrame(row, retained.assetId)
+  }
+
+  const finishRetrievedFrame = async (
+    row: typeof WorkRow.Type,
+    assetId: string,
+  ): Promise<RunExecutorPassResult> => {
+    let inspectionError: string | undefined
+    if (options.frameInspectionStorage !== undefined) {
+      const inspected = await Effect.runPromise(
+        inspectCapturedFrame(db, options.frameInspectionStorage, assetId).pipe(
+          Effect.exit,
+        ),
+      )
+      if (Exit.isSuccess(inspected))
+        options.publish?.('FrameInspectionUpdated', inspected.value.cursor)
+      else inspectionError = boundedDiagnostic(inspected.cause)
+    } else inspectionError = 'Bounded inspection storage is unavailable.'
+    commitWorkTransition({
+      runId: row.run_id,
+      phase: 'verify',
+      progress: 75,
+      eventType:
+        inspectionError === undefined
+          ? 'RunFrameInspectionUpdated'
+          : 'RunFrameInspectionUnavailable',
+      updateWork: () =>
+        settle(
+          row.work_id,
+          'completed',
+          inspectionError === undefined
+            ? undefined
+            : `The original is retained. ${inspectionError}`,
+        ),
+    })
+    return 'retrieved'
+  }
+
+  const rejectRetrieval = (row: typeof WorkRow.Type, reason: string) =>
+    commitWorkTransition({
+      runId: row.run_id,
+      phase: 'recover',
+      eventType: 'RunFrameRetrievalFailed',
+      updateWork: () => settle(row.work_id, 'rejected', reason),
+    })
 
   const enqueueAbort = (runId: string) => {
     db.prepare(
@@ -421,6 +629,28 @@ const isRejected = (
 
 function invalidDuration(): never {
   throw new Error('The accepted exposure duration is unavailable.')
+}
+
+function insideStartExposurePostAckGrace(
+  acknowledgedAt: string | null,
+  observedAt: Date,
+) {
+  if (acknowledgedAt === null) return false
+  const acknowledgedEpochMs = Date.parse(acknowledgedAt)
+  if (!Number.isFinite(acknowledgedEpochMs)) return false
+  const elapsedMs = observedAt.getTime() - acknowledgedEpochMs
+  return elapsedMs >= 0 && elapsedMs < startExposurePostAckGraceMs
+}
+
+function captureIdentity(runId: string, sequenceId: string) {
+  const digest = createHash('sha256')
+    .update(`${runId}:${sequenceId}:frame:0`)
+    .digest('hex')
+    .slice(0, 32)
+  return {
+    assetId: `asset-capture-${digest}`,
+    frameId: `frame-${digest}`,
+  }
 }
 
 function boundedDiagnostic(cause: unknown) {

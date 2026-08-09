@@ -96,6 +96,10 @@ describe('hardened Asset domain', () => {
       frameId: 'frame-m27-001',
       capturedAt: '2026-08-04T01:02:03.000Z',
       format: 'fits',
+      equipment: {
+        rigId: 'rig-main',
+        cameraDeviceId: 'camera-imaging',
+      },
       capture: {
         exposureSeconds: 180,
         filter: 'L',

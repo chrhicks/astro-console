@@ -172,6 +172,15 @@ function LineagePanel({ detail }: { detail: LibraryAssetDetail }) {
             <DataListItem label="Checksum" value={detail.checksum} />
           ) : null}
           <DataListItem label="Captured" value={detail.capturedAt} />
+          {detail.equipment ? (
+            <>
+              <DataListItem label="Rig" value={detail.equipment.rigId} />
+              <DataListItem
+                label="Camera"
+                value={detail.equipment.cameraDeviceId}
+              />
+            </>
+          ) : null}
           {detail.lineage.runId ? (
             <DataListItem label="Run" value={detail.lineage.runId} />
           ) : null}
@@ -591,6 +600,15 @@ export function BetaLibraryPhone({
               <DataList aria-label="Phone asset evidence and availability">
                 <DataListItem label="Asset ID" value={detail.assetId} />
                 <DataListItem label="Captured" value={detail.capturedAt} />
+                {detail.equipment ? (
+                  <>
+                    <DataListItem label="Rig" value={detail.equipment.rigId} />
+                    <DataListItem
+                      label="Camera"
+                      value={detail.equipment.cameraDeviceId}
+                    />
+                  </>
+                ) : null}
                 {detail.lineage.runId ? (
                   <DataListItem label="Run" value={detail.lineage.runId} />
                 ) : null}

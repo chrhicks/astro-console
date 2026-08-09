@@ -9,7 +9,9 @@ import { fileURLToPath } from 'node:url'
 import {
   BootstrapHttpSuccessEnvelope,
   CameraExposureObservation,
+  LibraryAssetDetail,
   PreflightSnapshot,
+  RunExecutionContext,
 } from '@astro-console/v2-contracts'
 import { Effect, Schema } from 'effect'
 import { createLocalWebService } from '../app/origin-service.ts'
@@ -114,7 +116,7 @@ test(
 )
 
 test(
-  'a simulated real exposure enters Library through Observe and does not replay after service restart',
+  'the supervised simulator exposure reaches retained Library review and does not replay after restart',
   { skip: !existsSync(preparedRealFrame) },
   async (t) => {
     const root = await mkdtemp(
@@ -141,46 +143,84 @@ test(
       },
     }
     const camera = alpacaCameraProvider(providerConfig)
-    const service = createLocalWebService(
+    const executionContext = RunExecutionContext.make({
+      rigId: providerConfig.rigId,
+      cameraDeviceId: 'sim-camera-asi2600mc-pro',
+      completionBehavior: 'hold',
+      unsafeBehavior: 'pauseAndPark',
+    })
+    const serviceOptions = {
+      simulation: {
+        origin: simulatorListener.origin,
+        launchScenario: 'exposure-success' as const,
+      },
+      runExecutorProviderOrigin: simulatorListener.origin,
+      runExecutionContext: executionContext,
+      preflightProvider: alpacaPreflightProvider(providerConfig),
+      cameraProvider: camera,
+      capturedFrameStorage: { originalsRoot },
+      frameInspectionStorage: { originalsRoot, previewsRoot },
+    }
+    let service = createLocalWebService(
       databasePath,
       undefined,
       undefined,
       undefined,
-      {
-        fixture: 'preflight',
-        preflightProvider: alpacaPreflightProvider(providerConfig),
-        cameraProvider: camera,
-        capturedFrameStorage: { originalsRoot },
-        frameInspectionStorage: { originalsRoot, previewsRoot },
-      },
+      serviceOptions,
     )
-    const serviceListener = await service.listen()
-    let serviceClosed = false
+    let serviceListener = await service.listen()
     t.after(async () => {
-      if (!serviceClosed) {
-        await serviceListener.close()
-        service.close()
-      }
+      await serviceListener.close().catch(() => undefined)
+      service.close()
       await simulatorListener.close()
       await rm(root, { recursive: true, force: true })
     })
-    const base = `http://127.0.0.1:${serviceListener.port}`
+    let base = `http://127.0.0.1:${serviceListener.port}`
     const initial = await serviceSnapshot(base)
     if (initial.plan === undefined)
       throw new Error('The simulated Observe fixture has no Plan.')
+    const accept = await fetch(`${base}/api/plan/commands`, {
+      method: 'POST',
+      body: JSON.stringify({
+        intent: {
+          _tag: 'AcceptRunDefinition',
+          planId: initial.plan.planId,
+          expectedPlanRevision: initial.plan.revision,
+          expectedLeaseRevision: initial.control.revision,
+          idempotencyKey: 'simulated-m101-accept',
+        },
+      }),
+    })
+    assert.equal(accept.status, 202)
+    const accepted = await serviceSnapshot(base)
+    if (accepted.plan === undefined)
+      throw new Error('The accepted simulated Plan is unavailable.')
+    const control = await fetch(`${base}/api/commands/control`, {
+      method: 'POST',
+      body: JSON.stringify({
+        commandId: 'simulated-m101-control',
+        command: {
+          _tag: 'TakeControl',
+          expectedLeaseRevision: accepted.control.revision,
+          idempotencyKey: 'simulated-m101-control',
+        },
+      }),
+    })
+    assert.equal(control.status, 202)
+    const controlled = await serviceSnapshot(base)
     const startRun = await fetch(`${base}/api/plan/commands`, {
       method: 'POST',
       body: JSON.stringify({
         intent: {
           _tag: 'StartAcceptedRun',
-          planId: initial.plan.planId,
-          expectedPlanRevision: initial.plan.revision,
-          expectedLeaseRevision: initial.control.revision,
+          planId: accepted.plan.planId,
+          expectedPlanRevision: accepted.plan.revision,
+          expectedLeaseRevision: controlled.control.revision,
           idempotencyKey: 'simulated-m101-run',
         },
       }),
     })
-    assert.equal(startRun.status, 202)
+    assert.equal(startRun.status, 202, await startRun.text())
     let current = await serviceSnapshot(base)
     if (current.activeRun._tag !== 'Active')
       throw new Error('The simulated Observe run did not start.')
@@ -192,70 +232,97 @@ test(
       }),
     })
     assert.equal(refresh.status, 200)
-    current = await serviceSnapshot(base)
-    if (current.activeRun._tag !== 'Active')
-      throw new Error('The simulated Observe run is no longer active.')
-    const startExposureIntent = {
-      _tag: 'StartCameraExposure',
-      expectedLeaseRevision: current.control.revision,
-      expectedRunRevision: current.activeRun.run.revision,
-      durationSeconds: 0.01,
-      idempotencyKey: 'simulated-m101-exposure',
-    }
-    const startExposure = await fetch(`${base}/api/acquire/commands`, {
-      method: 'POST',
-      body: JSON.stringify({ intent: startExposureIntent }),
+    await eventually(async () => {
+      const state = await readSimulatorState(simulatorListener.origin)
+      assert.equal(state.commandLog.length, 1)
+      assert.equal(state.commandLog[0]?.name, 'startExposure')
     })
-    assert.equal(startExposure.status, 202)
+    await eventually(async () => {
+      current = await serviceSnapshot(base)
+      assert.equal(
+        current.observe?.executorWork?.find(
+          (work) => work.kind === 'StartExposure',
+        )?.state,
+        'observing',
+      )
+    })
     await postControl(simulatorListener.origin, '/__sim/advance', {
-      milliseconds: 1010,
+      milliseconds: 16_000,
     })
-    current = await serviceSnapshot(base)
-    if (current.activeRun._tag !== 'Active')
-      throw new Error('The simulated Observe run is no longer active.')
-    const completionIntent = {
-      _tag: 'CompleteCameraExposure',
-      expectedLeaseRevision: current.control.revision,
-      expectedRunRevision: current.activeRun.run.revision,
-      idempotencyKey: 'simulated-m101-complete',
-      frameId: 'simulated-m101-frame',
-      capturedAt: '2026-06-21T22:38:22.000Z',
-      exposureSeconds: 15,
-      filter: 'RGB',
-      binning: 1,
-      frameType: 'light',
-    }
-    const complete = await fetch(`${base}/api/acquire/commands`, {
-      method: 'POST',
-      body: JSON.stringify({ intent: completionIntent }),
+    let assetId = ''
+    await eventually(async () => {
+      current = await serviceSnapshot(base)
+      assert.equal(
+        current.observe?.phase,
+        'verify',
+        JSON.stringify({
+          phase: current.observe?.phase,
+          work: current.observe?.executorWork,
+          facts: current.observe?.attemptFacts,
+        }),
+      )
+      assetId = current.observe?.latestCapturedAssetId ?? ''
+      assert.notEqual(assetId, '')
     })
-    assert.equal(complete.status, 202)
-    const assetId = 'asset-capture-simulated-m101-complete'
-    const detail = await fetch(`${base}/api/library/assets/${assetId}`)
-    assert.equal(detail.status, 200)
-    assert.match(JSON.stringify(await detail.json()), /alpaca-imagearray/)
+    const detailResponse = await fetch(`${base}/api/library/assets/${assetId}`)
+    assert.equal(detailResponse.status, 200)
+    const detail = Schema.decodeUnknownSync(LibraryAssetDetail)(
+      await detailResponse.json(),
+    )
+    if (detail.provenance === undefined)
+      throw new Error('The retained frame has no capture provenance.')
+    if (detail.inspection?._tag !== 'Available')
+      throw new Error('The retained frame has no available inspection.')
+    assert.deepEqual(detail.equipment, {
+      rigId: providerConfig.rigId,
+      cameraDeviceId: 'sim-camera-asi2600mc-pro',
+    })
+    assert.equal(detail.provenance.source, 'alpaca-imagearray')
+    assert.equal(detail.inspection.rationale.decision, 'unreviewed')
+    assert.equal(detail.review?.decision ?? 'unreviewed', 'unreviewed')
+    assert.ok(
+      detail.actions.some(
+        (action) => action._tag === 'Eligible' && action.action === 'download',
+      ),
+    )
+    const preview = await fetch(`${base}/api/library/assets/${assetId}/preview`)
+    assert.equal(preview.status, 200)
+    assert.deepEqual(
+      [...new Uint8Array(await preview.arrayBuffer()).subarray(0, 8)],
+      [137, 80, 78, 71, 13, 10, 26, 10],
+    )
+    const download = await fetch(
+      `${base}/api/library/assets/${assetId}/download`,
+    )
+    assert.equal(download.status, 200)
+    assert.match(
+      download.headers.get('content-disposition') ?? '',
+      new RegExp(`${assetId}\\.cameraRaw`),
+    )
+    assert.equal(
+      (await download.arrayBuffer()).byteLength,
+      44 + 6024 * 4024 * 2,
+    )
     const beforeRestart = await readSimulatorState(simulatorListener.origin)
     assert.equal(beforeRestart.evidence.framesServed, 1)
 
     await serviceListener.close()
     service.close()
-    serviceClosed = true
-    const recovered = createLocalWebService(databasePath)
-    const recoveredListener = await recovered.listen()
-    t.after(async () => {
-      await recoveredListener.close()
-      recovered.close()
-    })
-    const recoveredBase = `http://127.0.0.1:${recoveredListener.port}`
+    service = createLocalWebService(
+      databasePath,
+      undefined,
+      undefined,
+      undefined,
+      serviceOptions,
+    )
+    serviceListener = await service.listen()
+    base = `http://127.0.0.1:${serviceListener.port}`
+    const recovered = await serviceSnapshot(base)
+    assert.equal(recovered.observe?.latestCapturedAssetId, assetId)
     assert.equal(
-      (await fetch(`${recoveredBase}/api/library/assets/${assetId}`)).status,
+      (await fetch(`${base}/api/library/assets/${assetId}`)).status,
       200,
     )
-    const replay = await fetch(`${recoveredBase}/api/acquire/commands`, {
-      method: 'POST',
-      body: JSON.stringify({ intent: completionIntent }),
-    })
-    assert.equal(replay.status, 202)
     const afterRestart = await readSimulatorState(simulatorListener.origin)
     assert.equal(afterRestart.evidence.framesServed, 1)
     assert.equal(afterRestart.commandLog.length, 1)
@@ -507,6 +574,23 @@ async function serviceSnapshot(base: string) {
   const response = await fetch(`${base}/api/snapshot`)
   const body: unknown = await response.json()
   return Schema.decodeUnknownSync(BootstrapHttpSuccessEnvelope)(body).data
+}
+
+async function eventually(
+  assertion: () => Promise<void>,
+  attempts = 80,
+): Promise<void> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await assertion()
+      return
+    } catch (error) {
+      lastError = error
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+  }
+  throw lastError
 }
 
 async function readCameraState(camera: ReturnType<typeof cameraProvider>) {

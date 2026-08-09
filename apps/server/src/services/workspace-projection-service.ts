@@ -45,7 +45,12 @@ const LifecycleEventPayload = Schema.Struct({
 const StoredAcquireSession = Schema.Struct({ session: Schema.String })
 const ExecutorWorkRow = Schema.Struct({
   work_id: Schema.String,
-  kind: Schema.Literals(['BeginRun', 'StartExposure', 'AbortExposure']),
+  kind: Schema.Literals([
+    'BeginRun',
+    'StartExposure',
+    'RetrieveFrame',
+    'AbortExposure',
+  ]),
   state: Schema.Literals([
     'pending',
     'commandAttempted',
@@ -61,6 +66,13 @@ const ExecutorWorkRow = Schema.Struct({
   last_error: Schema.NullOr(Schema.String),
 })
 const isOwner = (identity: LocalIdentity) => identity.role === 'owner'
+const CapturedAssetRow = Schema.Struct({
+  asset_id: Schema.String,
+  detail: Schema.String,
+})
+const CapturedAssetDetail = Schema.Struct({
+  lineage: Schema.Struct({ runId: Schema.optionalKey(Schema.String) }),
+})
 
 export const observeWorkspaceProjection = (
   db: DatabaseSync,
@@ -115,7 +127,7 @@ export const observeWorkspaceProjection = (
   const events = Schema.decodeUnknownSync(Schema.Array(LifecycleEventRow))(
     db
       .prepare(
-        "SELECT type,snapshot FROM events WHERE type IN ('RunStarted','RunPaused','RunResumed','RunStopped','FakeSequenceSkipped','FakePhaseRetried','FakeParkRequested','RunCompleted','RunCaptureReady','RunAcquireRequired','RunExposureObserved','RunExposureCompletionObserved','RunProviderOutcomeUnknown','RunProviderCommandRejected','RunReconciliationUnavailable','RunExposureAbortObserved') ORDER BY cursor",
+        "SELECT type,snapshot FROM events WHERE type IN ('RunStarted','RunPaused','RunResumed','RunStopped','FakeSequenceSkipped','FakePhaseRetried','FakeParkRequested','RunCompleted','RunCaptureReady','RunAcquireRequired','RunExposureObserved','RunExposureCompletionObserved','RunFrameInspectionUpdated','RunFrameInspectionUnavailable','RunFrameRetrievalFailed','RunProviderOutcomeUnknown','RunProviderCommandRejected','RunReconciliationUnavailable','RunExposureAbortObserved') ORDER BY cursor",
       )
       .all(),
   )
@@ -162,6 +174,24 @@ export const observeWorkspaceProjection = (
       }))
     : []
   const workFacts = executorWork.map((work) => executorWorkFact(work))
+  const latestCapturedAssetId = Schema.decodeUnknownSync(
+    Schema.Array(CapturedAssetRow),
+  )(
+    db
+      .prepare(
+        "SELECT asset_id,detail FROM library_assets WHERE role='original' ORDER BY captured_at DESC,asset_id ASC",
+      )
+      .all(),
+  ).find((asset) => {
+    try {
+      return (
+        Schema.decodeUnknownSync(CapturedAssetDetail)(JSON.parse(asset.detail))
+          .lineage.runId === run.id
+      )
+    } catch {
+      return false
+    }
+  })?.asset_id
   const refreshPreflightReason = !writable
     ? 'readOnlyClient'
     : !controller
@@ -186,6 +216,7 @@ export const observeWorkspaceProjection = (
     ...(run.preflight === undefined ? {} : { preflight: run.preflight }),
     ...(acquire === undefined ? {} : { acquire }),
     ...(realExecutor ? { executorWork } : {}),
+    ...(latestCapturedAssetId === undefined ? {} : { latestCapturedAssetId }),
     lifecycleFacts:
       events.length === 0
         ? [
@@ -199,9 +230,13 @@ export const observeWorkspaceProjection = (
           ...(workFacts.length === 0
             ? ['No durable executor work is recorded for this run.']
             : workFacts),
-          run.phase === 'verify'
-            ? 'The camera was later observed idle. Captured bytes and Library intake are the next milestone.'
-            : 'No physical capture or captured bytes are claimed by this projection.',
+          latestCapturedAssetId !== undefined
+            ? `The completed frame is retained as Library asset ${latestCapturedAssetId}.`
+            : executorWork.some((work) => work.kind === 'RetrieveFrame')
+              ? 'Camera completion was observed. Capture remains current until image bytes are retained for immutable Library intake.'
+              : run.phase === 'verify'
+                ? 'The camera was later observed idle. Captured bytes are being retrieved for immutable Library intake.'
+                : 'No physical capture or captured bytes are claimed by this projection.',
         ]
       : [
           'All lifecycle and attempt evidence is fake/fixture only; no physical capture is claimed.',
@@ -257,7 +292,8 @@ export const observeWorkspaceProjection = (
 }
 
 function executorWorkFact(work: {
-  readonly kind: 'BeginRun' | 'StartExposure' | 'AbortExposure'
+  readonly kind:
+    'BeginRun' | 'StartExposure' | 'RetrieveFrame' | 'AbortExposure'
   readonly state:
     | 'pending'
     | 'commandAttempted'
@@ -273,13 +309,17 @@ function executorWorkFact(work: {
     work.state === 'pending'
       ? `${subject}: durable work was persisted before any provider command.`
       : work.state === 'commandAttempted'
-        ? `${subject}: the provider write was attempted and will not be replayed until later observation resolves it.`
+        ? work.kind === 'RetrieveFrame'
+          ? `${subject}: the service is performing an idempotent, read-only image retrieval.`
+          : `${subject}: the provider write was attempted and will not be replayed until later observation resolves it.`
         : work.state === 'observing'
           ? `${subject}: provider acknowledgement was followed by an active camera observation.`
           : work.state === 'reconciling'
             ? `${subject}: the service is using read-only observation and will not replay the provider command.`
             : work.state === 'completed'
-              ? `${subject}: later observation settled this durable work.`
+              ? work.kind === 'RetrieveFrame'
+                ? `${subject}: the immutable original and inspection outcome were persisted.`
+                : `${subject}: later observation settled this durable work.`
               : work.state === 'cancelled'
                 ? `${subject}: the intervention settled this work before a provider command was sent.`
                 : `${subject}: the provider rejected this durable work.`

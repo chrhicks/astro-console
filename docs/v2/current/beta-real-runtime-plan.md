@@ -1,6 +1,6 @@
 # Nightbook Beta Real-Runtime Plan
 
-Status: **accepted — first beta real-truth bundle complete**
+Status: **accepted — supervised live camera-to-Library proof complete; live abort pending**
 
 Accepted: August 8, 2026
 
@@ -160,6 +160,55 @@ provider or hardware was contacted.
 - Let the service observe completion, retrieve bytes, retain the original,
   create Library truth, and generate inspection evidence.
 - Remove the need for the browser to submit invented completion metadata.
+
+Simulator portion completed August 8, 2026. The executor now creates separate
+durable `RetrieveFrame` work only after an observed active-to-idle exposure. It
+keeps Capture current while retrieval is pending, then retrieves ImageBytes
+with one bounded GET, validates the binary shape, retains the original through
+the existing immutable intake, and records inspection without auto-accepting
+the frame. Only accepted intake advances Verify and exposes the exact Library
+handoff. Rig and camera identity come from the accepted run definition and
+remain part of the retained Library detail. A valid retained frame receives a
+pixel-derived PNG preview and metrics; inspection failure preserves the
+original. Library provides local download and owner review.
+
+Restart reuses a retained receipt without a second image read. Malformed,
+trailing, or oversized ImageBytes fail closed, including streams without
+`Content-Length`; a FITS signature under binary ImageBytes content does not
+bypass validation. Restart can also finish a checksum-matching final file left
+before its SQLite transaction without replacing bytes, while a mismatch is
+recorded and rejected. Retrieval failure settles once from Capture into Recover,
+and abort reads no image bytes. The real-frame loopback scenario passed the full
+supervised Plan-to-Observe-to-Library path and restart without replay. Contracts
+pass 187/187, server passes 151/151, and web passes 126/126.
+
+The owner-approved live start and retrieval proof completed August 8, 2026
+against ASCOM Camera 1, `ZWO ASI2600MC Pro`, UniqueID
+`613D9519-B32A-4021-8FE9-830F9D09F22A`. Both camera covers remained on. The
+camera-only Plan requested one 15-second Light frame with no filter. No mount,
+focuser, filter-wheel, or guide-camera command was sent.
+
+The first acknowledged start exposed a real driver timing gap: an immediate
+state read still reported idle, so the executor entered Recover and did not
+replay the write. A direct diagnostic then proved the same Alpaca request
+reported exposing for 15 seconds and produced a valid 52,183,340-byte,
+6248 x 4176 ImageBytes response. The executor now allows a bounded two-second
+read-only post-acknowledgement transition grace. It still never replays the
+write, survives restart, and enters Recover if idle persists past the grace.
+
+A fresh beta Plan-to-Observe run then observed the live exposure, retrieved the
+frame, retained asset
+`asset-capture-60d0dfdcc53347816fa0df64043554f0`, generated a 250 x 168
+pixel-derived PNG preview, and exposed the exact Library handoff. The retained
+original and Library download were byte-identical at 52,183,340 bytes with
+SHA-256
+`faddf0214f64dd2190136e80eed49db1cc53df495ca68287af8947695d48baaf`.
+Restart reopened the same Verify projection and Library asset with unchanged
+work timestamps while the camera remained idle. This proves the supervised
+live start, device observation, image transfer, immutable intake, preview,
+download, and restart boundary. It does not prove sky image quality because the
+camera was covered indoors. A separate owner-observed live abort remains
+pending if required for this delivery step.
 
 ### 6. Outdoor Acquire and modest capture
 
