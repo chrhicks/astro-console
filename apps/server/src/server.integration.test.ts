@@ -4142,6 +4142,9 @@ test('origin configuration enables the real preflight adapter only with complete
             ASTRO_PREFLIGHT_ALPACA_RIG_ID: 'seestar-indoor',
             ASTRO_PREFLIGHT_ALPACA_HOST: '192.168.4.63',
             ASTRO_PREFLIGHT_ALPACA_PORT: '32323',
+            ASTRO_PREFLIGHT_RIG_LATITUDE_DEGREES: '39.755',
+            ASTRO_PREFLIGHT_RIG_LONGITUDE_DEGREES: '-74.2677777778',
+            ASTRO_PREFLIGHT_RIG_ELEVATION_METERS: '12.5',
             ASTRO_PREFLIGHT_ALPACA_TELESCOPE_DEVICE_NUMBER: '0',
             ASTRO_PREFLIGHT_ALPACA_TELESCOPE_UNIQUE_ID: 'scope-001',
             ASTRO_PREFLIGHT_ALPACA_CAMERA_DEVICE_NUMBER: '0',
@@ -4156,6 +4159,11 @@ test('origin configuration enables the real preflight adapter only with complete
     rigId: 'seestar-indoor',
     host: '192.168.4.63',
     port: 32323,
+    site: {
+      latitudeDegrees: 39.755,
+      longitudeDegrees: -74.2677777778,
+      elevationMeters: 12.5,
+    },
     devices: {
       camera: { deviceNumber: 0, uniqueId: 'camera-001' },
       telescope: { deviceNumber: 0, uniqueId: 'scope-001' },

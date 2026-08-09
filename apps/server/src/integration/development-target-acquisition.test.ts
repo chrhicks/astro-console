@@ -36,10 +36,16 @@ const DetailRow = Schema.Struct({
 })
 const SolveBindingRow = Schema.Struct({ evidence: Schema.String })
 const SolveBinding = Schema.Struct({ pixelPayloadSha256: Schema.String })
+const ConfiguredSolveBinding = Schema.Struct({
+  runId: Schema.String,
+  sourceChecksum: Schema.String,
+  pixelPayloadSha256: Schema.String,
+})
 const AcquireSessionRow = Schema.Struct({ session: Schema.String })
 const SimulatorState = Schema.Struct({
   commandLog: Schema.Array(Schema.Struct({ name: Schema.String })),
   evidence: Schema.Struct({
+    framesServed: Schema.Int,
     lastFrame: Schema.NullOr(Schema.Struct({ filename: Schema.String })),
   }),
 })
@@ -255,6 +261,307 @@ test(
 )
 
 test(
+  'configured Acquire retains ImageBytes, invokes the local solver, and reconciles restart without replay',
+  { skip: !hasCorpus },
+  async (t) => {
+    const solverInputs: string[] = []
+    const centers = [
+      [314.549719973157, 44.1274205290256],
+      [314.553878955801, 44.1274120130098],
+    ] as const
+    const fixture = await deepSkyFixture(
+      t,
+      'target-evidence-progression',
+      async ({ args }) => {
+        const input = args.at(-1)
+        if (input === undefined) throw new Error('Solver input is unavailable.')
+        assert.ok(input.endsWith('retained-imagebytes.fits'))
+        assert.equal(
+          (await readFile(input)).subarray(0, 6).toString(),
+          'SIMPLE',
+        )
+        solverInputs.push(input)
+        const center = centers[solverInputs.length - 1]
+        assert.ok(center !== undefined)
+        return {
+          exitCode: 0,
+          stdout: `Field center: (${center[0]}, ${center[1]})`,
+          stderr: '',
+        }
+      },
+    )
+    let snapshot = await fixture.start('configured-target')
+    fixture.service.database
+      .prepare(
+        'INSERT OR REPLACE INTO plate_solve_runs (attempt_id,source_asset_id,evidence) VALUES (?,?,?)',
+      )
+      .run(
+        'deepSkyPlateSolve-initial-1',
+        'asset-capture-prior-run',
+        JSON.stringify({
+          runId: 'run-from-prior-session',
+          providerResult: { _tag: 'Aborted', summary: 'stale prior result' },
+        }),
+      )
+    await acquire(fixture.base(), snapshot, {
+      _tag: 'CaptureTargetAcquisitionEvidence',
+      idempotencyKey: 'configured-target-initial',
+    })
+    snapshot = await fixture.snapshot()
+    assert.equal(snapshot.observe?.acquire?.phase, 'awaitingApproval')
+    const proposal = snapshot.observe?.acquire?.pendingProposal
+    assert.ok(proposal !== undefined)
+    assert.ok(
+      Math.hypot(
+        proposal.correction.rightAscensionArcsec,
+        proposal.correction.declinationArcsec,
+      ) > 5,
+    )
+    await acquire(fixture.base(), snapshot, {
+      _tag: 'ApprovePointingCorrection',
+      proposalId: proposal.proposalId,
+      idempotencyKey: 'configured-target-correction',
+    })
+    snapshot = await fixture.snapshot()
+    await acquire(fixture.base(), snapshot, {
+      _tag: 'CaptureTargetAcquisitionEvidence',
+      idempotencyKey: 'configured-target-verification',
+    })
+    await eventually(async () => {
+      snapshot = await fixture.snapshot()
+      assert.equal(snapshot.observe?.acquire?.phase, 'completed')
+      assert.equal(snapshot.observe?.phase, 'capture')
+      assert.equal(
+        snapshot.observe?.executorWork?.find(
+          (work) => work.kind === 'StartExposure',
+        )?.state,
+        'observing',
+      )
+    })
+    assert.equal(solverInputs.length, 2)
+    const retained = Schema.decodeUnknownSync(Schema.Array(DetailRow))(
+      fixture.service.database
+        .prepare(
+          "SELECT asset_id,detail FROM library_assets WHERE format='cameraRaw'",
+        )
+        .all(),
+    )
+    assert.equal(retained.length, 2)
+    const bindings = Schema.decodeUnknownSync(Schema.Array(SolveBindingRow))(
+      fixture.service.database
+        .prepare('SELECT evidence FROM plate_solve_runs ORDER BY rowid')
+        .all(),
+    ).map(({ evidence }) =>
+      Schema.decodeUnknownSync(ConfiguredSolveBinding)(JSON.parse(evidence)),
+    )
+    assert.equal(bindings.length, 2)
+    assert.equal(
+      bindings.every(
+        ({ runId }) =>
+          runId ===
+          (snapshot.activeRun._tag === 'Active'
+            ? snapshot.activeRun.run.runId
+            : ''),
+      ),
+      true,
+    )
+    assert.equal(
+      bindings.every(({ sourceChecksum }) =>
+        /^[a-f0-9]{64}$/.test(sourceChecksum),
+      ),
+      true,
+    )
+    assert.deepEqual(
+      bindings.map(({ pixelPayloadSha256 }) => pixelPayloadSha256),
+      [
+        '00c1ac20810456955dfb0cdf9f4632372b5a82b422e9328892168ae6c1bb843a',
+        '8ca691238864ace5b13d98de3bbda96dcf9b536b75ee0415d8ed2c4d836708a3',
+      ],
+    )
+    await fetch(`${fixture.simulatorOrigin}/__sim/advance`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ milliseconds: 121_000 }),
+    })
+    let finalAssetId = ''
+    await eventually(async () => {
+      snapshot = await fixture.snapshot()
+      assert.equal(snapshot.observe?.phase, 'completed')
+      finalAssetId = snapshot.observe?.latestCapturedAssetId ?? ''
+      assert.notEqual(finalAssetId, '')
+    })
+    const finalBytes = await readFile(
+      join(fixture.originalsRoot, `${finalAssetId}.cameraRaw`),
+    )
+    assert.equal(
+      createHash('sha256').update(finalBytes.subarray(44)).digest('hex'),
+      '8ca691238864ace5b13d98de3bbda96dcf9b536b75ee0415d8ed2c4d836708a3',
+    )
+    const before = await simulatorState(fixture.simulatorOrigin)
+    await fixture.restart()
+    snapshot = await fixture.snapshot()
+    assert.equal(snapshot.observe?.acquire?.phase, 'completed')
+    assert.equal(snapshot.observe?.phase, 'completed')
+    assert.equal(snapshot.observe?.latestCapturedAssetId, finalAssetId)
+    assert.deepEqual(
+      (await simulatorState(fixture.simulatorOrigin)).commandLog,
+      before.commandLog,
+    )
+  },
+)
+
+test(
+  'configured Acquire reconciles a preclaimed slew with GET-only reads and never replays the PUT',
+  { skip: !hasCorpus },
+  async (t) => {
+    const fixture = await deepSkyFixture(
+      t,
+      'target-evidence-progression',
+      async () => ({ exitCode: 1, stdout: '', stderr: '' }),
+    )
+    let snapshot = await fixture.start('configured-preclaimed')
+    if (snapshot.activeRun._tag !== 'Active')
+      throw new Error('Run is unavailable.')
+    const runId = snapshot.activeRun.run.runId
+    fixture.service.database
+      .prepare(
+        "INSERT INTO configured_acquire_work (effect_id,kind,payload,state) VALUES (?,?,?,'claimed')",
+      )
+      .run(
+        `${runId}:deepSkyPlateSolve-initial-1:slew`,
+        'slew',
+        JSON.stringify({
+          rightAscensionHours: 20.9702585970534,
+          declinationDegrees: 44.1274120130098,
+        }),
+      )
+    let response = await acquireResponse(fixture.base(), snapshot, {
+      _tag: 'CaptureTargetAcquisitionEvidence',
+      idempotencyKey: 'configured-preclaimed-first',
+    })
+    assert.equal(response.status, 503)
+    assert.deepEqual(
+      (await simulatorState(fixture.simulatorOrigin)).commandLog,
+      [],
+    )
+    await fixture.restart()
+    snapshot = await fixture.snapshot()
+    response = await acquireResponse(fixture.base(), snapshot, {
+      _tag: 'CaptureTargetAcquisitionEvidence',
+      idempotencyKey: 'configured-preclaimed-restart',
+    })
+    assert.equal(response.status, 503)
+    assert.deepEqual(
+      (await simulatorState(fixture.simulatorOrigin)).commandLog,
+      [],
+    )
+  },
+)
+
+test(
+  'configured Acquire resumes a receipt-proven retained frame after the retrieval crash gap',
+  { skip: !hasCorpus },
+  async (t) => {
+    const fixture = await deepSkyFixture(
+      t,
+      'target-evidence-progression',
+      async () => ({
+        exitCode: 0,
+        stdout: 'Field center: (314.549719973157, 44.1274205290256)',
+        stderr: '',
+      }),
+    )
+    let snapshot = await fixture.start('configured-retained-gap')
+    if (snapshot.activeRun._tag !== 'Active')
+      throw new Error('Run is unavailable.')
+    const runId = snapshot.activeRun.run.runId
+    const attemptId = 'deepSkyPlateSolve-initial-1'
+    const started = await fetch(
+      `${fixture.simulatorOrigin}/api/v1/camera/0/startexposure`,
+      {
+        method: 'PUT',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        },
+        body: new URLSearchParams({ Duration: '5', Light: 'true' }),
+      },
+    )
+    assert.equal(started.status, 200)
+    await fetch(`${fixture.simulatorOrigin}/__sim/advance`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ milliseconds: 6_000 }),
+    })
+    const imageResponse = await fetch(
+      `${fixture.simulatorOrigin}/api/v1/camera/0/imagearray`,
+      { headers: { accept: 'application/imagebytes' } },
+    )
+    const imageBuffer = await imageResponse.arrayBuffer()
+    const image = new Uint8Array(imageBuffer)
+    const digest = createHash('sha256')
+      .update(`${runId}:${attemptId}`)
+      .digest('hex')
+      .slice(0, 32)
+    const assetId = `asset-capture-${digest}`
+    assert.equal(
+      fixture.service.ingestCapturedFrame(
+        {
+          assetId,
+          frameId: `frame-${digest}`,
+          capturedAt: '2026-08-09T12:00:00.000Z',
+          format: 'cameraRaw',
+          equipment: {
+            rigId: 'simulated-deep-sky-rig',
+            cameraDeviceId: 'sim-camera-asi2600mc-pro',
+          },
+          capture: {
+            exposureSeconds: 5,
+            filter: 'No filter',
+            binning: 1,
+            frameType: 'light',
+          },
+          lineage: {
+            runId,
+            sequenceId: 'sequence-ngc7000-acquire',
+            acquisitionId: attemptId,
+          },
+          idempotencyKey: `configured-acquire:${runId}:${attemptId}`,
+        },
+        image,
+      ).outcome,
+      'accepted',
+    )
+    fixture.service.database
+      .prepare(
+        "INSERT INTO configured_acquire_work (effect_id,kind,payload,state) VALUES (?,?,?,'retrieving')",
+      )
+      .run(
+        `${runId}:${attemptId}:exposure`,
+        'exposure',
+        JSON.stringify({ durationSeconds: 5 }),
+      )
+    const before = await simulatorState(fixture.simulatorOrigin)
+    assert.equal(before.evidence.framesServed, 1)
+    await fixture.restart()
+    snapshot = await fixture.snapshot()
+    await acquire(fixture.base(), snapshot, {
+      _tag: 'CaptureTargetAcquisitionEvidence',
+      idempotencyKey: 'configured-retained-gap-resume',
+    })
+    const after = await simulatorState(fixture.simulatorOrigin)
+    assert.equal(after.evidence.framesServed, 1)
+    assert.deepEqual(
+      after.commandLog.map(({ name }) => name),
+      ['startExposure', 'slewToCoordinates'],
+    )
+    assert.equal(
+      (await fixture.snapshot()).observe?.acquire?.phase,
+      'awaitingApproval',
+    )
+  },
+)
+
+test(
   'clouded evidence enters Recover and one changed solve series reaches Capture',
   { skip: !hasCorpus },
   async (t) => {
@@ -370,6 +677,9 @@ test(
 async function deepSkyFixture(
   t: TestContext,
   scenario: 'target-evidence-progression' | 'solve-success-no-solution',
+  solveExecute?: NonNullable<
+    import('../workers/plate-solve-worker.ts').PlateSolveWorkerConfig['execute']
+  >,
 ) {
   const root = await mkdtemp(join(tmpdir(), `astro-${scenario}-`))
   const databasePath = join(root, 'state.sqlite')
@@ -421,6 +731,29 @@ async function deepSkyFixture(
     cameraProvider: camera,
     capturedFrameStorage: { originalsRoot },
     frameInspectionStorage: { originalsRoot, previewsRoot },
+    ...(solveExecute === undefined
+      ? {}
+      : {
+          configuredTargetProvider: {
+            ...providerConfig,
+            site: {
+              latitudeDegrees: 39.755,
+              longitudeDegrees: -74.2677777778,
+              elevationMeters: 0,
+            },
+          },
+          plateSolveWorker: {
+            originalsRoot,
+            executable: '/usr/bin/solve-field',
+            indexesRoot: '/var/lib/astro-console/astrometry-indexes',
+            timeoutMs: 90_000,
+            solverVersion: '0.93',
+            scaleLowDeg: 20,
+            scaleHighDeg: 30,
+            searchRadiusDeg: 15,
+            execute: solveExecute,
+          },
+        }),
   }
   let service = createLocalWebService(
     databasePath,

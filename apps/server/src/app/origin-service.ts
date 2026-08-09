@@ -28,6 +28,7 @@ import { configuredDownloadGrantIssuer } from '../config/download-grant-config.t
 import {
   originServerConfig,
   type OriginServerConfig,
+  type PreflightProviderConfig,
 } from '../config/environment-config.ts'
 import { runExecutable } from './executable.ts'
 import { OriginListener, originListenerLayer } from '../http/origin-listener.ts'
@@ -129,6 +130,7 @@ import {
   type TargetAcquisitionProviderShape,
 } from '../services/target-acquisition-service.ts'
 import { developmentTargetAcquisitionProvider } from '../services/development-target-acquisition-provider.ts'
+import { configuredTargetAcquisitionProvider } from '../services/configured-target-acquisition-provider.ts'
 import {
   createPlateSolveWorker,
   type PlateSolveWorkerConfig,
@@ -188,6 +190,7 @@ export function createLocalWebService(
     readonly cameraProvider?: CameraProviderShape
     readonly polarMeasurementProvider?: PolarMeasurementProviderShape
     readonly targetAcquisitionProvider?: TargetAcquisitionProviderShape
+    readonly configuredTargetProvider?: PreflightProviderConfig
     readonly capturedFrameStorage?: CapturedFrameStorage
     readonly frameInspectionStorage?: FrameInspectionStorage
     readonly plateSolveWorker?: PlateSolveWorkerConfig
@@ -529,11 +532,12 @@ export function createLocalWebService(
           cameraProvider: options.cameraProvider,
           acquireRepository,
           developmentDeepSkyHold:
-            options.simulation !== undefined &&
-            (options.simulation.launchScenario ===
-              'target-evidence-progression' ||
-              options.simulation.launchScenario ===
-                'solve-success-no-solution'),
+            options.configuredTargetProvider !== undefined ||
+            (options.simulation !== undefined &&
+              (options.simulation.launchScenario ===
+                'target-evidence-progression' ||
+                options.simulation.launchScenario ===
+                  'solve-success-no-solution')),
           ...(options.capturedFrameStorage === undefined
             ? {}
             : { capturedFrameStorage: options.capturedFrameStorage }),
@@ -558,6 +562,22 @@ export function createLocalWebService(
         )
   const targetAcquisitionProvider =
     options.targetAcquisitionProvider ??
+    (options.configuredTargetProvider !== undefined &&
+    options.capturedFrameStorage !== undefined &&
+    options.cameraProvider !== undefined &&
+    options.plateSolveWorker !== undefined
+      ? configuredTargetAcquisitionProvider({
+          database,
+          alpaca: options.configuredTargetProvider,
+          cameraProvider: options.cameraProvider,
+          capturedFrameStorage: options.capturedFrameStorage,
+          plateSolveWorker: options.plateSolveWorker,
+          ...(options.frameInspectionStorage === undefined
+            ? {}
+            : { frameInspectionStorage: options.frameInspectionStorage }),
+          publish,
+        })
+      : undefined) ??
     (options.simulation !== undefined &&
     options.capturedFrameStorage !== undefined &&
     options.cameraProvider !== undefined &&
@@ -1761,13 +1781,16 @@ export const startOrigin = () =>
                                   mountDeviceId:
                                     config.preflightProvider.devices.telescope
                                       .uniqueId,
-                                  ...(config.simulation === undefined
-                                    ? {}
-                                    : {
-                                        latitudeDegrees: 39.755,
-                                        longitudeDegrees: -74.2677777778,
-                                        elevationMeters: 0,
-                                      }),
+                                  ...(config.preflightProvider.site ===
+                                  undefined
+                                    ? config.simulation === undefined
+                                      ? {}
+                                      : {
+                                          latitudeDegrees: 39.755,
+                                          longitudeDegrees: -74.2677777778,
+                                          elevationMeters: 0,
+                                        }
+                                    : config.preflightProvider.site),
                                 }),
                             completionBehavior: 'hold',
                             unsafeBehavior: 'pauseAndPark',
@@ -1794,6 +1817,12 @@ export const startOrigin = () =>
           scaleHighDeg: config.plateSolve.scaleHighDeg,
           searchRadiusDeg: config.plateSolve.searchRadiusDeg,
         },
+        ...(config.simulation === undefined &&
+        config.preflightProvider?.site !== undefined &&
+        config.preflightProvider.devices.camera?.uniqueId !== undefined &&
+        config.preflightProvider.devices.telescope?.uniqueId !== undefined
+          ? { configuredTargetProvider: config.preflightProvider }
+          : {}),
         ...(config.simulation === undefined
           ? {}
           : { simulation: config.simulation }),

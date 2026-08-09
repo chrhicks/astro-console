@@ -74,6 +74,9 @@ function initializeSchema(database: DatabaseSync) {
     'CREATE TABLE IF NOT EXISTS acquire_sessions (run_id TEXT PRIMARY KEY,session TEXT NOT NULL); CREATE TABLE IF NOT EXISTS acquire_receipts (idempotency_key TEXT NOT NULL,actor_client_id TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,actor_client_id)); CREATE TABLE IF NOT EXISTS camera_observations (run_id TEXT PRIMARY KEY,observation TEXT NOT NULL); CREATE TABLE IF NOT EXISTS acquire_work (attempt_id TEXT PRIMARY KEY,state TEXT NOT NULL); CREATE TABLE IF NOT EXISTS plate_solve_runs (attempt_id TEXT PRIMARY KEY,source_asset_id TEXT NOT NULL,evidence TEXT NOT NULL); CREATE TABLE IF NOT EXISTS captured_frame_receipts (idempotency_key TEXT PRIMARY KEY,semantic_key TEXT NOT NULL,response TEXT NOT NULL); CREATE TABLE IF NOT EXISTS captured_frame_events (asset_id TEXT PRIMARY KEY,event_type TEXT NOT NULL,checksum TEXT NOT NULL); CREATE TABLE IF NOT EXISTS captured_frame_orphans (path TEXT PRIMARY KEY,checksum TEXT NOT NULL,recorded_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS frame_inspections (asset_id TEXT PRIMARY KEY,state TEXT NOT NULL,detail TEXT NOT NULL); CREATE TABLE IF NOT EXISTS asset_reviews (asset_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,review TEXT NOT NULL); CREATE TABLE IF NOT EXISTS asset_review_receipts (asset_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(asset_id,idempotency_key))',
   )
   database.exec(
+    'CREATE TABLE IF NOT EXISTS configured_acquire_work (effect_id TEXT PRIMARY KEY,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL)',
+  )
+  database.exec(
     'CREATE TABLE IF NOT EXISTS processing_workspace (id INTEGER PRIMARY KEY CHECK(id=1),state TEXT NOT NULL)',
   )
   database.exec(

@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; Phase 5 simulator preparation complete**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven**
 
 Keep normal working context small. Do not read the complete V2 tree.
 
@@ -37,11 +37,11 @@ specific detail.
 V2 provides a rig-local service and web workspaces for Plan, Observe, Library,
 and Process. V2.0 delivery is complete. V2.1 Phases 1–4 provide one configured
 Alpaca rig boundary, bounded camera exposure and abort, immutable original
-Library intake, and local solve evidence. Phase 5 simulator preparation now
-exercises deep-sky acquisition, correction approval, solved verification,
-bounded recovery, modest capture, and Library handoff through the Nightbook
-beta. The remaining Phase 5 work is the owner-observed outdoor provider and
-physical proof.
+Library intake, and local solve evidence. Phase 5 now includes a configured
+Alpaca target provider and local-solver path behind durable Acquire. The
+live-shaped path is proven through the simulator from target slew through
+correction, verification, modest capture, and Library handoff. The remaining
+Phase 5 work is owner-observed live provider and physical outdoor proof.
 
 The official future presentation is the Nightbook React demo and
 `@nightbook/ui` package in the external Nightbook workspace. Astro Console has

@@ -1,6 +1,6 @@
 # V2.1 Delivery Plan — Real Alpaca Rig Operation
 
-Status: **accepted — Phases 1–4 complete; Phase 5 simulator preparation complete**
+Status: **accepted — Phases 1–4 complete; Phase 5 configured Acquire prepared and simulator-proven**
 
 V2.1 moves the V2.0 service from deterministic provider proof to one bounded,
 real-rig operation path. Alpaca is the only hardware integration boundary for
@@ -182,6 +182,34 @@ only and does not claim park confirmation.
 
 The remaining Phase 5 proof is the owner-observed outdoor provider and physical
 run; simulation does not satisfy it.
+
+Configured live-path preparation completed 2026-08-09. Production startup can
+activate one Alpaca camera and telescope only from reviewed device numbers,
+`UniqueID` values, complete site coordinates, and `hold` completion. Durable
+provider work records the requested coordinates or exposure before each write.
+A claimed slew or correction reconciles with telescope coordinates and
+`Slewing` through GET-only reads and never replays its PUT. A retained
+ImageBytes frame remains the immutable `cameraRaw` original; the local solver
+receives only a scratch 16-bit FITS conversion of those pixels, with the source
+and pixel-payload checksums recorded in solve evidence. The accepted target
+coordinates supply the solve hint and desired center, so the returned solved
+center produces the measured mount RA/Dec correction.
+
+The configured path passed the full deterministic simulator workflow, including
+explicit correction approval, a fresh verification frame, final 120-second
+Capture, exact centered Library handoff, restart without provider-write replay,
+a preclaimed pointing uncertainty, and a receipt-proven retained-frame crash
+gap. No hardware endpoint was contacted by the simulator run.
+
+After the simulator passed, an indoor GET-only check reached the reviewed ASCOM
+Remote endpoint. Management and all selected device reads returned Alpaca
+`ErrorNumber: 0`. Telescope 0 matched `ASI Mount` UniqueID
+`81F661C7-1F99-4747-A040-B7E438E04FF2`; Camera 1 matched `ZWO ASI2600MC Pro`
+UniqueID `613D9519-B32A-4021-8FE9-830F9D09F22A`; and Focuser 0 matched `ZWO
+Focuser` UniqueID `EA31A640-CD6E-4D68-BF8F-B1D683F61BD1`. The mount was
+connected, not parked, and not slewing; the camera was connected and idle with
+abort and stop capability; the focuser was connected and stationary. No PUT,
+command, or movement occurred.
 
 Exit evidence: the service record, captured original, solve evidence, and
 Library review agree on the same outdoor attempt. The proof states what the

@@ -90,6 +90,11 @@ export type PreflightProviderConfig = {
   readonly rigId: string
   readonly host: string
   readonly port: number
+  readonly site?: {
+    readonly latitudeDegrees: number
+    readonly longitudeDegrees: number
+    readonly elevationMeters: number
+  }
   readonly devices: {
     readonly camera?: AlpacaDeviceConfig
     readonly telescope?: AlpacaDeviceConfig
@@ -152,6 +157,9 @@ export const originServerConfig = Config.all({
   preflightRigId: text('ASTRO_PREFLIGHT_ALPACA_RIG_ID', 'configured-rig'),
   preflightHost: optional('ASTRO_PREFLIGHT_ALPACA_HOST'),
   preflightPort: optional('ASTRO_PREFLIGHT_ALPACA_PORT'),
+  preflightLatitudeDegrees: optional('ASTRO_PREFLIGHT_RIG_LATITUDE_DEGREES'),
+  preflightLongitudeDegrees: optional('ASTRO_PREFLIGHT_RIG_LONGITUDE_DEGREES'),
+  preflightElevationMeters: optional('ASTRO_PREFLIGHT_RIG_ELEVATION_METERS'),
   preflightTelescopeDeviceNumber: optional(
     'ASTRO_PREFLIGHT_ALPACA_TELESCOPE_DEVICE_NUMBER',
   ),
@@ -283,6 +291,9 @@ function originServer(input: {
   readonly preflightRigId: string
   readonly preflightHost: Option.Option<string>
   readonly preflightPort: Option.Option<string>
+  readonly preflightLatitudeDegrees: Option.Option<string>
+  readonly preflightLongitudeDegrees: Option.Option<string>
+  readonly preflightElevationMeters: Option.Option<string>
   readonly preflightTelescopeDeviceNumber: Option.Option<string>
   readonly preflightTelescopeUniqueId: Option.Option<string>
   readonly preflightCameraDeviceNumber: Option.Option<string>
@@ -558,6 +569,9 @@ function configuredPreflightProvider(input: {
   readonly preflightRigId: string
   readonly preflightHost: Option.Option<string>
   readonly preflightPort: Option.Option<string>
+  readonly preflightLatitudeDegrees: Option.Option<string>
+  readonly preflightLongitudeDegrees: Option.Option<string>
+  readonly preflightElevationMeters: Option.Option<string>
   readonly preflightTelescopeDeviceNumber: Option.Option<string>
   readonly preflightTelescopeUniqueId: Option.Option<string>
   readonly preflightCameraDeviceNumber: Option.Option<string>
@@ -602,16 +616,37 @@ function configuredPreflightProvider(input: {
       input.preflightFilterWheelUniqueId,
     ),
   }
+  const siteValues = [
+    Option.getOrUndefined(input.preflightLatitudeDegrees),
+    Option.getOrUndefined(input.preflightLongitudeDegrees),
+    Option.getOrUndefined(input.preflightElevationMeters),
+  ]
+  const siteNumbers = siteValues.map((value) =>
+    value === undefined ? undefined : Number(value),
+  )
+  const [latitudeDegrees, longitudeDegrees, elevationMeters] = siteNumbers
+  const completeSite =
+    latitudeDegrees !== undefined &&
+    longitudeDegrees !== undefined &&
+    elevationMeters !== undefined
   if (
     host === undefined ||
     port === undefined ||
     !/^\d+$/.test(port) ||
     Number(port) > 65_535 ||
     Object.values(devices).some((entry) => entry?.deviceNumber === -1) ||
-    Object.values(devices).every((entry) => entry === undefined)
+    Object.values(devices).every((entry) => entry === undefined) ||
+    (siteValues.some((value) => value !== undefined) &&
+      (siteNumbers.some(
+        (value) => value === undefined || !Number.isFinite(value),
+      ) ||
+        (latitudeDegrees !== undefined &&
+          (latitudeDegrees < -90 || latitudeDegrees > 90)) ||
+        (longitudeDegrees !== undefined &&
+          (longitudeDegrees < -180 || longitudeDegrees > 180))))
   )
     return configFailure(
-      'Alpaca preflight requires host, port, and at least one configured device number.',
+      'Alpaca preflight requires host, port, and at least one configured device number; optional site values must be complete and bounded.',
     )
   return Effect.gen(function* () {
     const validHost = yield* validText(host, 'Alpaca preflight host is invalid')
@@ -624,6 +659,15 @@ function configuredPreflightProvider(input: {
       rigId,
       host: validHost,
       port: Number(port),
+      ...(completeSite
+        ? {
+            site: {
+              latitudeDegrees,
+              longitudeDegrees,
+              elevationMeters,
+            },
+          }
+        : {}),
       devices: {
         ...(devices.camera === undefined ? {} : { camera: devices.camera }),
         ...(devices.telescope === undefined

@@ -33,6 +33,13 @@ mounts it read-only at `/var/lib/astro-console/astrometry-indexes`. Set the same
 container path in `config.env`. The index bind is the only new Phase 4 mount;
 do not mount `/home/chicks` into the container.
 
+The configured Acquire path activates only when the Alpaca camera and telescope
+have reviewed device numbers and `UniqueID` values and the rig has complete
+latitude, longitude, and elevation configuration. It keeps completion at
+`hold`. It does not command a filter wheel or park the mount. ImageBytes remains
+the immutable Library original; the local solver receives a temporary FITS
+copy of those exact retained pixels.
+
 Production admission is fail-closed: set `ASTRO_ADMISSION_MODE=production`,
 provide the verified Access issuer/audience, HTTPS JWKS/certificate URL,
 bounded JWKS cache TTL, bootstrap path, and local owner port. The bootstrap file is

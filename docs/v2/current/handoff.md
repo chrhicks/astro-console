@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; Phase 5 simulator Acquire preparation complete**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven**
 
 ## Current Position
 
@@ -110,6 +110,68 @@ invocation, physical telescope movement, sky position, or outdoor image
 quality. This bounded development path accepts `hold` completion only; it
 rejects `park` before a provider write and does not claim park confirmation.
 
+The configured live-shaped Acquire path is now prepared behind the same durable
+service. Production startup activates it only with reviewed Alpaca camera and
+telescope device numbers, their `UniqueID` values, complete site coordinates,
+and `hold` completion. It validates the accepted run against those identities
+before provider work. Slew, correction, and acquisition exposure each receive a
+durable claim before a write. Claimed pointing work reconciles with GET-only
+coordinates and `Slewing`; it never replays a PUT. A receipt-proven retained
+frame also resumes after a retrieval crash gap without another ImageBytes read.
+
+The camera response remains the immutable `cameraRaw` Library original. The
+local solver creates only a temporary 16-bit FITS input from those exact
+ImageBytes pixels. Solve evidence records both the retained source checksum and
+pixel-payload checksum, uses accepted Plan coordinates for its search hint and
+desired center, and derives the measured mount RA/Dec correction from the
+returned solved center. The worker returns evidence to Acquire and does not
+commit a second session transition. Stored provider results are bound to the
+run and attempt, not the static attempt name alone.
+
+The configured provider passed the complete loopback simulator workflow:
+accepted Plan, Preflight, initial slew and five-second acquisition exposure,
+retained local solve, explicit correction approval, fresh verification solve,
+one 120-second Capture, Complete, and the exact centered Library handoff.
+Restart preserved completion without replay. Separate cases proved a
+preclaimed pointing write stays GET-only and unavailable when coordinates do
+not prove it, and a retained-frame crash gap resumes from its receipt and
+checksum with no second image read. No hardware endpoint was contacted by this
+simulator run.
+
+After that simulator proof, an indoor GET-only readiness check reached ASCOM
+Remote at `192.168.4.104:11111`. Management and every device-property envelope
+returned `ErrorNumber: 0`. The configured identities were Telescope 0 `ASI
+Mount`, UniqueID `81F661C7-1F99-4747-A040-B7E438E04FF2`; Camera 1 `ZWO
+ASI2600MC Pro`, UniqueID `613D9519-B32A-4021-8FE9-830F9D09F22A`; and Focuser
+0 `ZWO Focuser`, UniqueID `EA31A640-CD6E-4D68-BF8F-B1D683F61BD1`. The mount
+was connected, not parked, and not slewing. The camera was connected and idle
+with abort and stop capability. The focuser was connected, stationary,
+absolute, and at position `32655`. No PUT, command, or movement occurred.
+
+## Configured Acquire Product Workflow for Review
+
+1. The owner supplies the reviewed rig, camera, mount, and site configuration.
+   Completion remains `hold`; no filter-wheel or park behavior is installed.
+2. In Plan, the owner accepts one deep-sky sequence. In Observe, the owner takes
+   control, starts the accepted definition, and refreshes Preflight.
+3. Target Acquire records the requested slew before one Alpaca write. It then
+   requires GET-only coordinates and `Slewing` to prove the request settled.
+4. Acquire records the short solve exposure before `StartExposure`, observes
+   the camera active and then idle, reads ImageBytes once, retains the original,
+   and runs the local solver against a temporary FITS input.
+5. If the solved center is outside the accepted threshold, Observe shows the
+   measured correction for explicit approval. The service claims and reconciles
+   that correction with the same no-replay rule.
+6. A new retained frame must solve inside the threshold. Only that fresh
+   verification advances the run to the accepted modest Capture.
+7. The executor retains the final frame, completes the run, and opens the exact
+   Library review. The mount remains held at the end.
+
+This review establishes the product and implementation path. Current GET-only
+device readiness is proven. A live command acknowledgement, later device
+observation, physical movement, sky position, and image quality still require
+owner-observed hardware and outdoor proof.
+
 This live run found and closed one provider timing gap. ASCOM can acknowledge
 `StartExposure` before its first state read changes from idle to exposing. The
 executor now waits for at most two seconds with GET-only observation after an
@@ -176,7 +238,7 @@ snapshot-gap recovery. Simulation and Library review controls follow the fresh
 held desktop lease, not whether Plan or Observe happens to have another eligible
 action, so moving between workspaces does not make the controller read-only.
 
-Current automated proof is green: contracts 187/187, server 154/154, and web
+Current automated proof is green: contracts 187/187, server 157/157, and web
 127/127. Functional browser proof covered the normal Plan-to-Verify workflow,
 fresh acceptance projection, restart/no-replay, abort and reconciliation
 states. Automated browser projections cover the exact Observe-to-Library link
@@ -202,13 +264,13 @@ frame.
 
 ## Accepted Next Four Items
 
-1. **Prepare live Acquire indoors.** Activate a configured Alpaca target
-   provider behind the durable Acquire service, connect retained camera frames
-   to the local solve worker, and preserve the existing claim-before-write and
-   restart-without-replay rules. Prove the complete path through the simulator
-   first. GET-only hardware checks remain indoor-safe; any small mount movement
-   or live abort requires the owner to be present. Physical pointing,
-   image-backed centering, and sky quality remain outdoor proof.
+1. **Review and exercise configured Acquire with the owner.** The configured
+   Alpaca target provider, retained-frame local solver, claim-before-write, and
+   restart-without-replay implementation are simulator-proven, and current
+   GET-only device readiness is confirmed. Install the reviewed host site values
+   before a run. Any small mount movement or live abort requires the owner to be
+   present. Physical
+   pointing, image-backed centering, and sky quality remain outdoor proof.
 2. **Complete beta Library judgment and Process entry.** Add the Nightbook
    catalog, organization, rating, annotation, related-frame comparison,
    representation state, exact lineage, and `Open in Process` handoff using

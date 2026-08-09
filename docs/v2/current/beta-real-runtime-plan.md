@@ -1,6 +1,6 @@
 # Nightbook Beta Real-Runtime Plan
 
-Status: **accepted — simulator Acquire preparation complete; outdoor proof and optional live abort pending**
+Status: **accepted — configured Acquire prepared and simulator-proven; outdoor proof and optional live abort pending**
 
 Accepted: August 8, 2026
 
@@ -243,6 +243,40 @@ accepts only `hold` completion; it rejects `park` before a provider write and
 does not claim park confirmation. The owner-observed outdoor half of this step
 remains open. The accepted simulator checkpoint is `cde00c9`
 (`feat: simulate deep-sky target acquisition`).
+
+Configured live-path preparation completed 2026-08-09. The production origin
+now installs a target provider only when one reviewed Alpaca camera and
+telescope have device numbers, `UniqueID` values, complete site coordinates,
+and a `hold` run context. The provider validates those accepted identities,
+claims target slew, correction, and acquisition exposure before each write,
+and reconciles uncertain pointing through GET-only coordinates and `Slewing`
+without replay. It does not contain a park or filter-wheel command.
+
+Acquisition ImageBytes remains the immutable `cameraRaw` Library original. A
+bounded worker-only conversion writes a temporary 16-bit FITS solver input,
+uses the accepted target coordinates as the search hint and desired center,
+and records the retained source checksum plus ImageBytes pixel-payload checksum.
+The worker returns evidence to durable Acquire instead of committing the same
+session twice. Provider-result reuse is bound to both run and attempt, so a
+static attempt name from an older run cannot supply current evidence.
+
+The same configured provider passed the loopback Alpaca simulator from Plan and
+Preflight through initial solve, explicit correction, fresh verification,
+120-second Capture, Complete, and the centered Library original. Restart tests
+proved no replay after completion, GET-only handling of a preclaimed slew, and
+receipt/checksum reconciliation when a crash leaves retrieval marked in
+progress after immutable intake. This is adapter, worker, persistence, and
+simulated-provider proof only; no hardware endpoint was contacted.
+
+Only after that proof, an indoor GET-only check matched the reviewed ASCOM
+Remote identities: Telescope 0 `ASI Mount`
+`81F661C7-1F99-4747-A040-B7E438E04FF2`, Camera 1 `ZWO ASI2600MC Pro`
+`613D9519-B32A-4021-8FE9-830F9D09F22A`, and Focuser 0 `ZWO Focuser`
+`EA31A640-CD6E-4D68-BF8F-B1D683F61BD1`. Every selected Alpaca envelope had
+`ErrorNumber: 0`; the mount was connected, unparked, and still, the camera was
+connected and idle, and the focuser was connected and stationary. No PUT,
+command, or movement occurred. This proves current read-only provider readiness,
+not the configured target command path.
 
 ### 7. Complete beta Library judgment and Process entry
 
