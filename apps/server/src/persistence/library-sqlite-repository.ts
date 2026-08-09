@@ -255,31 +255,31 @@ export const sqliteLibraryServiceLayer = (
     ),
   )
 
-const projectLibraryRow = Effect.fn('Server.LibraryService.projectLibraryRow')(
-  function* (asset: typeof LibraryAssetRow.Type) {
-    const detailRaw = yield* Effect.try({
-      try: () => JSON.parse(asset.detail) as unknown,
-      catch: () => new LibraryPersistenceUnavailable(),
-    })
-    const detail = yield* Schema.decodeUnknownEffect(LibraryDetail)(
-      detailRaw,
-    ).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
-    return {
-      assetId: asset.asset_id,
-      revision: asset.revision,
-      role: asset.role,
-      format: asset.format,
-      availability: asset.availability,
-      comparisonGroupId: asset.comparison_group_id,
-      review: {
-        decision: detail.review?.decision ?? 'unreviewed',
-        ...(detail.review?.rating === undefined
-          ? {}
-          : { rating: detail.review.rating }),
-      },
-    }
-  },
-)
+const projectLibraryRow = Effect.fnUntraced(function* (
+  asset: typeof LibraryAssetRow.Type,
+) {
+  const detailRaw = yield* Effect.try({
+    try: () => JSON.parse(asset.detail) as unknown,
+    catch: () => new LibraryPersistenceUnavailable(),
+  })
+  const detail = yield* Schema.decodeUnknownEffect(LibraryDetail)(
+    detailRaw,
+  ).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
+  return {
+    assetId: asset.asset_id,
+    revision: asset.revision,
+    role: asset.role,
+    format: asset.format,
+    availability: asset.availability,
+    comparisonGroupId: asset.comparison_group_id,
+    review: {
+      decision: detail.review?.decision ?? 'unreviewed',
+      ...(detail.review?.rating === undefined
+        ? {}
+        : { rating: detail.review.rating }),
+    },
+  }
+})
 
 const libraryAssetId = (assetId: string, requireStableId = true) =>
   Schema.decodeUnknownEffect(LibraryAssetDetail.fields.assetId)(assetId).pipe(

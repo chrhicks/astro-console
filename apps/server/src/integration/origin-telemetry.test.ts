@@ -1220,6 +1220,10 @@ test('Library HTTP paths export one safe business boundary each', async () => {
     collector.requests.map((request) => request.body),
   ).toString('utf8')
   assert.equal(textOccurrences(payload, 'Library.catalog.page'), 1)
+  assert.equal(
+    textOccurrences(payload, 'Server.LibraryService.projectLibraryRow'),
+    0,
+  )
   assert.equal(textOccurrences(payload, 'Library.asset.detail'), 1)
   assert.equal(textOccurrences(payload, 'Library.asset.review'), 2)
   assert.match(payload, /HTTP GET \/api\/library/)
