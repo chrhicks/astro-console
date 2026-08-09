@@ -24,8 +24,6 @@ import {
   acquireSqliteRepository,
   targetAcquisitionSession,
 } from '../persistence/acquire-sqlite-repository.ts'
-
-type AcquireRepository = ReturnType<typeof acquireSqliteRepository>
 import type {
   ExecutorWorkKind,
   ExecutorWorkResult,
@@ -34,6 +32,8 @@ import type {
   SqliteBacklogObserver,
   SqliteTraceSync,
 } from '../observability/sqlite-telemetry.ts'
+
+type AcquireRepository = ReturnType<typeof acquireSqliteRepository>
 
 const WorkRow = Schema.Struct({
   work_id: Schema.String,

@@ -260,133 +260,33 @@ compact Observe panels and added the exact read-only Library handoff to phone
 Observe. The 390 px projection has no horizontal overflow or mutation control,
 and an idle interval produced no refresh churn.
 
-## Origin Trace Export
+## Observability
 
-The production origin on the Arch host now exports selected traces to the
-host-local SigNoz collector over OTLP/HTTP protobuf. The deployed image is
-`astro-console-origin:otel-20260808-1`; the container remained running with no
-restart after a local-owner `GET /api/library` returned HTTP 200. SigNoz stored
-trace `eedc7a4479b237022e778a63b69132a5` with the server root
-`HTTP GET /api/library` and its child `Server.LibraryService.page`. The root
-records the stable route, `library` workspace, HTTP 200 status, production
-environment, and `otel-20260808-1` service version. No identity, request body,
-image, coordinate, secret, or provider response is attached.
+The reconciled server has one opt-in, Effect-owned OTLP/HTTP protobuf runtime
+for traces, structured logs, and metrics. Standard OTEL configuration controls
+each signal. The origin owns initialization, flush, and disposal. Publisher
+telemetry uses the same lifecycle model in its process.
 
-A follow-on local slice, not yet deployed, adds one complete
-`AlpacaProvider.operation` span and one nested `AlpacaProvider.fetch` span for
-preflight inventory and device reads, camera start and abort commands, camera
-state reads, and ImageBytes transfer and validation. It keeps only stable Astro
-provider fields, HTTP methods, route templates, response status, and outcome.
-Fake transports and a local OTLP collector verify that host names, device
-numbers and IDs, form values, concrete URLs, and provider response text are not
-exported. This is local adapter proof only; it did not contact hardware.
-The follow-on full server suite passed 151 tests with 3 expected skips.
+Traces cover stable HTTP roots and high-value Plan, Observe, Acquire, Library,
+Process, projection, executor, frame, plate-solve, publisher, startup,
+admission, Alpaca, and named SQLite boundaries. Metrics cover closed operational
+outcomes, SQLite duration/count/backlog, and Node.js event-loop, V8 heap, and GC
+signals. Empty worker polls, SSE heartbeats, static assets, and health polling
+do not create spans.
 
-A second local follow-on slice replaces generic service spans with intentional
-Plan, Observe, Library, and Process flow boundaries. Plan commands show execute,
-apply, conditional publish, and snapshot stages. Observe commands show execute,
-apply, conditional publish, and rejected-path snapshot stages. Library catalog,
-detail, and review requests each have one complete business span. Process source
-handoff and command execution each have one complete business span; a closed
-Process intent is attached only after command-envelope validation. Tests assert
-that identity, request bodies, domain IDs, annotations, idempotency values,
-filenames, and lineage are absent from exported payloads. The full server suite
-passed 155 tests with 3 expected skips.
+Telemetry fields use closed, low-cardinality operations and outcomes. They do
+not export identities, request bodies, raw domain IDs, coordinates, paths,
+object keys, checksums, provider response text, JWT details, email addresses,
+SQL text or values, process arguments, or environment values.
 
-A third local follow-on, not yet deployed, completes the telemetry base for
-background executor and recovery work, projection snapshot and bounded SSE
-setup, frame intake and inspection, plate solving, publisher storage stages,
-startup, and admission. It adds independently opt-in OTLP logs and metrics: the
-structured `astro.operation` log and `astro.operation.count` metric use only
-closed operation and outcome fields. SSE connect, disconnect, publish, and
-write failure are operational events; heartbeats and connection lifetimes are
-not traced. Empty executor polls also emit no work span. Deterministic local
-collectors and fake workers/providers prove export and exclusions without a
-hardware call. Identity, request data, raw IDs, coordinates, paths, object
-keys, checksums, provider text, JWT details, email, and SQL are excluded.
-Browser-only cursor-gap reasons remain a follow-on rather than a new diagnostics
-contract.
-The full server suite passed 163 tests with 3 expected skips.
-
-A fourth local follow-on adds named SQLite spans for projection reads, command
-transactions, executor work selection and settlement, and publisher outbox
-claim and settlement. It exports operation count, duration, and bounded
-executor/publisher backlog metrics. Empty worker polls update backlog gauges but
-do not create spans. SQL text, bound values, raw SQLite errors, and domain IDs
-remain excluded. The full server suite passed 165 tests with 3 expected skips.
-
-An isolated Arch candidate then proved stored `SQLite.projection.snapshot.read`
-and `SQLite.command.state.transaction` spans under their HTTP and business-flow
-parents, plus stored SQLite count and duration metrics. The candidate used its
-own database volume and fixture command only, then exited cleanly. Production
-Astro Console remained unchanged and healthy.
-
-The Arch SigNoz deployment now also has a separate metrics-only infrastructure
-agent. It exports host CPU, memory, load, filesystem capacity and inodes, disk
-I/O, network, paging, and process counts, plus per-container CPU, memory,
-network, and block I/O. The agent is non-root. It mounts `/proc`, `/sys`, an
-empty root-filesystem marker, and `/mnt/storage` read-only; it does not receive
-the rest of the host root. Docker statistics pass through a read-only socket
-proxy, and neither service publishes host ports. SigNoz stored 37 host/container
-metric families including the production `deployment/origin` container and
-filesystem series for `/` and `/mnt/storage`. Foundry recreated only the SigNoz
-ingester while applying the initial Compose definition; the datastores remained
-running, earlier traces remained available, and a new smoke trace was accepted
-after restart. The filesystem follow-on recreated only the infrastructure agent.
-
-A fifth local follow-on adds Node.js runtime metrics to the same Effect-owned
-OTLP lifecycle. It samples event-loop utilization and delay, V8 heap used and
-limit, and bounded GC duration/type data. It creates no spans or logs and does
-not start a second SDK, provider, exporter, or runtime. The serializer keeps
-the OTLP metric units (`1`, `s`, and `By`) and removes Effect's duplicate
-data-point `unit` label. Deterministic tests prove all eleven source metric
-names, lifecycle cleanup, metrics-only export, correct protobuf units, and the
-absence of process arguments, environment values, paths, or identity data. The
-full server suite passed 167 tests with 3 expected skips; the build, format
-check, focused lint, and diff check passed. The known full-lint baseline remains
-23 findings outside this runtime slice.
-
-The isolated Arch image `astro-console-origin:otel-runtime-20260809-1` then ran
-as `astro-console-runtime-candidate` on loopback port `28093` with its own
-volume. SigNoz stored all event-loop, heap, and GC series for service
-`astro-console-runtime-candidate`; the time-series metadata has the expected
-units and zero data-point series with a `unit` label. The Astro Console
-operations dashboard rendered the runtime candidate together with stored HTTP,
-startup, projection, admission, and SQLite signals. The candidate exited zero.
-The production origin and SigNoz ingester identities and start times did not
-change, and the production `/health/live` route remained alive.
-
-The SigNoz workspace now contains the `Astro Console Operations` dashboard and
-four enabled rules for filesystem usage, missing production-origin telemetry,
-SQLite trouble or sustained backlog, and unavailable HTTP/startup outcomes.
-All four rules evaluated as OK. They use routing policies but no notification
-channel is configured, so they retain state and history without sending a
-message. The dashboard export and exact rule definitions are versioned in the
-separate `arch-sig-noz` deployment repository. Backup/SMART collection, image
-pinning, and SigNoz retention changes remain intentionally deferred.
-
-An isolated Arch `m27` fixture candidate exported each slice to the host SigNoz
-collector without changing the production container or database. SigNoz stored
-accepted Plan trace `8e27fd74a2ce4b1d831e2c63facecf95`, accepted Observe
-trace `b0274d90f90f03cf75cb4f27b6a928e3`, accepted Library catalog,
-detail, and review traces `b480290021cbb14ded9b01568a4bf624`,
-`bf0bb30aa28742242fd72e44ef978bbf`, and
-`4c4be5c62e7a32b32535e1391fa52dee`, and accepted Process trace
-`761780129fcd56928e0c8608668b9a97`. This is fixture deployment and trace-storage
-proof only; no provider or hardware action occurred.
-
-Local verification passed the server build and 150 tests with 3 expected
-skips. A clean Arch image build also passed the contracts, web, and server
-builds. The deployment Dockerfile now copies the checksum-pinned Nightbook
-vendor package before `npm ci`, which makes the image reproducible from a clean
-build context.
-
-During rollout, a body-discarded local-owner `GET /api/workspaces/plan` returned
-an empty reply and exited both the prior uninstrumented production image and the
-traced candidate. This is a pre-existing production route/state defect, not an
-OTEL regression. Origin was restarted after each comparison. The defect is not
-fixed in this instrumentation change; use the healthy Library route for trace
-verification until it is investigated separately.
+Deployment examples route the origin and publisher containers to the host
+collector through `host.docker.internal:4318` with the Compose host-gateway
+mapping. This reconciled branch has local deterministic receiver proof only and
+has not been deployed. Earlier production and isolated-candidate SigNoZ proof,
+trace IDs, historical test counts, and rollout notes are in the
+[OTEL observability delivery record](../archive/handoffs/otel-observability-2026-08-09.md).
+The dashboard, infrastructure agent, and alert definitions remain owned by the
+separate `arch-sig-noz` repository.
 
 ## Proof Boundary
 

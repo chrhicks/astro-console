@@ -43,6 +43,9 @@ direction.
   — completed local proof that the packaged Nightbook component grammar can
   compose Astro Console's Plan, Observe, Library, and Process workspaces while
   production routes remain unchanged.
+- [OTEL observability delivery record](handoffs/otel-observability-2026-08-09.md)
+  — completed telemetry implementation, stored SigNoZ evidence, historical
+  test counts, and isolated-candidate chronology.
 - [V2.0 delivery plan](plans/v2-delivery-plan-2026-08-05.md) — completed
   V2.0 roadmap retained before the next multi-phase plan is defined.
 - [Phase 2 implementation plan](plans/phase-2-implementation-plan-2026-08-04.md)
