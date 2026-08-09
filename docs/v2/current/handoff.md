@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–2 complete; Item 3 next**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–3 complete; Item 3.5.1 next**
 
 ## Current Position
 
@@ -150,6 +150,30 @@ browser behavior and final Designer review passed at wide, compact, and 390 px.
 This is local fixture and service proof; it does not claim a new exposure,
 provider command, or outdoor image.
 
+Accepted follow-on Item 3 is complete. Process now starts from one compatible
+Library group with explained `Include`/`Exclude`/`Review` decisions and a small
+manual exception queue. The exact candidate decisions are frozen into the
+session. A separate durable worker owns Build, Preview, Apply, retry, save, and
+cleanup; it preserves named checkpoints, resumes after restart without replay,
+and pauses only for named measured pressure. Saved outputs have format-matching
+bytes, checksum, and Library lineage. Final Designer review passed wide,
+compact, and 390 px phone states. This proves only the deterministic local file
+adapter, not production processing quality or an external processor.
+
+The owner review exposed a larger Process product gap after that functional
+closeout. Item 3 proved the worker and recovery model, but one fast automatic
+Build does not match the intended operator workflow. Item 3.5 now introduces a
+target-owned Processing Project with Library multi-select and whole Capture Set
+intake, source roles, and persistent explicit Calibration, Registration,
+Stacking, Master, and Develop stages. Every executable stage has an explicit
+Run or Rerun action and retained attempts. Quality and metadata findings remain
+advisory; `Use anyway` is frozen only into the current attempt. Develop stays
+focused on astronomy operations such as astrometry, background extraction,
+color calibration, green-noise reduction, stretching, color controls, and
+star removal/addition. General layers, masks, and compositing are out of scope.
+The complete accepted breakdown is in the
+[Item 3.5 Process workflow plan](process-workflow-plan.md).
+
 After that simulator proof, an indoor GET-only readiness check reached ASCOM
 Remote at `192.168.4.104:11111`. Management and every device-property envelope
 returned `ErrorNumber: 0`. The configured identities were Telescope 0 `ASI
@@ -250,8 +274,8 @@ snapshot-gap recovery. Simulation and Library review controls follow the fresh
 held desktop lease, not whether Plan or Observe happens to have another eligible
 action, so moving between workspaces does not make the controller read-only.
 
-Current automated proof is green: contracts 187/187, server 157/157, and web
-134/134. Functional browser proof covered the normal Plan-to-Verify workflow,
+Current automated proof is green: contracts 187/187, server 184/184, and web
+136/136. Functional browser proof covered the normal Plan-to-Verify workflow,
 fresh acceptance projection, restart/no-replay, abort and reconciliation
 states. Automated browser projections cover the exact Observe-to-Library link
 and Library review state. Final read-only Designer review of the matching live
@@ -297,26 +321,29 @@ Completed evidence covers local contracts, service behavior, SQLite/HTTP/SSE,
 browser presentation, the opt-in beta integration, deterministic simulated
 Alpaca behavior, real-frame executor retrieval and intake, pixel-derived local
 preview, one covered-camera physical exposure, live Alpaca ImageBytes transfer,
-restart without replay, remote
-ingress and control, one isolated real camera-original intake, local solve-only
-evidence, and current GET-only provider/device communication for the selected
-ASI mount, imaging camera, and focuser. It does not prove beta route promotion,
-production deployment of the beta, mount movement, live abort behavior,
-production processing tools, or sky image quality from the covered indoor
-frame.
+restart without replay, remote ingress and control, one isolated real
+camera-original intake, local solve-only evidence, current GET-only
+provider/device communication for the selected ASI mount, imaging camera, and
+focuser, and deterministic worker-owned Process execution. It does not prove
+beta route promotion, production deployment of the beta, mount movement, live
+abort behavior, production processing tools, or sky image quality from the
+covered indoor frame.
 
 ## Next Accepted Item
 
-3. **Move Process onto worker-owned execution.** Replace the synchronous
-   simulation wrapper with durable Build and Develop work. Start from one
-   compatible Library group through an explained recommended source set, with
-   platform `Include`/`Exclude`/`Review` kept separate from owner
-   `Accepted`/`Rejected`/`Unreviewed` judgment. Review only the smaller exception
-   queue, then preserve checkpoints, retry, synchronized Preview, explicit Apply
-   history, save, discard, and measured host-pressure behavior. Selecting a
-   production processing adapter remains a separate owner decision.
+3.5.1. **Add Library selection and Processing Project intake.** Let the owner
+select individual frames or a whole Capture Set, open a new target-owned
+project or add to an existing one, and inspect exact sources, roles,
+provenance, recommendations, and warnings before any Calibration work
+starts. Freeze whole-set membership to exact asset IDs and revisions.
 
 ## Later Accepted Items
+
+Items 3.5.2 through 3.5.7 add persistent stage drafts and attempts, explicit
+Calibration, Registration, and Stacking, a saved Master boundary,
+astronomy-specific Develop operations, and the final integrated operator
+review. Follow the ordered scope and proof in the
+[Item 3.5 Process workflow plan](process-workflow-plan.md).
 
 4. **Audit and promote the beta.** Verify all four exact Nightbook workflows
    and shell states against service truth, run functional and Designer review
@@ -335,7 +362,7 @@ frame.
 
 Configured Acquire physical pointing, image-backed centering, sky quality, and
 live abort remain owner-observed outdoor proof for a suitable nighttime window.
-They do not block the daytime Item 3 work.
+They do not block the remaining beta audit and promotion work.
 
 The unavailable filter wheel stays explicit throughout this sequence. The
 current bounded target path continues to use `hold`; park is not added as an

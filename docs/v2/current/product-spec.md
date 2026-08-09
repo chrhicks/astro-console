@@ -563,20 +563,27 @@ control.
 Its accepted interaction model is recorded in the
 [Gate 4 Process reference](../gates/gate-04-process.md). Current composition and
 interaction authority lives in the [UI and UX direction](ui-ux.md) and the
-external Nightbook demo it names.
+external Nightbook demo it names. The accepted explicit project and stage
+expansion is in the [Item 3.5 Process workflow plan](process-workflow-plan.md).
 
 ### Responsibilities
 
-- select one compatible source group through a service-owned recommended set,
-  without requiring the owner to review every frame or permitting a global
-  cross-target selection;
+- select individual Library frames or a whole Capture Set, then open a new
+  target-owned Processing Project or add those exact asset revisions to an
+  existing project;
+- assign project sources as Lights, Darks, Flats, Bias, Dark flats, or
+  Unassigned, with target consistency required for Lights and calibration
+  support frames remaining target-independent;
 - use explained `Include`, `Exclude`, and `Review` determinations to reduce a
   large source group to a small exception queue while keeping manual
   `Accepted`, `Rejected`, and `Unreviewed` judgment distinct;
-- build a durable linear master through calibration, debayer, alignment, frame
-  evaluation, and stacking;
-- visually develop that master through one current, non-destructive edit
-  history with undo and redo;
+- expose persistent Sources, Calibration, Registration, Stacking, Master, and
+  Develop stages, with explicit Run or Rerun actions and retained attempts for
+  each executable stage;
+- build and save a durable linear Master before Develop opens that exact saved
+  Library artifact;
+- visually develop that Master through astronomy-specific operations and one
+  current, non-destructive edit history with undo and redo;
 - keep a large image preview visible while tools and adjustable parameters are
   evaluated;
 - automatically synchronize complete preview settings to the service after a
@@ -590,15 +597,17 @@ external Nightbook demo it names.
   suggestion loads its explained value changes into Operation while Apply
   remains explicit;
 - reveal the linear reference through press-and-hold comparison while editing;
-- offer installed compatible tools per operation, including Siril, RCAstro,
-  and other adapters where their invocation model fits;
+- offer astronomy operations such as astrometry, background extraction, color
+  calibration, green-noise reduction, stretching, simple color controls, star
+  removal, and star addition through installed compatible tools such as Siril,
+  RCAstro, and other adapters where their invocation model fits;
 - make optional analysis explain its evidence and never change the working
   image by itself;
 - retry a failed operation from its latest valid checkpoint without rerunning
-  unaffected Build steps;
+  unaffected upstream stages;
 - expose bounded owner-safe tool output and retry scope without replacing the
   visual editor;
-- switch among capture sessions, unfinished work, linear stacks, and Library
+- switch among Processing Projects, stage attempts, saved Masters, and Library
   sources while protecting unsaved work;
 - leave a synchronized session unfinished and resumable when switching data,
   without turning the session itself into a Library artifact;
@@ -611,6 +620,11 @@ General comparison among saved outputs belongs to Library; Process may open
 that capability as a convenience. Internal attempts and diagnostics remain
 inspectable but do not become the primary workspace navigation.
 
+Process is not a general photo editor. Layers, masks, brushes, painting, text,
+arbitrary selections, compositing, and a general node graph are out of scope.
+Star removal may create paired starless and star-companion artifacts without
+introducing a layer model.
+
 Processing may run while observing continues. Active capture alone does not
 pause it. The worker throttles only in response to measured memory, storage,
 thermal, or similar host pressure that could threaten acquisition or control,
@@ -621,11 +635,18 @@ Review and Process remain separate because they answer different questions:
 
 ### Source Selection And Review Precedence
 
-The normal entry is a Library comparison or capture group action named
-`Build recommended set`, not a global Library multi-select. The service shows
-the exact included, excluded, and needs-review counts before Process starts.
-The source group may contain hundreds of frames; the owner normally reviews
-only the smaller needs-review queue.
+The normal entry is an individual-frame multi-selection or a whole **Capture
+Set** selection in Library. The owner opens a new Processing Project or adds the
+selection to an existing project. A whole Capture Set resolves to the exact
+asset IDs and revisions present at selection time; later captures do not
+silently join it. Process also provides a full Library picker for adding
+sources.
+
+A Processing Project has one target for its Lights and may combine several
+Capture Sets or nights for that target. The service reports target and metadata
+conflicts, but advisory findings do not prevent the owner from experimenting or
+proceeding with a viable subset. Calibration support frames do not need to
+share the target.
 
 Manual judgment has clear precedence. `Rejected` frames are excluded.
 `Accepted` frames are included unless bytes are unavailable, corrupt,
@@ -634,15 +655,21 @@ override a quality-based platform exclusion, and the UI names that override.
 An `Unreviewed` frame follows an `Include` or `Exclude` determination; an
 `Unreviewed` frame with a `Review` determination enters the exception queue.
 Technical ineligibility cannot be overridden and always includes an exact
-reason.
+reason. Metadata and quality concerns remain advisory. `Use anyway` is a stage
+draft decision that can participate in draft undo/redo. A started attempt
+freezes that override; a later attempt inherits it only through an explicit
+rerun-with-same-settings choice.
 
 Platform determination may use retained capture integrity, pointing evidence,
 inspection metrics, and group-relative Build evaluation. A plate solve supports
 pointing evidence but is not, by itself, a frame-quality verdict. Each
 determination records its rationale and measured facts. Resolving a needs-review
-item with `Accept` or `Reject` updates the durable Library judgment. Starting
-Process freezes the exact candidate source set and its decisions for that
-session; later Library changes do not silently alter active work.
+item with `Accept` or `Reject` updates the durable Library judgment. Opening or
+adding to a Processing Project freezes the exact selected assets and revisions.
+Each executable stage attempt then freezes its own inputs, upstream result,
+settings, tool identity, decisions, overrides, outcomes, diagnostics, and
+outputs. Later Library or upstream changes do not silently alter a completed
+attempt.
 
 ## 9. Local Plate-Solve Evidence
 

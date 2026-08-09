@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; Process execution complete; Item 3.5.1 next**
 
 Keep normal working context small. Do not read the complete V2 tree.
 
@@ -22,6 +22,7 @@ specific detail.
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | UI or UX work, beta alignment, or route promotion         | [Current UI and UX direction](current/ui-ux.md), then the external Nightbook demo it names                   |
 | Accepted beta real-runtime delivery or Alpaca simulation  | [Nightbook beta real-runtime plan](current/beta-real-runtime-plan.md)                                        |
+| Explicit Process workflow and Item 3.5 delivery           | [Item 3.5 Process workflow plan](current/process-workflow-plan.md)                                           |
 | Workspace behavior or product entities                    | [Current product specification](current/product-spec.md); use it for domain truth, not visual composition    |
 | Accepted Gate 5 scenarios and ownership                   | [Gate 5 baseline](current/gate-05-scenarios.md)                                                              |
 | Accepted consequential actions                            | [Gate 5 action map](current/gate-05-action-map.md)                                                           |

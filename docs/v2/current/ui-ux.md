@@ -62,14 +62,24 @@ For one demo workflow or state at a time:
 
 ## Known Alignment Work
 
-The adoption proof found three current projection gaps:
+The first three Process projection gaps are closed: per-action eligibility,
+complete Library detail for Process outputs, and deterministic unfinished
+session resume. Item 3 owner review found that the broad automatic Build model
+does not match the intended workflow. Resolve this through the explicit,
+persistent stages in the
+[Item 3.5 Process workflow plan](process-workflow-plan.md).
 
-1. service-owned Process per-action eligibility and typed denial reasons;
-2. complete Library detail for Process-created outputs; and
-3. a deterministic unfinished-session restart-to-resume journey.
-
-Treat this as the starting list, not a complete migration plan. Recheck each
-demo workflow against current projections before changing a contract.
+- Library selection and whole Capture Set intake must lead to a persistent
+  Processing Project, not directly into transient worker progress.
+- Sources, Calibration, Registration, Stacking, Master, and Develop must remain
+  navigable after work completes. Earlier attempts and their evidence remain
+  inspectable.
+- The service owns source roles, recommendations, warnings, attempts, selected
+  results, lineage, eligibility, and denial reasons. Do not invent these in the
+  client or delay deterministic work to make progress easier to see.
+- Develop is an astronomy workflow. Preserve the dominant image workspace and
+  astronomy operations without drifting into layers, masks, compositing, or a
+  general Photoshop-style editor.
 
 ## Promotion Boundary
 

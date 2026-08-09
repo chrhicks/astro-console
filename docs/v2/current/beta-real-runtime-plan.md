@@ -301,16 +301,18 @@ read-only. Automated proof passes contracts 187/187, server 157/157, and web
 long availability-state overflow correction. This closes accepted Item 2 with
 local fixture and service proof only.
 
-### 8. Move Process onto worker-owned execution
+### 8. Move Process onto worker-owned execution — complete
 
 - Replace the synchronous Process simulation wrapper with a durable work ledger
   and a separate worker that claims and completes Build and Develop work. A
   browser command records intent and returns current truth; it does not complete
   its own worker result.
-- Enter Process from one compatible Library comparison or capture group through
-  `Build recommended set`. Do not add a global Library multi-select. Project an
-  exact source summary such as `300 frames · 272 included · 18 excluded · 10
-need review`, and let the owner inspect only the smaller exception queue.
+- Item 3 entered Process from one compatible Library comparison or capture
+  group through `Build recommended set`. That was the bounded worker-delivery
+  path, not the final product boundary; Item 3.5 supersedes it with Library
+  multi-select and whole Capture Set intake. The completed Item 3 path projected
+  an exact source summary and let the owner inspect only the smaller exception
+  queue.
 - Keep the platform's explained `Include`, `Exclude`, and `Review`
   determination separate from the owner's durable `Accepted`, `Rejected`, and
   `Unreviewed` judgment. Manual rejection excludes a frame. Manual acceptance
@@ -356,6 +358,41 @@ functional plus Designer review at wide, compact, and 390 px phone widths.
 This proves durable local Process execution for the selected scenarios. It does
 not prove a production processing adapter, external-tool output quality,
 hardware behavior, outdoor capture, or beta route promotion.
+
+Completed 2026-08-09 with the deterministic local file adapter and M27 service
+fixtures. Browser commands now persist work and return before a separate worker
+claims Build, Preview, Apply, retry, save, or cleanup. The service projects the
+recommended group, the smaller review queue, frozen source decisions, named
+Build checkpoints, Develop history, saved Library lineage, and measured
+pressure state. Restart/no-replay, stale completion, Debayer-to-Align retry,
+refresh during Preview and Apply, truthful TIFF save, source-preserving discard,
+normal capture concurrency, and pressure throttle/recovery are automated proof.
+Designer review passed wide, compact, and 390 px phone states; it added keyboard
+hold behavior for reference comparison. The normal browser fixture did not
+render the injected Align failure or non-normal pressure states, so those two
+states remain integration-test proof rather than browser screenshots. The work
+does not select or prove a production processing adapter. Closeout proof is
+green at contracts 187/187, server 184/184, and web 136/136.
+
+### 8.5. Add the explicit Process workflow
+
+Item 3's worker, ledger, claims, restart reconciliation, artifacts, pressure
+handling, and OpenTelemetry evidence remain the execution foundation. Item 3.5
+changes the product workflow around that foundation:
+
+1. **3.5.1 —** Library selection and Processing Project intake.
+2. **3.5.2 —** Stage drafts, attempts, and persistent navigation.
+3. **3.5.3 —** Explicit Calibration.
+4. **3.5.4 —** Explicit Registration.
+5. **3.5.5 —** Explicit Stacking and saved Master.
+6. **3.5.6 —** Astronomy Develop workspace.
+7. **3.5.7 —** Integrated operator review and closeout.
+
+Do not slow deterministic work to make transient states easier to watch. Keep
+the completed attempts and evidence navigable instead. The detailed product,
+service, proof, and non-goal boundaries are in the
+[Item 3.5 Process workflow plan](process-workflow-plan.md). Item 4 remains after
+Item 3.5.7.
 
 ### 9. Audit and promote the beta
 

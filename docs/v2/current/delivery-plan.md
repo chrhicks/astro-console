@@ -219,8 +219,8 @@ uncertainty.
 ## Accepted Follow-on Order
 
 The owner accepted the first four delivery items on August 9, 2026, then placed
-two host-housekeeping items at the bottom of the same order. Items 1 and 2 are
-complete; Item 3 is next:
+two host-housekeeping items at the bottom of the same order. Items 1 through 3
+are complete; owner review inserted Item 3.5 before Item 4:
 
 1. **Complete —** Prepare the configured live Acquire and local-solver path
    indoors. Physical pointing, centering, and sky-quality proof remain for the
@@ -228,17 +228,30 @@ complete; Item 3 is next:
 2. **Complete —** Finish beta Library judgment and comparison with retained
    assets. Include the service-backed catalog, published delivery, and exact
    Process handoff.
-3. **Next —** Replace the Process simulation wrapper with durable worker-owned
-   Build and Develop execution.
-4. Audit all four Nightbook beta workspaces and make route promotion an
-   explicit owner decision.
+3. **Complete —** Replace the Process simulation wrapper with durable
+   worker-owned Build and Develop execution.
+
+**Item 3.5 — Accepted epic.** Replace the broad automatic Build presentation
+with a target-owned Processing Project and explicit, inspectable stages:
+
+- **3.5.1 Next —** Library selection and Processing Project intake.
+- **3.5.2 —** Stage drafts, attempts, and persistent navigation.
+- **3.5.3 —** Explicit Calibration.
+- **3.5.4 —** Explicit Registration.
+- **3.5.5 —** Explicit Stacking and saved Master.
+- **3.5.6 —** Astronomy Develop workspace.
+- **3.5.7 —** Integrated operator review and closeout.
+
+4. Audit all four Nightbook beta workspaces and make route promotion an explicit
+   owner decision.
 5. Repair the scheduled host backup container-name mismatch.
 6. Remove only the unused failed-build and index-download staging copies after
    retaining the deployed release, installed solver indexes, and verified SSD
    backup.
 
 The detailed scope and proof boundaries remain in the
-[Nightbook beta real-runtime plan](beta-real-runtime-plan.md).
+[Nightbook beta real-runtime plan](beta-real-runtime-plan.md) and the
+[Item 3.5 Process workflow plan](process-workflow-plan.md).
 
 ## Implementation Rules
 
