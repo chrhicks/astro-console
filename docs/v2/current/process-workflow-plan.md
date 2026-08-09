@@ -1,6 +1,6 @@
 # Item 3.5 — Explicit Process Workflow
 
-Status: **Accepted epic; Item 3.5.1 next**
+Status: **Accepted epic; Item 3.5.1 complete; Item 3.5.2 next**
 
 Item 3 proved durable worker-owned execution. Item 3.5 reshapes that execution
 into the operator workflow: choose evidence, assign its role, run explicit
@@ -119,6 +119,8 @@ a viable subset remains.
 
 ### Item 3.5.1 — Library Selection And Project Intake
 
+**Status:** Complete.
+
 **Operator result:** Select individual frames or a whole Capture Set in
 Library, open a new Processing Project or add to an existing one, then see the
 exact sources, target, provenance, and suggested roles in Sources. No
@@ -131,6 +133,11 @@ while projecting overridable warnings rather than artificial quality gates.
 **Proof:** Cover individual selection, whole-set selection, several same-target
 nights, Lights plus calibration frames, restart with the exact frozen sources,
 and Designer review at wide, compact, and 390 px.
+
+The completed slice proves those paths through local contracts, SQLite service
+integration, web tests, and functional browser inspection. It also proves that
+project intake creates no `processing_work` row. It does not prove Calibration,
+production processing quality, a provider command, or a physical capture.
 
 ### Item 3.5.2 — Stage Drafts, Attempts, And Navigation
 

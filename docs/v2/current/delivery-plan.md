@@ -234,8 +234,8 @@ are complete; owner review inserted Item 3.5 before Item 4:
 **Item 3.5 — Accepted epic.** Replace the broad automatic Build presentation
 with a target-owned Processing Project and explicit, inspectable stages:
 
-- **3.5.1 Next —** Library selection and Processing Project intake.
-- **3.5.2 —** Stage drafts, attempts, and persistent navigation.
+- **3.5.1 Complete —** Library selection and Processing Project intake.
+- **3.5.2 Next —** Stage drafts, attempts, and persistent navigation.
 - **3.5.3 —** Explicit Calibration.
 - **3.5.4 —** Explicit Registration.
 - **3.5.5 —** Explicit Stacking and saved Master.

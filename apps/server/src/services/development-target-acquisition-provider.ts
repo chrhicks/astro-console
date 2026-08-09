@@ -93,6 +93,7 @@ const SimulatedRunDefinition = Schema.Struct({
     sequences: Schema.Array(
       Schema.Struct({
         sequenceId: Schema.String,
+        targetName: Schema.String,
         rightAscensionHours: Schema.Number,
         declinationDegrees: Schema.Number,
       }),
@@ -163,6 +164,7 @@ export function developmentTargetAcquisitionProvider(options: {
               assetId,
               frameId: `frame-${digest}`,
               capturedAt: frame.capturedAt,
+              targetName: run.targetName,
               format: image.format,
               equipment: {
                 rigId: run.rigId,
@@ -525,6 +527,7 @@ function currentRun(database: DatabaseSync) {
   return {
     runId: run.id,
     sequenceId: sequence.sequenceId,
+    targetName: sequence.targetName,
     rightAscensionHours: sequence.rightAscensionHours,
     declinationDegrees: sequence.declinationDegrees,
     rigId: context.rigId,

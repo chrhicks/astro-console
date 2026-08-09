@@ -20,6 +20,7 @@ import {
   StagedArtifact,
   leaveProcessingSessionUnfinished,
   projectProcessingProjection,
+  projectProcessingProjectActions,
 } from '@astro-console/v2-contracts'
 import {
   makeProcessingServerSimulation,
@@ -29,6 +30,11 @@ import {
 } from '@astro-console/v2-contracts'
 import type { LocalIdentity } from '../auth/identity.ts'
 import { processRecommendedSet } from '../persistence/library-sqlite-repository.ts'
+import {
+  executeProcessingProjectCommand,
+  isProcessingProjectCommand,
+  processingProjects,
+} from './processing-project-service.ts'
 
 const Stored = Schema.Struct({ state: Schema.String })
 const Asset = Schema.Struct({
@@ -63,8 +69,21 @@ export function processSnapshot(
     role: identity.role ?? 'viewer',
     capability: identity.capability,
   })
+  const projects = processingProjects(database)
+  const authority = {
+    role: identity.role ?? 'viewer',
+    capability: identity.capability,
+  } as const
   return Schema.decodeUnknownSync(ProcessingProjection)({
     ...projection,
+    projects,
+    projectActions: projectProcessingProjectActions(
+      projects.map((project) => project.projectId),
+      authority,
+    ),
+    ...(projects.length === 0
+      ? {}
+      : { selectedProjectId: projects.at(-1)?.projectId }),
     work: database
       .prepare(
         'SELECT session_id,kind,state,stage,checkpoint,attempts FROM processing_work ORDER BY rowid',
@@ -130,6 +149,8 @@ export function executeProcessCommand(
   try {
     const envelope = Schema.decodeUnknownSync(CommandEnvelope)(raw)
     const command = Schema.decodeUnknownSync(Command)(envelope.command)
+    if (isProcessingProjectCommand(command))
+      return executeProcessingProjectCommand(database, command, identity)
     if (Command.guards.RetryProcessingBuild(command))
       return retryBuild(database, command, identity)
     let selection: ReturnType<typeof processRecommendedSet> | undefined

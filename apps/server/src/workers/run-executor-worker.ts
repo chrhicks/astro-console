@@ -70,6 +70,7 @@ const RetrievePayload = Schema.Struct({
   assetId: Schema.String,
   frameId: Schema.String,
   capturedAt: Schema.NonEmptyString,
+  targetName: Schema.NonEmptyString,
   equipment: Schema.Struct({
     rigId: Schema.NonEmptyString,
     cameraDeviceId: Schema.NonEmptyString,
@@ -423,6 +424,7 @@ export const createRunExecutorWorker = (options: {
               assetId: identity.assetId,
               frameId: identity.frameId,
               capturedAt: observation.value.observedAt,
+              targetName: sequence.targetName,
               equipment: {
                 rigId: definition.executionContext.rigId,
                 cameraDeviceId: definition.executionContext.cameraDeviceId,

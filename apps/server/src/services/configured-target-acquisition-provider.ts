@@ -65,6 +65,7 @@ const StoredDefinition = Schema.Struct({
     sequences: Schema.Array(
       Schema.Struct({
         sequenceId: Schema.String,
+        targetName: Schema.String,
         rightAscensionHours: Schema.Number,
         declinationDegrees: Schema.Number,
       }),
@@ -318,6 +319,7 @@ async function captureAndRetain(
     {
       ...identity,
       capturedAt,
+      targetName: run.targetName,
       format: image.format,
       equipment: { rigId: run.rigId, cameraDeviceId: run.cameraDeviceId },
       capture: {
@@ -590,6 +592,7 @@ function currentRun(database: DatabaseSync) {
   return {
     runId: run.id,
     sequenceId: sequence.sequenceId,
+    targetName: sequence.targetName,
     rightAscensionHours: sequence.rightAscensionHours,
     declinationDegrees: sequence.declinationDegrees,
     rigId: definition.executionContext.rigId,

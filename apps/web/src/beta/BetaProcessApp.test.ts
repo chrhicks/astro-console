@@ -21,6 +21,7 @@ const source = {
 }
 
 const workspace = Schema.decodeUnknownSync(ProcessingProjection)({
+  projects: [],
   snapshotVersion: 8,
   eventCursor: 5,
   selectedSessionId: 'session-process-1',
@@ -93,6 +94,7 @@ const workspace = Schema.decodeUnknownSync(ProcessingProjection)({
       ],
     },
   ],
+  projectActions: [],
   assets: [],
   pressure: { state: 'normal' },
 })
@@ -133,13 +135,130 @@ test('does not confuse absent Plan or Observe eligibility with Process read-only
   assert.doesNotMatch(markup, /Control · view|No active controller/)
 })
 
+const projectWorkspace = Schema.decodeUnknownSync(ProcessingProjection)({
+  snapshotVersion: 9,
+  eventCursor: 6,
+  selectedProjectId: 'project-m27',
+  projects: [
+    {
+      projectId: 'project-m27',
+      revision: 2,
+      name: 'M27 multi-night',
+      targetName: 'M27',
+      sources: [
+        {
+          assetId: 'asset-m27-006',
+          assetRevision: 1,
+          role: 'Lights',
+          suggestedRole: 'Lights',
+          captureSetId: 'm27-night-1',
+          targetName: 'M27',
+          capturedAt: '2026-08-07T02:13:00.000Z',
+          checksum: 'sha256:m27-006',
+          availability: 'availableLocally',
+          provenance: {
+            runId: 'run-m27-1',
+            sequenceId: 'sequence-l',
+            rigId: 'rig-1',
+            cameraDeviceId: 'camera-1',
+            exposureSeconds: 120,
+            filter: 'L',
+            binning: 1,
+          },
+          warnings: [],
+        },
+      ],
+      warnings: [],
+      createdAt: '2026-08-09T00:00:00.000Z',
+      updatedAt: '2026-08-09T00:01:00.000Z',
+    },
+  ],
+  actions: [],
+  sessions: [],
+  sessionActions: [],
+  projectActions: [
+    {
+      projectId: 'project-m27',
+      actions: [
+        { _tag: 'Eligible', action: 'AddProcessingProjectSources' },
+        { _tag: 'Eligible', action: 'AssignProcessingSourceRole' },
+      ],
+    },
+  ],
+  assets: [],
+  pressure: { state: 'normal' },
+  work: [],
+})
+
+test('renders exact Processing Project Sources without automatic stage work', () => {
+  const markup = renderToStaticMarkup(
+    createElement(BetaProcessApp, {
+      projection: processControllerProjection,
+      loading: false,
+      initialWorkspace: projectWorkspace,
+    }),
+  )
+  assert.match(markup, /M27 multi-night/)
+  assert.match(markup, /Processing Project stages/)
+  assert.match(markup, /No Calibration work has started/)
+  assert.match(markup, /asset-m27-006/)
+  assert.match(markup, /Revision 1 · m27-night-1/)
+  assert.match(markup, /Suggested: Lights/)
+  assert.match(markup, /Add sources from Library/)
+  assert.match(markup, /No Calibration, Registration, or Stacking work starts/)
+  assert.doesNotMatch(markup, /Build recommended set/)
+})
+
+test('uses the service-owned project action denial for role controls', () => {
+  const denied = Schema.decodeUnknownSync(ProcessingProjection)({
+    ...projectWorkspace,
+    projectActions: [
+      {
+        projectId: 'project-m27',
+        actions: [
+          {
+            _tag: 'Ineligible',
+            action: 'AssignProcessingSourceRole',
+            reason: 'readOnlyClient',
+          },
+        ],
+      },
+    ],
+  })
+  const markup = renderToStaticMarkup(
+    createElement(BetaProcessApp, {
+      projection: processControllerProjection,
+      loading: false,
+      initialWorkspace: denied,
+    }),
+  )
+  assert.match(markup, /control-capable desktop client is required/)
+  assert.match(markup, /<select class="nb-select" disabled=""/)
+})
+
+test('phone project summary does not mix in an unrelated selected session', () => {
+  const markup = renderToStaticMarkup(
+    createElement(ProcessPhone, {
+      projection: processControllerProjection,
+      workspace: projectWorkspace,
+      state: 'Current',
+    }),
+  )
+  assert.match(markup, /Processing Project/)
+  assert.match(markup, /Project summary/)
+  assert.match(markup, /Frozen sources/)
+  assert.doesNotMatch(markup, /History|Frozen candidates|Current evidence/)
+})
+
 test('shows the service-owned needs-review queue with evidence and blocks Build', () => {
   const empty = Schema.decodeUnknownSync(ProcessingProjection)({
+    projects: [],
     snapshotVersion: 1,
     eventCursor: 1,
     actions: [{ _tag: 'Eligible', action: 'StartProcessingSession' }],
     sessions: [],
     sessionActions: [],
+    projectActions: [],
     assets: [],
     pressure: { state: 'normal' },
   })

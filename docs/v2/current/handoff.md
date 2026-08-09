@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–3 complete; Item 3.5.1 next**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–3 and Item 3.5.1 complete; Item 3.5.2 next**
 
 ## Current Position
 
@@ -174,6 +174,15 @@ star removal/addition. General layers, masks, and compositing are out of scope.
 The complete accepted breakdown is in the
 [Item 3.5 Process workflow plan](process-workflow-plan.md).
 
+Item 3.5.1 is complete. Library can select individual assets or one complete
+Capture Set and create a Processing Project or add to an existing project.
+The service freezes exact asset IDs and revisions, retains provenance and the
+original Capture Set identity, suggests or assigns all six source roles, and
+keeps one stable target for Lights while projecting metadata and quality
+concerns as warnings. Process now keeps a persistent Sources view across
+restart. Intake does not enqueue Build or Calibration work, and phone remains
+read-only.
+
 After that simulator proof, an indoor GET-only readiness check reached ASCOM
 Remote at `192.168.4.104:11111`. Management and every device-property envelope
 returned `ErrorNumber: 0`. The configured identities were Telescope 0 `ASI
@@ -331,16 +340,15 @@ covered indoor frame.
 
 ## Next Accepted Item
 
-3.5.1. **Add Library selection and Processing Project intake.** Let the owner
-select individual frames or a whole Capture Set, open a new target-owned
-project or add to an existing one, and inspect exact sources, roles,
-provenance, recommendations, and warnings before any Calibration work
-starts. Freeze whole-set membership to exact asset IDs and revisions.
+3.5.2. **Add persistent stage drafts, attempts, and navigation.** Keep Sources,
+Calibration, Registration, Stacking, Master, and Develop navigable. Add bounded
+draft undo and redo, append-only attempts, selected results, and explicit Run
+or Rerun actions without replaying claimed work after restart.
 
 ## Later Accepted Items
 
-Items 3.5.2 through 3.5.7 add persistent stage drafts and attempts, explicit
-Calibration, Registration, and Stacking, a saved Master boundary,
+Items 3.5.3 through 3.5.7 add explicit Calibration, Registration, and Stacking,
+a saved Master boundary,
 astronomy-specific Develop operations, and the final integrated operator
 review. Follow the ordered scope and proof in the
 [Item 3.5 Process workflow plan](process-workflow-plan.md).

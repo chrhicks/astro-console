@@ -89,6 +89,9 @@ function initializeSchema(database: DatabaseSync) {
     'CREATE TABLE IF NOT EXISTS processing_work_receipts (idempotency_key TEXT PRIMARY KEY,response TEXT NOT NULL)',
   )
   database.exec(
+    'CREATE TABLE IF NOT EXISTS processing_projects (project_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,project TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS processing_project_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id))',
+  )
+  database.exec(
     'CREATE TABLE IF NOT EXISTS run_executor_work (work_id TEXT PRIMARY KEY,run_id TEXT NOT NULL,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL,command_attempted_at TEXT,acknowledged_at TEXT,settled_at TEXT,last_error TEXT)',
   )
   migrateStructuredRunDefinitions(database)

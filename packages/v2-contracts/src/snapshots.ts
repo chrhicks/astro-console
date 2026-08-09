@@ -21,6 +21,7 @@ import {
   AttemptId,
   AssetId,
   AssetRevision,
+  CaptureSetId,
   ClientCapability,
   ClientId,
   ExpiresAt,
@@ -406,6 +407,8 @@ export const LibraryAssetSummary = Schema.Struct({
   format: AssetSnapshot.fields.format,
   availability: AssetSnapshot.fields.availability,
   comparisonGroupId: Schema.NonEmptyString,
+  captureSetId: Schema.optionalKey(CaptureSetId),
+  targetName: Schema.optionalKey(Schema.NonEmptyString),
   review: Schema.Struct({
     decision: AssetReview.fields.decision,
     rating: AssetReview.fields.rating,
@@ -435,6 +438,8 @@ export const LibraryAssetDetail = Schema.Struct({
   availability: AssetSnapshot.fields.availability,
   capturedAt: ObservedAt,
   comparisonGroupId: Schema.NonEmptyString,
+  captureSetId: Schema.optionalKey(CaptureSetId),
+  targetName: Schema.optionalKey(Schema.NonEmptyString),
   equipment: Schema.optionalKey(
     Schema.Struct({
       rigId: Schema.NonEmptyString,

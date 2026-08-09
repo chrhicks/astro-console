@@ -16,11 +16,17 @@ import {
   PreviewId,
   ProcessingFreshness,
   ProcessingOutputId,
+  ProcessingProjectId,
+  ProcessingProjectRevision,
   ProcessingSessionId,
   ProposalId,
   RepresentationId,
   RunFreshness,
 } from './primitives.js'
+import {
+  ProcessingProjectSourceSelection,
+  ProcessingSourceRole,
+} from './processing-project-domain.js'
 
 const RunAndLeaseFreshness = {
   ...RunFreshness,
@@ -165,6 +171,9 @@ export const acceptedCommandTags = [
   'CapturePolarAlignmentMeasurement',
   'AcceptPolarAlignmentEvidence',
   'StartProcessingSession',
+  'CreateProcessingProject',
+  'AddProcessingProjectSources',
+  'AssignProcessingSourceRole',
   'ResumeProcessingSession',
   'SyncProcessingPreview',
   'ApplyProcessingPreview',
@@ -302,6 +311,24 @@ export const Command = Schema.TaggedUnion({
   StartProcessingSession: {
     ...SourceSelection,
     selection: Schema.optionalKey(Schema.Literal('recommended')),
+    ...DurableMutation,
+  },
+  CreateProcessingProject: {
+    name: Schema.NonEmptyString,
+    selection: ProcessingProjectSourceSelection,
+    ...DurableMutation,
+  },
+  AddProcessingProjectSources: {
+    projectId: ProcessingProjectId,
+    expectedProjectRevision: ProcessingProjectRevision,
+    selection: ProcessingProjectSourceSelection,
+    ...DurableMutation,
+  },
+  AssignProcessingSourceRole: {
+    projectId: ProcessingProjectId,
+    expectedProjectRevision: ProcessingProjectRevision,
+    assetId: AssetId,
+    role: ProcessingSourceRole,
     ...DurableMutation,
   },
   ResumeProcessingSession: {

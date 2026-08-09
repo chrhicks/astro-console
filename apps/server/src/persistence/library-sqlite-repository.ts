@@ -76,6 +76,8 @@ const LibraryDetail = Schema.Struct({
   ]),
   capturedAt: Schema.String,
   comparisonGroupId: Schema.String,
+  captureSetId: Schema.optionalKey(Schema.String),
+  targetName: Schema.optionalKey(Schema.String),
   equipment: Schema.optionalKey(
     Schema.Struct({
       rigId: Schema.String,
@@ -229,6 +231,9 @@ export const sqliteLibraryServiceLayer = (
             format: detail.format,
             availability: detail.availability,
             comparisonGroupId: detail.comparisonGroupId,
+            ...(detail.captureSetId === undefined
+              ? {}
+              : { captureSetId: detail.captureSetId }),
             lineage: detail.lineage,
             processing: {
               availability: 'available',
@@ -354,6 +359,12 @@ const projectLibraryRow = Effect.fnUntraced(function* (
     format: asset.format,
     availability: asset.availability,
     comparisonGroupId: asset.comparison_group_id,
+    ...(detail.captureSetId === undefined
+      ? {}
+      : { captureSetId: detail.captureSetId }),
+    ...(detail.targetName === undefined
+      ? {}
+      : { targetName: detail.targetName }),
     review: {
       decision: detail.review?.decision ?? 'unreviewed',
       ...(detail.review?.rating === undefined
@@ -491,6 +502,10 @@ export function seedLibrary(db: DatabaseSync) {
       availability,
       capturedAt,
       comparisonGroupId: `m27-stack-${Math.ceil(index / 12)}`,
+      ...(role === 'original'
+        ? { captureSetId: `m27-stack-${Math.ceil(index / 12)}` }
+        : {}),
+      targetName: 'M27',
       lineage: {
         sourceAssetIds:
           index === 1
@@ -499,6 +514,17 @@ export function seedLibrary(db: DatabaseSync) {
         runId: 'run-m27-001',
         solveAttemptId: 'solve-m27-001',
       },
+      ...(role === 'original'
+        ? {
+            capture: {
+              frameId: `frame-m27-${String(index).padStart(3, '0')}`,
+              exposureSeconds: 120,
+              filter: 'L',
+              binning: 1,
+              frameType: 'light' as const,
+            },
+          }
+        : {}),
       representations: [
         {
           label:

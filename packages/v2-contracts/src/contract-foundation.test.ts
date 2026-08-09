@@ -167,6 +167,27 @@ const commandFixtures: ReadonlyArray<unknown> = [
     idempotencyKey: 'i-7',
   },
   {
+    _tag: 'CreateProcessingProject',
+    name: 'M27 multi-night',
+    selection: { assetIds: ['asset-1'], captureSetIds: [] },
+    idempotencyKey: 'i-project-1',
+  },
+  {
+    _tag: 'AddProcessingProjectSources',
+    projectId: 'project-1',
+    expectedProjectRevision: 0,
+    selection: { assetIds: [], captureSetIds: ['capture-set-2'] },
+    idempotencyKey: 'i-project-2',
+  },
+  {
+    _tag: 'AssignProcessingSourceRole',
+    projectId: 'project-1',
+    expectedProjectRevision: 1,
+    assetId: 'asset-1',
+    role: 'Lights',
+    idempotencyKey: 'i-project-3',
+  },
+  {
     _tag: 'ResumeProcessingSession',
     sessionId: 'process-1',
     expectedProcessingRevision: 5,
@@ -258,7 +279,7 @@ const commandFixtures: ReadonlyArray<unknown> = [
 
 describe('Gate 5 contract foundation', () => {
   it('keeps the accepted command vocabulary closed', () => {
-    assert.equal(commandTags.length, 41)
+    assert.equal(commandTags.length, 44)
     assert.deepEqual(commandTags, acceptedCommandTags)
     assert.deepEqual(
       commandTags,

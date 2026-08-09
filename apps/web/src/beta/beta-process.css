@@ -92,6 +92,27 @@
   .beta-process-phone {
     overflow-x: hidden;
   }
+  .beta-process-phone-sources {
+    display: grid;
+    gap: 6px;
+  }
+  .beta-process-phone-source {
+    min-width: 0;
+    border: 1px solid var(--nb-line);
+    border-radius: var(--nb-radius);
+    background: var(--nb-surface-raised);
+    padding: 8px;
+    display: grid;
+    gap: 3px;
+  }
+  .beta-process-phone-source b,
+  .beta-process-phone-source span {
+    overflow-wrap: anywhere;
+  }
+  .beta-process-phone-source span {
+    color: var(--nb-muted);
+    font: 600 10px/1.4 var(--nb-font-mono);
+  }
   .beta-process-phone .nb-evidence-canvas {
     min-height: 220px;
   }
@@ -109,4 +130,69 @@
     justify-content: flex-start;
     font-size: 8px;
   }
+}
+.beta-process-project-grid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.beta-process-project-rail,
+.beta-process-project-sources {
+  min-width: 0;
+  min-height: 0;
+}
+
+.beta-process-project-sources .nb-panel-body {
+  overflow: auto;
+}
+
+.beta-process-source-table {
+  min-width: 720px;
+  display: grid;
+  gap: 5px;
+}
+
+.beta-process-source-row {
+  border: 1px solid var(--nb-line);
+  border-radius: var(--nb-radius);
+  background: var(--nb-surface-raised);
+  padding: 8px;
+  display: grid;
+  grid-template-columns:
+    minmax(170px, 1.2fr) minmax(140px, 1fr) minmax(170px, 0.8fr)
+    minmax(130px, 0.7fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.beta-process-source-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.beta-process-source-row b,
+.beta-process-source-row span {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) and (min-width: 601px) {
+  .beta-process-project-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .beta-process-source-table {
+    min-width: 0;
+  }
+
+  .beta-process-source-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.beta-process-source-row span {
+  color: var(--nb-muted);
+  font: 600 11px var(--nb-font-mono);
 }

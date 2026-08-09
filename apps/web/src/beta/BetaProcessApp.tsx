@@ -164,6 +164,50 @@ const selectedSession = (workspace: ProcessWorkspace | undefined) =>
     .filter((session) => session.lifecycle !== 'discarded')
     .at(-1)
 
+const selectedProject = (workspace: ProcessWorkspace | undefined) =>
+  workspace?.projects.find(
+    (project) => project.projectId === workspace.selectedProjectId,
+  ) ?? workspace?.projects.at(-1)
+
+const projectSteps = [
+  {
+    id: 'sources',
+    label: 'Sources',
+    description: 'Current',
+    status: 'current' as const,
+  },
+  {
+    id: 'calibration',
+    label: 'Calibration',
+    description: 'Explicit Run later',
+    status: 'pending' as const,
+  },
+  {
+    id: 'registration',
+    label: 'Registration',
+    description: 'Explicit Run later',
+    status: 'pending' as const,
+  },
+  {
+    id: 'stacking',
+    label: 'Stacking',
+    description: 'Explicit Run later',
+    status: 'pending' as const,
+  },
+  {
+    id: 'master',
+    label: 'Master',
+    description: 'No result yet',
+    status: 'pending' as const,
+  },
+  {
+    id: 'develop',
+    label: 'Develop',
+    description: 'No saved Master',
+    status: 'pending' as const,
+  },
+]
+
 const currentOutputId = (session: Session) => {
   if (session.historyPosition > 0)
     return session.history[session.historyPosition - 1]?.output.outputId
@@ -286,6 +330,7 @@ export function ProcessPhone({
   state: string
 }) {
   const session = selectedSession(workspace)
+  const project = selectedProject(workspace)
   return (
     <main
       id="beta-workspace"
@@ -294,11 +339,14 @@ export function ProcessPhone({
       <header className="beta-phone-header">
         <div>
           <p>Process / read only</p>
-          <h1>{session ? titleCase(session.phase) : 'Process session'}</h1>
+          <h1>
+            {project?.name ??
+              (session ? titleCase(session.phase) : 'Process session')}
+          </h1>
         </div>
         <StatusIndicator
-          label={session?.lifecycle ?? state}
-          tone={session ? 'positive' : 'neutral'}
+          label={project ? 'Sources' : (session?.lifecycle ?? state)}
+          tone={project || session ? 'positive' : 'neutral'}
         />
       </header>
       <AttentionCard
@@ -309,53 +357,124 @@ export function ProcessPhone({
       />
       <Panel>
         <PanelHeader
-          title="Session summary"
-          meta={session ? `rev ${session.revision}` : 'No session'}
+          title={project ? 'Project summary' : 'Session summary'}
+          meta={
+            project
+              ? `project rev ${project.revision}`
+              : session
+                ? `rev ${session.revision}`
+                : 'No session'
+          }
         />
         <PanelBody>
           <DataList>
             <DataListItem
               label="Lifecycle"
-              value={session?.lifecycle ?? state}
-            />
-            <DataListItem
-              label="Phase"
-              value={session?.phase ?? 'Unavailable'}
-            />
-            <DataListItem
-              label="History"
               value={
-                session
-                  ? `${session.historyPosition} / ${session.history.length}`
-                  : '—'
+                project ? 'Processing Project' : (session?.lifecycle ?? state)
               }
             />
             <DataListItem
-              label="Preview"
-              value={session?.preview?.state ?? 'None'}
+              label="Phase"
+              value={project ? 'Sources' : (session?.phase ?? 'Unavailable')}
             />
+            {!project ? (
+              <>
+                <DataListItem
+                  label="History"
+                  value={
+                    session
+                      ? `${session.historyPosition} / ${session.history.length}`
+                      : '—'
+                  }
+                />
+                <DataListItem
+                  label="Preview"
+                  value={session?.preview?.state ?? 'None'}
+                />
+              </>
+            ) : null}
             <DataListItem
               label="Pressure"
               value={workspace?.pressure.state ?? 'Unknown'}
               detail={workspace?.pressure.reason}
             />
-            <DataListItem
-              label="Saved"
-              value={String(session?.savedAssetIds.length ?? 0)}
-            />
-            <DataListItem
-              label="Frozen candidates"
-              value={String(session?.selection?.candidateCount ?? 0)}
-              detail={
-                session?.selection
-                  ? `${session.selection.includedCount} included · ${session.selection.excludedCount} excluded`
-                  : 'No recommended set is frozen.'
-              }
-            />
+            {!project ? (
+              <DataListItem
+                label="Saved"
+                value={String(session?.savedAssetIds.length ?? 0)}
+              />
+            ) : null}
+            {project ? (
+              <>
+                <DataListItem
+                  label="Target"
+                  value={project.targetName ?? 'Not set'}
+                />
+                <DataListItem
+                  label="Frozen sources"
+                  value={String(project.sources.length)}
+                />
+                <DataListItem
+                  label="Warnings"
+                  value={String(project.warnings.length)}
+                />
+              </>
+            ) : null}
+            {!project ? (
+              <DataListItem
+                label="Frozen candidates"
+                value={String(session?.selection?.candidateCount ?? 0)}
+                detail={
+                  session?.selection
+                    ? `${session.selection.includedCount} included · ${session.selection.excludedCount} excluded`
+                    : 'No recommended set is frozen.'
+                }
+              />
+            ) : null}
           </DataList>
         </PanelBody>
       </Panel>
-      {session ? (
+      {project ? (
+        <Panel>
+          <PanelHeader
+            title="Frozen sources"
+            meta={`${project.sources.length} exact revision${project.sources.length === 1 ? '' : 's'}`}
+          />
+          <PanelBody>
+            <div
+              className="beta-process-phone-sources"
+              aria-label="Read-only frozen project sources"
+            >
+              {project.sources.map((source) => (
+                <article
+                  className="beta-process-phone-source"
+                  key={source.assetId}
+                >
+                  <b>{source.assetId}</b>
+                  <span>
+                    Revision {source.assetRevision}
+                    {source.captureSetId ? ` · ${source.captureSetId}` : ''}
+                  </span>
+                  <span>
+                    {source.targetName ?? 'Calibration support'} · {source.role}
+                  </span>
+                  <span>Suggested: {source.suggestedRole}</span>
+                  <span>
+                    {source.provenance.exposureSeconds === undefined
+                      ? 'Exposure not recorded'
+                      : `${source.provenance.exposureSeconds}s`}
+                    {' · '}
+                    {source.provenance.filter ?? 'Filter not recorded'} · bin{' '}
+                    {source.provenance.binning ?? '—'}
+                  </span>
+                </article>
+              ))}
+            </div>
+          </PanelBody>
+        </Panel>
+      ) : null}
+      {session && !project ? (
         <Panel>
           <PanelHeader title="Current evidence" meta="Last confirmed" />
           <PanelBody>
@@ -375,6 +494,168 @@ export function ProcessPhone({
       <p className="beta-process-phone-protection">
         {projection.shell.protection}
       </p>
+    </main>
+  )
+}
+
+function ProjectSourcesDesktop({
+  project,
+  pending,
+  message,
+  assignmentReason,
+  command,
+}: {
+  project: ProcessWorkspace['projects'][number]
+  pending: string | undefined
+  message: string | undefined
+  assignmentReason: string | undefined
+  command: (command: object, label: string) => void
+}) {
+  const roles = [
+    'Lights',
+    'Darks',
+    'Flats',
+    'Bias',
+    'Dark flats',
+    'Unassigned',
+  ] as const
+  return (
+    <main
+      id="beta-workspace"
+      className="beta-desktop-workspace beta-process-workspace beta-process-project"
+      aria-busy={!!pending}
+    >
+      <PageHeader
+        eyebrow="Process / Processing Project"
+        title={project.name}
+        meta={`${project.targetName ?? 'Target not set'} · ${project.sources.length} exact sources`}
+        actions={
+          <StatusIndicator
+            tone={project.warnings.length ? 'warning' : 'positive'}
+            label="Sources retained"
+            detail={`Project revision ${project.revision}`}
+          />
+        }
+      />
+      <div className="beta-process-project-grid">
+        <Panel className="beta-process-project-rail">
+          <PanelHeader title="Workflow" meta="Persistent project" />
+          <PanelBody>
+            <Stack>
+              <ProcessActionDenial reason={assignmentReason} />
+              <StepRail
+                label="Processing Project stages"
+                activeId="sources"
+                items={projectSteps}
+              />
+              <a
+                className="nb-button nb-button--secondary nb-button--medium"
+                href="/library?ui=beta"
+              >
+                Add sources from Library
+              </a>
+            </Stack>
+          </PanelBody>
+        </Panel>
+        <Panel className="beta-process-project-sources">
+          <PanelHeader title="Sources" meta="No Calibration work has started" />
+          <PanelBody>
+            <Stack>
+              {project.warnings.map((warning) => (
+                <AttentionCard
+                  key={`${warning.code}-${warning.assetIds.join('-')}`}
+                  tone={
+                    warning.code === 'TargetConflict' ? 'warning' : 'neutral'
+                  }
+                  statusLabel={titleCase(warning.code)}
+                  title={`${warning.assetIds.length} source${warning.assetIds.length === 1 ? '' : 's'}`}
+                  description={warning.message}
+                />
+              ))}
+              <div
+                className="beta-process-source-table"
+                role="table"
+                aria-label="Frozen project sources"
+              >
+                {project.sources.map((source) => (
+                  <div
+                    key={source.assetId}
+                    role="row"
+                    className="beta-process-source-row"
+                  >
+                    <div role="cell">
+                      <b>{source.assetId}</b>
+                      <span>
+                        Revision {source.assetRevision}
+                        {source.captureSetId ? ` · ${source.captureSetId}` : ''}
+                      </span>
+                    </div>
+                    <div role="cell">
+                      <b>{source.targetName ?? 'Calibration support'}</b>
+                      <span>{source.capturedAt}</span>
+                    </div>
+                    <div role="cell">
+                      <Field
+                        label="Source role"
+                        hint={`Suggested: ${source.suggestedRole}`}
+                      >
+                        <Select
+                          value={source.role}
+                          disabled={
+                            pending !== undefined ||
+                            assignmentReason !== undefined
+                          }
+                          onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                            command(
+                              {
+                                _tag: 'AssignProcessingSourceRole',
+                                projectId: project.projectId,
+                                expectedProjectRevision: project.revision,
+                                assetId: source.assetId,
+                                role: event.target.value,
+                                idempotencyKey: crypto.randomUUID(),
+                              },
+                              'Assigning source role',
+                            )
+                          }
+                        >
+                          {roles.map((role) => (
+                            <option key={role} value={role}>
+                              {role}
+                            </option>
+                          ))}
+                        </Select>
+                      </Field>
+                    </div>
+                    <div role="cell">
+                      <span>
+                        {source.provenance.exposureSeconds === undefined
+                          ? 'Exposure not recorded'
+                          : `${source.provenance.exposureSeconds}s`}
+                      </span>
+                      <span>
+                        {source.provenance.filter ?? 'Filter not recorded'} ·
+                        bin {source.provenance.binning ?? '—'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {message ? (
+                <p className="beta-process-message" role="status">
+                  {message}
+                </p>
+              ) : null}
+              <AttentionCard
+                tone="neutral"
+                statusLabel="Intake complete"
+                title="Calibration is explicit"
+                description="These exact asset revisions are retained as project sources. No Calibration, Registration, or Stacking work starts from source intake."
+              />
+            </Stack>
+          </PanelBody>
+        </Panel>
+      </div>
     </main>
   )
 }
@@ -580,6 +861,7 @@ function ProcessDesktop({
     | undefined
 }) {
   const session = selectedSession(workspace)
+  const project = selectedProject(workspace)
   const buildWork = workspace?.work?.find(
     (work) => work.sessionId === session?.sessionId && work.kind === 'build',
   )
@@ -587,6 +869,25 @@ function ProcessDesktop({
   const authorityReason = processCommandsProtected(projection)
     ? 'Current desktop owner authority is not confirmed.'
     : undefined
+  if (project) {
+    const assignmentReason =
+      authorityReason ??
+      processActionReason(
+        workspace?.projectActions.find(
+          (entry) => entry.projectId === project.projectId,
+        )?.actions,
+        'AssignProcessingSourceRole',
+      )
+    return (
+      <ProjectSourcesDesktop
+        project={project}
+        pending={pending}
+        message={message}
+        assignmentReason={assignmentReason}
+        command={command}
+      />
+    )
+  }
   const startReason =
     authorityReason ??
     processActionReason(workspace?.actions, 'StartProcessingSession')
@@ -1111,19 +1412,26 @@ function ProcessStatusStrip({
   workspace: ProcessWorkspace | undefined
 }) {
   const session = selectedSession(workspace)
+  const project = selectedProject(workspace)
   return (
     <footer
       className="beta-operational-status beta-process-status"
       aria-label="Operational status"
     >
       <span className="beta-process-status-desktop">
-        <i data-tone={session ? 'positive' : 'neutral'} aria-hidden="true" />
-        <b>Process</b> · {session?.lifecycle ?? 'No session'}
+        <i
+          data-tone={project || session ? 'positive' : 'neutral'}
+          aria-hidden="true"
+        />
+        <b>Process</b> ·{' '}
+        {project ? 'Processing Project' : (session?.lifecycle ?? 'No session')}
       </span>
       <span className="beta-process-status-desktop">
-        {session
-          ? `${titleCase(session.phase)} · revision ${session.revision}`
-          : 'Durable workspace ready'}
+        {project
+          ? `Sources · project revision ${project.revision}`
+          : session
+            ? `${titleCase(session.phase)} · revision ${session.revision}`
+            : 'Durable workspace ready'}
       </span>
       <span className="beta-process-status-desktop">
         {workspace?.pressure.state ?? 'unknown'} pressure ·{' '}
@@ -1132,8 +1440,12 @@ function ProcessStatusStrip({
           : 'Process authority unavailable'}
       </span>
       <span className="beta-process-status-mobile">
-        <i data-tone={session ? 'positive' : 'neutral'} aria-hidden="true" />
-        <b>Process</b> · {session?.phase ?? 'No session'}
+        <i
+          data-tone={project || session ? 'positive' : 'neutral'}
+          aria-hidden="true"
+        />
+        <b>Process</b> ·{' '}
+        {project ? 'Sources' : (session?.phase ?? 'No session')}
       </span>
     </footer>
   )

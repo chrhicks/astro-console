@@ -15,6 +15,7 @@ import {
   ProcessingSimulationState,
   makeProcessingServerSimulation,
   projectProcessingProjection,
+  projectProcessingProjectActions,
 } from './processing-server-simulation.js'
 import { projectProcessingSessionSnapshot } from './snapshots.js'
 import {
@@ -30,6 +31,7 @@ import {
   PersonId,
   PreviewId,
   ProcessingOutputId,
+  ProcessingProjectId,
   ProcessingRevision,
   ProcessingSessionId,
   SnapshotVersion,
@@ -709,6 +711,26 @@ describe('processing session server proofs', () => {
       viewer.sessionActions[0]?.actions.every(
         (action) =>
           action._tag === 'Ineligible' && action.reason === 'ownerRequired',
+      ),
+      true,
+    )
+    assert.deepEqual(
+      viewer.actions.find(
+        (action) => action.action === 'CreateProcessingProject',
+      ),
+      {
+        _tag: 'Ineligible',
+        action: 'CreateProcessingProject',
+        reason: 'ownerRequired',
+      },
+    )
+    assert.equal(
+      projectProcessingProjectActions([ProcessingProjectId.make('project-1')], {
+        role: 'owner',
+        capability: 'readOnly',
+      })[0]?.actions.every(
+        (action) =>
+          action._tag === 'Ineligible' && action.reason === 'readOnlyClient',
       ),
       true,
     )

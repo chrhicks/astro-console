@@ -57,6 +57,7 @@ import {
   resumeProcessingSession,
   startProcessingApply,
 } from './processing-domain.js'
+import { ProcessingProject } from './processing-project-domain.js'
 import {
   AssetId,
   AttemptId,
@@ -68,6 +69,7 @@ import {
   OperationId,
   PreviewId,
   ProcessingOutputId,
+  ProcessingProjectId,
   ProcessingRevision,
   ProcessingSessionId,
   SnapshotVersion,
@@ -121,6 +123,9 @@ const PressureProjection = Schema.Struct({
 })
 
 export const ProcessingAction = Schema.Literals([
+  'CreateProcessingProject',
+  'AddProcessingProjectSources',
+  'AssignProcessingSourceRole',
   'StartProcessingSession',
   'ResumeProcessingSession',
   'SyncProcessingPreview',
@@ -166,11 +171,19 @@ export const ProcessingProjection = Schema.Struct({
   snapshotVersion: SnapshotVersion,
   eventCursor: EventCursor,
   selectedSessionId: Schema.optionalKey(ProcessingSessionId),
+  selectedProjectId: Schema.optionalKey(ProcessingProjectId),
+  projects: Schema.Array(ProcessingProject),
   actions: Schema.Array(ProcessingActionEligibility),
   sessions: Schema.Array(ProcessingSession),
   sessionActions: Schema.Array(
     Schema.Struct({
       sessionId: ProcessingSessionId,
+      actions: Schema.Array(ProcessingActionEligibility),
+    }),
+  ),
+  projectActions: Schema.Array(
+    Schema.Struct({
+      projectId: ProcessingProjectId,
       actions: Schema.Array(ProcessingActionEligibility),
     }),
   ),
@@ -1523,7 +1536,9 @@ export function projectProcessingProjection(
     ...(state.selectedSessionId === undefined
       ? {}
       : { selectedSessionId: state.selectedSessionId }),
+    projects: [],
     actions: [
+      eligibility('CreateProcessingProject', authorityReason(authority)),
       eligibility(
         'StartProcessingSession',
         authorityReason(authority) ??
@@ -1535,6 +1550,7 @@ export function projectProcessingProjection(
       sessionId: session.sessionId,
       actions: projectSessionActions(state, session, authority),
     })),
+    projectActions: [],
     assets: state.assets,
     pressure: state.pressure,
   })
@@ -1657,6 +1673,20 @@ function projectSessionActions(
     ),
     eligibility('DiscardProcessingSession', attemptReason()),
   ]
+}
+
+export function projectProcessingProjectActions(
+  projectIds: ReadonlyArray<typeof ProcessingProjectId.Type>,
+  authority: ProcessingAuthority,
+) {
+  const reason = authorityReason(authority)
+  return projectIds.map((projectId) => ({
+    projectId,
+    actions: [
+      eligibility('AddProcessingProjectSources', reason),
+      eligibility('AssignProcessingSourceRole', reason),
+    ],
+  }))
 }
 
 function rejected(

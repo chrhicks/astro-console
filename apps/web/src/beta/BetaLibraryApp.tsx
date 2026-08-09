@@ -20,6 +20,8 @@ import {
   type ActionDescriptor,
   type Tone,
 } from '@nightbook/ui'
+import { ProcessingProjection } from '@astro-console/v2-contracts'
+import { Schema } from 'effect'
 import {
   useEffect,
   useMemo,
@@ -39,6 +41,23 @@ import './beta-observe.css'
 import './beta-library.css'
 
 type DetailState = 'loading' | 'not-found' | 'unavailable'
+type IntakeProject = (typeof ProcessingProjection.Type)['projects'][number]
+type LibraryIntake = {
+  selectedAssetIds: ReadonlySet<string>
+  selectedCaptureSetIds: ReadonlySet<string>
+  projects: ReadonlyArray<IntakeProject>
+  projectName: string
+  destination: string
+  pending: boolean
+  disabled: boolean
+  denial?: string
+  message?: string
+  setProjectName: (value: string) => void
+  setDestination: (value: string) => void
+  toggleAsset: (assetId: string) => void
+  toggleCaptureSet: (captureSetId: string) => void
+  submit: () => void
+}
 
 export type BetaLibraryAppProps = {
   projection: Projection
@@ -246,7 +265,10 @@ function LibraryCatalog({
   page,
   onQuery,
   onSelectAsset,
-}: Pick<BetaLibraryAppProps, 'page' | 'onQuery' | 'onSelectAsset'>) {
+  intake,
+}: Pick<BetaLibraryAppProps, 'page' | 'onQuery' | 'onSelectAsset'> & {
+  intake: LibraryIntake
+}) {
   const groups = useMemo(() => {
     const grouped = new Map<
       string,
@@ -356,6 +378,70 @@ function LibraryCatalog({
           </p>
         </PanelBody>
       </Panel>
+      <Panel className="beta-library-intake">
+        <PanelHeader
+          title="Processing Project intake"
+          meta={`${intake.selectedAssetIds.size} frames · ${intake.selectedCaptureSetIds.size} Capture Sets`}
+        />
+        <PanelBody>
+          <div className="beta-library-intake-fields">
+            <Field label="Destination">
+              <Select
+                value={intake.destination}
+                disabled={intake.pending || intake.disabled}
+                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                  intake.setDestination(event.target.value)
+                }
+              >
+                <option value="new">New Processing Project</option>
+                {intake.projects.map((project) => (
+                  <option key={project.projectId} value={project.projectId}>
+                    Add to {project.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {intake.destination === 'new' ? (
+              <Field label="Project name">
+                <TextField
+                  value={intake.projectName}
+                  disabled={intake.pending || intake.disabled}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    intake.setProjectName(event.target.value)
+                  }
+                />
+              </Field>
+            ) : null}
+            <Button
+              tone="primary"
+              disabled={
+                intake.pending ||
+                intake.disabled ||
+                intake.selectedAssetIds.size +
+                  intake.selectedCaptureSetIds.size ===
+                  0 ||
+                (intake.destination === 'new' && !intake.projectName.trim())
+              }
+              onClick={intake.submit}
+            >
+              {intake.pending
+                ? 'Freezing sources…'
+                : intake.destination === 'new'
+                  ? 'Create project'
+                  : 'Add to project'}
+            </Button>
+          </div>
+          <p className="beta-library-message" role="status">
+            {intake.message ??
+              intake.denial ??
+              'Project intake is ready for an exact source selection.'}
+          </p>
+          <p className="beta-library-message">
+            Capture Sets resolve to the exact asset revisions currently
+            retained. Intake does not start Calibration.
+          </p>
+        </PanelBody>
+      </Panel>
       {page.value?.catalogChanged ? (
         <AttentionCard
           tone="warning"
@@ -369,37 +455,68 @@ function LibraryCatalog({
           className="beta-library-catalog-groups"
           aria-label="Loaded Library groups"
         >
-          {groups.map(([groupId, assets]) => (
-            <Panel key={groupId} className="beta-library-catalog-group">
-              <PanelHeader
-                title={groupId}
-                meta={`${assets.length} loaded representation${assets.length === 1 ? '' : 's'}`}
-              />
-              <PanelBody>
-                <div className="beta-library-catalog-assets">
-                  {assets.map((asset) => (
-                    <a
-                      key={asset.assetId}
-                      href={`/library/assets/${encodeURIComponent(asset.assetId)}?ui=beta`}
-                      onClick={(event) => follow(event, asset.assetId)}
-                    >
-                      <b>{compactAssetId(asset.assetId)}</b>
-                      <span>
-                        {titleCase(asset.role)} · {asset.format.toUpperCase()}
-                      </span>
-                      <CatalogReview review={asset.review} />
-                      <StatusIndicator
-                        className="beta-library-catalog-availability"
-                        label={titleCase(asset.availability)}
-                        tone={availabilityTone(asset.availability)}
-                        detail={`Revision ${asset.revision}`}
+          {groups.map(([groupId, assets]) => {
+            const captureSetId = assets.find(
+              (asset) => asset.captureSetId !== undefined,
+            )?.captureSetId
+            return (
+              <Panel key={groupId} className="beta-library-catalog-group">
+                <PanelHeader
+                  title={groupId}
+                  meta={`${assets.length} loaded representation${assets.length === 1 ? '' : 's'}`}
+                />
+                <PanelBody>
+                  {captureSetId ? (
+                    <label className="beta-library-set-selector">
+                      <input
+                        type="checkbox"
+                        disabled={intake.disabled}
+                        checked={intake.selectedCaptureSetIds.has(captureSetId)}
+                        onChange={() => intake.toggleCaptureSet(captureSetId)}
                       />
-                    </a>
-                  ))}
-                </div>
-              </PanelBody>
-            </Panel>
-          ))}
+                      Select whole Capture Set
+                    </label>
+                  ) : null}
+                  <div className="beta-library-catalog-assets">
+                    {assets.map((asset) => (
+                      <div
+                        className="beta-library-selectable-asset"
+                        key={asset.assetId}
+                      >
+                        <label>
+                          <input
+                            type="checkbox"
+                            disabled={intake.disabled}
+                            checked={intake.selectedAssetIds.has(asset.assetId)}
+                            onChange={() => intake.toggleAsset(asset.assetId)}
+                          />
+                          Select frame
+                        </label>
+                        <a
+                          href={`/library/assets/${encodeURIComponent(asset.assetId)}?ui=beta`}
+                          onClick={(event) => follow(event, asset.assetId)}
+                        >
+                          <b>{compactAssetId(asset.assetId)}</b>
+                          <span>
+                            {asset.targetName ? `${asset.targetName} · ` : ''}
+                            {titleCase(asset.role)} ·{' '}
+                            {asset.format.toUpperCase()}
+                          </span>
+                          <CatalogReview review={asset.review} />
+                          <StatusIndicator
+                            className="beta-library-catalog-availability"
+                            label={titleCase(asset.availability)}
+                            tone={availabilityTone(asset.availability)}
+                            detail={`Revision ${asset.revision}`}
+                          />
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                </PanelBody>
+              </Panel>
+            )
+          })}
         </section>
       ) : (
         <AttentionCard
@@ -1071,7 +1188,9 @@ function AvailabilityTab({ detail }: { detail: LibraryAssetDetail }) {
   )
 }
 
-function BetaLibraryDesktop(props: BetaLibraryAppProps) {
+function BetaLibraryDesktop(
+  props: BetaLibraryAppProps & { intake: LibraryIntake },
+) {
   const [activeTab, setActiveTab] = useState('review')
   const title =
     props.detailState === 'loading' || props.loading
@@ -1109,6 +1228,7 @@ function BetaLibraryDesktop(props: BetaLibraryAppProps) {
         page={props.page}
         onSelectAsset={props.onSelectAsset}
         {...(props.onQuery === undefined ? {} : { onQuery: props.onQuery })}
+        intake={props.intake}
       />
     )
 
@@ -1371,6 +1491,138 @@ function BetaLibraryStatusStrip({ projection }: { projection: Projection }) {
 
 export function BetaLibraryApp(props: BetaLibraryAppProps) {
   const phone = usePhoneProjection()
+  const [selectedAssetIds, setSelectedAssetIds] = useState<ReadonlySet<string>>(
+    new Set(),
+  )
+  const [selectedCaptureSetIds, setSelectedCaptureSetIds] = useState<
+    ReadonlySet<string>
+  >(new Set())
+  const [projects, setProjects] = useState<ReadonlyArray<IntakeProject>>([])
+  const [processWorkspace, setProcessWorkspace] =
+    useState<typeof ProcessingProjection.Type>()
+  const [projectName, setProjectName] = useState('New Processing Project')
+  const [destination, setDestination] = useState('new')
+  const [pending, setPending] = useState(false)
+  const [message, setMessage] = useState<string>()
+  useEffect(() => {
+    if (phone) return
+    let current = true
+    void fetch('/api/workspaces/process')
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Process unavailable')
+        return Schema.decodeUnknownSync(ProcessingProjection)(
+          await response.json(),
+        )
+      })
+      .then((workspace) => {
+        if (!current) return
+        setProcessWorkspace(workspace)
+        setProjects(workspace.projects)
+      })
+      .catch(() => current && setMessage('Existing projects are unavailable.'))
+    return () => {
+      current = false
+    }
+  }, [phone])
+  const toggle = (
+    update: (value: ReadonlySet<string>) => void,
+    values: ReadonlySet<string>,
+    value: string,
+  ) => {
+    const next = new Set(values)
+    if (next.has(value)) next.delete(value)
+    else next.add(value)
+    update(next)
+  }
+  const requestedProjectAction =
+    destination === 'new'
+      ? processWorkspace?.actions.find(
+          (action) => action.action === 'CreateProcessingProject',
+        )
+      : processWorkspace?.projectActions
+          .find((entry) => entry.projectId === destination)
+          ?.actions.find(
+            (action) => action.action === 'AddProcessingProjectSources',
+          )
+  const disabled =
+    phone ||
+    props.projection.shell.readOnly ||
+    requestedProjectAction?._tag !== 'Eligible'
+  const denial = props.projection.shell.readOnly
+    ? 'This client is read-only.'
+    : requestedProjectAction?._tag === 'Ineligible'
+      ? requestedProjectAction.reason === 'ownerRequired'
+        ? 'Owner membership is required.'
+        : 'A control-capable desktop client is required.'
+      : requestedProjectAction === undefined
+        ? 'The service did not project this project action.'
+        : undefined
+  const intake: LibraryIntake = {
+    selectedAssetIds,
+    selectedCaptureSetIds,
+    projects,
+    projectName,
+    destination,
+    pending,
+    disabled,
+    ...(denial === undefined ? {} : { denial }),
+    ...(message === undefined ? {} : { message }),
+    setProjectName,
+    setDestination,
+    toggleAsset: (assetId) =>
+      !disabled && toggle(setSelectedAssetIds, selectedAssetIds, assetId),
+    toggleCaptureSet: (captureSetId) =>
+      !disabled &&
+      toggle(setSelectedCaptureSetIds, selectedCaptureSetIds, captureSetId),
+    submit: () => {
+      if (disabled) return
+      const project = projects.find(
+        (candidate) => candidate.projectId === destination,
+      )
+      const command =
+        destination === 'new'
+          ? {
+              _tag: 'CreateProcessingProject',
+              name: projectName.trim(),
+              selection: {
+                assetIds: [...selectedAssetIds],
+                captureSetIds: [...selectedCaptureSetIds],
+              },
+              idempotencyKey: crypto.randomUUID(),
+            }
+          : {
+              _tag: 'AddProcessingProjectSources',
+              projectId: destination,
+              expectedProjectRevision: project?.revision,
+              selection: {
+                assetIds: [...selectedAssetIds],
+                captureSetIds: [...selectedCaptureSetIds],
+              },
+              idempotencyKey: crypto.randomUUID(),
+            }
+      setPending(true)
+      setMessage(undefined)
+      void fetch('/api/process/commands', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ commandId: crypto.randomUUID(), command }),
+      })
+        .then(async (response) => {
+          const result: unknown = await response.json()
+          if (
+            !response.ok ||
+            typeof result !== 'object' ||
+            result === null ||
+            !('outcome' in result) ||
+            result.outcome !== 'accepted'
+          )
+            throw new Error('Project intake rejected')
+          location.assign('/process?ui=beta')
+        })
+        .catch(() => setMessage('The project intake was not accepted.'))
+        .finally(() => setPending(false))
+    },
+  }
   return (
     <div
       className="beta-app nb-theme"
@@ -1397,7 +1649,7 @@ export function BetaLibraryApp(props: BetaLibraryAppProps) {
             : { detailState: props.detailState })}
         />
       ) : (
-        <BetaLibraryDesktop {...props} />
+        <BetaLibraryDesktop {...props} intake={intake} />
       )}
       <BetaLibraryStatusStrip projection={props.projection} />
     </div>

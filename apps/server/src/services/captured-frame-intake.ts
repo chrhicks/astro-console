@@ -133,7 +133,11 @@ export function materializeCapturedFrame(
       format: input.format,
       availability: 'availableLocally',
       capturedAt,
+      ...(input.targetName === undefined
+        ? {}
+        : { targetName: input.targetName }),
       comparisonGroupId: `${input.lineage.runId}-${input.lineage.sequenceId}`,
+      captureSetId: `${input.lineage.runId}-${input.lineage.sequenceId}`,
       equipment: input.equipment,
       lineage: {
         sourceAssetIds: [],

@@ -27,6 +27,7 @@ const detail = Schema.decodeUnknownSync(LibraryAssetDetailSchema)({
   availability: 'availableLocally',
   capturedAt: '2026-08-07T02:13:00.000Z',
   comparisonGroupId: 'm27-night-1',
+  captureSetId: 'm27-night-1',
   equipment: {
     rigId: 'rig-backyard-primary',
     cameraDeviceId: 'camera-asi2600mc-pro',
@@ -96,6 +97,7 @@ const page = Schema.decodeUnknownSync(LibraryPageSchema)({
       format: detail.format,
       availability: detail.availability,
       comparisonGroupId: detail.comparisonGroupId,
+      captureSetId: detail.captureSetId,
       review: { decision: 'unreviewed', rating: 4 },
     },
     {
@@ -178,6 +180,11 @@ test('renders a service-page catalog grouped only by projected identities', () =
   assert.match(markup, /Library \/ Durable evidence/)
   assert.match(markup, /<h1[^>]*>Catalog<\/h1>/)
   assert.match(markup, /2 loaded records · snapshot 8/)
+  assert.match(markup, /Processing Project intake/)
+  assert.match(markup, /Select whole Capture Set/)
+  assert.match(markup, /Select frame/)
+  assert.match(markup, /Create project/)
+  assert.match(markup, /does not start Calibration/)
   assert.match(markup, /Organize/)
   assert.match(markup, /Service query/)
   assert.match(markup, /<label[^>]*><span>Role<\/span>/)
@@ -202,6 +209,21 @@ test('renders a service-page catalog grouped only by projected identities', () =
   assert.match(markup, /First loaded page/)
   assert.match(markup, /Next page/)
   assert.doesNotMatch(markup, /Captured 25 Jul|M27 target|Accepted frames/)
+})
+
+test('disables every Library intake control for a read-only shell', () => {
+  const markup = renderToStaticMarkup(
+    createElement(BetaLibraryApp, {
+      projection: unavailableProjection,
+      loading: false,
+      page: { query, value: page },
+      onQuery: () => undefined,
+      onSelectAsset: () => undefined,
+    }),
+  )
+  assert.match(markup, /This client is read-only/)
+  assert.doesNotMatch(markup, /<input type="checkbox"(?! disabled)/)
+  assert.match(markup, /<select class="nb-select" disabled=""/)
 })
 
 test('wraps long catalog availability and revision inside the card', () => {
