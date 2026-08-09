@@ -330,11 +330,12 @@ test('SQLite telemetry exports closed spans, operation metrics, and backlog gaug
       .filter((request) => request.url === '/v1/traces')
       .map((request) => request.body),
   ).toString('utf8')
-  const metricPayload = Buffer.concat(
+  const metricPayloadBytes = Buffer.concat(
     collector.requests
       .filter((request) => request.url === '/v1/metrics')
       .map((request) => request.body),
-  ).toString('utf8')
+  )
+  const metricPayload = metricPayloadBytes.toString('utf8')
   for (const span of [
     'SQLite.executor.work.select',
     'SQLite.executor.work.settle',
@@ -357,6 +358,16 @@ test('SQLite telemetry exports closed spans, operation metrics, and backlog gaug
   assert.match(metricPayload, /astro\.sqlite\.backlog/)
   assert.match(metricPayload, /executor/)
   assert.match(metricPayload, /publisher/)
+  assert.equal(
+    otlpMetricUnits(metricPayloadBytes).get('astro.sqlite.operation.duration'),
+    's',
+  )
+  const durationAttributeKeys = otlpHistogramAttributeKeys(
+    metricPayloadBytes,
+    'astro.sqlite.operation.duration',
+  )
+  assert.equal(durationAttributeKeys.has('unit'), false)
+  assert.equal(durationAttributeKeys.has('time_unit'), false)
   for (const payload of [tracePayload, metricPayload]) {
     assert.doesNotMatch(payload, /db\.query\.text/)
     assert.doesNotMatch(payload, /SQLITE_BUSY/)
@@ -1380,6 +1391,22 @@ function otlpMetricUnits(payload: Uint8Array) {
         if (name !== undefined && unit !== undefined) units.set(name, unit)
       }
   return units
+}
+
+function otlpHistogramAttributeKeys(payload: Uint8Array, metricName: string) {
+  const keys = new Set<string>()
+  for (const resourceMetrics of protobufMessages(payload, 1))
+    for (const scopeMetrics of protobufMessages(resourceMetrics, 2))
+      for (const metric of protobufMessages(scopeMetrics, 2)) {
+        if (protobufString(metric, 1) !== metricName) continue
+        for (const histogram of protobufMessages(metric, 9))
+          for (const point of protobufMessages(histogram, 1))
+            for (const attribute of protobufMessages(point, 9)) {
+              const key = protobufString(attribute, 1)
+              if (key !== undefined) keys.add(key)
+            }
+      }
+  return keys
 }
 
 function protobufMessages(bytes: Uint8Array, fieldNumber: number) {
