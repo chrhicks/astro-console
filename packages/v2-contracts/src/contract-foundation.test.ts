@@ -401,12 +401,17 @@ describe('Gate 5 contract foundation', () => {
           format: 'fits',
           availability: 'published',
           comparisonGroupId: 'm27',
+          review: { decision: 'accepted', rating: 4 },
         },
       ],
       nextCursor: 'cursor-2',
       catalogChanged: false,
     })
     assert.equal(page.results[0]?.assetId, 'asset-1')
+    assert.deepEqual(page.results[0]?.review, {
+      decision: 'accepted',
+      rating: 4,
+    })
     assert.equal(
       Schema.decodeUnknownResult(LibraryQuery)({
         queryId: 'library-query-too-large',

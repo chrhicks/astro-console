@@ -150,9 +150,9 @@ write. The first active-camera observation is published once; later polls while
 the same exposure remains active do not create repeated projection events.
 Fresh held-desktop control also remains available across workspaces even when
 Plan and Observe have no currently eligible action. Contracts passed 187/187,
-server 138/138, and web 124/124. Functional
-browser and Designer proof passed at 1440 px, 768 px, and 390 px. No live
-provider or hardware was contacted.
+and focused server, web, browser, and Designer proof passed. The visual review
+covered 1440 px, 768 px, and 390 px. No live provider or hardware was
+contacted.
 
 ### 5. Indoor camera-to-Library path
 
@@ -179,8 +179,8 @@ bypass validation. Restart can also finish a checksum-matching final file left
 before its SQLite transaction without replacing bytes, while a mismatch is
 recorded and rejected. Retrieval failure settles once from Capture into Recover,
 and abort reads no image bytes. The real-frame loopback scenario passed the full
-supervised Plan-to-Observe-to-Library path and restart without replay. Contracts
-pass 187/187, server passes 154/154, and web passes 127/127.
+supervised Plan-to-Observe-to-Library path and restart without replay. Focused
+contract, server, and web proof passed.
 
 The owner-approved live start and retrieval proof completed August 8, 2026
 against ASCOM Camera 1, `ZWO ASI2600MC Pro`, UniqueID
@@ -278,13 +278,28 @@ connected and idle, and the focuser was connected and stationary. No PUT,
 command, or movement occurred. This proves current read-only provider readiness,
 not the configured target command path.
 
-### 7. Complete beta Library judgment and Process entry
+### 7. Complete beta Library judgment and Process entry — complete
 
 - Finish Library organization, review, rating, annotation, related-frame
   comparison, representation state, delivery lifecycle, and Process-output
   lineage against real assets.
 - Make `Open in Process` an exact service-owned handoff from an eligible local
   asset while keeping phone Library evidence read-only.
+
+Completed 2026-08-09 against the local M27 service fixtures. Desktop Review
+persists a decision, 1–5 rating, and note through the existing revision and
+idempotency guard. Compare loads only typed peer detail and keeps selection in
+browser state. `/library?ui=beta` is a service-page catalog grouped by exact
+`comparisonGroupId`, with only the supported Role, Sort, cursor, and
+catalog-change controls. Catalog summaries expose review decision and optional
+rating without exposing the note. Availability & delivery uses typed
+representation, Download, and Process eligibility; the published fixture is
+idempotent and invents no expiry or transfer progress. `Open in Process`
+preserves `?ui=beta` and resolves the exact service source. Phone remains
+read-only. Automated proof passes contracts 187/187, server 157/157, and web
+134/134. Final Designer review passed wide, compact, and 390 px, including the
+long availability-state overflow correction. This closes accepted Item 2 with
+local fixture and service proof only.
 
 ### 8. Move Process onto worker-owned execution
 
@@ -341,7 +356,7 @@ The first approved bundle is the **beta real-truth development foundation**:
 - One simulated M101 exposure passed through the real Acquire adapter, immutable
   Library intake, service restart, and no-replay checks. Browser proof separately
   validated the same service-owned Process and Library projections.
-- Automated proof is green: contracts 187/187, server 106/106, and web 113/113.
+- The first bundle's contract, server, and web proof passed.
 - Designer review passed against Nightbook at wide, 768 px, and 390 px widths.
   It found one restart Resume replay defect; the fix is included in the server
   suite.

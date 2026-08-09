@@ -65,6 +65,20 @@ const BetaLibraryApp = lazy(() => import('./beta/BetaLibraryApp'))
 const BetaPlanApp = lazy(() => import('./beta/BetaPlanApp'))
 const BetaProcessApp = lazy(() => import('./beta/BetaProcessApp'))
 
+const loadLibraryAssetDetail = async (assetId: string) => {
+  const runtime = createLibraryRuntime()
+  try {
+    return await runtime.runPromise(
+      Effect.gen(function* () {
+        const client = yield* LibraryClient
+        return yield* client.detail(assetId)
+      }),
+    )
+  } finally {
+    await runtime.dispose()
+  }
+}
+
 export function App() {
   const [projection, setProjection] = useState<Projection>(
     unavailableProjection,
@@ -164,11 +178,7 @@ export function App() {
     state: 'loading' | 'not-found' | 'not-local' | 'unavailable' | undefined
   }>({ value: undefined, state: undefined })
   const selectedLibraryAssetId =
-    route.kind === 'asset'
-      ? route.assetId
-      : betaWorkspace && workspace === 'library'
-        ? libraryPage.value?.results[0]?.assetId
-        : undefined
+    route.kind === 'asset' ? route.assetId : undefined
 
   useEffect(() => {
     const frame = projection.observe.source?.acquire?.liveFrame
@@ -236,21 +246,6 @@ export function App() {
       void runtime.dispose()
     }
   }, [libraryQuery, workspace])
-  useEffect(() => {
-    if (
-      !betaWorkspace ||
-      route.kind !== 'workspace' ||
-      route.workspace !== 'library'
-    )
-      return
-    const firstAssetId = libraryPage.value?.results[0]?.assetId
-    if (firstAssetId === undefined) return
-    const path = `/library/assets/${encodeURIComponent(firstAssetId)}`
-    const next = parseRoute(path, '?ui=beta')
-    if (next.kind !== 'asset') return
-    history.replaceState(null, '', `${path}?ui=beta`)
-    setRoute(next)
-  }, [betaWorkspace, libraryPage.value, route])
   useEffect(() => {
     if (selectedLibraryAssetId === undefined) {
       setLibraryDetail({ value: undefined, state: undefined })
@@ -643,7 +638,19 @@ export function App() {
     setRoute(next)
     setBetaWorkspace(true)
   }
-  const reviewLibraryAsset = async (decision: 'accepted' | 'rejected') => {
+  const openBetaProcess = (assetId: string) => {
+    const search = `?sourceAssetId=${encodeURIComponent(assetId)}&ui=beta`
+    const next = parseRoute('/process', search)
+    if (next.kind !== 'process-source') return
+    history.pushState(null, '', `/process${search}`)
+    setRoute(next)
+    setBetaWorkspace(true)
+  }
+  const reviewLibraryAsset = async (review: {
+    decision: 'accepted' | 'rejected' | 'unreviewed'
+    rating?: number
+    annotation?: string
+  }) => {
     const detail = libraryDetail.value
     if (!detail) throw new Error('Asset detail is unavailable.')
     const response = await fetch(
@@ -654,7 +661,7 @@ export function App() {
         body: JSON.stringify({
           expectedAssetRevision: detail.revision,
           expectedReviewRevision: detail.review?.revision ?? 0,
-          decision,
+          ...review,
           idempotencyKey: crypto.randomUUID(),
         }),
       },
@@ -739,7 +746,7 @@ export function App() {
         onQuery={changeLibraryQuery}
         readOnly={projection.shell.readOnly}
         onReview={(decision) => {
-          void reviewLibraryAsset(decision).catch(() => undefined)
+          void reviewLibraryAsset({ decision }).catch(() => undefined)
         }}
       />
     ) : workspace === 'process' ? (
@@ -836,6 +843,7 @@ export function App() {
               ? {}
               : { message: libraryPage.message }),
           }}
+          onQuery={changeLibraryQuery}
           onSelectAsset={selectBetaLibraryAsset}
           {...(selectedLibraryAssetId === undefined
             ? {}
@@ -849,6 +857,8 @@ export function App() {
           {...(projection.shell.readOnly
             ? {}
             : { onReview: reviewLibraryAsset })}
+          loadDetail={loadLibraryAssetDetail}
+          onOpenProcess={openBetaProcess}
         />
       </Suspense>
     )

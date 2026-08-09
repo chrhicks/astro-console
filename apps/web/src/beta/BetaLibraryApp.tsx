@@ -5,18 +5,28 @@ import {
   DataList,
   DataListItem,
   EvidenceViewport,
+  Field,
   MetricOverlay,
   PageHeader,
   Panel,
   PanelBody,
   PanelHeader,
+  Select,
   StatusIndicator,
+  Stack,
   Tabs,
+  TextField,
   Toolbar,
   type ActionDescriptor,
   type Tone,
 } from '@nightbook/ui'
-import { useEffect, useMemo, useState, type MouseEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ChangeEvent,
+  type MouseEvent,
+} from 'react'
 import type {
   LibraryAssetDetail,
   LibraryPage,
@@ -41,8 +51,15 @@ export type BetaLibraryAppProps = {
   }
   detail?: LibraryAssetDetail
   detailState?: DetailState
+  onQuery?: (query: LibraryQuery) => void
   onSelectAsset: (assetId: string) => void
-  onReview?: (decision: 'accepted' | 'rejected') => Promise<void>
+  loadDetail?: (assetId: string) => Promise<LibraryAssetDetail>
+  onReview?: (review: {
+    decision: 'accepted' | 'rejected' | 'unreviewed'
+    rating?: number
+    annotation?: string
+  }) => Promise<void>
+  onOpenProcess?: (assetId: string) => void
 }
 
 const titleCase = (value: string) =>
@@ -99,6 +116,37 @@ const previewFallback = (detail: LibraryAssetDetail, failed: boolean) => {
   return 'No inspection preview is available. The durable asset remains recorded.'
 }
 
+const actionReason = (
+  action:
+    | Extract<LibraryAssetDetail['actions'][number], { _tag: 'Unavailable' }>
+    | undefined,
+) => (action ? titleCase(action.reason) : 'Not projected by the service')
+
+const compactAssetId = (assetId: string) =>
+  assetId.length > 20 ? `${assetId.slice(0, 10)}…${assetId.slice(-7)}` : assetId
+
+const roleOptions: ReadonlyArray<{
+  value: LibraryQuery['role'] | undefined
+  label: string
+}> = [
+  { value: undefined, label: 'All roles' },
+  { value: 'original', label: 'Original' },
+  { value: 'linearMaster', label: 'Linear master' },
+  { value: 'intermediate', label: 'Intermediate' },
+  { value: 'final', label: 'Final' },
+  { value: 'preview', label: 'Preview' },
+  { value: 'diagnostic', label: 'Diagnostic' },
+]
+
+const sortOptions: ReadonlyArray<{
+  value: LibraryQuery['sort']
+  label: string
+}> = [
+  { value: 'capturedAtDescending', label: 'Newest first' },
+  { value: 'sharpestFirst', label: 'Sharpest first' },
+  { value: 'recentlyUpdated', label: 'Recently updated' },
+]
+
 function AssetNavigator({
   page,
   selectedAssetId,
@@ -132,6 +180,7 @@ function AssetNavigator({
   }
   return (
     <nav className="beta-library-assets" aria-label="Frame review navigation">
+      <a href="/library?ui=beta">Catalog</a>
       {previous ? (
         <a
           href={`/library/assets/${encodeURIComponent(previous.assetId)}?ui=beta`}
@@ -161,6 +210,240 @@ function AssetNavigator({
   )
 }
 
+const availabilityTone = (
+  availability: LibraryAssetDetail['availability'],
+): Tone =>
+  availability === 'availableLocally' || availability === 'published'
+    ? 'positive'
+    : availability === 'failedPublication'
+      ? 'danger'
+      : availability === 'preparing' ||
+          availability === 'republishing' ||
+          availability === 'expiring'
+        ? 'info'
+        : 'warning'
+
+function CatalogReview({
+  review,
+}: {
+  review: LibraryPage['results'][number]['review']
+}) {
+  const rating =
+    review.rating === undefined ? '☆ Not rated' : `★ ${review.rating}/5`
+  return (
+    <div
+      className="beta-library-catalog-review"
+      data-decision={review.decision}
+      aria-label={`Review: ${titleCase(review.decision)}; ${rating}`}
+    >
+      <span>{rating}</span>
+      <b>{titleCase(review.decision)}</b>
+    </div>
+  )
+}
+
+function LibraryCatalog({
+  page,
+  onQuery,
+  onSelectAsset,
+}: Pick<BetaLibraryAppProps, 'page' | 'onQuery' | 'onSelectAsset'>) {
+  const groups = useMemo(() => {
+    const grouped = new Map<
+      string,
+      NonNullable<BetaLibraryAppProps['page']['value']>['results']
+    >()
+    for (const asset of page.value?.results ?? [])
+      grouped.set(asset.comparisonGroupId, [
+        ...(grouped.get(asset.comparisonGroupId) ?? []),
+        asset,
+      ])
+    return [...grouped.entries()]
+  }, [page.value])
+  const follow = (event: MouseEvent<HTMLAnchorElement>, assetId: string) => {
+    if (
+      event.defaultPrevented ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    )
+      return
+    event.preventDefault()
+    onSelectAsset(assetId)
+  }
+  const changeQuery = (
+    role: LibraryQuery['role'] | undefined,
+    sort: LibraryQuery['sort'],
+    cursor?: LibraryQuery['cursor'],
+  ) =>
+    onQuery?.({
+      queryId: page.query.queryId,
+      pageSize: page.query.pageSize,
+      sort,
+      ...(role === undefined ? {} : { role }),
+      ...(cursor === undefined ? {} : { cursor }),
+    })
+
+  return (
+    <main id="beta-workspace" className="beta-library-catalog">
+      <PageHeader
+        eyebrow="Library / Durable evidence"
+        title="Catalog"
+        meta={
+          page.value
+            ? `${page.value.results.length} loaded records · snapshot ${page.value.querySnapshotVersion}`
+            : (page.message ?? 'Loading Library records.')
+        }
+        actions={
+          <StatusIndicator
+            label={page.value ? 'Service page loaded' : 'Loading'}
+            tone={page.value ? 'positive' : 'neutral'}
+            detail={
+              page.value?.catalogChanged
+                ? 'Catalog changed during this query.'
+                : 'Current loaded page'
+            }
+          />
+        }
+      />
+      <Panel className="beta-library-catalog-controls">
+        <PanelHeader title="Organize" meta="Service query" />
+        <PanelBody>
+          <div className="beta-library-catalog-fields">
+            <Field label="Role">
+              <Select
+                value={page.query.role ?? ''}
+                disabled={!onQuery}
+                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                  changeQuery(
+                    event.target.value
+                      ? (event.target.value as LibraryQuery['role'])
+                      : undefined,
+                    page.query.sort,
+                  )
+                }
+              >
+                {roleOptions.map((option) => (
+                  <option key={option.label} value={option.value ?? ''}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Sort">
+              <Select
+                value={page.query.sort}
+                disabled={!onQuery}
+                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                  changeQuery(
+                    page.query.role,
+                    event.target.value as LibraryQuery['sort'],
+                  )
+                }
+              >
+                {sortOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <p className="beta-library-message">
+            Assets are grouped by the service comparison-group identity. Night,
+            target, and review-status facets are not projected by the current
+            query contract.
+          </p>
+        </PanelBody>
+      </Panel>
+      {page.value?.catalogChanged ? (
+        <AttentionCard
+          tone="warning"
+          statusLabel="Catalog changed"
+          title="Reload this query before acting on page position"
+          description="The loaded records remain exact, but their page position may have changed."
+        />
+      ) : null}
+      {groups.length ? (
+        <section
+          className="beta-library-catalog-groups"
+          aria-label="Loaded Library groups"
+        >
+          {groups.map(([groupId, assets]) => (
+            <Panel key={groupId} className="beta-library-catalog-group">
+              <PanelHeader
+                title={groupId}
+                meta={`${assets.length} loaded representation${assets.length === 1 ? '' : 's'}`}
+              />
+              <PanelBody>
+                <div className="beta-library-catalog-assets">
+                  {assets.map((asset) => (
+                    <a
+                      key={asset.assetId}
+                      href={`/library/assets/${encodeURIComponent(asset.assetId)}?ui=beta`}
+                      onClick={(event) => follow(event, asset.assetId)}
+                    >
+                      <b>{compactAssetId(asset.assetId)}</b>
+                      <span>
+                        {titleCase(asset.role)} · {asset.format.toUpperCase()}
+                      </span>
+                      <CatalogReview review={asset.review} />
+                      <StatusIndicator
+                        className="beta-library-catalog-availability"
+                        label={titleCase(asset.availability)}
+                        tone={availabilityTone(asset.availability)}
+                        detail={`Revision ${asset.revision}`}
+                      />
+                    </a>
+                  ))}
+                </div>
+              </PanelBody>
+            </Panel>
+          ))}
+        </section>
+      ) : (
+        <AttentionCard
+          tone={page.message ? 'warning' : 'neutral'}
+          statusLabel={page.message ? 'Catalog unavailable' : 'No records'}
+          title="Library catalog"
+          description={page.message ?? 'No assets match this service query.'}
+        />
+      )}
+      {page.value ? (
+        <nav className="beta-library-catalog-paging" aria-label="Catalog pages">
+          <Button
+            size="small"
+            disabled={!page.query.cursor || !onQuery}
+            onClick={() =>
+              changeQuery(page.query.role, page.query.sort, undefined)
+            }
+          >
+            First page
+          </Button>
+          <span>
+            {page.query.cursor
+              ? `Cursor ${page.query.cursor}`
+              : 'First loaded page'}
+          </span>
+          <Button
+            size="small"
+            disabled={!page.value.nextCursor || !onQuery}
+            onClick={() =>
+              changeQuery(
+                page.query.role,
+                page.query.sort,
+                page.value?.nextCursor,
+              )
+            }
+          >
+            Next page
+          </Button>
+        </nav>
+      ) : null}
+    </main>
+  )
+}
+
 function LineagePanel({ detail }: { detail: LibraryAssetDetail }) {
   return (
     <Panel as="aside" className="beta-library-lineage">
@@ -172,6 +455,15 @@ function LineagePanel({ detail }: { detail: LibraryAssetDetail }) {
             <DataListItem label="Checksum" value={detail.checksum} />
           ) : null}
           <DataListItem label="Captured" value={detail.capturedAt} />
+          <DataListItem
+            label="Representation"
+            value={`${titleCase(detail.role)} · ${detail.format.toUpperCase()}`}
+            detail={titleCase(detail.availability)}
+          />
+          <DataListItem
+            label="Comparison group"
+            value={detail.comparisonGroupId}
+          />
           {detail.equipment ? (
             <>
               <DataListItem label="Rig" value={detail.equipment.rigId} />
@@ -323,25 +615,38 @@ function ReviewDecision({
   readOnly,
   onSelectAsset,
   onReview,
+  onOpenProcess,
 }: {
   detail: LibraryAssetDetail
   page: BetaLibraryAppProps['page']
   readOnly: boolean
   onSelectAsset: BetaLibraryAppProps['onSelectAsset']
   onReview?: BetaLibraryAppProps['onReview']
+  onOpenProcess?: BetaLibraryAppProps['onOpenProcess']
 }) {
-  const [pending, setPending] = useState<'accepted' | 'rejected'>()
+  const [pending, setPending] = useState<
+    'accepted' | 'rejected' | 'unreviewed'
+  >()
   const [result, setResult] = useState<string>()
+  const [rating, setRating] = useState(detail.review?.rating ?? 0)
+  const [annotation, setAnnotation] = useState(detail.review?.annotation ?? '')
   useEffect(() => {
     setPending(undefined)
     setResult(undefined)
+    setRating(detail.review?.rating ?? 0)
+    setAnnotation(detail.review?.annotation ?? '')
   }, [detail.assetId, detail.review?.revision])
 
-  const review = (decision: 'accepted' | 'rejected') => {
+  const review = (decision: 'accepted' | 'rejected' | 'unreviewed') => {
     if (!onReview || readOnly || pending) return
     setPending(decision)
     setResult(undefined)
-    void onReview(decision)
+    const note = annotation.trim()
+    void onReview({
+      decision,
+      ...(rating > 0 ? { rating } : {}),
+      ...(note ? { annotation: note } : {}),
+    })
       .then(
         () => setResult(`Review saved as ${decision}.`),
         () =>
@@ -351,6 +656,10 @@ function ReviewDecision({
   }
 
   const decision = detail.review?.decision ?? 'unreviewed'
+  const process = detail.actions.find(
+    (action) => action.action === 'openInProcess',
+  )
+  const processEligible = process?._tag === 'Eligible'
   const primary: ActionDescriptor = {
     id: 'accept-frame',
     label: pending === 'accepted' ? 'Saving…' : 'Accept',
@@ -376,6 +685,62 @@ function ReviewDecision({
         selectedAssetId={detail.assetId}
         onSelectAsset={onSelectAsset}
       />
+      <Panel className="beta-library-review-fields">
+        <PanelHeader title="Review" meta="Durable rating and note" />
+        <PanelBody>
+          <Stack gap={8}>
+            <div
+              className="beta-library-rating"
+              role="radiogroup"
+              aria-label="Frame rating"
+            >
+              <span>Rate</span>
+              {[1, 2, 3, 4, 5].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={rating === value}
+                  aria-label={`Rate ${value}`}
+                  disabled={readOnly || !onReview || pending !== undefined}
+                  onClick={() => setRating(value)}
+                >
+                  {value <= rating ? '★' : '☆'}
+                </button>
+              ))}
+            </div>
+            <Field label="Durable review note">
+              <TextField
+                value={annotation}
+                placeholder="Add a note"
+                disabled={readOnly || !onReview || pending !== undefined}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  setAnnotation(event.target.value)
+                }
+              />
+            </Field>
+            <Button
+              size="small"
+              disabled={readOnly || !onReview || pending !== undefined}
+              onClick={() => review(decision)}
+            >
+              {pending === decision ? 'Saving…' : 'Save review details'}
+            </Button>
+            <Button
+              size="small"
+              disabled={!processEligible || !onOpenProcess}
+              title={
+                processEligible
+                  ? 'Open this service-eligible source in Process.'
+                  : `Unavailable: ${actionReason(process?._tag === 'Unavailable' ? process : undefined)}`
+              }
+              onClick={() => onOpenProcess?.(detail.assetId)}
+            >
+              Open in Process →
+            </Button>
+          </Stack>
+        </PanelBody>
+      </Panel>
       <ActionPanel
         eyebrow={readOnly ? 'Review · viewer' : 'Review · controller'}
         title={titleCase(decision)}
@@ -403,9 +768,15 @@ function ReviewTab({
   projection,
   onSelectAsset,
   onReview,
+  onOpenProcess,
 }: Pick<
   BetaLibraryAppProps,
-  'detail' | 'page' | 'projection' | 'onSelectAsset' | 'onReview'
+  | 'detail'
+  | 'page'
+  | 'projection'
+  | 'onSelectAsset'
+  | 'onReview'
+  | 'onOpenProcess'
 >) {
   if (!detail) return null
   return (
@@ -418,14 +789,204 @@ function ReviewTab({
         readOnly={projection.shell.readOnly}
         onSelectAsset={onSelectAsset}
         onReview={onReview}
+        onOpenProcess={onOpenProcess}
       />
+    </section>
+  )
+}
+
+function CompareTab({
+  detail,
+  page,
+  loadDetail,
+}: Pick<BetaLibraryAppProps, 'detail' | 'page' | 'loadDetail'>) {
+  const peers = useMemo(
+    () =>
+      (page.value?.results ?? []).filter(
+        (asset) =>
+          asset.assetId !== detail?.assetId &&
+          asset.comparisonGroupId === detail?.comparisonGroupId,
+      ),
+    [detail?.assetId, detail?.comparisonGroupId, page.value],
+  )
+  const [peerAssetId, setPeerAssetId] = useState<string>()
+  const [peer, setPeer] = useState<LibraryAssetDetail>()
+  const [state, setState] = useState<'loading' | 'unavailable'>()
+
+  useEffect(() => {
+    setPeerAssetId(peers[0]?.assetId)
+    setPeer(undefined)
+    setState(undefined)
+  }, [detail?.assetId, detail?.comparisonGroupId, peers])
+
+  useEffect(() => {
+    if (!peerAssetId || !loadDetail) {
+      setPeer(undefined)
+      setState(undefined)
+      return
+    }
+    let current = true
+    setPeer(undefined)
+    setState('loading')
+    void loadDetail(peerAssetId).then(
+      (value) => {
+        if (!current) return
+        setPeer(value)
+        setState(undefined)
+      },
+      () => {
+        if (!current) return
+        setPeer(undefined)
+        setState('unavailable')
+      },
+    )
+    return () => {
+      current = false
+    }
+  }, [loadDetail, peerAssetId])
+
+  if (!detail) return null
+  const inspection = (asset: LibraryAssetDetail) =>
+    asset.inspection?._tag === 'Available'
+      ? asset.inspection.metrics
+      : undefined
+  const leftMetrics = inspection(detail)
+  const rightMetrics = peer ? inspection(peer) : undefined
+  const pair = (left: string | number, right: string | number | undefined) =>
+    `${left} · ${right ?? 'Not loaded'}`
+
+  return (
+    <section className="beta-library-compare" aria-label="Frame compare">
+      <div className="beta-library-compare-picker">
+        <b>Comparison peer</b>
+        {peers.length ? (
+          peers.map((candidate) => (
+            <Button
+              key={candidate.assetId}
+              size="small"
+              tone="quiet"
+              aria-pressed={peerAssetId === candidate.assetId}
+              title={candidate.assetId}
+              onClick={() => setPeerAssetId(candidate.assetId)}
+            >
+              {compactAssetId(candidate.assetId)}
+            </Button>
+          ))
+        ) : (
+          <span>
+            No peer is present in this loaded page and comparison group.
+          </span>
+        )}
+      </div>
+      <ReviewEvidence detail={detail} monitoringOnly />
+      {peer ? (
+        <ReviewEvidence detail={peer} monitoringOnly />
+      ) : (
+        <AttentionCard
+          tone={state === 'unavailable' ? 'warning' : 'neutral'}
+          statusLabel={
+            state === 'loading' ? 'Loading peer' : 'Peer unavailable'
+          }
+          title="Select loaded service detail"
+          description={
+            state === 'unavailable'
+              ? 'The selected peer detail could not be loaded.'
+              : 'Comparison waits for the selected Library detail.'
+          }
+        />
+      )}
+      <Panel className="beta-library-compare-facts">
+        <PanelHeader title="Loaded service facts" meta="Browser-only view" />
+        <PanelBody>
+          <DataList aria-label="Compared service facts">
+            <DataListItem
+              label="Assets"
+              value={pair(detail.assetId, peer?.assetId)}
+            />
+            <DataListItem
+              label="Representation"
+              value={pair(
+                `${titleCase(detail.role)} · ${detail.format.toUpperCase()}`,
+                peer
+                  ? `${titleCase(peer.role)} · ${peer.format.toUpperCase()}`
+                  : undefined,
+              )}
+            />
+            <DataListItem
+              label="Availability"
+              value={pair(
+                titleCase(detail.availability),
+                peer ? titleCase(peer.availability) : undefined,
+              )}
+            />
+            <DataListItem
+              label="Review"
+              value={pair(
+                titleCase(detail.review?.decision ?? 'unreviewed'),
+                peer
+                  ? titleCase(peer.review?.decision ?? 'unreviewed')
+                  : undefined,
+              )}
+            />
+            {leftMetrics && rightMetrics ? (
+              <>
+                <DataListItem
+                  label="Sharpness"
+                  value={pair(leftMetrics.sharpness, rightMetrics.sharpness)}
+                />
+                <DataListItem
+                  label="Shape"
+                  value={pair(leftMetrics.shape, rightMetrics.shape)}
+                />
+                <DataListItem
+                  label="Drift"
+                  value={pair(
+                    `${leftMetrics.driftArcsec}″`,
+                    `${rightMetrics.driftArcsec}″`,
+                  )}
+                />
+                <DataListItem
+                  label="Clipping"
+                  value={pair(
+                    `${leftMetrics.clippingPercent}%`,
+                    `${rightMetrics.clippingPercent}%`,
+                  )}
+                />
+              </>
+            ) : (
+              <DataListItem
+                label="Inspection metrics"
+                value={pair(
+                  leftMetrics ? 'Available' : 'Unavailable',
+                  peer
+                    ? rightMetrics
+                      ? 'Available'
+                      : 'Unavailable'
+                    : undefined,
+                )}
+                detail="Metrics appear only when both loaded details provide them."
+              />
+            )}
+          </DataList>
+          <p className="beta-library-message">
+            Left · right. Compare selection is browser-only and changes no asset
+            or review.
+          </p>
+        </PanelBody>
+      </Panel>
     </section>
   )
 }
 
 function AvailabilityTab({ detail }: { detail: LibraryAssetDetail }) {
   const download = detail.actions.find((action) => action.action === 'download')
+  const process = detail.actions.find(
+    (action) => action.action === 'openInProcess',
+  )
   const eligible = download?._tag === 'Eligible'
+  const publishedRepresentation = detail.representations.find(
+    (representation) => representation.state === 'published',
+  )
   return (
     <section
       className="beta-library-availability"
@@ -443,6 +1004,22 @@ function AvailabilityTab({ detail }: { detail: LibraryAssetDetail }) {
               value={detail.assetId}
               detail="Stable identity"
             />
+            <DataListItem
+              label="Download action"
+              value={
+                download?._tag === 'Eligible'
+                  ? 'Eligible'
+                  : `Unavailable · ${actionReason(download?._tag === 'Unavailable' ? download : undefined)}`
+              }
+            />
+            <DataListItem
+              label="Process handoff"
+              value={
+                process?._tag === 'Eligible'
+                  ? 'Eligible'
+                  : `Unavailable · ${actionReason(process?._tag === 'Unavailable' ? process : undefined)}`
+              }
+            />
             {detail.representations.length > 0 ? (
               detail.representations.map((representation) => (
                 <DataListItem
@@ -459,14 +1036,26 @@ function AvailabilityTab({ detail }: { detail: LibraryAssetDetail }) {
       </Panel>
       <AttentionCard
         tone={eligible ? 'positive' : 'warning'}
-        statusLabel={eligible ? 'Download available' : 'Download unavailable'}
-        title="Get the original"
-        description={
-          eligible
-            ? 'Use the service-owned download route for this stable asset.'
-            : `The original cannot be downloaded now${download?._tag === 'Unavailable' ? `: ${titleCase(download.reason)}` : '.'}`
+        statusLabel={
+          publishedRepresentation
+            ? 'Published delivery'
+            : eligible
+              ? 'Download available'
+              : 'Download unavailable'
         }
-        evidence="Preview availability does not change the original asset identity."
+        title={publishedRepresentation?.label ?? 'Get the original'}
+        description={
+          publishedRepresentation
+            ? 'The service reports this representation as published and the download action as eligible.'
+            : eligible
+              ? 'Use the service-owned download route for this stable asset.'
+              : `The original cannot be downloaded now${download?._tag === 'Unavailable' ? `: ${titleCase(download.reason)}` : '.'}`
+        }
+        evidence={
+          publishedRepresentation
+            ? 'No grant expiry or transfer progress is projected by this detail contract.'
+            : 'Preview availability does not change the original asset identity.'
+        }
         actions={
           eligible ? (
             <a
@@ -500,14 +1089,28 @@ function BetaLibraryDesktop(props: BetaLibraryAppProps) {
               content: <ReviewTab {...props} />,
             },
             {
+              id: 'compare',
+              label: 'Compare',
+              content: <CompareTab {...props} />,
+            },
+            {
               id: 'availability',
-              label: 'Availability',
+              label: 'Availability & delivery',
               content: <AvailabilityTab detail={props.detail} />,
             },
           ]
         : [],
     [props],
   )
+
+  if (!props.assetId && !props.detail && props.detailState === undefined)
+    return (
+      <LibraryCatalog
+        page={props.page}
+        onSelectAsset={props.onSelectAsset}
+        {...(props.onQuery === undefined ? {} : { onQuery: props.onQuery })}
+      />
+    )
 
   return (
     <main id="beta-workspace" className="beta-library-workspace">
@@ -556,10 +1159,23 @@ function BetaLibraryDesktop(props: BetaLibraryAppProps) {
 
 export function BetaLibraryPhone({
   loading,
+  assetId,
   detail,
   detailState,
   page,
-}: Omit<BetaLibraryAppProps, 'onSelectAsset' | 'onReview'>) {
+}: Omit<
+  BetaLibraryAppProps,
+  'onSelectAsset' | 'onReview' | 'onOpenProcess' | 'loadDetail'
+>) {
+  const catalogGroups = useMemo(() => {
+    const groups = new Map<string, NonNullable<typeof page.value>['results']>()
+    for (const asset of page.value?.results ?? [])
+      groups.set(asset.comparisonGroupId, [
+        ...(groups.get(asset.comparisonGroupId) ?? []),
+        asset,
+      ])
+    return [...groups.entries()]
+  }, [page.value])
   return (
     <main
       id="beta-workspace"
@@ -567,14 +1183,36 @@ export function BetaLibraryPhone({
       aria-label="Read-only Library phone projection"
     >
       <PageHeader
-        eyebrow="Library / Frame review"
+        eyebrow={
+          detail || assetId
+            ? 'Library / Frame review'
+            : 'Library / Durable evidence'
+        }
         title={
-          detail ? (detail.capture?.frameId ?? detail.assetId) : 'Frame review'
+          detail
+            ? (detail.capture?.frameId ?? detail.assetId)
+            : assetId
+              ? 'Frame review'
+              : 'Catalog'
         }
         actions={
           <StatusIndicator
-            label={loading ? 'Loading' : detail ? 'Current' : 'Unavailable'}
-            tone={loading ? 'info' : detail ? 'positive' : 'warning'}
+            label={
+              loading
+                ? 'Loading'
+                : detail
+                  ? 'Current'
+                  : !assetId && page.value
+                    ? 'Catalog loaded'
+                    : 'Unavailable'
+            }
+            tone={
+              loading
+                ? 'info'
+                : detail || (!assetId && page.value)
+                  ? 'positive'
+                  : 'warning'
+            }
           />
         }
       />
@@ -584,12 +1222,19 @@ export function BetaLibraryPhone({
         title={
           detail
             ? titleCase(detail.review?.decision ?? 'unreviewed')
-            : 'No current asset'
+            : assetId
+              ? 'Asset detail unavailable'
+              : page.value
+                ? `${page.value.results.length} loaded records`
+                : 'Library catalog'
         }
         description={
           detail
             ? 'Frame review and download controls are available on desktop only.'
-            : detailMessage(detailState, page.message)
+            : assetId
+              ? detailMessage(detailState, page.message)
+              : (page.message ??
+                'Browse exact service records. Review and delivery controls remain on desktop.')
         }
       />
       {detail ? (
@@ -631,6 +1276,33 @@ export function BetaLibraryPhone({
                   value={titleCase(detail.availability)}
                 />
                 <DataListItem
+                  label="Review rating"
+                  value={
+                    detail.review?.rating === undefined
+                      ? 'Not rated'
+                      : `${detail.review.rating} / 5`
+                  }
+                />
+                <DataListItem
+                  label="Review note"
+                  value={detail.review?.annotation ?? 'No durable note'}
+                />
+                <DataListItem
+                  label="Comparison group"
+                  value={detail.comparisonGroupId}
+                />
+                {detail.representations.length ? (
+                  detail.representations.map((representation) => (
+                    <DataListItem
+                      key={`${representation.label}-${representation.state}`}
+                      label={representation.label}
+                      value={titleCase(representation.state)}
+                    />
+                  ))
+                ) : (
+                  <DataListItem label="Representations" value="None reported" />
+                )}
+                <DataListItem
                   label="Inspection record"
                   value={
                     detail.inspection === undefined
@@ -642,6 +1314,38 @@ export function BetaLibraryPhone({
             </PanelBody>
           </Panel>
         </>
+      ) : !assetId && catalogGroups.length ? (
+        <section
+          className="beta-library-phone-groups"
+          aria-label="Phone Library catalog"
+        >
+          {catalogGroups.map(([groupId, assets]) => (
+            <Panel key={groupId}>
+              <PanelHeader
+                title={groupId}
+                meta={`${assets.length} loaded representation${assets.length === 1 ? '' : 's'}`}
+              />
+              <PanelBody>
+                <nav aria-label={`Assets in ${groupId}`}>
+                  {assets.map((asset) => (
+                    <a
+                      key={asset.assetId}
+                      href={`/library/assets/${encodeURIComponent(asset.assetId)}?ui=beta`}
+                    >
+                      <b>{compactAssetId(asset.assetId)}</b>
+                      <span>
+                        {titleCase(asset.role)} · {asset.format.toUpperCase()} ·{' '}
+                        {titleCase(asset.availability)} · Revision{' '}
+                        {asset.revision}
+                      </span>
+                      <CatalogReview review={asset.review} />
+                    </a>
+                  ))}
+                </nav>
+              </PanelBody>
+            </Panel>
+          ))}
+        </section>
       ) : null}
     </main>
   )

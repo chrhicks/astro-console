@@ -406,6 +406,10 @@ export const LibraryAssetSummary = Schema.Struct({
   format: AssetSnapshot.fields.format,
   availability: AssetSnapshot.fields.availability,
   comparisonGroupId: Schema.NonEmptyString,
+  review: Schema.Struct({
+    decision: AssetReview.fields.decision,
+    rating: AssetReview.fields.rating,
+  }),
 })
 
 export const LibraryAssetAction = Schema.TaggedUnion({

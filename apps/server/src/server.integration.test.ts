@@ -1124,6 +1124,19 @@ test('Library review is owner-only, revision-guarded, idempotent, durable, and p
     (response) => response.json(),
   )
   assert.deepEqual(detail.review, accepted.review)
+  const reviewedPage = Schema.decodeUnknownSync(LibraryPage)(
+    await fetch(
+      `${base}/api/library?queryId=review-summary&pageSize=3&sort=sharpestFirst`,
+    ).then((response) => response.json()),
+  )
+  const reviewedSummary = reviewedPage.results.find(
+    (summary) => summary.assetId === 'asset-m27-001',
+  )
+  assert.deepEqual(reviewedSummary?.review, {
+    decision: 'accepted',
+    rating: 5,
+  })
+  assert.equal('annotation' in (reviewedSummary?.review ?? {}), false)
   const viewer = createFixtureService(undefined, () => ({
     personId: 'viewer',
     clientId: 'viewer',
@@ -4782,6 +4795,8 @@ test('Library queries enforce bounded pages, cursor order, role filters, and all
   ).then((response) => response.json())
   assert.equal(first.results.length, 3)
   assert.equal(first.results[0].assetId, 'asset-m27-001')
+  assert.deepEqual(first.results[0].review, { decision: 'unreviewed' })
+  assert.equal('rating' in first.results[0].review, false)
   assert.equal(first.nextCursor, '3')
   const next = await fetch(
     `${base}/api/library?queryId=library-check&pageSize=3&cursor=${first.nextCursor}&sort=sharpestFirst`,
@@ -5055,6 +5070,14 @@ test('library-published fixture projects one durable Download Eligible M27 asset
       reason: 'AssetNotAvailableLocally',
     },
   ])
+  assert.equal(
+    detail.representations.filter(
+      (representation: { label?: string; state?: string }) =>
+        representation.label === 'Published delivery available' &&
+        representation.state === 'published',
+    ).length,
+    1,
+  )
   assert.equal(JSON.stringify(detail).includes('objectKey'), false)
   assert.equal(JSON.stringify(detail).includes('published/'), false)
   assert.equal(JSON.stringify(detail).includes('X-Amz'), false)
@@ -5085,10 +5108,15 @@ test('library-published fixture projects one durable Download Eligible M27 asset
   const recoveredDetail = await fetch(
     `http://127.0.0.1:${recoveredListener.port}/api/library/assets/asset-m27-001`,
   ).then((response) => response.json())
-  assert.deepEqual(recoveredDetail.actions[0], {
-    _tag: 'Eligible',
-    action: 'download',
-  })
+  assert.deepEqual(recoveredDetail.actions, detail.actions)
+  assert.equal(
+    recoveredDetail.representations.filter(
+      (representation: { label?: string; state?: string }) =>
+        representation.label === 'Published delivery available' &&
+        representation.state === 'published',
+    ).length,
+    1,
+  )
   const publication = databaseRow(
     PublicationRow,
     recovered.database

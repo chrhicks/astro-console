@@ -1,7 +1,149 @@
 .beta-library-workspace,
+.beta-library-catalog,
 .beta-library-phone {
   min-width: 0;
   color: var(--nb-text);
+}
+
+.beta-library-catalog {
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px 44px;
+  display: grid;
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 8px;
+}
+
+.beta-library-catalog-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 260px));
+  gap: 8px;
+}
+
+.beta-library-catalog-groups {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(340px, 1fr));
+  gap: 8px;
+}
+
+.beta-library-catalog-group {
+  min-width: 0;
+}
+
+.beta-library-catalog-assets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 6px;
+}
+
+.beta-library-catalog-assets > a,
+.beta-library-phone-groups nav > a {
+  min-width: 0;
+  border: 1px solid var(--nb-line);
+  border-radius: var(--nb-radius);
+  color: var(--nb-text);
+  background: var(--nb-surface-raised);
+  padding: 8px;
+  text-decoration: none;
+  display: grid;
+  gap: 5px;
+}
+
+.beta-library-catalog-assets > a:hover,
+.beta-library-phone-groups nav > a:hover {
+  border-color: var(--nb-accent);
+}
+
+.beta-library-catalog-assets > a:focus-visible,
+.beta-library-phone-groups nav > a:focus-visible {
+  outline: 2px solid var(--nb-focus);
+  outline-offset: 2px;
+}
+
+.beta-library-catalog-assets > a > b,
+.beta-library-phone-groups nav > a > b {
+  overflow: hidden;
+  font: 700 12px var(--nb-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.beta-library-catalog-assets > a > span,
+.beta-library-phone-groups nav > a > span {
+  color: var(--nb-muted);
+  font: 600 11px var(--nb-font-mono);
+}
+
+.beta-library-catalog-review {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--nb-muted);
+  font: 650 11px var(--nb-font-mono);
+}
+
+.beta-library-catalog-review > span {
+  color: var(--nb-accent);
+}
+
+.beta-library-catalog-review > b {
+  overflow: hidden;
+  color: var(--nb-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.beta-library-catalog-review[data-decision='accepted'] > b {
+  color: var(--nb-positive);
+}
+
+.beta-library-catalog-review[data-decision='rejected'] > b {
+  color: var(--nb-danger);
+}
+
+.beta-library-catalog-availability {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 6px;
+  row-gap: 2px;
+  white-space: normal;
+}
+
+.beta-library-catalog-availability > i {
+  grid-column: 1;
+  margin-top: 0.35em;
+}
+
+.beta-library-catalog-availability > b,
+.beta-library-catalog-availability > small {
+  min-width: 0;
+  grid-column: 2;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.beta-library-catalog-availability > b {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.beta-library-catalog-paging {
+  display: grid;
+  grid-template-columns: auto minmax(100px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--nb-muted);
+  font: 650 11px var(--nb-font-mono);
+  text-align: center;
 }
 
 .beta-library-workspace {
@@ -16,7 +158,7 @@
 .beta-library-assets {
   min-width: 0;
   display: grid;
-  grid-template-columns: auto auto auto;
+  grid-template-columns: auto auto auto auto;
   justify-content: start;
   align-items: center;
   gap: 4px;
@@ -101,8 +243,48 @@
 
 .beta-library-decision {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 8px;
+  overflow: auto;
+}
+
+.beta-library-review-fields .nb-panel-body {
+  padding-block: 8px;
+}
+
+.beta-library-rating {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border-block: 1px solid var(--nb-line);
+  padding: 7px 0;
+  color: var(--nb-muted);
+  font: 650 11px var(--nb-font-mono);
+}
+
+.beta-library-rating > span {
+  margin-right: auto;
+}
+
+.beta-library-rating button {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  border: 0;
+  padding: 0;
+  color: var(--nb-accent);
+  background: transparent;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.beta-library-rating button:disabled {
+  color: var(--nb-muted);
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 .beta-library-lineage .nb-panel-body {
@@ -156,6 +338,38 @@
   align-items: start;
 }
 
+.beta-library-compare {
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr) 300px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+}
+
+.beta-library-compare-picker {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  color: var(--nb-muted);
+  font: 650 11px var(--nb-font-mono);
+}
+
+.beta-library-compare-picker .nb-button {
+  flex: 0 0 auto;
+}
+
+.beta-library-compare .beta-library-evidence {
+  min-height: 360px;
+}
+
+.beta-library-compare-facts {
+  min-width: 0;
+  overflow: auto;
+}
+
 .beta-library-download {
   min-height: var(--nb-control-height);
   border: 1px solid var(--nb-line-strong);
@@ -192,6 +406,13 @@
   display: none;
 }
 
+.beta-library-phone-groups,
+.beta-library-phone-groups nav {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
 @media (max-width: 1050px) {
   .beta-library-review-grid {
     height: auto;
@@ -202,12 +423,31 @@
   .beta-library-decision {
     grid-column: 1 / -1;
   }
+
+  .beta-library-compare {
+    height: auto;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .beta-library-compare-facts {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 800px) and (min-width: 601px) {
-  .beta-library-review-grid,
-  .beta-library-availability {
+  .beta-library-catalog-groups {
     grid-template-columns: 1fr;
+  }
+
+  .beta-library-review-grid,
+  .beta-library-availability,
+  .beta-library-compare {
+    grid-template-columns: 1fr;
+  }
+
+  .beta-library-compare-picker,
+  .beta-library-compare-facts {
+    grid-column: auto;
   }
 
   .beta-library-evidence {
@@ -227,5 +467,9 @@
 
   .beta-library-phone .nb-data-list-item {
     grid-template-columns: minmax(88px, 0.8fr) minmax(0, 1.2fr);
+  }
+
+  .beta-library-phone-groups nav > a {
+    min-height: 52px;
   }
 }

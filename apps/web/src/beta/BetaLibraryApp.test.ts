@@ -74,6 +74,8 @@ const detail = Schema.decodeUnknownSync(LibraryAssetDetailSchema)({
   review: {
     revision: 2,
     decision: 'unreviewed',
+    rating: 4,
+    annotation: 'Keep the centered frame.',
     updatedAt: '2026-08-07T02:14:00.000Z',
   },
   representations: [{ label: 'Inspection preview', state: 'available' }],
@@ -94,6 +96,7 @@ const page = Schema.decodeUnknownSync(LibraryPageSchema)({
       format: detail.format,
       availability: detail.availability,
       comparisonGroupId: detail.comparisonGroupId,
+      review: { decision: 'unreviewed', rating: 4 },
     },
     {
       assetId: 'asset-m27-002',
@@ -102,6 +105,7 @@ const page = Schema.decodeUnknownSync(LibraryPageSchema)({
       format: 'fits',
       availability: 'temporarilyUnavailable',
       comparisonGroupId: 'm27-night-1',
+      review: { decision: 'rejected' },
     },
   ],
   catalogChanged: false,
@@ -122,20 +126,34 @@ test('renders one real frame-review task from Library contracts', () => {
       detail,
       onSelectAsset: () => undefined,
       onReview: async () => undefined,
+      onOpenProcess: () => undefined,
+      loadDetail: async () => detail,
     }),
   )
 
   assert.match(markup, /frame-m27-001/)
   assert.match(markup, /Frame review modes/)
   assert.match(markup, />Review</)
-  assert.match(markup, />Availability</)
+  assert.match(markup, />Compare</)
+  assert.match(markup, />Availability &amp; delivery</)
   assert.match(markup, /\/api\/library\/assets\/asset-m27-001\/preview/)
   assert.match(markup, /Inspection metrics/)
   assert.match(markup, /Preview controls/)
   assert.match(markup, />Accept</)
   assert.match(markup, />Reject</)
+  assert.match(markup, /Frame rating/)
+  assert.match(markup, /Rate 4/)
+  assert.match(markup, /Durable review note/)
+  assert.match(markup, /Keep the centered frame/)
+  assert.match(markup, /Save review details/)
+  assert.match(markup, /Open in Process/)
+  assert.match(markup, /Loaded service facts/)
+  assert.match(markup, /Browser-only view/)
+  assert.match(markup, /Inspection metrics/)
+  assert.match(markup, /Available · Not loaded/)
   assert.match(markup, /Previous/)
   assert.match(markup, /Next/)
+  assert.match(markup, /href="\/library\?ui=beta">Catalog/)
   assert.match(markup, /asset-m27-002\?ui=beta/)
   assert.match(markup, /<dt>Rig<\/dt>/)
   assert.match(markup, /rig-backyard-primary/)
@@ -143,8 +161,111 @@ test('renders one real frame-review task from Library contracts', () => {
   assert.match(markup, /camera-asi2600mc-pro/)
   assert.match(markup, /Backyard observatory · beta/)
   assert.match(markup, /aria-current="page">Library/)
-  assert.doesNotMatch(markup, /Compare/)
-  assert.doesNotMatch(markup, /Rating|Annotation/)
+  assert.doesNotMatch(markup, /Computed delta/)
+})
+
+test('renders a service-page catalog grouped only by projected identities', () => {
+  const markup = renderToStaticMarkup(
+    createElement(BetaLibraryApp, {
+      projection: controllerProjection,
+      loading: false,
+      page: { query, value: page },
+      onQuery: () => undefined,
+      onSelectAsset: () => undefined,
+    }),
+  )
+
+  assert.match(markup, /Library \/ Durable evidence/)
+  assert.match(markup, /<h1[^>]*>Catalog<\/h1>/)
+  assert.match(markup, /2 loaded records · snapshot 8/)
+  assert.match(markup, /Organize/)
+  assert.match(markup, /Service query/)
+  assert.match(markup, /<label[^>]*><span>Role<\/span>/)
+  assert.match(markup, /All roles/)
+  assert.match(markup, /<label[^>]*><span>Sort<\/span>/)
+  assert.match(markup, /Newest first/)
+  assert.match(markup, /m27-night-1/)
+  assert.match(markup, /2 loaded representations/)
+  assert.match(markup, /\/library\/assets\/asset-m27-001\?ui=beta/)
+  assert.match(markup, /\/library\/assets\/asset-m27-002\?ui=beta/)
+  assert.match(markup, /★ 4\/5/)
+  assert.match(markup, /Unreviewed/)
+  assert.match(markup, /☆ Not rated/)
+  assert.match(markup, /Rejected/)
+  assert.match(markup, /beta-library-catalog-availability/)
+  assert.match(markup, /Temporarily Unavailable/)
+  assert.match(markup, /Revision 1/)
+  assert.match(
+    markup,
+    /Night, target, and review-status facets are not projected/,
+  )
+  assert.match(markup, /First loaded page/)
+  assert.match(markup, /Next page/)
+  assert.doesNotMatch(markup, /Captured 25 Jul|M27 target|Accepted frames/)
+})
+
+test('wraps long catalog availability and revision inside the card', () => {
+  const styles = readFileSync(
+    new URL('./beta-library.css', import.meta.url),
+    'utf8',
+  )
+  const availabilityRule = styles.match(
+    /\.beta-library-catalog-availability\s*\{([^}]*)\}/s,
+  )?.[1]
+  const availabilityTextRule = styles.match(
+    /\.beta-library-catalog-availability > b,\s*\.beta-library-catalog-availability > small\s*\{([^}]*)\}/s,
+  )?.[1]
+  assert.ok(availabilityRule)
+  assert.ok(availabilityTextRule)
+  assert.match(availabilityRule, /width:\s*100%/)
+  assert.match(availabilityRule, /min-width:\s*0/)
+  assert.match(
+    availabilityRule,
+    /grid-template-columns:\s*7px minmax\(0,\s*1fr\)/,
+  )
+  assert.match(availabilityRule, /white-space:\s*normal/)
+  assert.match(availabilityTextRule, /min-width:\s*0/)
+  assert.match(availabilityTextRule, /white-space:\s*normal/)
+  assert.match(availabilityTextRule, /overflow-wrap:\s*anywhere/)
+})
+
+test('renders the published fixture facts without inventing delivery progress or expiry', () => {
+  const publishedDetail = Schema.decodeUnknownSync(LibraryAssetDetailSchema)({
+    ...detail,
+    availability: 'published',
+    representations: [
+      ...detail.representations,
+      { label: 'Published delivery available', state: 'published' },
+    ],
+    actions: [
+      { _tag: 'Eligible', action: 'download' },
+      {
+        _tag: 'Unavailable',
+        action: 'openInProcess',
+        reason: 'AssetNotAvailableLocally',
+      },
+    ],
+  })
+  const markup = renderToStaticMarkup(
+    createElement(BetaLibraryApp, {
+      projection: controllerProjection,
+      loading: false,
+      assetId: publishedDetail.assetId,
+      page: { query, value: page },
+      detail: publishedDetail,
+      onSelectAsset: () => undefined,
+      onOpenProcess: () => undefined,
+    }),
+  )
+
+  assert.match(markup, /Published delivery available/)
+  assert.match(markup, /Published delivery/)
+  assert.match(markup, /Download action<\/dt><dd>Eligible/)
+  assert.match(markup, /Process handoff/)
+  assert.match(markup, /Unavailable · Asset Not Available Locally/)
+  assert.match(markup, /Download original/)
+  assert.match(markup, /No grant expiry or transfer progress is projected/)
+  assert.doesNotMatch(markup, /2h|Preparing \d+%|32 MB/)
 })
 
 test('keeps preview failure truth separate from durable asset truth', () => {
@@ -169,7 +290,7 @@ test('keeps preview failure truth separate from durable asset truth', () => {
   assert.match(markup, /Inspection unavailable/)
   assert.match(markup, /Download original/)
   assert.match(markup, /Stable asset/)
-  assert.doesNotMatch(markup, /Inspection metrics/)
+  assert.doesNotMatch(markup, /aria-label="Inspection metrics"/)
 })
 
 test('renders complete Process output lineage without invented capture lineage', () => {
@@ -227,10 +348,58 @@ test('phone is evidence, availability, and lineage without mutation controls', (
   assert.match(markup, /camera-asi2600mc-pro/)
   assert.match(markup, /<dt>Source<\/dt>/)
   assert.match(markup, /Inspection record/)
+  assert.match(markup, /Review rating/)
+  assert.match(markup, /4 \/ 5/)
+  assert.match(markup, /Keep the centered frame/)
+  assert.match(markup, /Comparison group/)
+  assert.match(markup, /Inspection preview/)
   assert.doesNotMatch(markup, /<button/)
   assert.doesNotMatch(markup, /Preview controls/)
   assert.doesNotMatch(markup, /Inspection metrics/)
   assert.doesNotMatch(markup, /Download original/)
+})
+
+test('phone catalog is useful read-only service evidence with navigation only', () => {
+  const markup = renderToStaticMarkup(
+    createElement(BetaLibraryPhone, {
+      projection: controllerProjection,
+      loading: false,
+      page: { query, value: page },
+    }),
+  )
+
+  assert.match(markup, /Read-only Library phone projection/)
+  assert.match(markup, /<h1[^>]*>Catalog<\/h1>/)
+  assert.match(markup, /Catalog loaded/)
+  assert.match(markup, /2 loaded records/)
+  assert.match(markup, /Phone Library catalog/)
+  assert.match(markup, /m27-night-1/)
+  assert.match(markup, /asset-m27-001/)
+  assert.match(markup, /asset-m27-002/)
+  assert.match(markup, /★ 4\/5/)
+  assert.match(markup, /Unreviewed/)
+  assert.match(markup, /☆ Not rated/)
+  assert.match(markup, /Rejected/)
+  assert.match(markup, /Revision 1/)
+  assert.match(markup, /\?ui=beta/)
+  assert.doesNotMatch(markup, /<button|<input|<select|<textarea/)
+})
+
+test('phone keeps an unavailable asset route distinct from the catalog', () => {
+  const markup = renderToStaticMarkup(
+    createElement(BetaLibraryPhone, {
+      projection: controllerProjection,
+      loading: false,
+      assetId: detail.assetId,
+      detailState: 'unavailable',
+      page: { query, value: page },
+    }),
+  )
+
+  assert.match(markup, /<h1[^>]*>Frame review<\/h1>/)
+  assert.match(markup, /Asset detail unavailable/)
+  assert.match(markup, /Asset detail is unavailable/)
+  assert.doesNotMatch(markup, /Phone Library catalog/)
 })
 
 test('does not expose a review action without current asset detail', () => {
@@ -267,6 +436,39 @@ test('keeps desktop review controls disabled for a read-only or stale projection
   assert.match(markup, /<button[^>]*disabled=""[^>]*>Reject<\/button>/)
 })
 
+test('keeps Process handoff disabled when the service marks it unavailable', () => {
+  const unavailableProcess = Schema.decodeUnknownSync(LibraryAssetDetailSchema)(
+    {
+      ...detail,
+      actions: [
+        { _tag: 'Eligible', action: 'download' },
+        {
+          _tag: 'Unavailable',
+          action: 'openInProcess',
+          reason: 'AssetNotAvailableLocally',
+        },
+      ],
+    },
+  )
+  const markup = renderToStaticMarkup(
+    createElement(BetaLibraryApp, {
+      projection: controllerProjection,
+      loading: false,
+      page: { query, value: page },
+      detail: unavailableProcess,
+      onSelectAsset: () => undefined,
+      onOpenProcess: () => undefined,
+    }),
+  )
+
+  assert.match(
+    markup,
+    /<button[^>]*disabled=""[^>]*title="Unavailable: Asset Not Available Locally"[^>]*>Open in Process →<\/button>/,
+  )
+  assert.match(markup, /Process handoff/)
+  assert.match(markup, /Unavailable · Asset Not Available Locally/)
+})
+
 test('contains the wide review grid inside the available shell height', () => {
   const styles = readFileSync(
     new URL('./beta-library.css', import.meta.url),
@@ -283,6 +485,21 @@ test('contains the wide review grid inside the available shell height', () => {
     styles,
     /@media \(max-width: 1050px\)[\s\S]*?\.beta-library-review-grid\s*\{[^}]*height:\s*auto/,
   )
+})
+
+test('gives each desktop rating star a clear bounded hit area', () => {
+  const styles = readFileSync(
+    new URL('./beta-library.css', import.meta.url),
+    'utf8',
+  )
+  const ratingButtonRule = styles.match(
+    /\.beta-library-rating button\s*\{([^}]*)\}/s,
+  )?.[1]
+  assert.ok(ratingButtonRule)
+  assert.match(ratingButtonRule, /width:\s*40px/)
+  assert.match(ratingButtonRule, /min-width:\s*40px/)
+  assert.match(ratingButtonRule, /height:\s*40px/)
+  assert.match(ratingButtonRule, /flex:\s*0 0 40px/)
 })
 
 test('keeps both Library preview modes inside the bounded wide review row', () => {

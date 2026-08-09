@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–2 complete; Item 3 next**
 
 ## Current Position
 
@@ -138,6 +138,18 @@ not prove it, and a retained-frame crash gap resumes from its receipt and
 checksum with no second image read. No hardware endpoint was contacted by this
 simulator run.
 
+Accepted follow-on Item 2 is complete. The beta Library now has a service-page
+catalog, revision-guarded decision, 1–5 rating and note, browser-only peer
+comparison from loaded details, exact representation and action eligibility,
+and a typed `Open in Process` handoff that preserves `?ui=beta`. Catalog
+summaries expose only the review decision and optional rating; notes remain in
+asset detail. The published fixture is idempotent and invents no grant or
+transfer facts. Long availability states wrap inside compact catalog cards,
+and phone remains evidence-only navigation with no mutation controls. Local
+browser behavior and final Designer review passed at wide, compact, and 390 px.
+This is local fixture and service proof; it does not claim a new exposure,
+provider command, or outdoor image.
+
 After that simulator proof, an indoor GET-only readiness check reached ASCOM
 Remote at `192.168.4.104:11111`. Management and every device-property envelope
 returned `ErrorNumber: 0`. The configured identities were Telescope 0 `ASI
@@ -239,7 +251,7 @@ held desktop lease, not whether Plan or Observe happens to have another eligible
 action, so moving between workspaces does not make the controller read-only.
 
 Current automated proof is green: contracts 187/187, server 157/157, and web
-127/127. Functional browser proof covered the normal Plan-to-Verify workflow,
+134/134. Functional browser proof covered the normal Plan-to-Verify workflow,
 fresh acceptance projection, restart/no-replay, abort and reconciliation
 states. Automated browser projections cover the exact Observe-to-Library link
 and Library review state. Final read-only Designer review of the matching live
@@ -262,28 +274,34 @@ production deployment of the beta, mount movement, live abort behavior,
 production processing tools, or sky image quality from the covered indoor
 frame.
 
-## Accepted Next Four Items
+## Next Accepted Item
 
-1. **Review and exercise configured Acquire with the owner.** The configured
-   Alpaca target provider, retained-frame local solver, claim-before-write, and
-   restart-without-replay implementation are simulator-proven, and current
-   GET-only device readiness is confirmed. Install the reviewed host site values
-   before a run. Any small mount movement or live abort requires the owner to be
-   present. Physical
-   pointing, image-backed centering, and sky quality remain outdoor proof.
-2. **Complete beta Library judgment and Process entry.** Add the Nightbook
-   catalog, organization, rating, annotation, related-frame comparison,
-   representation state, exact lineage, and `Open in Process` handoff using
-   retained real-frame assets. Phone remains a useful read-only projection.
 3. **Move Process onto worker-owned execution.** Replace the synchronous
    simulation wrapper with durable Build and Develop work, checkpoints, retry,
    synchronized Preview, explicit Apply history, save, discard, and measured
    host-pressure behavior. Selecting a production processing adapter remains a
    separate owner decision.
+
+## Later Accepted Items
+
 4. **Audit and promote the beta.** Verify all four exact Nightbook workflows
    and shell states against service truth, run functional and Designer review
    at wide, compact, and 390 px phone widths, and make route promotion an
    explicit owner decision. Retire the old presentation only after promotion.
+5. **Repair the scheduled host backup job.** The pre-update backup and isolated
+   restore drill succeeded, but `astro-console-backup.timer` currently calls a
+   script that expects container `astro-console-origin` while Compose creates
+   `deployment-origin-1`. Reconcile that host-only identity before relying on
+   the timer again.
+6. **Remove unused installation staging copies.** After the release and backup
+   retention boundary is reviewed, remove only the unused failed-build and
+   index-download staging copies under the explicit `chicks` home paths. The
+   deployed `776242a` release, installed Astrometry.net indexes, and SSD backup
+   remain retained.
+
+Configured Acquire physical pointing, image-backed centering, sky quality, and
+live abort remain owner-observed outdoor proof for a suitable nighttime window.
+They do not block the daytime Item 3 work.
 
 The unavailable filter wheel stays explicit throughout this sequence. The
 current bounded target path continues to use `hold`; park is not added as an

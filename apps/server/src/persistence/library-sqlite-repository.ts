@@ -183,10 +183,14 @@ export const sqliteLibraryServiceLayer = (
             try: readSnapshotVersion,
             catch: () => new LibraryPersistenceUnavailable(),
           })
+          const results = yield* Effect.forEach(
+            rows.slice(0, query.pageSize),
+            projectLibraryRow,
+          )
           return yield* Schema.decodeUnknownEffect(LibraryPage)({
             queryId: query.queryId,
             querySnapshotVersion: snapshotVersion,
-            results: rows.slice(0, query.pageSize).map(projectLibraryRow),
+            results,
             ...(rows.length > query.pageSize
               ? { nextCursor: String(cursor + query.pageSize) }
               : {}),
@@ -253,14 +257,31 @@ export const sqliteLibraryServiceLayer = (
     ),
   )
 
-const projectLibraryRow = (asset: typeof LibraryAssetRow.Type) => ({
-  assetId: asset.asset_id,
-  revision: asset.revision,
-  role: asset.role,
-  format: asset.format,
-  availability: asset.availability,
-  comparisonGroupId: asset.comparison_group_id,
-})
+const projectLibraryRow = Effect.fn('Server.LibraryService.projectLibraryRow')(
+  function* (asset: typeof LibraryAssetRow.Type) {
+    const detailRaw = yield* Effect.try({
+      try: () => JSON.parse(asset.detail) as unknown,
+      catch: () => new LibraryPersistenceUnavailable(),
+    })
+    const detail = yield* Schema.decodeUnknownEffect(LibraryDetail)(
+      detailRaw,
+    ).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
+    return {
+      assetId: asset.asset_id,
+      revision: asset.revision,
+      role: asset.role,
+      format: asset.format,
+      availability: asset.availability,
+      comparisonGroupId: asset.comparison_group_id,
+      review: {
+        decision: detail.review?.decision ?? 'unreviewed',
+        ...(detail.review?.rating === undefined
+          ? {}
+          : { rating: detail.review.rating }),
+      },
+    }
+  },
+)
 
 const libraryAssetId = (assetId: string, requireStableId = true) =>
   Schema.decodeUnknownEffect(LibraryAssetDetail.fields.assetId)(assetId).pipe(
@@ -428,6 +449,10 @@ export function seedLibrary(db: DatabaseSync) {
 
 export function installPublishedLibraryFixture(database: DatabaseSync) {
   const assetId = 'asset-m27-001'
+  const publishedRepresentation = {
+    label: 'Published delivery available',
+    state: 'published',
+  }
   const raw: unknown = database
     .prepare('SELECT detail FROM library_assets WHERE asset_id=?')
     .get(assetId)
@@ -447,8 +472,12 @@ export function installPublishedLibraryFixture(database: DatabaseSync) {
         ...libraryDetail,
         availability: 'published',
         representations: [
-          ...libraryDetail.representations,
-          { label: 'Published delivery available', state: 'published' },
+          ...libraryDetail.representations.filter(
+            (representation) =>
+              representation.label !== publishedRepresentation.label ||
+              representation.state !== publishedRepresentation.state,
+          ),
+          publishedRepresentation,
         ],
       }),
       assetId,
