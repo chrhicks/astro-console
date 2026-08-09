@@ -277,10 +277,13 @@ frame.
 ## Next Accepted Item
 
 3. **Move Process onto worker-owned execution.** Replace the synchronous
-   simulation wrapper with durable Build and Develop work, checkpoints, retry,
-   synchronized Preview, explicit Apply history, save, discard, and measured
-   host-pressure behavior. Selecting a production processing adapter remains a
-   separate owner decision.
+   simulation wrapper with durable Build and Develop work. Start from one
+   compatible Library group through an explained recommended source set, with
+   platform `Include`/`Exclude`/`Review` kept separate from owner
+   `Accepted`/`Rejected`/`Unreviewed` judgment. Review only the smaller exception
+   queue, then preserve checkpoints, retry, synchronized Preview, explicit Apply
+   history, save, discard, and measured host-pressure behavior. Selecting a
+   production processing adapter remains a separate owner decision.
 
 ## Later Accepted Items
 

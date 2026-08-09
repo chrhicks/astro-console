@@ -511,7 +511,9 @@ Every frame should expose:
 - filename and durable asset identity;
 - dimensions and pixel format;
 - clipping, sharpness, shape, drift, and framing metrics when available;
-- why automation accepted or rejected it;
+- the platform's explained `Include`, `Exclude`, or `Review` determination,
+  kept separate from the owner's durable `Accepted`, `Rejected`, or
+  `Unreviewed` judgment;
 - provenance and related processing outputs.
 
 Review supports compare, accept, reject, rate, annotate, reveal, download, and
@@ -565,7 +567,12 @@ external Nightbook demo it names.
 
 ### Responsibilities
 
-- select source assets;
+- select one compatible source group through a service-owned recommended set,
+  without requiring the owner to review every frame or permitting a global
+  cross-target selection;
+- use explained `Include`, `Exclude`, and `Review` determinations to reduce a
+  large source group to a small exception queue while keeping manual
+  `Accepted`, `Rejected`, and `Unreviewed` judgment distinct;
 - build a durable linear master through calibration, debayer, alignment, frame
   evaluation, and stacking;
 - visually develop that master through one current, non-destructive edit
@@ -611,6 +618,31 @@ and the UI names that condition directly.
 
 Review and Process remain separate because they answer different questions:
 `Is this evidence good?` versus `How should it be transformed?`
+
+### Source Selection And Review Precedence
+
+The normal entry is a Library comparison or capture group action named
+`Build recommended set`, not a global Library multi-select. The service shows
+the exact included, excluded, and needs-review counts before Process starts.
+The source group may contain hundreds of frames; the owner normally reviews
+only the smaller needs-review queue.
+
+Manual judgment has clear precedence. `Rejected` frames are excluded.
+`Accepted` frames are included unless bytes are unavailable, corrupt,
+incomplete, or technically incompatible with the group. An accepted frame may
+override a quality-based platform exclusion, and the UI names that override.
+An `Unreviewed` frame follows an `Include` or `Exclude` determination; an
+`Unreviewed` frame with a `Review` determination enters the exception queue.
+Technical ineligibility cannot be overridden and always includes an exact
+reason.
+
+Platform determination may use retained capture integrity, pointing evidence,
+inspection metrics, and group-relative Build evaluation. A plate solve supports
+pointing evidence but is not, by itself, a frame-quality verdict. Each
+determination records its rationale and measured facts. Resolving a needs-review
+item with `Accept` or `Reject` updates the durable Library judgment. Starting
+Process freezes the exact candidate source set and its decisions for that
+session; later Library changes do not silently alter active work.
 
 ## 9. Local Plate-Solve Evidence
 

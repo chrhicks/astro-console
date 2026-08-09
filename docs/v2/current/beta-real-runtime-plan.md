@@ -303,11 +303,59 @@ local fixture and service proof only.
 
 ### 8. Move Process onto worker-owned execution
 
-- Replace the synchronous Process simulation wrapper with durable worker-owned
-  Build and Develop workflows, checkpoints, retry, save, discard, and measured
-  pressure.
+- Replace the synchronous Process simulation wrapper with a durable work ledger
+  and a separate worker that claims and completes Build and Develop work. A
+  browser command records intent and returns current truth; it does not complete
+  its own worker result.
+- Enter Process from one compatible Library comparison or capture group through
+  `Build recommended set`. Do not add a global Library multi-select. Project an
+  exact source summary such as `300 frames · 272 included · 18 excluded · 10
+need review`, and let the owner inspect only the smaller exception queue.
+- Keep the platform's explained `Include`, `Exclude`, and `Review`
+  determination separate from the owner's durable `Accepted`, `Rejected`, and
+  `Unreviewed` judgment. Manual rejection excludes a frame. Manual acceptance
+  overrides a quality exclusion but cannot override corrupt, incomplete,
+  unavailable, or incompatible evidence. Unreviewed frames follow Include or
+  Exclude; Review enters the exception queue.
+- Show each needs-review frame with its preview, determination rationale, and
+  metrics relative to its group. `Accept` and `Reject` resolve the durable
+  Library judgment and update the proposed set. Freeze the exact candidate set
+  and decisions when the owner starts Process; later Library review changes do
+  not silently alter that session.
+- Build through Validate, Calibrate, Debayer, Align, Evaluate, and Stack. Keep
+  named decision gates, last-valid checkpoints, bounded failure output, and
+  retry only for the affected remaining stages. Plate-solve evidence may inform
+  pointing and framing but does not act as the sole quality verdict.
+- Develop through synchronized Preview, explicit Apply, one linear undo/redo
+  history, reference comparison, and checkpoint-bound retry. Keep Preview,
+  applied history, and saved Library artifacts visibly distinct.
+- Save selected retained outputs to Library with checksums and lineage; discard
+  only unsaved derived work; resume unfinished sessions after refresh or service
+  restart. Processing may continue during observing and throttles only for
+  named, measured host pressure.
 - Select one production processing adapter only through a separate owner
-  decision; current V2.1 does not yet select one.
+  decision. Use a deterministic file-backed adapter for this worker and product
+  proof without claiming Siril, RCAstro, or production processing quality.
+
+Deliver this item as four end-to-end review slices:
+
+1. durable worker claims, attempts, outputs, restart reconciliation, and one
+   file-backed Build result;
+2. recommended source selection, the small review queue, Build gates,
+   checkpoints, and scoped retry;
+3. worker-owned Preview, Apply, linear history, reference comparison, and
+   Develop retry; and
+4. save, discard, resume, session switching, measured pressure, complete
+   browser review, and current-document closeout.
+
+Exit proof includes worker restart after claim without duplicate execution,
+stale completion rejection, exact checkpoint retry, refresh during Preview and
+Apply, idempotent Library save with lineage, source-preserving discard, normal
+observing and processing together, injected measured-pressure throttling, and
+functional plus Designer review at wide, compact, and 390 px phone widths.
+This proves durable local Process execution for the selected scenarios. It does
+not prove a production processing adapter, external-tool output quality,
+hardware behavior, outdoor capture, or beta route promotion.
 
 ### 9. Audit and promote the beta
 
