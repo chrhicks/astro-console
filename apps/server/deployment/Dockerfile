@@ -4,6 +4,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/server/package.json ./apps/server/package.json
 COPY apps/web/package.json ./apps/web/package.json
+COPY apps/web/vendor/ui-package-trials/nightbook-ui-0.1.1-sha256-59482f0a8ffbb25d3458ddfec5f569020ffc05e8531d15add46fda9f0391d262.tgz ./apps/web/vendor/ui-package-trials/nightbook-ui-0.1.1-sha256-59482f0a8ffbb25d3458ddfec5f569020ffc05e8531d15add46fda9f0391d262.tgz
 COPY packages/v2-contracts/package.json ./packages/v2-contracts/package.json
 RUN npm ci
 
