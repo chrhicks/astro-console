@@ -95,6 +95,9 @@ export type PlateSolveEvidenceResult =
 export function createPlateSolveWorker(
   database: DatabaseSync,
   config: PlateSolveWorkerConfig,
+  observability: {
+    readonly traceExecute?: <A>(run: () => Promise<A>) => Promise<A>
+  } = {},
 ) {
   const execute = config.execute ?? executeSolveField
   const solveEvidence = async (
@@ -167,11 +170,15 @@ export function createPlateSolveWorker(
         astrometryConfig,
         `add_path ${config.indexesRoot}\nautoindex\n`,
       )
-      execution = await execute({
-        executable: config.executable,
-        args,
-        timeoutMs: config.timeoutMs,
-      })
+      const run = () =>
+        execute({
+          executable: config.executable,
+          args,
+          timeoutMs: config.timeoutMs,
+        })
+      execution = await (observability.traceExecute === undefined
+        ? run()
+        : observability.traceExecute(run))
     } catch {
       execution = { exitCode: -1, stdout: '', stderr: 'solver process failed' }
     }

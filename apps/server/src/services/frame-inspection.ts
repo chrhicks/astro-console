@@ -27,78 +27,76 @@ export type FrameInspectionResult = {
 }
 
 /** Deterministic local inspection only; it never invokes an image processor. */
-export const inspectCapturedFrame = Effect.fn('Server.inspectCapturedFrame')(
-  function* (
-    database: DatabaseSync,
-    storage: FrameInspectionStorage,
-    assetId: string,
-  ) {
-    const asset = yield* Effect.sync(() =>
-      Schema.decodeUnknownSync(Schema.optional(AssetRow))(
-        database
-          .prepare(
-            'SELECT asset_id,format,detail FROM library_assets WHERE asset_id=?',
-          )
-          .get(assetId),
-      ),
-    )
-    if (asset === undefined)
-      return yield* Effect.die(new Error('unknown captured asset'))
-    const event = Schema.decodeUnknownSync(Schema.optional(EventRow))(
+export const inspectCapturedFrame = Effect.fnUntraced(function* (
+  database: DatabaseSync,
+  storage: FrameInspectionStorage,
+  assetId: string,
+) {
+  const asset = yield* Effect.sync(() =>
+    Schema.decodeUnknownSync(Schema.optional(AssetRow))(
       database
-        .prepare('SELECT checksum FROM captured_frame_events WHERE asset_id=?')
+        .prepare(
+          'SELECT asset_id,format,detail FROM library_assets WHERE asset_id=?',
+        )
         .get(assetId),
-    )
-    const inspection = inspect(asset, event?.checksum, storage)
-    const existing = Schema.decodeUnknownSync(Detail)(
-      JSON.parse(asset.detail),
-    ).inspection
-    if (
-      existing !== undefined &&
-      JSON.stringify(existing) === JSON.stringify(inspection)
-    )
-      return {
-        inspection,
-        cursor: stateNumber(database, 'eventCursor'),
-      } satisfies FrameInspectionResult
-    const cursor = stateNumber(database, 'eventCursor') + 1
-    const detail = { ...JSON.parse(asset.detail), inspection }
-    database.exec('BEGIN IMMEDIATE')
-    try {
-      database
-        .prepare(
-          'INSERT INTO frame_inspections VALUES (?,?,?) ON CONFLICT(asset_id) DO UPDATE SET state=excluded.state,detail=excluded.detail',
-        )
-        .run(assetId, inspection._tag, JSON.stringify(inspection))
-      database
-        .prepare(
-          'UPDATE library_assets SET detail=?,updated_at=? WHERE asset_id=?',
-        )
-        .run(JSON.stringify(detail), new Date().toISOString(), assetId)
-      database
-        .prepare('UPDATE state SET value=? WHERE key=?')
-        .run(JSON.stringify(cursor), 'eventCursor')
-      database
-        .prepare('UPDATE state SET value=? WHERE key=?')
-        .run(
-          JSON.stringify(stateNumber(database, 'snapshotVersion') + 1),
-          'snapshotVersion',
-        )
-      database
-        .prepare('INSERT INTO events VALUES (?,?,?)')
-        .run(
-          cursor,
-          'FrameInspectionUpdated',
-          JSON.stringify({ assetId, inspection }),
-        )
-      database.exec('COMMIT')
-      return { inspection, cursor } satisfies FrameInspectionResult
-    } catch (cause) {
-      database.exec('ROLLBACK')
-      return yield* Effect.die(cause)
-    }
-  },
-)
+    ),
+  )
+  if (asset === undefined)
+    return yield* Effect.die(new Error('unknown captured asset'))
+  const event = Schema.decodeUnknownSync(Schema.optional(EventRow))(
+    database
+      .prepare('SELECT checksum FROM captured_frame_events WHERE asset_id=?')
+      .get(assetId),
+  )
+  const inspection = inspect(asset, event?.checksum, storage)
+  const existing = Schema.decodeUnknownSync(Detail)(
+    JSON.parse(asset.detail),
+  ).inspection
+  if (
+    existing !== undefined &&
+    JSON.stringify(existing) === JSON.stringify(inspection)
+  )
+    return {
+      inspection,
+      cursor: stateNumber(database, 'eventCursor'),
+    } satisfies FrameInspectionResult
+  const cursor = stateNumber(database, 'eventCursor') + 1
+  const detail = { ...JSON.parse(asset.detail), inspection }
+  database.exec('BEGIN IMMEDIATE')
+  try {
+    database
+      .prepare(
+        'INSERT INTO frame_inspections VALUES (?,?,?) ON CONFLICT(asset_id) DO UPDATE SET state=excluded.state,detail=excluded.detail',
+      )
+      .run(assetId, inspection._tag, JSON.stringify(inspection))
+    database
+      .prepare(
+        'UPDATE library_assets SET detail=?,updated_at=? WHERE asset_id=?',
+      )
+      .run(JSON.stringify(detail), new Date().toISOString(), assetId)
+    database
+      .prepare('UPDATE state SET value=? WHERE key=?')
+      .run(JSON.stringify(cursor), 'eventCursor')
+    database
+      .prepare('UPDATE state SET value=? WHERE key=?')
+      .run(
+        JSON.stringify(stateNumber(database, 'snapshotVersion') + 1),
+        'snapshotVersion',
+      )
+    database
+      .prepare('INSERT INTO events VALUES (?,?,?)')
+      .run(
+        cursor,
+        'FrameInspectionUpdated',
+        JSON.stringify({ assetId, inspection }),
+      )
+    database.exec('COMMIT')
+    return { inspection, cursor } satisfies FrameInspectionResult
+  } catch (cause) {
+    database.exec('ROLLBACK')
+    return yield* Effect.die(cause)
+  }
+})
 
 function inspect(
   asset: typeof AssetRow.Type,

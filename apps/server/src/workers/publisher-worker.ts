@@ -4,6 +4,14 @@ import { relative, resolve } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
 import type { ProcessSaveStorage } from '../services/process-save.ts'
+import type {
+  PipelineStage,
+  PublisherWorkResult,
+} from '../observability/pipeline-telemetry.ts'
+import type {
+  SqliteBacklogObserver,
+  SqliteTraceSync,
+} from '../observability/sqlite-telemetry.ts'
 
 const Work = Schema.Struct({ assetId: Schema.String, checksum: Schema.String })
 const Asset = Schema.Struct({
@@ -26,6 +34,7 @@ const Publication = Schema.Struct({
   ]),
 })
 const ClaimedWork = Schema.Struct({ id: Schema.String, payload: Schema.String })
+const CountRow = Schema.Struct({ count: Schema.Int })
 export type PublisherFile = {
   readonly path: string
   readonly bytes: number
@@ -48,7 +57,27 @@ export function createPublisherWorker(
   database: DatabaseSync,
   storage: Pick<ProcessSaveStorage, 'outputsRoot'>,
   provider: PublisherProvider,
+  observability: {
+    readonly traceWork?: (
+      run: () => Promise<PublisherWorkResult>,
+    ) => Promise<PublisherWorkResult>
+    readonly traceStage?: <A>(
+      stage: Extract<PipelineStage, `publisher.${string}`>,
+      run: () => Promise<A>,
+    ) => Promise<A>
+    readonly traceSqlite?: SqliteTraceSync
+    readonly observeSqliteBacklog?: SqliteBacklogObserver
+  } = {},
 ) {
+  const traceStage = <A>(
+    stage: Extract<PipelineStage, `publisher.${string}`>,
+    run: () => Promise<A>,
+  ) =>
+    observability.traceStage === undefined
+      ? run()
+      : observability.traceStage(stage, run)
+  const traceSqlite: SqliteTraceSync =
+    observability.traceSqlite ?? ((_operation, run) => run())
   const pass = async (workerId = 'publisher-worker') => {
     const token = randomUUID()
     const now = new Date().toISOString()
@@ -61,35 +90,50 @@ export function createPublisherWorker(
           "UPDATE outbox SET state='failed',claim_token=NULL,claimed_by=NULL,claim_until=NULL,last_error='publisher lease expired',retry_after=? WHERE kind='PublishAsset' AND state='claimed' AND claim_until<=?",
         )
         .run(now, now)
-      const raw: unknown = database
-        .prepare(
-          "SELECT id,payload FROM outbox WHERE kind='PublishAsset' AND state IN ('pending','failed') AND (retry_after IS NULL OR retry_after<=?) ORDER BY rowid LIMIT 1",
-        )
-        .get(now)
-      const work = Schema.decodeUnknownSync(Schema.optional(ClaimedWork))(raw)
-      if (work === undefined) {
+      const backlog = Schema.decodeUnknownSync(CountRow)(
+        database
+          .prepare(
+            "SELECT count(*) AS count FROM outbox WHERE kind='PublishAsset' AND state IN ('pending','failed') AND (retry_after IS NULL OR retry_after<=?)",
+          )
+          .get(now),
+      ).count
+      observability.observeSqliteBacklog?.('publisher', backlog)
+      if (backlog === 0) {
         database.exec('COMMIT')
         transactionOpen = false
         return 'none' as const
       }
-      const claimed = database
-        .prepare(
-          "UPDATE outbox SET state='claimed',claim_token=?,claimed_by=?,claim_until=?,attempts=attempts+1 WHERE id=? AND state IN ('pending','failed')",
+      const work = traceSqlite('publisher.outbox.claim', () => {
+        const raw: unknown = database
+          .prepare(
+            "SELECT id,payload FROM outbox WHERE kind='PublishAsset' AND state IN ('pending','failed') AND (retry_after IS NULL OR retry_after<=?) ORDER BY rowid LIMIT 1",
+          )
+          .get(now)
+        const selected = Schema.decodeUnknownSync(Schema.optional(ClaimedWork))(
+          raw,
         )
-        .run(
-          token,
-          workerId,
-          new Date(Date.now() + 30_000).toISOString(),
-          work.id,
-        )
-      if (claimed.changes !== 1) {
-        database.exec('COMMIT')
-        transactionOpen = false
-        return 'none' as const
-      }
+        if (selected === undefined) return undefined
+        const claimed = database
+          .prepare(
+            "UPDATE outbox SET state='claimed',claim_token=?,claimed_by=?,claim_until=?,attempts=attempts+1 WHERE id=? AND state IN ('pending','failed')",
+          )
+          .run(
+            token,
+            workerId,
+            new Date(Date.now() + 30_000).toISOString(),
+            selected.id,
+          )
+        return claimed.changes === 1 ? selected : undefined
+      })
       database.exec('COMMIT')
       transactionOpen = false
-      return await publish(work, token)
+      if (work === undefined) {
+        return 'none' as const
+      }
+      const run = () => publish(work, token)
+      return await (observability.traceWork === undefined
+        ? run()
+        : observability.traceWork(run))
     } catch (error) {
       if (transactionOpen)
         try {
@@ -138,8 +182,10 @@ export function createPublisherWorker(
       )
     let file: PublisherFile
     try {
-      const path = outputPath(storage.outputsRoot, asset)
-      file = await checksumFile(path)
+      file = await traceStage('publisher.localRead', async () => {
+        const path = outputPath(storage.outputsRoot, asset)
+        return checksumFile(path)
+      })
     } catch {
       return settleFailure(
         claimed.id,
@@ -214,11 +260,13 @@ export function createPublisherWorker(
     let verified:
       { readonly checksum: string; readonly bytes: number } | undefined
     try {
-      await provider.put(key, file, {
-        assetId: asset.asset_id,
-        checksum: work.checksum,
-      })
-      verified = await provider.head(key)
+      await traceStage('publisher.put', () =>
+        provider.put(key, file, {
+          assetId: asset.asset_id,
+          checksum: work.checksum,
+        }),
+      )
+      verified = await traceStage('publisher.verify', () => provider.head(key))
     } catch {
       return settleFailure(
         claimed.id,
@@ -238,7 +286,7 @@ export function createPublisherWorker(
       )
     return settlePublished(claimed.id, token, asset, work.checksum)
   }
-  const settlePublished = (
+  const settlePublishedUntraced = (
     outboxId: string,
     token: string,
     asset: typeof Asset.Type,
@@ -268,7 +316,18 @@ export function createPublisherWorker(
       throw error
     }
   }
-  const settleFailure = (
+  const settlePublished = (
+    outboxId: string,
+    token: string,
+    asset: typeof Asset.Type,
+    checksum: string,
+  ) =>
+    traceStage('publisher.settle', async () =>
+      traceSqlite('publisher.outbox.settle', () =>
+        settlePublishedUntraced(outboxId, token, asset, checksum),
+      ),
+    )
+  const settleFailureUntraced = (
     outboxId: string,
     token: string,
     assetId: string | undefined,
@@ -310,6 +369,18 @@ export function createPublisherWorker(
       throw error
     }
   }
+  const settleFailure = (
+    outboxId: string,
+    token: string,
+    assetId: string | undefined,
+    state: (typeof Publication.Type)['state'],
+    message: string,
+  ) =>
+    traceStage('publisher.settle', async () =>
+      traceSqlite('publisher.outbox.settle', () =>
+        settleFailureUntraced(outboxId, token, assetId, state, message),
+      ),
+    )
   const projectAvailability = (
     assetId: string,
     availability: 'published' | 'temporarilyUnavailable' | 'failedPublication',

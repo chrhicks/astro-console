@@ -4276,6 +4276,8 @@ test('production admission rechecks normalized bootstrap policy and revokes remo
     ).toString('base64url')
     return `${header}.${payload}.${sign('RSA-SHA256', Buffer.from(`${header}.${payload}`), keys.privateKey).toString('base64url')}`
   }
+  const jwksOutcomes: Array<string> = []
+  const admissionReasons: Array<string> = []
   const keyResolver = createJwksKeyResolver({
     url: 'https://access.example/certs',
     fetcher: async () => ({
@@ -4292,6 +4294,7 @@ test('production admission rechecks normalized bootstrap policy and revokes remo
           ],
         }),
     }),
+    observe: (outcome) => jwksOutcomes.push(outcome),
   })
   const config = {
     issuer,
@@ -4306,7 +4309,8 @@ test('production admission rechecks normalized bootstrap policy and revokes remo
         role: 'viewer' as const,
       },
     ],
-  }
+    observe: (reason) => admissionReasons.push(reason),
+  } satisfies Parameters<typeof createProductionAccessAdmission>[0]
   const admitted = createProductionAccessAdmission(config)
   const request = {
     headers: { 'cf-access-jwt-assertion': claim('viewer@example.com') },
@@ -4330,6 +4334,13 @@ test('production admission rechecks normalized bootstrap policy and revokes remo
   )
   const revoked = createProductionAccessAdmission({ ...config, bootstrap: [] })
   assert.equal(await revoked(request), undefined)
+  assert.equal(await admitted({ headers: {} }), undefined)
+  assert.deepEqual(jwksOutcomes, ['success'])
+  assert.deepEqual(admissionReasons, [
+    'admitted',
+    'notMember',
+    'missingOrInvalidToken',
+  ])
   const bootstrap = first(config.bootstrap)
   assert.throws(
     () =>

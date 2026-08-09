@@ -293,6 +293,78 @@ that identity, request bodies, domain IDs, annotations, idempotency values,
 filenames, and lineage are absent from exported payloads. The full server suite
 passed 155 tests with 3 expected skips.
 
+A third local follow-on, not yet deployed, completes the telemetry base for
+background executor and recovery work, projection snapshot and bounded SSE
+setup, frame intake and inspection, plate solving, publisher storage stages,
+startup, and admission. It adds independently opt-in OTLP logs and metrics: the
+structured `astro.operation` log and `astro.operation.count` metric use only
+closed operation and outcome fields. SSE connect, disconnect, publish, and
+write failure are operational events; heartbeats and connection lifetimes are
+not traced. Empty executor polls also emit no work span. Deterministic local
+collectors and fake workers/providers prove export and exclusions without a
+hardware call. Identity, request data, raw IDs, coordinates, paths, object
+keys, checksums, provider text, JWT details, email, and SQL are excluded.
+Browser-only cursor-gap reasons remain a follow-on rather than a new diagnostics
+contract.
+The full server suite passed 163 tests with 3 expected skips.
+
+A fourth local follow-on adds named SQLite spans for projection reads, command
+transactions, executor work selection and settlement, and publisher outbox
+claim and settlement. It exports operation count, duration, and bounded
+executor/publisher backlog metrics. Empty worker polls update backlog gauges but
+do not create spans. SQL text, bound values, raw SQLite errors, and domain IDs
+remain excluded. The full server suite passed 165 tests with 3 expected skips.
+
+An isolated Arch candidate then proved stored `SQLite.projection.snapshot.read`
+and `SQLite.command.state.transaction` spans under their HTTP and business-flow
+parents, plus stored SQLite count and duration metrics. The candidate used its
+own database volume and fixture command only, then exited cleanly. Production
+Astro Console remained unchanged and healthy.
+
+The Arch SigNoz deployment now also has a separate metrics-only infrastructure
+agent. It exports host CPU, memory, load, filesystem capacity and inodes, disk
+I/O, network, paging, and process counts, plus per-container CPU, memory,
+network, and block I/O. The agent is non-root. It mounts `/proc`, `/sys`, an
+empty root-filesystem marker, and `/mnt/storage` read-only; it does not receive
+the rest of the host root. Docker statistics pass through a read-only socket
+proxy, and neither service publishes host ports. SigNoz stored 37 host/container
+metric families including the production `deployment/origin` container and
+filesystem series for `/` and `/mnt/storage`. Foundry recreated only the SigNoz
+ingester while applying the initial Compose definition; the datastores remained
+running, earlier traces remained available, and a new smoke trace was accepted
+after restart. The filesystem follow-on recreated only the infrastructure agent.
+
+A fifth local follow-on adds Node.js runtime metrics to the same Effect-owned
+OTLP lifecycle. It samples event-loop utilization and delay, V8 heap used and
+limit, and bounded GC duration/type data. It creates no spans or logs and does
+not start a second SDK, provider, exporter, or runtime. The serializer keeps
+the OTLP metric units (`1`, `s`, and `By`) and removes Effect's duplicate
+data-point `unit` label. Deterministic tests prove all eleven source metric
+names, lifecycle cleanup, metrics-only export, correct protobuf units, and the
+absence of process arguments, environment values, paths, or identity data. The
+full server suite passed 167 tests with 3 expected skips; the build, format
+check, focused lint, and diff check passed. The known full-lint baseline remains
+23 findings outside this runtime slice.
+
+The isolated Arch image `astro-console-origin:otel-runtime-20260809-1` then ran
+as `astro-console-runtime-candidate` on loopback port `28093` with its own
+volume. SigNoz stored all event-loop, heap, and GC series for service
+`astro-console-runtime-candidate`; the time-series metadata has the expected
+units and zero data-point series with a `unit` label. The Astro Console
+operations dashboard rendered the runtime candidate together with stored HTTP,
+startup, projection, admission, and SQLite signals. The candidate exited zero.
+The production origin and SigNoz ingester identities and start times did not
+change, and the production `/health/live` route remained alive.
+
+The SigNoz workspace now contains the `Astro Console Operations` dashboard and
+four enabled rules for filesystem usage, missing production-origin telemetry,
+SQLite trouble or sustained backlog, and unavailable HTTP/startup outcomes.
+All four rules evaluated as OK. They use routing policies but no notification
+channel is configured, so they retain state and history without sending a
+message. The dashboard export and exact rule definitions are versioned in the
+separate `arch-sig-noz` deployment repository. Backup/SMART collection, image
+pinning, and SigNoz retention changes remain intentionally deferred.
+
 An isolated Arch `m27` fixture candidate exported each slice to the host SigNoz
 collector without changing the production container or database. SigNoz stored
 accepted Plan trace `8e27fd74a2ce4b1d831e2c63facecf95`, accepted Observe

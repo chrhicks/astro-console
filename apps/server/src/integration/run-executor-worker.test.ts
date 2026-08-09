@@ -725,6 +725,84 @@ test('an active exposure publishes its observing transition only once', async ()
   fixture.database.close()
 })
 
+test('an empty executor pass does not invoke work tracing', async () => {
+  const provider: CameraProviderShape = {
+    startExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
+    abortExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
+    readState: () =>
+      Effect.succeed({
+        observedAt: '2026-08-08T18:00:15.000Z',
+        cameraState: 'idle',
+      }),
+  }
+  const fixture = prepare(':memory:', provider)
+  fixture.database.exec('DELETE FROM run_executor_work')
+  let traced = 0
+  let sqliteTraced = 0
+  const backlogs: number[] = []
+  const worker = createRunExecutorWorker({
+    database: fixture.database,
+    stateRepository: fixture.stateRepository,
+    cameraProvider: provider,
+    traceWork: async (_kind, run) => {
+      traced += 1
+      return run()
+    },
+    traceSqlite: (_operation, run) => {
+      sqliteTraced += 1
+      return run()
+    },
+    observeSqliteBacklog: (backlog, count) => {
+      assert.equal(backlog, 'executor')
+      backlogs.push(count)
+    },
+  })
+  assert.equal(await worker.pass(), 'none')
+  assert.equal(traced, 0)
+  assert.equal(sqliteTraced, 0)
+  assert.deepEqual(backlogs, [0])
+  fixture.database.close()
+})
+
+test('executor traces selected and settled SQLite work and observes backlog', async () => {
+  const provider: CameraProviderShape = {
+    startExposure: () =>
+      Effect.succeed({
+        _tag: 'Rejected' as const,
+        summary: 'The fixture rejected this exposure.',
+      }),
+    abortExposure: () => Effect.succeed({ _tag: 'Acknowledged' as const }),
+    readState: () => Effect.die('rejected commands are not reconciled'),
+  }
+  const fixture = prepare(':memory:', provider)
+  const operations: string[] = []
+  const backlogs: number[] = []
+  const worker = createRunExecutorWorker({
+    database: fixture.database,
+    stateRepository: fixture.stateRepository,
+    cameraProvider: provider,
+    traceSqlite: (operation, run) => {
+      operations.push(operation)
+      return run()
+    },
+    observeSqliteBacklog: (backlog, count) => {
+      assert.equal(backlog, 'executor')
+      backlogs.push(count)
+    },
+  })
+
+  assert.equal(await worker.pass(), 'captureReady')
+  assert.equal(await worker.pass(), 'rejected')
+  assert.equal(await worker.pass(), 'none')
+  assert.deepEqual(operations, [
+    'executor.work.select',
+    'executor.work.select',
+    'executor.work.settle',
+  ])
+  assert.deepEqual(backlogs, [1, 1, 0])
+  fixture.database.close()
+})
+
 test('restart after an uncertain provider write performs GET-only reconciliation and never replays start', async () => {
   const databasePath = join(
     mkdtempSync(join(tmpdir(), 'astro-run-executor-restart-')),

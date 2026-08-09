@@ -17,6 +17,7 @@ import {
 } from '../services/captured-frame-intake.ts'
 import {
   inspectCapturedFrame,
+  type FrameInspectionResult,
   type FrameInspectionStorage,
 } from '../services/frame-inspection.ts'
 import {
@@ -25,6 +26,14 @@ import {
 } from '../persistence/acquire-sqlite-repository.ts'
 
 type AcquireRepository = ReturnType<typeof acquireSqliteRepository>
+import type {
+  ExecutorWorkKind,
+  ExecutorWorkResult,
+} from '../observability/executor-telemetry.ts'
+import type {
+  SqliteBacklogObserver,
+  SqliteTraceSync,
+} from '../observability/sqlite-telemetry.ts'
 
 const WorkRow = Schema.Struct({
   work_id: Schema.String,
@@ -84,19 +93,9 @@ const CapturedReceiptResponse = Schema.Struct({
   assetId: Schema.String,
   cursor: Schema.Int,
 })
+const CountRow = Schema.Struct({ count: Schema.Int })
 
-export type RunExecutorPassResult =
-  | 'none'
-  | 'waitingPreflight'
-  | 'acquireRequired'
-  | 'captureReady'
-  | 'awaitingObservation'
-  | 'observing'
-  | 'retrievalReady'
-  | 'retrieved'
-  | 'aborted'
-  | 'rejected'
-  | 'reconciling'
+export type RunExecutorPassResult = ExecutorWorkResult
 
 export const createRunExecutorWorker = (options: {
   readonly database: DatabaseSync
@@ -109,19 +108,40 @@ export const createRunExecutorWorker = (options: {
   readonly now?: () => Date
   readonly publish?: (type: string, cursor: number) => void
   readonly traceWork?: (
-    kind: (typeof WorkRow.Type)['kind'],
-    run: () => Promise<RunExecutorPassResult>,
-  ) => Promise<RunExecutorPassResult>
+    kind: ExecutorWorkKind,
+    run: () => Promise<ExecutorWorkResult>,
+  ) => Promise<ExecutorWorkResult>
+  readonly traceFrameIntake?: (
+    run: () => ReturnType<typeof materializeCapturedFrame>,
+  ) => ReturnType<typeof materializeCapturedFrame>
+  readonly traceFrameInspection?: (
+    effect: ReturnType<typeof inspectCapturedFrame>,
+  ) => Promise<Exit.Exit<FrameInspectionResult>>
+  readonly traceSqlite?: SqliteTraceSync
+  readonly observeSqliteBacklog?: SqliteBacklogObserver
 }) => {
   const db = options.database
   const now = options.now ?? (() => new Date())
+  const traceSqlite: SqliteTraceSync =
+    options.traceSqlite ?? ((_operation, run) => run())
 
   const pass = async (): Promise<RunExecutorPassResult> => {
-    const raw: unknown = db
-      .prepare(
-        "SELECT work_id,run_id,kind,payload,state,acknowledged_at FROM run_executor_work WHERE state IN ('pending','commandAttempted','observing','reconciling') ORDER BY CASE WHEN kind='AbortExposure' THEN 0 ELSE 1 END,rowid LIMIT 1",
-      )
-      .get()
+    const backlog = Schema.decodeUnknownSync(CountRow)(
+      db
+        .prepare(
+          "SELECT count(*) AS count FROM run_executor_work WHERE state IN ('pending','commandAttempted','observing','reconciling')",
+        )
+        .get(),
+    ).count
+    options.observeSqliteBacklog?.('executor', backlog)
+    if (backlog === 0) return continueCompletedAcquire()
+    const raw: unknown = traceSqlite('executor.work.select', () =>
+      db
+        .prepare(
+          "SELECT work_id,run_id,kind,payload,state,acknowledged_at FROM run_executor_work WHERE state IN ('pending','commandAttempted','observing','reconciling') ORDER BY CASE WHEN kind='AbortExposure' THEN 0 ELSE 1 END,rowid LIMIT 1",
+        )
+        .get(),
+    )
     const row = Schema.decodeUnknownSync(Schema.optional(WorkRow))(raw)
     if (row === undefined) return continueCompletedAcquire()
     const run = () => runWork(row)
@@ -491,7 +511,8 @@ export const createRunExecutorWorker = (options: {
       return finishRetrievedFrame(row, retained.assetId)
     }
     const reader = options.cameraProvider.readImageArray
-    if (reader === undefined || options.capturedFrameStorage === undefined) {
+    const capturedFrameStorage = options.capturedFrameStorage
+    if (reader === undefined || capturedFrameStorage === undefined) {
       rejectRetrieval(
         row,
         'The camera image reader or retained-original storage is unavailable.',
@@ -511,15 +532,20 @@ export const createRunExecutorWorker = (options: {
       rejectRetrieval(row, boundedDiagnostic(image.cause))
       return 'rejected'
     }
-    const retained = materializeCapturedFrame(
-      db,
-      options.capturedFrameStorage,
-      {
-        ...payload,
-        format: image.value.format,
-      },
-      image.value.bytes,
-    )
+    const materialize = () =>
+      materializeCapturedFrame(
+        db,
+        capturedFrameStorage,
+        {
+          ...payload,
+          format: image.value.format,
+        },
+        image.value.bytes,
+      )
+    const retained =
+      options.traceFrameIntake === undefined
+        ? materialize()
+        : options.traceFrameIntake(materialize)
     if (retained.outcome !== 'accepted') {
       rejectRetrieval(
         row,
@@ -537,11 +563,15 @@ export const createRunExecutorWorker = (options: {
   ): Promise<RunExecutorPassResult> => {
     let inspectionError: string | undefined
     if (options.frameInspectionStorage !== undefined) {
-      const inspected = await Effect.runPromise(
-        inspectCapturedFrame(db, options.frameInspectionStorage, assetId).pipe(
-          Effect.exit,
-        ),
+      const effect = inspectCapturedFrame(
+        db,
+        options.frameInspectionStorage,
+        assetId,
       )
+      const inspected =
+        options.traceFrameInspection === undefined
+          ? await Effect.runPromise(effect.pipe(Effect.exit))
+          : await options.traceFrameInspection(effect)
       if (Exit.isSuccess(inspected))
         options.publish?.('FrameInspectionUpdated', inspected.value.cursor)
       else inspectionError = boundedDiagnostic(inspected.cause)
@@ -659,29 +689,35 @@ export const createRunExecutorWorker = (options: {
   }
 
   const markForReconciliation = (workId: string, cause: unknown) =>
-    db
-      .prepare(
-        "UPDATE run_executor_work SET state='reconciling',last_error=? WHERE work_id=?",
-      )
-      .run(boundedDiagnostic(cause), workId)
+    traceSqlite('executor.work.settle', () =>
+      db
+        .prepare(
+          "UPDATE run_executor_work SET state='reconciling',last_error=? WHERE work_id=?",
+        )
+        .run(boundedDiagnostic(cause), workId),
+    )
 
   const settle = (
     workId: string,
     state: 'completed' | 'rejected',
     error?: string,
   ) =>
-    db
-      .prepare(
-        'UPDATE run_executor_work SET state=?,settled_at=?,last_error=? WHERE work_id=?',
-      )
-      .run(state, now().toISOString(), error ?? null, workId)
+    traceSqlite('executor.work.settle', () =>
+      db
+        .prepare(
+          'UPDATE run_executor_work SET state=?,settled_at=?,last_error=? WHERE work_id=?',
+        )
+        .run(state, now().toISOString(), error ?? null, workId),
+    )
 
   const cancelPending = (workId: string, reason: string) =>
-    db
-      .prepare(
-        "UPDATE run_executor_work SET state='cancelled',settled_at=?,last_error=? WHERE work_id=? AND state='pending'",
-      )
-      .run(now().toISOString(), reason, workId)
+    traceSqlite('executor.work.settle', () =>
+      db
+        .prepare(
+          "UPDATE run_executor_work SET state='cancelled',settled_at=?,last_error=? WHERE work_id=? AND state='pending'",
+        )
+        .run(now().toISOString(), reason, workId),
+    )
 
   return { pass, enqueueAbort }
 }

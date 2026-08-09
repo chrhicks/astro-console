@@ -1,6 +1,16 @@
 # Copy outside the repository as publisher.env. Only the publisher service reads it.
 ASTRO_SERVER_DB=/var/lib/astro-console/state.sqlite
 ASTRO_PUBLISHER_OUTPUTS_ROOT=/var/lib/astro-console/outputs
+OTEL_TRACES_EXPORTER=otlp
+OTEL_LOGS_EXPORTER=otlp
+OTEL_METRICS_EXPORTER=otlp
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://host.docker.internal:4318/v1/traces
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://host.docker.internal:4318/v1/logs
+OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://host.docker.internal:4318/v1/metrics
+OTEL_SERVICE_NAME=astro-console-publisher
+OTEL_SERVICE_VERSION=REPLACE_WITH_RELEASE
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=production
 R2_ACCOUNT_ID=503286fc7e5e8545c172105f991efef1
 R2_BUCKET=astro-console-artifacts
 R2_ENDPOINT=https://503286fc7e5e8545c172105f991efef1.r2.cloudflarestorage.com

@@ -23,25 +23,33 @@ keys.
 Do not add router forwarding, home-directory mounts, device credentials, or
 tunnel tokens to this folder.
 
-## Local SigNoz traces
+## Local SigNoz telemetry
 
-The origin has one process-owned, traces-only Effect OTLP runtime. It stays
-inactive unless `OTEL_TRACES_EXPORTER=otlp`. The sample `config.example` sends
-OTLP/HTTP protobuf to SigNoz on the Arch host through Docker's
+The origin and publisher each own one Effect OTLP runtime. Traces, logs, and
+metrics remain independently inactive unless their standard
+`OTEL_*_EXPORTER=otlp` switch is enabled. The example configuration sends each
+OTLP/HTTP protobuf signal to SigNoz on the Arch host through Docker's
 `host.docker.internal` host-gateway entry. Keep `OTEL_SERVICE_NAME` stable and
 set `OTEL_SERVICE_VERSION` to the same immutable release as `ASTRO_RELEASE`.
 
 Exported spans cover selected Plan, Observe, Control, Acquire, preflight,
-camera, frame-intake, Process, and Library operations. Health checks, static
-assets, SSE connection lifetimes, previews, and idle executor polls are not
-traced. Trace attributes contain stable route and operation facts only. Do not
-add identity data, request bodies, FITS or preview data, secrets, coordinates,
-or raw provider responses.
+camera, frame-intake, executor, projection, plate-solve, publisher, Process,
+Library, startup, and admission operations. Health checks, static assets, SSE
+connection lifetimes, previews, and idle executor polls are not traced. The
+runtime also exports the `astro.operation.count` metric and structured
+`astro.operation` logs with closed operation and outcome fields. It records
+SSE connect, disconnect, publish, and write-failure events, but not heartbeats.
+Telemetry contains stable route and operation facts only. Do not add identity
+data, request bodies, IDs, paths, object keys, checksums, FITS or preview data,
+secrets, coordinates, or raw provider responses.
 
 After activation, perform one non-hardware command or read-only preflight and
 verify that SigNoz shows `astro-console-origin`, the expected release resource,
-one stable `HTTP ...` root span, and its nested Effect operation spans. Service
-health alone does not prove trace export.
+one stable `HTTP ...` root span, its nested operation spans, structured
+operation logs, and operation-count metrics. Service health alone does not
+prove telemetry export. Browser-only cursor-gap reasons are not observable by
+the server and have no diagnostics endpoint. Queue depth and SQLite internals
+remain follow-on signals.
 
 ## Local plate solver
 

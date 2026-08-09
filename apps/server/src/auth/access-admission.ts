@@ -8,7 +8,12 @@ import {
 } from 'node:crypto'
 import { readFileSync, statSync } from 'node:fs'
 import { Schema } from 'effect'
-import type { LocalIdentity, RequestAdmission } from './identity.ts'
+import type {
+  AdmissionObservation,
+  AdmissionReason,
+  LocalIdentity,
+  RequestAdmission,
+} from './identity.ts'
 
 const AccessClaims = Schema.Struct({
   sub: Schema.NonEmptyString,
@@ -126,8 +131,11 @@ export type JwksFetcher = (
   text(): Promise<string>
 }>
 export type JwksKeyResolver = {
-  resolve(kid: string): Promise<KeyObject | undefined>
-  refresh(): Promise<void>
+  resolve(
+    kid: string,
+    observe?: (outcome: 'success' | 'failed') => void,
+  ): Promise<KeyObject | undefined>
+  refresh(observe?: (outcome: 'success' | 'failed') => void): Promise<void>
 }
 function accessToken(
   request: Pick<IncomingMessage, 'headers'> | undefined,
@@ -201,6 +209,7 @@ export function createJwksKeyResolver(config: {
   readonly cacheTtlMs?: number
   readonly fetcher?: JwksFetcher
   readonly now?: () => number
+  readonly observe?: (outcome: 'success' | 'failed') => void
 }): JwksKeyResolver {
   const endpoint = new URL(config.url)
   if (endpoint.protocol !== 'https:')
@@ -215,7 +224,7 @@ export function createJwksKeyResolver(config: {
   let cached: ReadonlyMap<string, KeyObject> | undefined
   let expiresAt = 0
   const unknownKids = new Set<string>()
-  const refresh = async () => {
+  const refreshUnobserved = async () => {
     const response = await fetcher(
       endpoint.toString(),
       AbortSignal.timeout(5_000),
@@ -241,12 +250,24 @@ export function createJwksKeyResolver(config: {
     expiresAt = now() + ttl
     unknownKids.clear()
   }
+  const refresh = async (
+    observe:
+      ((outcome: 'success' | 'failed') => void) | undefined = config.observe,
+  ) => {
+    try {
+      await refreshUnobserved()
+      observe?.('success')
+    } catch (cause) {
+      observe?.('failed')
+      throw cause
+    }
+  }
   return {
     refresh,
-    resolve: async (kid) => {
+    resolve: async (kid, observe) => {
       if (cached === undefined || now() >= expiresAt) {
         try {
-          await refresh()
+          await refresh(observe)
         } catch {
           return undefined
         }
@@ -255,7 +276,7 @@ export function createJwksKeyResolver(config: {
       if (key !== undefined) return key
       if (unknownKids.has(kid)) return undefined
       try {
-        await refresh()
+        await refresh(observe)
       } catch {
         return undefined
       }
@@ -275,14 +296,20 @@ async function verifiedAccessClaims(
     readonly keyResolver: JwksKeyResolver
   },
   request: Pick<IncomingMessage, 'headers'> | undefined,
+  observeJwks?: AdmissionObservation['jwks'],
 ) {
   const token = accessToken(request)
   if (token === undefined || !validClaims(config, token.claims))
-    return undefined
-  const key = await config.keyResolver.resolve(token.header.kid)
-  return key !== undefined && verifyAccessToken(token, key)
-    ? token.claims
-    : undefined
+    return {
+      outcome: 'rejected' as const,
+      reason: 'missingOrInvalidToken' as const,
+    }
+  const key = await config.keyResolver.resolve(token.header.kid, observeJwks)
+  if (key === undefined)
+    return { outcome: 'rejected' as const, reason: 'keyUnavailable' as const }
+  return verifyAccessToken(token, key)
+    ? { outcome: 'verified' as const, claims: token.claims }
+    : { outcome: 'rejected' as const, reason: 'missingOrInvalidToken' as const }
 }
 export function createProductionAccessAdmission(config: {
   readonly issuer: string
@@ -292,6 +319,7 @@ export function createProductionAccessAdmission(config: {
   readonly clientContext: 'desktop' | 'phone'
   readonly bootstrap?: typeof MembershipBootstrap.Type
   readonly bootstrapResolver?: MembershipBootstrapResolver
+  readonly observe?: (reason: AdmissionReason) => void
 }): RequestAdmission {
   const staticPolicy =
     config.bootstrap === undefined
@@ -301,15 +329,34 @@ export function createProductionAccessAdmission(config: {
     throw new Error(
       'Production admission requires a membership bootstrap policy',
     )
-  return async (request) => {
-    const claims = await verifiedAccessClaims(config, request)
-    if (!claims || claims.email === undefined) return undefined
+  return async (request, observation) => {
+    const observe = observation?.admission ?? config.observe
+    const verified = await verifiedAccessClaims(
+      config,
+      request,
+      observation?.jwks,
+    )
+    if (verified.outcome === 'rejected') {
+      observe?.(verified.reason)
+      return undefined
+    }
+    const claims = verified.claims
+    if (claims.email === undefined) {
+      observe?.('missingOrInvalidToken')
+      return undefined
+    }
     const policy = config.bootstrapResolver?.load() ?? staticPolicy
-    if (policy === undefined) return undefined
+    if (policy === undefined) {
+      observe?.('membershipUnavailable')
+      return undefined
+    }
     const email = claims.email
     if (email === undefined) return undefined
     const entry = policy.find((item) => item.email === normalizedEmail(email))
-    if (!entry) return undefined
+    if (!entry) {
+      observe?.('notMember')
+      return undefined
+    }
     const membership = new DatabaseSync(config.databasePath)
     try {
       membership.exec('BEGIN IMMEDIATE')
@@ -325,21 +372,26 @@ export function createProductionAccessAdmission(config: {
         .get(claims.sub)
       const stored = Schema.decodeUnknownSync(MembershipRow)(raw)
       membership.exec('COMMIT')
-      if (stored.person_id !== entry.personId || stored.role !== entry.role)
+      if (stored.person_id !== entry.personId || stored.role !== entry.role) {
+        observe?.('membershipUnavailable')
         return undefined
-      return {
+      }
+      const identity = {
         personId: stored.person_id,
         clientId: `access:${claims.sub}`,
         role: stored.role,
         capability:
           stored.role === 'owner' && config.clientContext === 'desktop'
-            ? 'controlCapable'
-            : 'readOnly',
+            ? ('controlCapable' as const)
+            : ('readOnly' as const),
       }
+      observe?.('admitted')
+      return identity
     } catch {
       try {
         membership.exec('ROLLBACK')
       } catch {}
+      observe?.('membershipUnavailable')
       return undefined
     } finally {
       membership.close()

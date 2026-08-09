@@ -24,6 +24,9 @@ export const projectionPublicationLayer = (dependencies: {
   readonly controllerConnected: (identity: LocalIdentity) => void
   readonly controllerDisconnected: (identity: LocalIdentity) => void
   readonly responseHeaders: (contentType: string) => Record<string, string>
+  readonly observe?: (
+    event: 'connect' | 'disconnect' | 'publish' | 'writeFailure',
+  ) => void
 }) =>
   Layer.effect(
     ProjectionPublication,
@@ -42,7 +45,13 @@ export const projectionPublicationLayer = (dependencies: {
           void cursor
           if (closed) return
           for (const [response, identity] of listeners)
-            response.write(dependencies.eventFor(identity))
+            try {
+              response.write(dependencies.eventFor(identity))
+            } catch (cause) {
+              dependencies.observe?.('writeFailure')
+              throw cause
+            }
+          dependencies.observe?.('publish')
         })
       let poll: ReturnType<typeof setTimeout> | undefined
       const schedulePoll = () => {
@@ -82,8 +91,14 @@ export const projectionPublicationLayer = (dependencies: {
             ...dependencies.responseHeaders('text/event-stream'),
             connection: 'keep-alive',
           })
-          response.write(dependencies.eventFor(identity))
+          try {
+            response.write(dependencies.eventFor(identity))
+          } catch (cause) {
+            dependencies.observe?.('writeFailure')
+            throw cause
+          }
           listeners.set(response, identity)
+          dependencies.observe?.('connect')
           scheduleHeartbeat(response)
           request.on('close', () => {
             if (closed) return
@@ -91,7 +106,9 @@ export const projectionPublicationLayer = (dependencies: {
             if (heartbeat !== undefined) clearTimeout(heartbeat)
             heartbeats.delete(response)
             listeners.delete(response)
-            const remaining = (controllerStreams.get(identity.clientId) ?? 1) - 1
+            dependencies.observe?.('disconnect')
+            const remaining =
+              (controllerStreams.get(identity.clientId) ?? 1) - 1
             if (remaining <= 0) {
               controllerStreams.delete(identity.clientId)
               dependencies.controllerDisconnected(identity)

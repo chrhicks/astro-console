@@ -1381,6 +1381,10 @@ test('publisher worker verifies fake provider metadata, retries idempotently, an
   >()
   let mismatch = true
   let puts = 0
+  let tracedWork = 0
+  const tracedStages: Array<string> = []
+  const sqliteOperations: Array<string> = []
+  const publisherBacklogs: Array<number> = []
   const worker = createPublisherWorker(
     service.database,
     { outputsRoot: outputs },
@@ -1401,6 +1405,24 @@ test('publisher worker verifies fake provider metadata, retries idempotently, an
             }
       },
     },
+    {
+      traceWork: async (run) => {
+        tracedWork += 1
+        return run()
+      },
+      traceStage: async (stage, run) => {
+        tracedStages.push(stage)
+        return run()
+      },
+      traceSqlite: (operation, run) => {
+        sqliteOperations.push(operation)
+        return run()
+      },
+      observeSqliteBacklog: (backlog, count) => {
+        assert.equal(backlog, 'publisher')
+        publisherBacklogs.push(count)
+      },
+    },
   )
   assert.equal(await worker.pass(), 'failed')
   assert.equal(
@@ -1416,6 +1438,24 @@ test('publisher worker verifies fake provider metadata, retries idempotently, an
   assert.equal(await worker.pass(), 'published')
   assert.equal(await worker.pass(), 'none')
   assert.equal(puts, 2)
+  assert.equal(tracedWork, 2)
+  assert.deepEqual(tracedStages, [
+    'publisher.localRead',
+    'publisher.put',
+    'publisher.verify',
+    'publisher.settle',
+    'publisher.localRead',
+    'publisher.put',
+    'publisher.verify',
+    'publisher.settle',
+  ])
+  assert.deepEqual(sqliteOperations, [
+    'publisher.outbox.claim',
+    'publisher.outbox.settle',
+    'publisher.outbox.claim',
+    'publisher.outbox.settle',
+  ])
+  assert.deepEqual(publisherBacklogs, [1, 1, 0])
   assert.equal(objects.size, 1)
   assert.equal(
     databaseRow(

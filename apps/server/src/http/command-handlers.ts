@@ -17,6 +17,7 @@ import {
 } from '../services/observe-command-service.ts'
 import type { RunSqliteRepositoryShape } from '../persistence/run-sqlite-repository.ts'
 import type { StateSqliteRepositoryShape } from '../persistence/state-sqlite-repository.ts'
+import { tracedSqliteOperation } from '../observability/sqlite-telemetry.ts'
 import { BodyTooLarge } from './request-body.ts'
 
 export const commandFailureStatuses = {
@@ -37,30 +38,40 @@ const sqlitePlanPersistenceLayer = (
 ) =>
   planPersistenceLayer({
     saveDraft: (intent, identity) =>
-      Effect.try({
-        try: () => runRepository.saveDraft(intent, identity),
-        catch: (cause) => cause,
-      }),
+      sqliteCommandTransaction(
+        Effect.try({
+          try: () => runRepository.saveDraft(intent, identity),
+          catch: (cause) => cause,
+        }),
+      ),
     acceptRunDefinition: (intent, identity) =>
-      Effect.try({
-        try: () => runRepository.acceptRunDefinition(intent, identity),
-        catch: (cause) => cause,
-      }),
+      sqliteCommandTransaction(
+        Effect.try({
+          try: () => runRepository.acceptRunDefinition(intent, identity),
+          catch: (cause) => cause,
+        }),
+      ),
     startAcceptedRun: (intent, identity) =>
-      Effect.try({
-        try: () => runRepository.startAcceptedRun(intent, identity),
-        catch: (cause) => cause,
-      }),
+      sqliteCommandTransaction(
+        Effect.try({
+          try: () => runRepository.startAcceptedRun(intent, identity),
+          catch: (cause) => cause,
+        }),
+      ),
     previewRunMutation: (intent, identity) =>
-      Effect.try({
-        try: () => runRepository.previewRunMutation(intent, identity),
-        catch: (cause) => cause,
-      }),
+      sqliteCommandTransaction(
+        Effect.try({
+          try: () => runRepository.previewRunMutation(intent, identity),
+          catch: (cause) => cause,
+        }),
+      ),
     applyRunMutation: (intent, identity) =>
-      Effect.try({
-        try: () => runRepository.applyRunMutation(intent, identity),
-        catch: (cause) => cause,
-      }),
+      sqliteCommandTransaction(
+        Effect.try({
+          try: () => runRepository.applyRunMutation(intent, identity),
+          catch: (cause) => cause,
+        }),
+      ),
     snapshot: (identity) => stateRepository.bootstrapSnapshot(identity),
     publish: (type, cursor) =>
       Effect.try({
@@ -107,35 +118,47 @@ const sqliteObservePersistenceLayer = (
 ) =>
   observePersistenceLayer({
     pause: (intent, identity) =>
-      Effect.try({
-        try: () => runRepository.pause(intent, identity),
-        catch: (cause) => cause,
-      }),
+      sqliteCommandTransaction(
+        Effect.try({
+          try: () => runRepository.pause(intent, identity),
+          catch: (cause) => cause,
+        }),
+      ),
     resume: (intent, identity) =>
-      Effect.try({
-        try: () => runRepository.resume(intent, identity),
-        catch: (cause) => cause,
-      }),
+      sqliteCommandTransaction(
+        Effect.try({
+          try: () => runRepository.resume(intent, identity),
+          catch: (cause) => cause,
+        }),
+      ),
     stop: (intent, identity) =>
-      Effect.try({
-        try: () => runRepository.stop(intent, identity),
-        catch: (cause) => cause,
-      }),
+      sqliteCommandTransaction(
+        Effect.try({
+          try: () => runRepository.stop(intent, identity),
+          catch: (cause) => cause,
+        }),
+      ),
     skip: (intent, identity) =>
-      Effect.try({
-        try: () => runRepository.skip(intent, identity),
-        catch: (cause) => cause,
-      }),
+      sqliteCommandTransaction(
+        Effect.try({
+          try: () => runRepository.skip(intent, identity),
+          catch: (cause) => cause,
+        }),
+      ),
     retry: (intent, identity) =>
-      Effect.try({
-        try: () => runRepository.retry(intent, identity),
-        catch: (cause) => cause,
-      }),
+      sqliteCommandTransaction(
+        Effect.try({
+          try: () => runRepository.retry(intent, identity),
+          catch: (cause) => cause,
+        }),
+      ),
     park: (intent, identity) =>
-      Effect.try({
-        try: () => runRepository.park(intent, identity),
-        catch: (cause) => cause,
-      }),
+      sqliteCommandTransaction(
+        Effect.try({
+          try: () => runRepository.park(intent, identity),
+          catch: (cause) => cause,
+        }),
+      ),
     snapshot: (identity) => stateRepository.bootstrapSnapshot(identity),
     publish: (type, cursor) =>
       Effect.try({
@@ -143,6 +166,9 @@ const sqliteObservePersistenceLayer = (
         catch: (cause) => cause,
       }),
   })
+
+const sqliteCommandTransaction = <A, E>(effect: Effect.Effect<A, E>) =>
+  tracedSqliteOperation('command.state.transaction', effect)
 export const observeCommandFromRequest = Effect.fnUntraced(
   function* (
     request: Promise<unknown | undefined | typeof BodyTooLarge>,

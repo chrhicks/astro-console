@@ -6,11 +6,15 @@ ASTRO_REMOTE_DESKTOP_PORT=8082
 # Compose uses 0.0.0.0 only inside its private network; host publishes no port.
 ASTRO_SERVER_BIND=0.0.0.0
 ASTRO_RELEASE=REPLACE_WITH_RELEASE
-# Effect exports traces only when this standard OTEL switch is enabled. The
+# Effect exports each signal only when its standard OTEL switch is enabled. The
 # Compose host-gateway entry resolves the SigNoz collector on the Arch host.
 OTEL_TRACES_EXPORTER=otlp
+OTEL_LOGS_EXPORTER=otlp
+OTEL_METRICS_EXPORTER=otlp
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://host.docker.internal:4318/v1/traces
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://host.docker.internal:4318/v1/logs
+OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://host.docker.internal:4318/v1/metrics
 OTEL_SERVICE_NAME=astro-console-origin
 OTEL_SERVICE_VERSION=REPLACE_WITH_RELEASE
 OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=production

@@ -5,6 +5,8 @@ services:
     command:
       ['node', '--experimental-strip-types', 'src/workers/publisher-service.ts']
     env_file: ${ASTRO_PUBLISHER_ENV_FILE:?Set the host-managed publisher environment file in the Compose environment file}
+    extra_hosts:
+      - host.docker.internal:host-gateway
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]

@@ -203,8 +203,7 @@ function acceptControl(
   // Admission assigns control capability only to the local-owner or desktop
   // listener. Production Access client IDs are `access:<subject>`, so the
   // client-ID prefix must not be treated as an authority boundary here.
-  if (identity.capability === 'readOnly')
-    return reject('ClientReadOnly')
+  if (identity.capability === 'readOnly') return reject('ClientReadOnly')
   if (command.expectedLeaseRevision !== current.control.revision)
     return reject('FreshnessConflict')
   if (

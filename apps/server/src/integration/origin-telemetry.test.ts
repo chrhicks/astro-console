@@ -4,15 +4,62 @@ import test from 'node:test'
 import { ConfigProvider, Effect, Schema } from 'effect'
 import { createLocalWebService } from '../app/origin-service.ts'
 import { createOriginTelemetry } from '../observability/origin-telemetry.ts'
+import type {
+  NodeRuntimeGcType,
+  NodeRuntimeSampleSource,
+} from '../observability/node-runtime-telemetry.ts'
+import { tracedExecutorWork } from '../observability/executor-telemetry.ts'
+import { recordOperationalEvent } from '../observability/operational-telemetry.ts'
+import {
+  recordAdmissionDecision,
+  recordJwksRefresh,
+  tracedAdmission,
+} from '../observability/admission-telemetry.ts'
+import { tracedStartup } from '../observability/startup-telemetry.ts'
+import {
+  tracedFrameInspection,
+  tracedFrameIntake,
+  tracedPipelineStage,
+  tracedPlateSolve,
+  tracedPublisherWork,
+} from '../observability/pipeline-telemetry.ts'
+import {
+  recordSqliteBacklog,
+  tracedSqliteOperation,
+  type SqliteOperation,
+} from '../observability/sqlite-telemetry.ts'
 import { alpacaCameraProvider } from '../providers/alpaca-camera-provider.ts'
 import { alpacaPreflightProvider } from '../providers/alpaca-preflight-provider.ts'
 
 test('origin telemetry is disabled until the standard traces exporter is enabled', async () => {
   const collector = await testCollector()
+  let runtimeSamplerStarts = 0
   const telemetry = createOriginTelemetry({
     configProvider: ConfigProvider.fromUnknown({
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.url}/v1/traces`,
     }),
+    nodeRuntimeTelemetry: {
+      source: {
+        start: () => {
+          runtimeSamplerStarts += 1
+        },
+        sample: () => ({
+          eventLoopUtilization: 0,
+          eventLoopDelaySeconds: {
+            min: 0,
+            max: 0,
+            mean: 0,
+            stddev: 0,
+            p50: 0,
+            p90: 0,
+            p99: 0,
+          },
+          heapSpaces: [],
+          heapLimitBytes: 0,
+        }),
+        stop: () => undefined,
+      },
+    },
   })
   try {
     await telemetry.initialize()
@@ -24,6 +71,7 @@ test('origin telemetry is disabled until the standard traces exporter is enabled
     await collector.close()
   }
   assert.equal(collector.requests.length, 0)
+  assert.equal(runtimeSamplerStarts, 0)
 })
 
 test('origin telemetry exports protobuf spans with standard resource identity', async () => {
@@ -69,6 +117,587 @@ test('origin telemetry exports protobuf spans with standard resource identity', 
   assert.match(payload, /OriginTelemetry\.child/)
   assert.match(payload, /HTTP POST \/api\/observe\/commands/)
   assert.match(payload, /astro\.workspace/)
+})
+
+test('origin telemetry exports structured logs and metrics with standard signal config', async () => {
+  const collector = await testCollector()
+  const telemetry = createOriginTelemetry({
+    configProvider: ConfigProvider.fromUnknown({
+      OTEL_LOGS_EXPORTER: 'otlp',
+      OTEL_METRICS_EXPORTER: 'otlp',
+      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: `${collector.url}/v1/logs`,
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: `${collector.url}/v1/metrics`,
+      OTEL_SERVICE_NAME: 'astro-console-signals-test',
+      OTEL_BLRP_SCHEDULE_DELAY: '60000',
+      OTEL_METRIC_EXPORT_INTERVAL: '60000',
+    }),
+  })
+  try {
+    await telemetry.initialize()
+    await telemetry.runPromise(
+      recordOperationalEvent({
+        scope: 'startup',
+        operation: 'config.decode',
+        outcome: 'ready',
+      }),
+    )
+  } finally {
+    await telemetry.dispose()
+    await collector.close()
+  }
+  const logs = collector.requests.filter(
+    (request) => request.url === '/v1/logs',
+  )
+  const metrics = collector.requests.filter(
+    (request) => request.url === '/v1/metrics',
+  )
+  assert.equal(logs.length, 1)
+  assert.equal(metrics.length, 1)
+  assert.match(logs[0]?.contentType ?? '', /^application\/x-protobuf/)
+  assert.match(metrics[0]?.contentType ?? '', /^application\/x-protobuf/)
+  const logPayload = logs[0]?.body.toString('utf8') ?? ''
+  const metricPayload = metrics[0]?.body.toString('utf8') ?? ''
+  assert.match(logPayload, /astro-console-signals-test/)
+  assert.match(logPayload, /astro\.operation/)
+  assert.match(logPayload, /astro\.telemetry\.scope/)
+  assert.match(logPayload, /startup/)
+  assert.match(logPayload, /config\.decode/)
+  assert.match(logPayload, /ready/)
+  assert.match(metricPayload, /astro-console-signals-test/)
+  assert.match(metricPayload, /astro\.operation\.count/)
+  assert.match(metricPayload, /astro\.telemetry\.scope/)
+  assert.doesNotMatch(logPayload, /owner-chicks/)
+  assert.doesNotMatch(logPayload, /private/)
+  assert.doesNotMatch(metricPayload, /owner-chicks/)
+  assert.doesNotMatch(metricPayload, /private/)
+})
+
+test('origin telemetry exports Node runtime metrics without spans or private process data', async () => {
+  const collector = await testCollector()
+  let starts = 0
+  let stops = 0
+  let tick: (() => void) | undefined
+  let recordGc:
+    ((type: NodeRuntimeGcType, durationSeconds: number) => void) | undefined
+  const source: NodeRuntimeSampleSource = {
+    start(record) {
+      starts += 1
+      recordGc = record
+    },
+    sample: () => ({
+      eventLoopUtilization: 0.42,
+      eventLoopDelaySeconds: {
+        min: 0.001,
+        max: 0.009,
+        mean: 0.003,
+        stddev: 0.002,
+        p50: 0.002,
+        p90: 0.006,
+        p99: 0.008,
+      },
+      heapSpaces: [{ name: 'old_space', usedBytes: 1_048_576 }],
+      heapLimitBytes: 4_294_967_296,
+    }),
+    stop() {
+      stops += 1
+    },
+  }
+  const telemetry = createOriginTelemetry({
+    configProvider: ConfigProvider.fromUnknown({
+      OTEL_METRICS_EXPORTER: 'otlp',
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: `${collector.url}/v1/metrics`,
+      OTEL_SERVICE_NAME: 'astro-console-node-runtime-test',
+      OTEL_METRIC_EXPORT_INTERVAL: '60000',
+    }),
+    nodeRuntimeTelemetry: {
+      source,
+      schedule: (scheduledTick) => {
+        tick = scheduledTick
+        return () => undefined
+      },
+    },
+  })
+  try {
+    await telemetry.initialize()
+    assert.equal(starts, 1)
+    tick?.()
+    recordGc?.('major', 0.012)
+  } finally {
+    await telemetry.dispose()
+    await collector.close()
+  }
+
+  assert.equal(stops, 1)
+  assert.deepEqual(
+    [...new Set(collector.requests.map((request) => request.url))],
+    ['/v1/metrics'],
+  )
+  const payloadBytes = Buffer.concat(
+    collector.requests.map((request) => request.body),
+  )
+  const payload = payloadBytes.toString('utf8')
+  for (const metricName of [
+    'nodejs.eventloop.utilization',
+    'nodejs.eventloop.delay.min',
+    'nodejs.eventloop.delay.max',
+    'nodejs.eventloop.delay.mean',
+    'nodejs.eventloop.delay.stddev',
+    'nodejs.eventloop.delay.p50',
+    'nodejs.eventloop.delay.p90',
+    'nodejs.eventloop.delay.p99',
+    'v8js.memory.heap.used',
+    'v8js.memory.heap.limit',
+    'v8js.gc.duration',
+  ])
+    assert.equal(textOccurrences(payload, metricName), 1)
+  assert.match(payload, /v8js\.heap\.space\.name/)
+  assert.match(payload, /old_space/)
+  assert.match(payload, /v8js\.gc\.type/)
+  assert.match(payload, /major/)
+  assert.match(payload, /astro-console-node-runtime-test/)
+  const units = otlpMetricUnits(payloadBytes)
+  assert.equal(units.get('nodejs.eventloop.utilization'), '1')
+  for (const metricName of [
+    'nodejs.eventloop.delay.min',
+    'nodejs.eventloop.delay.max',
+    'nodejs.eventloop.delay.mean',
+    'nodejs.eventloop.delay.stddev',
+    'nodejs.eventloop.delay.p50',
+    'nodejs.eventloop.delay.p90',
+    'nodejs.eventloop.delay.p99',
+    'v8js.gc.duration',
+  ])
+    assert.equal(units.get(metricName), 's')
+  assert.equal(units.get('v8js.memory.heap.used'), 'By')
+  assert.equal(units.get('v8js.memory.heap.limit'), 'By')
+  assert.doesNotMatch(payload, /unit/)
+  assert.doesNotMatch(payload, /\/Users\/chicks/)
+  assert.doesNotMatch(payload, /--experimental-strip-types/)
+  assert.doesNotMatch(payload, /OTEL_EXPORTER_OTLP/)
+  assert.doesNotMatch(payload, /owner-chicks/)
+  assert.doesNotMatch(payload, /private/)
+  assert.doesNotMatch(payload, /email/)
+})
+
+test('SQLite telemetry exports closed spans, operation metrics, and backlog gauges', async () => {
+  const collector = await testCollector()
+  const telemetry = createOriginTelemetry({
+    configProvider: ConfigProvider.fromUnknown({
+      OTEL_TRACES_EXPORTER: 'otlp',
+      OTEL_METRICS_EXPORTER: 'otlp',
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.url}/v1/traces`,
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: `${collector.url}/v1/metrics`,
+      OTEL_SERVICE_NAME: 'astro-console-sqlite-test',
+      OTEL_BSP_SCHEDULE_DELAY: '60000',
+      OTEL_METRIC_EXPORT_INTERVAL: '60000',
+    }),
+  })
+  const successfulOperations: ReadonlyArray<SqliteOperation> = [
+    'executor.work.select',
+    'executor.work.settle',
+    'publisher.outbox.claim',
+    'publisher.outbox.settle',
+    'projection.snapshot.read',
+  ]
+  try {
+    await telemetry.initialize()
+    for (const operation of successfulOperations)
+      await telemetry.runPromise(
+        tracedSqliteOperation(operation, Effect.succeed('complete')),
+      )
+    await assert.rejects(
+      telemetry.runPromise(
+        tracedSqliteOperation(
+          'command.state.transaction',
+          Effect.fail(
+            new Error(
+              'SQLITE_BUSY private SQL SELECT * FROM secrets WHERE id=private-param',
+            ),
+          ),
+        ),
+      ),
+    )
+    await telemetry.runPromise(recordSqliteBacklog('executor', 2))
+    await telemetry.runPromise(recordSqliteBacklog('publisher', 3))
+    await telemetry.runPromise(recordSqliteBacklog('executor', 0))
+  } finally {
+    await telemetry.dispose()
+    await collector.close()
+  }
+
+  const tracePayload = Buffer.concat(
+    collector.requests
+      .filter((request) => request.url === '/v1/traces')
+      .map((request) => request.body),
+  ).toString('utf8')
+  const metricPayload = Buffer.concat(
+    collector.requests
+      .filter((request) => request.url === '/v1/metrics')
+      .map((request) => request.body),
+  ).toString('utf8')
+  for (const span of [
+    'SQLite.executor.work.select',
+    'SQLite.executor.work.settle',
+    'SQLite.publisher.outbox.claim',
+    'SQLite.publisher.outbox.settle',
+    'SQLite.projection.snapshot.read',
+    'SQLite.command.state.transaction',
+  ])
+    assert.equal(textOccurrences(tracePayload, span), 1)
+  assert.match(tracePayload, /db\.system\.name/)
+  assert.match(tracePayload, /sqlite/)
+  assert.match(tracePayload, /db\.operation\.name/)
+  assert.match(tracePayload, /db\.query\.summary/)
+  assert.match(tracePayload, /db\.collection\.name/)
+  assert.match(tracePayload, /astro\.sqlite\.outcome/)
+  assert.match(tracePayload, /success/)
+  assert.match(tracePayload, /busy/)
+  assert.match(metricPayload, /astro\.sqlite\.operation\.count/)
+  assert.match(metricPayload, /astro\.sqlite\.operation\.duration/)
+  assert.match(metricPayload, /astro\.sqlite\.backlog/)
+  assert.match(metricPayload, /executor/)
+  assert.match(metricPayload, /publisher/)
+  for (const payload of [tracePayload, metricPayload]) {
+    assert.doesNotMatch(payload, /db\.query\.text/)
+    assert.doesNotMatch(payload, /SQLITE_BUSY/)
+    assert.doesNotMatch(payload, /SELECT \* FROM secrets/)
+    assert.doesNotMatch(payload, /private-param/)
+    assert.doesNotMatch(payload, /private SQL/)
+    assert.doesNotMatch(payload, /state\.sqlite/)
+    assert.doesNotMatch(payload, /owner-chicks/)
+    assert.doesNotMatch(payload, /desktop-owner/)
+    assert.doesNotMatch(payload, /checksum/)
+    assert.doesNotMatch(payload, /rightAscension/)
+    assert.doesNotMatch(payload, /declination/)
+  }
+})
+
+test('startup and admission spans export closed outcomes without identity', async () => {
+  const collector = await testCollector()
+  const telemetry = createOriginTelemetry({
+    configProvider: ConfigProvider.fromUnknown({
+      OTEL_TRACES_EXPORTER: 'otlp',
+      OTEL_LOGS_EXPORTER: 'otlp',
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.url}/v1/traces`,
+      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: `${collector.url}/v1/logs`,
+      OTEL_SERVICE_NAME: 'astro-console-startup-admission-test',
+      OTEL_BSP_SCHEDULE_DELAY: '60000',
+      OTEL_BLRP_SCHEDULE_DELAY: '60000',
+    }),
+  })
+  try {
+    await telemetry.initialize()
+    await telemetry.runPromise(
+      tracedStartup('config.decode', Effect.succeed({ mode: 'development' })),
+    )
+    await telemetry.runPromise(
+      tracedStartup('service.create', Effect.succeed(true)),
+    )
+    await telemetry.runPromise(
+      tracedStartup('listener.bind', Effect.succeed(true)),
+    )
+    await telemetry.runPromise(
+      tracedAdmission(
+        Effect.succeed({
+          personId: 'private-person-id',
+          clientId: 'private-client-id',
+          role: 'owner' as const,
+          capability: 'controlCapable' as const,
+        }),
+      ),
+    )
+    await telemetry.runPromise(tracedAdmission(Effect.succeed(undefined)))
+    await telemetry.runPromise(recordAdmissionDecision('notMember'))
+    await telemetry.runPromise(recordJwksRefresh('failed'))
+  } finally {
+    await telemetry.dispose()
+    await collector.close()
+  }
+  const payload = Buffer.concat(
+    collector.requests.map((request) => request.body),
+  ).toString('utf8')
+  assert.equal(textOccurrences(payload, 'Origin.startup.config.decode'), 1)
+  assert.equal(textOccurrences(payload, 'Origin.startup.service.create'), 1)
+  assert.equal(textOccurrences(payload, 'Origin.startup.listener.bind'), 1)
+  assert.equal(textOccurrences(payload, 'Admission.request'), 2)
+  assert.match(payload, /astro\.startup\.operation/)
+  assert.match(payload, /astro\.startup\.outcome/)
+  assert.match(payload, /astro\.admission\.outcome/)
+  assert.match(payload, /ready/)
+  assert.match(payload, /admitted/)
+  assert.match(payload, /rejected/)
+  assert.match(payload, /decision/)
+  assert.match(payload, /notMember/)
+  assert.match(payload, /jwks\.refresh/)
+  assert.match(payload, /failed/)
+  assert.doesNotMatch(payload, /private-person-id/)
+  assert.doesNotMatch(payload, /private-client-id/)
+  assert.doesNotMatch(payload, /owner-chicks/)
+  assert.doesNotMatch(payload, /cf-access-jwt-assertion/)
+  assert.doesNotMatch(payload, /kid/)
+  assert.doesNotMatch(payload, /email/)
+})
+
+test('admission telemetry excludes health and static requests', async () => {
+  const observed: Array<{ readonly path: string; readonly enabled: boolean }> =
+    []
+  const service = createLocalWebService(
+    ':memory:',
+    (request, observation) => {
+      observed.push({
+        path: new URL(request?.url ?? '/', 'http://local').pathname,
+        enabled: observation !== undefined,
+      })
+      observation?.admission('admitted')
+      return {
+        personId: 'private-person-id',
+        clientId: 'private-client-id',
+        role: 'owner',
+        capability: 'controlCapable',
+      }
+    },
+    undefined,
+    undefined,
+    {
+      fixture: 'm27',
+      admissionObservability: {
+        admission: () => undefined,
+        jwks: () => undefined,
+      },
+    },
+  )
+  try {
+    const listener = await service.listen()
+    try {
+      const base = `http://127.0.0.1:${listener.port}`
+      assert.equal((await fetch(`${base}/api/health/ready`)).status, 200)
+      assert.equal((await fetch(`${base}/missing-static.css`)).status, 404)
+      assert.equal((await fetch(`${base}/api/library`)).status, 200)
+    } finally {
+      await listener.close()
+    }
+  } finally {
+    service.close()
+  }
+
+  assert.deepEqual(observed, [
+    { path: '/api/health/ready', enabled: false },
+    { path: '/missing-static.css', enabled: false },
+    { path: '/api/library', enabled: true },
+  ])
+})
+
+test('executor work exports a safe closed work outcome without tracing an empty poll', async () => {
+  const collector = await testCollector()
+  const telemetry = createOriginTelemetry({
+    configProvider: ConfigProvider.fromUnknown({
+      OTEL_TRACES_EXPORTER: 'otlp',
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.url}/v1/traces`,
+      OTEL_SERVICE_NAME: 'astro-console-executor-test',
+      OTEL_BSP_SCHEDULE_DELAY: '60000',
+    }),
+  })
+  try {
+    await telemetry.initialize()
+    const outcome = await telemetry.runPromise(
+      tracedExecutorWork('StartExposure', async () => 'reconciling'),
+    )
+    assert.equal(outcome, 'reconciling')
+  } finally {
+    await telemetry.dispose()
+    await collector.close()
+  }
+  const payload = Buffer.concat(
+    collector.requests.map((request) => request.body),
+  ).toString('utf8')
+  assert.equal(textOccurrences(payload, 'RunExecutor.work.execute'), 1)
+  assert.match(payload, /astro\.executor\.work\.kind/)
+  assert.match(payload, /StartExposure/)
+  assert.match(payload, /astro\.executor\.work\.outcome/)
+  assert.match(payload, /reconciling/)
+  assert.doesNotMatch(payload, /run-m27/)
+  assert.doesNotMatch(payload, /asset-m27/)
+})
+
+test('projection snapshot and SSE setup export bounded delivery spans', async () => {
+  const collector = await testCollector()
+  const telemetry = createOriginTelemetry({
+    configProvider: ConfigProvider.fromUnknown({
+      OTEL_TRACES_EXPORTER: 'otlp',
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.url}/v1/traces`,
+      OTEL_LOGS_EXPORTER: 'otlp',
+      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: `${collector.url}/v1/logs`,
+      OTEL_SERVICE_NAME: 'astro-console-projection-test',
+      OTEL_BSP_SCHEDULE_DELAY: '60000',
+      OTEL_BLRP_SCHEDULE_DELAY: '60000',
+    }),
+  })
+  try {
+    await telemetry.initialize()
+    const service = createLocalWebService(
+      ':memory:',
+      undefined,
+      undefined,
+      undefined,
+      { fixture: 'm27', telemetry },
+    )
+    try {
+      const listener = await service.listen()
+      try {
+        const base = `http://127.0.0.1:${listener.port}`
+        const snapshot = await fetch(`${base}/api/snapshot`)
+        assert.equal(snapshot.status, 200)
+        const projection = Schema.decodeUnknownSync(
+          Schema.Struct({
+            data: Schema.Struct({
+              plan: Schema.optionalKey(
+                Schema.Struct({
+                  planId: Schema.String,
+                  revision: Schema.Number,
+                }),
+              ),
+              control: Schema.Struct({ revision: Schema.Number }),
+            }),
+          }),
+        )(await snapshot.json()).data
+        if (projection.plan === undefined)
+          throw new Error(
+            'Projection telemetry fixture has no Plan projection.',
+          )
+        const eventsAbort = new AbortController()
+        const events = await fetch(`${base}/api/events`, {
+          signal: eventsAbort.signal,
+        })
+        assert.equal(events.status, 200)
+        assert.match(
+          events.headers.get('content-type') ?? '',
+          /text\/event-stream/,
+        )
+        const command = await fetch(`${base}/api/plan/commands`, {
+          method: 'POST',
+          body: JSON.stringify({
+            intent: {
+              _tag: 'StartAcceptedRun',
+              planId: projection.plan.planId,
+              expectedPlanRevision: projection.plan.revision,
+              expectedLeaseRevision: projection.control.revision,
+              idempotencyKey: 'private-projection-command-key',
+            },
+          }),
+        })
+        assert.equal(command.status, 202)
+        await command.body?.cancel()
+        eventsAbort.abort()
+        await new Promise<void>((resolve) => setTimeout(resolve, 25))
+      } finally {
+        await listener.close()
+      }
+    } finally {
+      service.close()
+    }
+  } finally {
+    await telemetry.dispose()
+    await collector.close()
+  }
+  const payload = Buffer.concat(
+    collector.requests.map((request) => request.body),
+  ).toString('utf8')
+  assert.equal(textOccurrences(payload, 'Projection.snapshot.deliver'), 1)
+  assert.equal(textOccurrences(payload, 'Projection.sse.open'), 1)
+  assert.equal(textOccurrences(payload, 'HTTP GET /api/snapshot'), 1)
+  assert.equal(textOccurrences(payload, 'HTTP GET /api/events'), 1)
+  assert.equal(textOccurrences(payload, 'SQLite.projection.snapshot.read'), 1)
+  assert.equal(textOccurrences(payload, 'SQLite.command.state.transaction'), 1)
+  assert.match(payload, /astro\.projection\.delivery/)
+  assert.match(payload, /astro\.projection\.delivery\.outcome/)
+  assert.match(payload, /delivered/)
+  assert.match(payload, /astro\.projection\.control\.state/)
+  assert.match(payload, /held/)
+  assert.match(payload, /sse\.connect/)
+  assert.match(payload, /sse\.publish/)
+  assert.match(payload, /sse\.disconnect/)
+  assert.doesNotMatch(payload, /heartbeat/)
+  assert.doesNotMatch(payload, /owner-chicks/)
+  assert.doesNotMatch(payload, /desktop-owner/)
+  assert.doesNotMatch(payload, /plan-m27/)
+  assert.doesNotMatch(payload, /run-m27/)
+  assert.doesNotMatch(payload, /asset-m27/)
+  assert.doesNotMatch(payload, /private-projection-command-key/)
+})
+
+test('local image pipeline boundaries export only closed outcomes', async () => {
+  const collector = await testCollector()
+  const telemetry = createOriginTelemetry({
+    configProvider: ConfigProvider.fromUnknown({
+      OTEL_TRACES_EXPORTER: 'otlp',
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.url}/v1/traces`,
+      OTEL_SERVICE_NAME: 'astro-console-pipeline-test',
+      OTEL_BSP_SCHEDULE_DELAY: '60000',
+    }),
+  })
+  try {
+    await telemetry.initialize()
+    await telemetry.runPromise(
+      tracedPlateSolve(
+        Effect.succeed({
+          outcome: 'recorded' as const,
+          result: 'NoSolution' as const,
+        }),
+      ),
+    )
+    await telemetry.runPromise(
+      tracedFrameIntake(
+        Effect.succeed({
+          outcome: 'rejected' as const,
+          reason: 'MaterializationFailed' as const,
+        }),
+      ),
+    )
+    await telemetry.runPromise(
+      tracedFrameInspection(
+        Effect.succeed({ inspection: { _tag: 'Available' as const } }),
+      ),
+    )
+    assert.equal(
+      await telemetry.runPromise(tracedPublisherWork(async () => 'published')),
+      'published',
+    )
+    for (const stage of [
+      'plateSolve.execute',
+      'publisher.localRead',
+      'publisher.put',
+      'publisher.verify',
+      'publisher.settle',
+    ] as const)
+      await telemetry.runPromise(tracedPipelineStage(stage, async () => true))
+  } finally {
+    await telemetry.dispose()
+    await collector.close()
+  }
+  const payload = Buffer.concat(
+    collector.requests.map((request) => request.body),
+  ).toString('utf8')
+  assert.equal(textOccurrences(payload, 'PlateSolve.execute'), 1)
+  assert.equal(textOccurrences(payload, 'FrameIntake.materialize'), 1)
+  assert.equal(textOccurrences(payload, 'FrameInspection.inspect'), 1)
+  assert.equal(textOccurrences(payload, 'Publisher.work.publish'), 1)
+  assert.equal(textOccurrences(payload, 'PlateSolve.external.execute'), 1)
+  assert.equal(textOccurrences(payload, 'Publisher.local.read'), 1)
+  assert.equal(textOccurrences(payload, 'Publisher.provider.put'), 1)
+  assert.equal(textOccurrences(payload, 'Publisher.provider.verify'), 1)
+  assert.equal(textOccurrences(payload, 'Publisher.work.settle'), 1)
+  assert.match(payload, /astro\.pipeline\.operation/)
+  assert.match(payload, /astro\.pipeline\.outcome/)
+  assert.match(payload, /recorded\.noSolution/)
+  assert.match(payload, /rejected\.MaterializationFailed/)
+  assert.match(payload, /available/)
+  assert.match(payload, /published/)
+  assert.doesNotMatch(payload, /asset-private/)
+  assert.doesNotMatch(payload, /private\/path/)
+  assert.doesNotMatch(payload, /sha256:/)
+  assert.doesNotMatch(payload, /object-key/)
+  assert.doesNotMatch(payload, /rightAscension/)
+  assert.doesNotMatch(payload, /declination/)
 })
 
 test('Alpaca operations export safe child spans without changing requests', async () => {
@@ -735,6 +1364,76 @@ test('Process HTTP flows export one safe business boundary each', async () => {
 
 function textOccurrences(text: string, value: string) {
   return text.split(value).length - 1
+}
+
+function otlpMetricUnits(payload: Uint8Array) {
+  const units = new Map<string, string>()
+  for (const resourceMetrics of protobufMessages(payload, 1))
+    for (const scopeMetrics of protobufMessages(resourceMetrics, 2))
+      for (const metric of protobufMessages(scopeMetrics, 2)) {
+        const name = protobufString(metric, 1)
+        const unit = protobufString(metric, 3)
+        if (name !== undefined && unit !== undefined) units.set(name, unit)
+      }
+  return units
+}
+
+function protobufMessages(bytes: Uint8Array, fieldNumber: number) {
+  return protobufFields(bytes)
+    .filter(
+      (field) => field.number === fieldNumber && field.bytes !== undefined,
+    )
+    .flatMap((field) => (field.bytes === undefined ? [] : [field.bytes]))
+}
+
+function protobufString(bytes: Uint8Array, fieldNumber: number) {
+  const value = protobufMessages(bytes, fieldNumber)[0]
+  return value === undefined ? undefined : new TextDecoder().decode(value)
+}
+
+function protobufFields(bytes: Uint8Array) {
+  const fields: Array<{
+    readonly number: number
+    readonly bytes?: Uint8Array
+  }> = []
+  let offset = 0
+  while (offset < bytes.length) {
+    const tag = protobufVarint(bytes, offset)
+    offset = tag.next
+    const wireType = tag.value & 7
+    const number = tag.value >>> 3
+    if (wireType === 2) {
+      const length = protobufVarint(bytes, offset)
+      offset = length.next
+      const end = offset + length.value
+      if (end > bytes.length) throw new Error('Invalid OTLP protobuf length')
+      fields.push({ number, bytes: bytes.slice(offset, end) })
+      offset = end
+    } else if (wireType === 0) {
+      offset = protobufVarint(bytes, offset).next
+    } else if (wireType === 1) {
+      offset += 8
+    } else if (wireType === 5) {
+      offset += 4
+    } else {
+      throw new Error(`Unsupported OTLP protobuf wire type ${wireType}`)
+    }
+  }
+  return fields
+}
+
+function protobufVarint(bytes: Uint8Array, offset: number) {
+  let value = 0
+  let shift = 0
+  while (offset < bytes.length && shift < 35) {
+    const byte = bytes[offset]
+    if (byte === undefined) break
+    value += (byte & 0x7f) * 2 ** shift
+    offset += 1
+    if ((byte & 0x80) === 0) return { value, next: offset }
+    shift += 7
+  }
+  throw new Error('Invalid OTLP protobuf varint')
 }
 
 function recordedImageBytes() {

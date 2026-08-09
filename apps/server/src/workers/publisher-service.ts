@@ -5,19 +5,44 @@ import { createPublisherWorker } from './publisher-worker.ts'
 import { Effect } from 'effect'
 import { publisherEnvironmentConfig } from '../config/environment-config.ts'
 import { runExecutable } from '../app/executable.ts'
+import { createOriginTelemetry } from '../observability/origin-telemetry.ts'
+import {
+  tracedPipelineStage,
+  tracedPublisherWork,
+} from '../observability/pipeline-telemetry.ts'
+import {
+  recordSqliteBacklog,
+  tracedSqliteOperation,
+} from '../observability/sqlite-telemetry.ts'
 
 export async function runPublisher(config: R2PublisherConfig) {
   const database = openPublisherDatabase(config.databasePath)
-  const worker = createPublisherWorker(
-    database,
-    { outputsRoot: config.outputsRoot },
-    createR2Provider(config),
-  )
+  const telemetry = createOriginTelemetry()
   const controller = new AbortController()
   const stop = () => controller.abort()
   process.once('SIGINT', stop)
   process.once('SIGTERM', stop)
   try {
+    await telemetry.initialize()
+    const worker = createPublisherWorker(
+      database,
+      { outputsRoot: config.outputsRoot },
+      createR2Provider(config),
+      {
+        traceWork: (run) => telemetry.runPromise(tracedPublisherWork(run)),
+        traceStage: (stage, run) =>
+          telemetry.runPromise(tracedPipelineStage(stage, run)),
+        traceSqlite: (operation, run) =>
+          telemetry.runSync(
+            tracedSqliteOperation(
+              operation,
+              Effect.try({ try: run, catch: (cause) => cause }),
+            ),
+          ),
+        observeSqliteBacklog: (backlog, count) =>
+          telemetry.runSync(recordSqliteBacklog(backlog, count)),
+      },
+    )
     while (!controller.signal.aborted) {
       try {
         await worker.pass()
@@ -29,6 +54,7 @@ export async function runPublisher(config: R2PublisherConfig) {
   } finally {
     process.removeListener('SIGINT', stop)
     process.removeListener('SIGTERM', stop)
+    await telemetry.dispose()
     database.close()
   }
 }

@@ -34,7 +34,11 @@ import { runExecutable } from './executable.ts'
 import { OriginListener, originListenerLayer } from '../http/origin-listener.ts'
 import { WebHost, webHostLayer } from '../http/web-host.ts'
 import { openOriginDatabase } from '../persistence/database.ts'
-import type { LocalIdentity, RequestAdmission } from '../auth/identity.ts'
+import type {
+  AdmissionObservation,
+  LocalIdentity,
+  RequestAdmission,
+} from '../auth/identity.ts'
 import {
   createJwksKeyResolver,
   createLocalFixtureAdmission,
@@ -123,6 +127,25 @@ import {
   processCommandIntent,
   tracedProcessOperation,
 } from '../observability/process-telemetry.ts'
+import { tracedExecutorWork } from '../observability/executor-telemetry.ts'
+import { tracedProjectionDelivery } from '../observability/projection-telemetry.ts'
+import { recordOperationalEvent } from '../observability/operational-telemetry.ts'
+import {
+  recordAdmissionDecision,
+  recordJwksRefresh,
+  tracedAdmission,
+} from '../observability/admission-telemetry.ts'
+import { tracedStartup } from '../observability/startup-telemetry.ts'
+import {
+  tracedFrameInspection,
+  tracedFrameIntake,
+  tracedPipelineStage,
+  tracedPlateSolve,
+} from '../observability/pipeline-telemetry.ts'
+import {
+  recordSqliteBacklog,
+  tracedSqliteOperation,
+} from '../observability/sqlite-telemetry.ts'
 import { createRunExecutorWorker } from '../workers/run-executor-worker.ts'
 import {
   acquireSqliteRepository,
@@ -211,6 +234,7 @@ export function createLocalWebService(
     readonly runExecutionContext?: typeof RunExecutionContext.Type
     readonly runExecutorProviderOrigin?: string
     readonly telemetry?: OriginTelemetry
+    readonly admissionObservability?: AdmissionObservation
   } = {},
 ) {
   const database = openOriginDatabase(databasePath)
@@ -510,6 +534,7 @@ export function createLocalWebService(
   const originListener = Effect.runSync(
     OriginListener.pipe(Effect.provide(originListenerLayer)),
   )
+  const telemetry = options.telemetry ?? defaultOriginTelemetry
   const projectionPublication = Effect.runSync(
     ProjectionPublication.pipe(
       Effect.provide(
@@ -522,6 +547,14 @@ export function createLocalWebService(
           controllerDisconnected: (identity) =>
             stateRepository.controllerDisconnected(identity),
           responseHeaders,
+          observe: (event) =>
+            telemetry.runSync(
+              recordOperationalEvent({
+                scope: 'projection',
+                operation: `sse.${event}`,
+                outcome: event === 'writeFailure' ? 'failed' : 'success',
+              }),
+            ),
         }),
       ),
     ),
@@ -563,16 +596,22 @@ export function createLocalWebService(
             ? {}
             : {
                 traceWork: (kind, run) =>
+                  telemetry.runPromise(tracedExecutorWork(kind, run)),
+                traceFrameIntake: (run) =>
+                  telemetry.runSync(tracedFrameIntake(Effect.sync(run))),
+                traceFrameInspection: (effect) =>
                   telemetry.runPromise(
-                    Effect.promise(run).pipe(
-                      Effect.withSpan('RunExecutor.pass', {
-                        attributes: {
-                          'astro.workspace': 'observe',
-                          'astro.executor.work.kind': kind,
-                        },
-                      }),
+                    tracedFrameInspection(effect).pipe(Effect.exit),
+                  ),
+                traceSqlite: (operation, run) =>
+                  telemetry.runSync(
+                    tracedSqliteOperation(
+                      operation,
+                      Effect.try({ try: run, catch: (cause) => cause }),
                     ),
                   ),
+                observeSqliteBacklog: (backlog, count) =>
+                  telemetry.runSync(recordSqliteBacklog(backlog, count)),
               }),
         })
   const runExecutorFiber =
@@ -637,29 +676,57 @@ export function createLocalWebService(
       : undefined)
   const cameraProvider = options.cameraProvider
   const developmentSimulation = options.simulation
-  const telemetry = options.telemetry ?? defaultOriginTelemetry
   const runHttp = <A, E>(
     response: ServerResponse,
     input: Parameters<typeof tracedHttpRequest>[1],
     effect: Effect.Effect<A, E>,
   ) => telemetry.runPromise(tracedHttpRequest(response, input, effect))
 
-  const handler = (requestAdmission: RequestAdmission = identityResolver) =>
-    createOriginRouter({
-      identityResolver: requestAdmission,
+  const handler = (requestAdmission: RequestAdmission = identityResolver) => {
+    const observedAdmission: RequestAdmission = (request) => {
+      const pathname = new URL(request?.url ?? '/', 'http://local').pathname
+      if (!pathname.startsWith('/api/') || pathname.startsWith('/api/health/'))
+        return requestAdmission(request)
+      return telemetry.runPromise(
+        tracedAdmission(
+          Effect.tryPromise({
+            try: async () =>
+              await requestAdmission(request, options.admissionObservability),
+            catch: (cause) => cause,
+          }),
+        ),
+      )
+    }
+    return createOriginRouter({
+      identityResolver: observedAdmission,
       expireReconnectGrace: () => stateRepository.expireReconnectGrace(),
       live: (response) => json(response, 200, { status: 'alive' }),
       unauthenticated,
       snapshot: (response, identity) =>
-        void Effect.runSync(
-          stateRepository.bootstrapSnapshot(identity).pipe(
-            Effect.flatMap((data) =>
-              Schema.decodeUnknownEffect(BootstrapHttpSuccessEnvelope)({
-                ok: true,
-                data,
-              }),
+        void telemetry.runSync(
+          tracedHttpRequest(
+            response,
+            {
+              method: 'GET',
+              route: '/api/snapshot',
+              workspace: 'projection',
+            },
+            tracedProjectionDelivery(
+              response,
+              'snapshot',
+              tracedSqliteOperation(
+                'projection.snapshot.read',
+                stateRepository.bootstrapSnapshot(identity),
+              ).pipe(
+                Effect.flatMap((data) =>
+                  Schema.decodeUnknownEffect(BootstrapHttpSuccessEnvelope)({
+                    ok: true,
+                    data,
+                  }),
+                ),
+                Effect.map((body) => json(response, 200, body)),
+              ),
             ),
-            Effect.map((body) => json(response, 200, body)),
           ),
         ),
       ready: (response) => json(response, 200, stateRepository.readiness()),
@@ -668,8 +735,24 @@ export function createLocalWebService(
           ? json(response, 200, stateRepository.operations())
           : json(response, 403, reject('OwnerRequired').body),
       events: (request, response, identity) =>
-        void Effect.runSync(
-          projectionPublication.stream(request, response, identity),
+        void telemetry.runSync(
+          tracedHttpRequest(
+            response,
+            {
+              method: 'GET',
+              route: '/api/events',
+              workspace: 'projection',
+            },
+            tracedProjectionDelivery(
+              response,
+              'sse.open',
+              projectionPublication.stream(request, response, identity),
+              () =>
+                identity.capability === 'controlCapable'
+                  ? stateRepository.state().control.state
+                  : 'notApplicable',
+            ),
+          ),
         ),
       control: (response, identity, request) =>
         runHttp(
@@ -1432,6 +1515,7 @@ export function createLocalWebService(
           .writeHead(404, responseHeaders('text/plain; charset=utf-8'))
           .end(),
     })
+  }
   const listen = async (
     port = 0,
     host = '127.0.0.1',
@@ -1511,16 +1595,18 @@ export function createLocalWebService(
       ? 0
       : cleanupProcessOrphans(database, processSaveStorage)
   const ingestCapturedFrame = (raw: unknown, bytes: Uint8Array) => {
-    if (options.capturedFrameStorage === undefined)
+    const capturedFrameStorage = options.capturedFrameStorage
+    if (capturedFrameStorage === undefined)
       return {
         outcome: 'rejected' as const,
         reason: 'MaterializationFailed' as const,
       }
-    const result = materializeCapturedFrame(
-      database,
-      options.capturedFrameStorage,
-      raw,
-      bytes,
+    const result = telemetry.runSync(
+      tracedFrameIntake(
+        Effect.sync(() =>
+          materializeCapturedFrame(database, capturedFrameStorage, raw, bytes),
+        ),
+      ),
     )
     if (result.outcome === 'accepted')
       publish('CapturedFrameMaterialized', result.cursor)
@@ -1565,31 +1651,38 @@ export function createLocalWebService(
     return result
   }
   const completedCameraExposure = (raw: unknown) =>
-    Effect.promise(() => ingestCompletedCameraExposure(raw)).pipe(
-      Effect.withSpan('CapturedFrameIntake.complete', {
-        attributes: { 'astro.workspace': 'acquire' },
-      }),
-    )
+    Effect.promise(() => ingestCompletedCameraExposure(raw))
   const inspectFrame = (assetId: string) =>
     options.frameInspectionStorage === undefined
       ? undefined
-      : Effect.runSync(
-          inspectCapturedFrame(
-            database,
-            options.frameInspectionStorage,
-            assetId,
+      : telemetry.runSync(
+          tracedFrameInspection(
+            inspectCapturedFrame(
+              database,
+              options.frameInspectionStorage,
+              assetId,
+            ),
           ),
         )
   const solveRetainedFrame = async (assetId: string) => {
-    if (options.plateSolveWorker === undefined)
+    const plateSolveWorker = options.plateSolveWorker
+    if (plateSolveWorker === undefined)
       return {
         outcome: 'rejected' as const,
         reason: 'SourceUnavailable' as const,
       }
-    const result = await createPlateSolveWorker(
-      database,
-      options.plateSolveWorker,
-    ).solve(assetId)
+    const result = await telemetry.runPromise(
+      tracedPlateSolve(
+        Effect.promise(() =>
+          createPlateSolveWorker(database, plateSolveWorker, {
+            traceExecute: (run) =>
+              telemetry.runPromise(
+                tracedPipelineStage('plateSolve.execute', run),
+              ),
+          }).solve(assetId),
+        ),
+      ),
+    )
     if (result.outcome === 'recorded')
       publish('AcquireEvidenceUpdated', result.cursor)
     return result
@@ -1857,7 +1950,7 @@ export function createOriginAdmission(
 ): RequestAdmission {
   if (config.admission.mode === 'development') {
     const client = config.admission.client
-    return createLocalFixtureAdmission({
+    const admission = createLocalFixtureAdmission({
       personId: client === 'friend' ? 'friend-ada' : 'owner-chicks',
       clientId:
         client === 'phone'
@@ -1867,6 +1960,7 @@ export function createOriginAdmission(
             : 'desktop-owner',
       capability: client === 'phone' ? 'readOnly' : 'controlCapable',
     })
+    return admission
   }
   return createProductionAccessAdmission({
     issuer: config.admission.issuer,
@@ -1912,7 +2006,7 @@ function createRemoteAccessAdmission(
     }),
   })
 }
-export const createLocalOwnerAdmission = () =>
+export const createLocalOwnerAdmission = (): RequestAdmission =>
   createLocalFixtureAdmission({
     personId: 'owner-chicks',
     clientId: 'local-owner',
@@ -1921,103 +2015,130 @@ export const createLocalOwnerAdmission = () =>
   })
 export const startOrigin = () =>
   runExecutable('origin server', async () => {
-    const config = await Effect.runPromise(originServerConfig)
     const telemetry = createOriginTelemetry()
     const listeners: Array<{ readonly close: () => Promise<void> }> = []
     let service: ReturnType<typeof createLocalWebService> | undefined
     try {
       await telemetry.initialize()
+      const config = await telemetry.runPromise(
+        tracedStartup('config.decode', originServerConfig),
+      )
+      const admissionObservability: AdmissionObservation = {
+        admission: (reason) =>
+          telemetry.runSync(recordAdmissionDecision(reason)),
+        jwks: (outcome) => telemetry.runSync(recordJwksRefresh(outcome)),
+      }
       const admission = createRemoteReadOnlyAdmission(config)
       const issuer = configuredDownloadGrantIssuer(config.downloadGrant)
-      service = createLocalWebService(
-        config.runtime.databasePath,
-        admission,
-        undefined,
-        issuer === undefined ? undefined : { issuer },
-        {
-          ...(config.fixture === undefined ? {} : { fixture: config.fixture }),
-          ...(config.preflightProvider === undefined
-            ? {}
-            : {
-                preflightProvider: alpacaPreflightProvider(
-                  config.preflightProvider,
-                ),
-                ...(config.preflightProvider.devices.camera === undefined
+      const createdService = telemetry.runSync(
+        tracedStartup(
+          'service.create',
+          Effect.sync(() =>
+            createLocalWebService(
+              config.runtime.databasePath,
+              admission,
+              undefined,
+              issuer === undefined ? undefined : { issuer },
+              {
+                ...(config.fixture === undefined
+                  ? {}
+                  : { fixture: config.fixture }),
+                ...(config.preflightProvider === undefined
                   ? {}
                   : {
-                      cameraProvider: alpacaCameraProvider(
+                      preflightProvider: alpacaPreflightProvider(
                         config.preflightProvider,
                       ),
-                      runExecutorProviderOrigin: new URL(
-                        `http://${config.preflightProvider.host}:${config.preflightProvider.port}`,
-                      ).origin,
-                      ...(config.preflightProvider.devices.camera.uniqueId ===
-                      undefined
+                      ...(config.preflightProvider.devices.camera === undefined
                         ? {}
                         : {
-                            runExecutionContext: RunExecutionContext.make({
-                              rigId: config.preflightProvider.rigId,
-                              cameraDeviceId:
-                                config.preflightProvider.devices.camera
-                                  .uniqueId,
-                              ...(config.preflightProvider.devices.telescope
-                                ?.uniqueId === undefined
-                                ? {}
-                                : {
-                                    mountDeviceId:
-                                      config.preflightProvider.devices.telescope
-                                        .uniqueId,
-                                    ...(config.preflightProvider.site ===
-                                    undefined
-                                      ? config.simulation === undefined
+                            cameraProvider: alpacaCameraProvider(
+                              config.preflightProvider,
+                            ),
+                            runExecutorProviderOrigin: new URL(
+                              `http://${config.preflightProvider.host}:${config.preflightProvider.port}`,
+                            ).origin,
+                            ...(config.preflightProvider.devices.camera
+                              .uniqueId === undefined
+                              ? {}
+                              : {
+                                  runExecutionContext: RunExecutionContext.make(
+                                    {
+                                      rigId: config.preflightProvider.rigId,
+                                      cameraDeviceId:
+                                        config.preflightProvider.devices.camera
+                                          .uniqueId,
+                                      ...(config.preflightProvider.devices
+                                        .telescope?.uniqueId === undefined
                                         ? {}
                                         : {
-                                            latitudeDegrees: 39.755,
-                                            longitudeDegrees: -74.2677777778,
-                                            elevationMeters: 0,
-                                          }
-                                      : config.preflightProvider.site),
-                                  }),
-                              completionBehavior: 'hold',
-                              unsafeBehavior: 'pauseAndPark',
-                            }),
+                                            mountDeviceId:
+                                              config.preflightProvider.devices
+                                                .telescope.uniqueId,
+                                            ...(config.preflightProvider
+                                              .site === undefined
+                                              ? config.simulation === undefined
+                                                ? {}
+                                                : {
+                                                    latitudeDegrees: 39.755,
+                                                    longitudeDegrees:
+                                                      -74.2677777778,
+                                                    elevationMeters: 0,
+                                                  }
+                                              : config.preflightProvider.site),
+                                          }),
+                                      completionBehavior: 'hold',
+                                      unsafeBehavior: 'pauseAndPark',
+                                    },
+                                  ),
+                                }),
                           }),
                     }),
-              }),
-          webDistPath: config.runtime.webDistPath,
-          previewRoot: config.runtime.previewRoot,
-          capturedFrameStorage: {
-            originalsRoot: config.runtime.originalsRoot,
-          },
-          frameInspectionStorage: {
-            originalsRoot: config.runtime.originalsRoot,
-            previewsRoot: config.runtime.previewRoot,
-          },
-          plateSolveWorker: {
-            originalsRoot: config.runtime.originalsRoot,
-            executable: config.plateSolve.executable,
-            indexesRoot: config.plateSolve.indexesRoot,
-            timeoutMs: config.plateSolve.timeoutMs,
-            solverVersion: config.plateSolve.solverVersion,
-            scaleLowDeg: config.plateSolve.scaleLowDeg,
-            scaleHighDeg: config.plateSolve.scaleHighDeg,
-            searchRadiusDeg: config.plateSolve.searchRadiusDeg,
-          },
-          ...(config.simulation === undefined &&
-          config.preflightProvider?.site !== undefined &&
-          config.preflightProvider.devices.camera?.uniqueId !== undefined &&
-          config.preflightProvider.devices.telescope?.uniqueId !== undefined
-            ? { configuredTargetProvider: config.preflightProvider }
-            : {}),
-          ...(config.simulation === undefined
-            ? {}
-            : { simulation: config.simulation }),
-          telemetry,
-        },
+                webDistPath: config.runtime.webDistPath,
+                previewRoot: config.runtime.previewRoot,
+                capturedFrameStorage: {
+                  originalsRoot: config.runtime.originalsRoot,
+                },
+                frameInspectionStorage: {
+                  originalsRoot: config.runtime.originalsRoot,
+                  previewsRoot: config.runtime.previewRoot,
+                },
+                plateSolveWorker: {
+                  originalsRoot: config.runtime.originalsRoot,
+                  executable: config.plateSolve.executable,
+                  indexesRoot: config.plateSolve.indexesRoot,
+                  timeoutMs: config.plateSolve.timeoutMs,
+                  solverVersion: config.plateSolve.solverVersion,
+                  scaleLowDeg: config.plateSolve.scaleLowDeg,
+                  scaleHighDeg: config.plateSolve.scaleHighDeg,
+                  searchRadiusDeg: config.plateSolve.searchRadiusDeg,
+                },
+                ...(config.simulation === undefined &&
+                config.preflightProvider?.site !== undefined &&
+                config.preflightProvider.devices.camera?.uniqueId !==
+                  undefined &&
+                config.preflightProvider.devices.telescope?.uniqueId !==
+                  undefined
+                  ? { configuredTargetProvider: config.preflightProvider }
+                  : {}),
+                ...(config.simulation === undefined
+                  ? {}
+                  : { simulation: config.simulation }),
+                telemetry,
+                admissionObservability,
+              },
+            ),
+          ),
+        ),
       )
-      const remote = await service.listen(
-        config.runtime.port,
-        config.runtime.host,
+      service = createdService
+      const remote = await telemetry.runPromise(
+        tracedStartup(
+          'listener.bind',
+          Effect.promise(() =>
+            createdService.listen(config.runtime.port, config.runtime.host),
+          ),
+        ),
       )
       listeners.push(remote)
       if (config.admission.mode === 'development') {
@@ -2030,26 +2151,40 @@ export const startOrigin = () =>
       const localOwnerPort = config.runtime.localOwnerPort
       if (localOwnerPort === undefined)
         throw new Error('Production origin requires ASTRO_LOCAL_OWNER_PORT')
-      const local = await service.listen(
-        localOwnerPort,
-        config.runtime.host,
-        createLocalOwnerAdmission(),
+      const local = await telemetry.runPromise(
+        tracedStartup(
+          'listener.bind',
+          Effect.promise(() =>
+            createdService.listen(
+              localOwnerPort,
+              config.runtime.host,
+              createLocalOwnerAdmission(),
+            ),
+          ),
+        ),
       )
       listeners.push(local)
       const remoteDesktop =
         config.runtime.remoteDesktopPort === undefined
           ? undefined
-          : await service.listen(
-              config.runtime.remoteDesktopPort,
-              config.runtime.host,
-              createRemoteDesktopAdmission(config),
+          : await telemetry.runPromise(
+              tracedStartup(
+                'listener.bind',
+                Effect.promise(() =>
+                  createdService.listen(
+                    config.runtime.remoteDesktopPort,
+                    config.runtime.host,
+                    createRemoteDesktopAdmission(config),
+                  ),
+                ),
+              ),
             )
       if (remoteDesktop !== undefined) listeners.push(remoteDesktop)
       console.log(
         `Astro Console ${config.runtime.release}: remote phone http://${config.runtime.host}:${remote.port};${remoteDesktop === undefined ? '' : ` remote desktop http://${config.runtime.host}:${remoteDesktop.port};`} local owner http://${config.runtime.host}:${local.port}`,
       )
       installOriginShutdown(
-        service,
+        createdService,
         telemetry,
         remoteDesktop === undefined
           ? [remote, local]
@@ -2079,6 +2214,13 @@ function installOriginShutdown(
     try {
       service.close()
     } finally {
+      await telemetry.runPromise(
+        recordOperationalEvent({
+          scope: 'startup',
+          operation: 'shutdown',
+          outcome: 'stopped',
+        }),
+      )
       await telemetry.dispose()
     }
   }
