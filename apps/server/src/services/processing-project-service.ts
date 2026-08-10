@@ -12,6 +12,7 @@ import {
   ProcessingLibraryRole,
   CalibrationOverride,
   CalibrationRecommendation,
+  RegistrationFrameInclusion,
   ProcessingProjectId,
   ProcessingProjectRevision,
   ProcessingProjectSource,
@@ -35,6 +36,7 @@ type ProjectCommand = Extract<
   | { readonly _tag: 'UndoProcessingStageDraft' }
   | { readonly _tag: 'RedoProcessingStageDraft' }
   | { readonly _tag: 'SetCalibrationUseAnyway' }
+  | { readonly _tag: 'SetRegistrationFrameIncluded' }
   | { readonly _tag: 'RunProcessingProjectStage' }
   | { readonly _tag: 'SelectProcessingStageResult' }
 >
@@ -67,6 +69,7 @@ const ProjectAcceptedResponse = Schema.Struct({
     'projectStageDraftUndone',
     'projectStageDraftRedone',
     'calibrationUseAnywayUpdated',
+    'registrationFrameInclusionUpdated',
     'projectStageRunQueued',
     'projectStageResultSelected',
   ]),
@@ -116,6 +119,7 @@ export const isProcessingProjectCommand = (
   Command.guards.UndoProcessingStageDraft(command) ||
   Command.guards.RedoProcessingStageDraft(command) ||
   Command.guards.SetCalibrationUseAnyway(command) ||
+  Command.guards.SetRegistrationFrameIncluded(command) ||
   Command.guards.RunProcessingProjectStage(command) ||
   Command.guards.SelectProcessingStageResult(command)
 
@@ -187,12 +191,19 @@ function normalizeStoredProject(
         Array.isArray(history)
           ? history.map((entry) =>
               Array.isArray(entry)
-                ? { settings: entry, overrides: [] }
+                ? {
+                    settings: entry,
+                    overrides: [],
+                    registrationInclusions: [],
+                  }
                 : {
                     ...Schema.decodeUnknownSync(UnknownRecord)(entry),
                     overrides:
                       Schema.decodeUnknownSync(UnknownRecord)(entry)
                         .overrides ?? [],
+                    registrationInclusions:
+                      Schema.decodeUnknownSync(UnknownRecord)(entry)
+                        .registrationInclusions ?? [],
                   },
             )
           : []
@@ -201,6 +212,7 @@ function normalizeStoredProject(
         draft: {
           ...draft,
           overrides: draft.overrides ?? [],
+          registrationInclusions: draft.registrationInclusions ?? [],
           undo: normalizeHistory(draft.undo),
           redo: normalizeHistory(draft.redo),
         },
@@ -213,11 +225,20 @@ function normalizeStoredProject(
                   .recommendations ?? [],
               overrides:
                 Schema.decodeUnknownSync(UnknownRecord)(entry).overrides ?? [],
+              registrationInclusions:
+                Schema.decodeUnknownSync(UnknownRecord)(entry)
+                  .registrationInclusions ?? [],
               frameOutcomes:
                 Schema.decodeUnknownSync(UnknownRecord)(entry).frameOutcomes ??
                 [],
               outputs:
                 Schema.decodeUnknownSync(UnknownRecord)(entry).outputs ?? [],
+              registrationTransforms:
+                Schema.decodeUnknownSync(UnknownRecord)(entry)
+                  .registrationTransforms ?? [],
+              viableAssetIds:
+                Schema.decodeUnknownSync(UnknownRecord)(entry).viableAssetIds ??
+                [],
               diagnostics:
                 Schema.decodeUnknownSync(UnknownRecord)(entry).diagnostics ??
                 [],
@@ -272,13 +293,16 @@ export function executeProcessingProjectCommand(
     Command.guards.UpdateProcessingStageDraft(command) ||
     Command.guards.UndoProcessingStageDraft(command) ||
     Command.guards.RedoProcessingStageDraft(command) ||
-    Command.guards.SetCalibrationUseAnyway(command)
+    Command.guards.SetCalibrationUseAnyway(command) ||
+    Command.guards.SetRegistrationFrameIncluded(command)
   ) {
     if (current === undefined)
       return { outcome: 'rejected' as const, reason: 'ProjectNotFound' }
     const stageName = Command.guards.SetCalibrationUseAnyway(command)
       ? 'Calibration'
-      : command.stage
+      : Command.guards.SetRegistrationFrameIncluded(command)
+        ? 'Registration'
+        : command.stage
     const stage = current.stages.find((item) => item.stage === stageName)
     if (stage === undefined)
       return { outcome: 'rejected' as const, reason: 'StageNotFound' }
@@ -293,9 +317,29 @@ export function executeProcessingProjectCommand(
           reason: 'CalibrationOverrideUnavailable',
         }
     }
+    if (Command.guards.SetRegistrationFrameIncluded(command)) {
+      const latest = stage.attempts
+        .filter(
+          (attempt) =>
+            attempt.state === 'succeeded' && !attempt.basedOnEarlierUpstream,
+        )
+        .at(-1)
+      const outcome = latest?.frameOutcomes.find(
+        (candidate) => candidate.assetId === command.assetId,
+      )
+      const transform = latest?.registrationTransforms.find(
+        (candidate) => candidate.assetId === command.assetId,
+      )
+      if (outcome?.outcome !== 'Warning' || transform?.usable !== true)
+        return {
+          outcome: 'rejected' as const,
+          reason: 'RegistrationFrameChoiceUnavailable',
+        }
+    }
     const snapshot = {
       settings: draft.settings,
       overrides: draft.overrides,
+      registrationInclusions: draft.registrationInclusions,
     }
     const nextDraft = Command.guards.SetCalibrationUseAnyway(command)
       ? {
@@ -311,36 +355,63 @@ export function executeProcessingProjectCommand(
             : draft.overrides.filter(
                 (override) => override.assetId !== command.assetId,
               ),
+          registrationInclusions: draft.registrationInclusions,
           undo: [...draft.undo, snapshot].slice(-10),
           redo: [],
         }
-      : Command.guards.UpdateProcessingStageDraft(command)
+      : Command.guards.SetRegistrationFrameIncluded(command)
         ? {
             revision: draft.revision + 1,
-            settings: command.settings,
+            settings: draft.settings,
             overrides: draft.overrides,
+            registrationInclusions: command.included
+              ? [
+                  ...draft.registrationInclusions.filter(
+                    (choice) => choice.assetId !== command.assetId,
+                  ),
+                  {
+                    assetId: command.assetId,
+                    decision: 'Include warning frame' as const,
+                  },
+                ]
+              : draft.registrationInclusions.filter(
+                  (choice) => choice.assetId !== command.assetId,
+                ),
             undo: [...draft.undo, snapshot].slice(-10),
             redo: [],
           }
-        : Command.guards.UndoProcessingStageDraft(command)
-          ? draft.undo.length === 0
-            ? undefined
-            : {
-                revision: draft.revision + 1,
-                settings: draft.undo.at(-1)?.settings ?? [],
-                overrides: draft.undo.at(-1)?.overrides ?? [],
-                undo: draft.undo.slice(0, -1),
-                redo: [snapshot, ...draft.redo].slice(0, 10),
-              }
-          : draft.redo.length === 0
-            ? undefined
-            : {
-                revision: draft.revision + 1,
-                settings: draft.redo[0]?.settings ?? [],
-                overrides: draft.redo[0]?.overrides ?? [],
-                undo: [...draft.undo, snapshot].slice(-10),
-                redo: draft.redo.slice(1),
-              }
+        : Command.guards.UpdateProcessingStageDraft(command)
+          ? {
+              revision: draft.revision + 1,
+              settings: command.settings,
+              overrides: draft.overrides,
+              registrationInclusions: draft.registrationInclusions,
+              undo: [...draft.undo, snapshot].slice(-10),
+              redo: [],
+            }
+          : Command.guards.UndoProcessingStageDraft(command)
+            ? draft.undo.length === 0
+              ? undefined
+              : {
+                  revision: draft.revision + 1,
+                  settings: draft.undo.at(-1)?.settings ?? [],
+                  overrides: draft.undo.at(-1)?.overrides ?? [],
+                  registrationInclusions:
+                    draft.undo.at(-1)?.registrationInclusions ?? [],
+                  undo: draft.undo.slice(0, -1),
+                  redo: [snapshot, ...draft.redo].slice(0, 10),
+                }
+            : draft.redo.length === 0
+              ? undefined
+              : {
+                  revision: draft.revision + 1,
+                  settings: draft.redo[0]?.settings ?? [],
+                  overrides: draft.redo[0]?.overrides ?? [],
+                  registrationInclusions:
+                    draft.redo[0]?.registrationInclusions ?? [],
+                  undo: [...draft.undo, snapshot].slice(-10),
+                  redo: draft.redo.slice(1),
+                }
     if (nextDraft === undefined)
       return { outcome: 'rejected' as const, reason: 'DraftHistoryUnavailable' }
     project = reviseProject(current, current.sources, {
@@ -376,6 +447,20 @@ export function executeProcessingProjectCommand(
     const upstream = upstreamAttempt(current, command.stage)
     if (command.stage !== 'Calibration' && upstream === undefined)
       return { outcome: 'rejected' as const, reason: 'UpstreamResultRequired' }
+    const upstreamResult =
+      command.stage === 'Registration' && upstream !== undefined
+        ? current.stages
+            .find((item) => item.stage === 'Calibration')
+            ?.attempts.find((item) => item.attemptId === upstream)
+        : undefined
+    if (
+      command.stage === 'Registration' &&
+      registrationReference(stage.draft.settings, upstreamResult) === undefined
+    )
+      return {
+        outcome: 'rejected' as const,
+        reason: 'RegistrationReferenceUnavailable',
+      }
     const attemptId = ProcessingStageAttemptId.make(
       `stage-attempt-${randomUUID()}`,
     )
@@ -388,22 +473,39 @@ export function executeProcessingProjectCommand(
       toolIdentity:
         command.stage === 'Calibration'
           ? 'deterministic-calibration-adapter-v1'
-          : 'deterministic-stage-harness-v1',
+          : command.stage === 'Registration'
+            ? 'deterministic-registration-adapter-v1'
+            : 'deterministic-stage-harness-v1',
       resultKind:
         command.stage === 'Calibration'
           ? 'deterministicCalibrationEvidence'
-          : 'deterministicStageEvidence',
+          : command.stage === 'Registration'
+            ? 'deterministicRegistrationEvidence'
+            : 'deterministicStageEvidence',
       basedOnEarlierUpstream: false,
-      sourceRevisions: current.sources.map((source) => ({
-        assetId: source.assetId,
-        assetRevision: source.assetRevision,
-        role: source.role,
-      })),
+      sourceRevisions:
+        command.stage === 'Registration' && upstreamResult !== undefined
+          ? upstreamResult.frameOutcomes.map((source) => ({
+              assetId: source.assetId,
+              assetRevision: source.assetRevision,
+              role: 'Lights' as const,
+            }))
+          : current.sources.map((source) => ({
+              assetId: source.assetId,
+              assetRevision: source.assetRevision,
+              role: source.role,
+            })),
       recommendations:
         command.stage === 'Calibration' ? stage.calibrationRecommendations : [],
       overrides: command.stage === 'Calibration' ? stage.draft.overrides : [],
+      registrationInclusions:
+        command.stage === 'Registration'
+          ? stage.draft.registrationInclusions
+          : [],
       frameOutcomes: [],
       outputs: [],
+      registrationTransforms: [],
+      viableAssetIds: [],
       diagnostics: [],
       ...(upstream === undefined ? {} : { upstreamAttemptId: upstream }),
     })
@@ -527,9 +629,11 @@ export function executeProcessingProjectCommand(
                   ? ('projectStageDraftRedone' as const)
                   : Command.guards.SetCalibrationUseAnyway(command)
                     ? ('calibrationUseAnywayUpdated' as const)
-                    : Command.guards.RunProcessingProjectStage(command)
-                      ? ('projectStageRunQueued' as const)
-                      : ('projectStageResultSelected' as const)
+                    : Command.guards.SetRegistrationFrameIncluded(command)
+                      ? ('registrationFrameInclusionUpdated' as const)
+                      : Command.guards.RunProcessingProjectStage(command)
+                        ? ('projectStageRunQueued' as const)
+                        : ('projectStageResultSelected' as const)
   const response = {
     outcome: 'accepted' as const,
     replayed: false,
@@ -715,8 +819,15 @@ function initialStages(
                 { key: 'operation', value: 'calibrate-and-debayer' },
                 { key: 'allowUncalibrated', value: 'true' },
               ]
-            : [],
+            : stage === 'Registration'
+              ? [
+                  { key: 'referenceAssetId', value: 'auto' },
+                  { key: 'alignmentModel', value: 'translation' },
+                  { key: 'starDetection', value: 'balanced' },
+                ]
+              : [],
         overrides: [],
+        registrationInclusions: [],
         undo: [],
         redo: [],
       },
@@ -750,6 +861,19 @@ function upstreamAttempt(
   return attempt?.state === 'succeeded' && !attempt.basedOnEarlierUpstream
     ? attempt.attemptId
     : undefined
+}
+
+function registrationReference(
+  settings: ReadonlyArray<{ readonly key: string; readonly value: string }>,
+  upstream: typeof ProcessingStageAttempt.Type | undefined,
+) {
+  const outputs = upstream?.outputs ?? []
+  const selected =
+    settings.find((setting) => setting.key === 'referenceAssetId')?.value ??
+    'auto'
+  return selected === 'auto'
+    ? outputs[0]
+    : outputs.find((output) => output.sourceAssetId === selected)
 }
 
 export function settleProcessingProjectStage(
@@ -800,6 +924,16 @@ export function settleProcessingProjectStage(
           claimToken,
         )
       : undefined
+  const registrationEvidence =
+    attempt.stage === 'Registration'
+      ? registrationAttemptEvidence(
+          project,
+          attempt,
+          checksum,
+          artifactPath,
+          claimToken,
+        )
+      : undefined
   const calibration =
     calibrationEvidence === undefined
       ? undefined
@@ -809,13 +943,29 @@ export function settleProcessingProjectStage(
           outputs: calibrationEvidence.outputs,
           diagnostics: calibrationEvidence.diagnostics,
         }
+  const registration =
+    registrationEvidence === undefined
+      ? undefined
+      : {
+          stageOutcome: registrationEvidence.stageOutcome,
+          frameOutcomes: registrationEvidence.frameOutcomes,
+          outputs: registrationEvidence.outputs,
+          diagnostics: registrationEvidence.diagnostics,
+          registrationTransforms: registrationEvidence.transforms,
+          viableAssetIds: registrationEvidence.viableAssetIds,
+        }
+  const evidence = calibration ?? registration
   const completed = ProcessingStageAttempt.make({
     ...attempt,
     state:
-      calibration === undefined || calibration.outputs.length > 0
-        ? 'succeeded'
+      evidence === undefined || evidence.outputs.length > 0
+        ? registration === undefined || registration.viableAssetIds.length > 0
+          ? 'succeeded'
+          : 'failed'
         : 'failed',
-    ...(calibration === undefined || calibration.outputs.length > 0
+    ...(evidence === undefined ||
+    (evidence.outputs.length > 0 &&
+      (registration === undefined || registration.viableAssetIds.length > 0))
       ? {
           resultId: ProcessingStageResultId.make(
             `stage-result-${attempt.attemptId}`,
@@ -823,11 +973,13 @@ export function settleProcessingProjectStage(
           outputChecksum: checksum,
         }
       : {}),
-    ...(calibration ?? {
+    ...(evidence ?? {
       stageOutcome: 'Succeeded' as const,
       frameOutcomes: [],
       outputs: [],
       diagnostics: [],
+      registrationTransforms: [],
+      viableAssetIds: [],
     }),
     startedAt: now,
     completedAt: now,
@@ -893,6 +1045,21 @@ export function settleProcessingProjectStage(
           settledProject.projectId,
           workId,
           `calibration-output-${attempt.attemptId}-${index + 1}`,
+          artifact.path,
+          artifact.checksum,
+        )
+    for (const [index, artifact] of (
+      registrationEvidence?.outputArtifacts ?? []
+    ).entries())
+      database
+        .prepare(
+          'INSERT OR REPLACE INTO processing_artifacts VALUES (?,?,?,?,?,?,0)',
+        )
+        .run(
+          `${workId}:registration:${artifact.sourceAssetId}`,
+          settledProject.projectId,
+          workId,
+          `registration-transform-${attempt.attemptId}-${index + 1}`,
           artifact.path,
           artifact.checksum,
         )
@@ -1071,6 +1238,204 @@ function calibrationAttemptEvidence(
   }
 }
 
+function registrationAttemptEvidence(
+  project: ProcessingProject,
+  attempt: typeof ProcessingStageAttempt.Type,
+  evidenceChecksum: string,
+  artifactPath: string,
+  claimToken: string,
+) {
+  const calibration = project.stages
+    .find((stage) => stage.stage === 'Calibration')
+    ?.attempts.find(
+      (candidate) => candidate.attemptId === attempt.upstreamAttemptId,
+    )
+  const reference = registrationReference(attempt.settings, calibration)
+  if (calibration === undefined || reference === undefined)
+    return {
+      stageOutcome: 'Unavailable' as const,
+      frameOutcomes: attempt.sourceRevisions.map((source) => ({
+        assetId: source.assetId,
+        assetRevision: source.assetRevision,
+        outcome: 'Unavailable' as const,
+        message: 'The exact selected Calibration output is unavailable.',
+        diagnostic: 'CalibrationOutputUnavailable',
+      })),
+      outputs: [],
+      diagnostics: [
+        'Registration requires one exact selected Calibration result.',
+      ],
+      transforms: [],
+      viableAssetIds: [],
+      outputArtifacts: [],
+    }
+  const upstreamOutputs = new Map(
+    calibration.outputs.map((output) => [output.sourceAssetId, output]),
+  )
+  const includedWarnings = new Set(
+    attempt.registrationInclusions.map((choice) => choice.assetId),
+  )
+  const model =
+    attempt.settings.find((setting) => setting.key === 'alignmentModel')
+      ?.value === 'affine'
+      ? ('affine' as const)
+      : ('translation' as const)
+  const strict =
+    attempt.settings.find((setting) => setting.key === 'starDetection')
+      ?.value === 'strict'
+  const fail = attempt.settings.some(
+    (setting) => setting.key === 'adapterMode' && setting.value === 'fail',
+  )
+  const partial = attempt.settings.some(
+    (setting) => setting.key === 'adapterMode' && setting.value === 'partial',
+  )
+  const outputArtifacts: Array<{
+    sourceAssetId: typeof AssetId.Type
+    sourceAssetRevision: typeof AssetRevision.Type
+    path: string
+    checksum: string
+  }> = []
+  const transforms: Array<{
+    assetId: typeof AssetId.Type
+    assetRevision: typeof AssetRevision.Type
+    referenceAssetId: typeof AssetId.Type
+    referenceAssetRevision: typeof AssetRevision.Type
+    model: 'translation' | 'affine'
+    coefficients: ReadonlyArray<number>
+    checksum: string
+    usable: boolean
+    diagnostic?: string
+  }> = []
+  const frameOutcomes = attempt.sourceRevisions.map((source, index) => {
+    const upstream = upstreamOutputs.get(source.assetId)
+    if (upstream === undefined)
+      return {
+        assetId: source.assetId,
+        assetRevision: source.assetRevision,
+        outcome: 'Unavailable' as const,
+        message:
+          'Calibration produced no readable output for this Light, so Registration has no input bytes.',
+        diagnostic: 'CalibrationOutputUnavailable',
+      }
+    const isReference = source.assetId === reference.sourceAssetId
+    if (fail || (!isReference && (partial || strict)))
+      return {
+        assetId: source.assetId,
+        assetRevision: source.assetRevision,
+        outcome: 'Failed' as const,
+        message:
+          'The deterministic adapter found no usable transform for this Light.',
+        diagnostic: 'NoUsableTransform',
+      }
+    const warning = !isReference && index % 2 === 1
+    const coefficients = isReference
+      ? [1, 0, 0, 0, 1, 0]
+      : model === 'affine'
+        ? [1, 0.001, index, -0.001, 1, index * -0.5]
+        : [1, 0, index, 0, 1, index * -0.5]
+    const bytes = JSON.stringify({
+      kind: 'deterministicRegistrationTransform',
+      sourceAssetId: source.assetId,
+      sourceAssetRevision: source.assetRevision,
+      referenceAssetId: reference.sourceAssetId,
+      referenceAssetRevision: reference.sourceAssetRevision,
+      model,
+      coefficients,
+      upstreamAttemptId: attempt.upstreamAttemptId,
+      upstreamChecksum: upstream.checksum,
+      frozenEvidenceChecksum: evidenceChecksum,
+      settings: attempt.settings,
+      registrationInclusions: attempt.registrationInclusions,
+      toolIdentity: attempt.toolIdentity,
+    })
+    const checksum = `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+    const path = `${artifactPath}.${outputArtifacts.length + 1}.registration.json`
+    if (!existsSync(path)) {
+      const temporaryPath = `${path}.${claimToken}.tmp`
+      if (existsSync(temporaryPath)) {
+        if (readFileSync(temporaryPath, 'utf8') !== bytes)
+          throw new Error(
+            'temporary Registration transform does not match frozen evidence',
+          )
+      } else writeFileSync(temporaryPath, bytes, { flag: 'wx' })
+      renameSync(temporaryPath, path)
+    }
+    const retained = readFileSync(path, 'utf8')
+    if (retained !== bytes)
+      throw new Error(
+        'retained Registration transform does not match frozen evidence',
+      )
+    if (
+      `sha256:${createHash('sha256').update(retained).digest('hex')}` !==
+      checksum
+    )
+      throw new Error('retained Registration transform checksum mismatch')
+    outputArtifacts.push({
+      sourceAssetId: source.assetId,
+      sourceAssetRevision: source.assetRevision,
+      path,
+      checksum,
+    })
+    transforms.push({
+      assetId: source.assetId,
+      assetRevision: source.assetRevision,
+      referenceAssetId: reference.sourceAssetId,
+      referenceAssetRevision: reference.sourceAssetRevision,
+      model,
+      coefficients,
+      checksum,
+      usable: true,
+      ...(warning ? { diagnostic: 'AlignmentNeedsReview' } : {}),
+    })
+    return {
+      assetId: source.assetId,
+      assetRevision: source.assetRevision,
+      outcome: warning ? ('Warning' as const) : ('Succeeded' as const),
+      message: warning
+        ? includedWarnings.has(source.assetId)
+          ? 'A usable transform was retained and this Light is included despite the alignment warning.'
+          : 'A usable transform was retained, but this Light stays out of the next Stack input until included.'
+        : isReference
+          ? 'This exact calibrated Light is the Registration reference.'
+          : 'The deterministic adapter retained a usable transform.',
+      outputChecksum: checksum,
+      ...(warning ? { diagnostic: 'AlignmentNeedsReview' } : {}),
+    }
+  })
+  const outputs = transforms.map((transform) => ({
+    sourceAssetId: transform.assetId,
+    sourceAssetRevision: transform.assetRevision,
+    checksum: transform.checksum,
+    format: 'deterministicEvidenceJson' as const,
+  }))
+  const viableAssetIds = frameOutcomes.flatMap((outcome) =>
+    outcome.outcome === 'Succeeded' ||
+    (outcome.outcome === 'Warning' && includedWarnings.has(outcome.assetId))
+      ? [outcome.assetId]
+      : [],
+  )
+  const stageOutcome =
+    viableAssetIds.length === 0
+      ? frameOutcomes.some((outcome) => outcome.outcome === 'Unavailable')
+        ? ('Unavailable' as const)
+        : ('Failed' as const)
+      : frameOutcomes.some((outcome) => outcome.outcome !== 'Succeeded')
+        ? ('Warning' as const)
+        : ('Succeeded' as const)
+  return {
+    stageOutcome,
+    frameOutcomes,
+    outputs,
+    diagnostics: [
+      'Deterministic transform evidence only; astronomy registration quality is not claimed.',
+      `${viableAssetIds.length} Light${viableAssetIds.length === 1 ? '' : 's'} selected for the next Stack input.`,
+    ],
+    transforms,
+    viableAssetIds,
+    outputArtifacts,
+  }
+}
+
 function recomputeLineage(
   stages: ProcessingProject['stages'],
   sources: ProcessingProject['sources'],
@@ -1093,6 +1458,9 @@ function recomputeLineage(
   const retainCurrentOverrides = (snapshot: {
     settings: ReadonlyArray<{ readonly key: string; readonly value: string }>
     overrides: ReadonlyArray<typeof CalibrationOverride.Type>
+    registrationInclusions: ReadonlyArray<
+      typeof RegistrationFrameInclusion.Type
+    >
   }) => ({
     ...snapshot,
     overrides: snapshot.overrides.filter((override) =>

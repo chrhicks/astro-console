@@ -1,6 +1,6 @@
 # Item 3.5 — Explicit Process Workflow
 
-Status: **Accepted epic; Items 3.5.1–3.5.3 complete; Item 3.5.4 next**
+Status: **Accepted epic; Items 3.5.1–3.5.4 complete; Item 3.5.5 next**
 
 Item 3 proved durable worker-owned execution. Item 3.5 reshapes that execution
 into the operator workflow: choose evidence, assign its role, run explicit
@@ -202,6 +202,8 @@ astronomy-quality calibration or an external processing tool.
 
 ### Item 3.5.4 — Explicit Registration
 
+**Status:** Complete.
+
 **Operator result:** Choose a reference and settings, run Registration, inspect
 which frames registered, warned, failed, or were unavailable, and proceed with
 a viable subset. Rerun without losing earlier attempts.
@@ -214,6 +216,18 @@ other viable frames.
 **Proof:** Cover reference changes, mixed outcomes, `Use anyway` where
 technically valid, missing-transform exclusion, retained earlier results, and
 restart/retry behavior.
+
+The completed MVP binds each Registration attempt to one exact selected
+Calibration result. Its bounded draft keeps a reference Light, alignment
+model, star-detection setting, and explicit warning-frame choices through undo
+and redo. Run or Rerun freezes those facts, exact source revisions, and the
+deterministic adapter identity. Attempts retain per-Light outcomes,
+diagnostics, checksum-bound transform evidence, and the viable Light subset;
+a frame without a usable transform never enters the next Stack input. Earlier
+attempts and the last valid selected result survive reruns and restart without
+worker replay. Local contract, SQLite service, worker, browser, and Designer
+proof cover this deterministic flow only; they do not prove astronomy-quality
+alignment or an external registration tool.
 
 ### Item 3.5.5 — Explicit Stacking And Saved Master
 

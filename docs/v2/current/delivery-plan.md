@@ -237,8 +237,8 @@ with a target-owned Processing Project and explicit, inspectable stages:
 - **3.5.1 Complete —** Library selection and Processing Project intake.
 - **3.5.2 Complete —** Stage drafts, attempts, and persistent navigation.
 - **3.5.3 Complete —** Explicit Calibration.
-- **3.5.4 Next —** Explicit Registration.
-- **3.5.5 —** Explicit Stacking and saved Master.
+- **3.5.4 Complete —** Explicit Registration.
+- **3.5.5 Next —** Explicit Stacking and saved Master.
 - **3.5.6 —** Astronomy Develop workspace.
 - **3.5.7 —** Integrated operator review and closeout.
 

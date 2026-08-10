@@ -239,7 +239,9 @@ export function createProcessWorkWorker(options: {
         row.kind === 'projectStage'
           ? stage === 'Calibration'
             ? 'deterministic-calibration-adapter-v1'
-            : 'deterministic-stage-harness-v1'
+            : stage === 'Registration'
+              ? 'deterministic-registration-adapter-v1'
+              : 'deterministic-stage-harness-v1'
           : 'deterministic-file-v1',
       kind: row.kind,
       stage,

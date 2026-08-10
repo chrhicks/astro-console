@@ -121,6 +121,10 @@ export const commandPolicies = {
   UndoProcessingStageDraft: { authority: 'owner', requiresDesktop: true },
   RedoProcessingStageDraft: { authority: 'owner', requiresDesktop: true },
   SetCalibrationUseAnyway: { authority: 'owner', requiresDesktop: true },
+  SetRegistrationFrameIncluded: {
+    authority: 'owner',
+    requiresDesktop: true,
+  },
   RunProcessingProjectStage: { authority: 'owner', requiresDesktop: true },
   SelectProcessingStageResult: { authority: 'owner', requiresDesktop: true },
   ResumeProcessingSession: { authority: 'owner', requiresDesktop: true },

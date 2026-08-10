@@ -619,6 +619,7 @@ test('3.5.3 normalizes a persisted 3.5.2 project shape on restart', () => {
     delete stage.calibrationRecommendations
     const draft = stage.draft as Record<string, unknown>
     delete draft.overrides
+    delete draft.registrationInclusions
     draft.undo = [[{ key: 'profile', value: 'old-default' }]]
     draft.redo = []
     for (const attempt of (stage.attempts ?? []) as Array<
@@ -628,6 +629,9 @@ test('3.5.3 normalizes a persisted 3.5.2 project shape on restart', () => {
       delete attempt.overrides
       delete attempt.frameOutcomes
       delete attempt.outputs
+      delete attempt.registrationInclusions
+      delete attempt.registrationTransforms
+      delete attempt.viableAssetIds
       delete attempt.diagnostics
     }
   }
@@ -642,6 +646,7 @@ test('3.5.3 normalizes a persisted 3.5.2 project shape on restart', () => {
   assert.deepEqual(recovered.stages[0]?.draft.undo[0], {
     settings: [{ key: 'profile', value: 'old-default' }],
     overrides: [],
+    registrationInclusions: [],
   })
   assert.ok(recovered.stages[0]?.calibrationRecommendations)
   assert.equal(recovered.sources[0]?.libraryRole, 'original')

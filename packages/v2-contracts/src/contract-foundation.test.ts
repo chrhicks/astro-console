@@ -232,6 +232,14 @@ const commandFixtures: ReadonlyArray<unknown> = [
     idempotencyKey: 'i-project-override',
   },
   {
+    _tag: 'SetRegistrationFrameIncluded',
+    projectId: 'project-1',
+    expectedProjectRevision: 6,
+    assetId: 'asset-light-2',
+    included: true,
+    idempotencyKey: 'i-project-registration-frame',
+  },
+  {
     _tag: 'RunProcessingProjectStage',
     projectId: 'project-1',
     expectedProjectRevision: 6,
@@ -338,7 +346,7 @@ const commandFixtures: ReadonlyArray<unknown> = [
 
 describe('Gate 5 contract foundation', () => {
   it('keeps the accepted command vocabulary closed', () => {
-    assert.equal(commandTags.length, 52)
+    assert.equal(commandTags.length, 53)
     assert.deepEqual(commandTags, acceptedCommandTags)
     assert.deepEqual(
       commandTags,

@@ -65,9 +65,15 @@ export const CalibrationOverride = Schema.Struct({
   decision: Schema.Literal('Use anyway'),
 })
 
+export const RegistrationFrameInclusion = Schema.Struct({
+  assetId: AssetId,
+  decision: Schema.Literal('Include warning frame'),
+})
+
 export const CalibrationDraftSnapshot = Schema.Struct({
   settings: Schema.Array(ProcessingStageSetting),
   overrides: Schema.Array(CalibrationOverride),
+  registrationInclusions: Schema.Array(RegistrationFrameInclusion),
 })
 
 export const CalibrationRecommendation = Schema.Struct({
@@ -100,10 +106,23 @@ export const CalibrationOutput = Schema.Struct({
   format: Schema.Literal('deterministicEvidenceJson'),
 })
 
+export const RegistrationTransform = Schema.Struct({
+  assetId: AssetId,
+  assetRevision: AssetRevision,
+  referenceAssetId: AssetId,
+  referenceAssetRevision: AssetRevision,
+  model: Schema.Literals(['translation', 'affine']),
+  coefficients: Schema.Array(Schema.Finite),
+  checksum: Schema.NonEmptyString,
+  usable: Schema.Boolean,
+  diagnostic: Schema.optionalKey(Schema.NonEmptyString),
+})
+
 export const ProcessingStageDraft = Schema.Struct({
   revision: Schema.Int,
   settings: Schema.Array(ProcessingStageSetting),
   overrides: Schema.Array(CalibrationOverride),
+  registrationInclusions: Schema.Array(RegistrationFrameInclusion),
   undo: Schema.Array(CalibrationDraftSnapshot),
   redo: Schema.Array(CalibrationDraftSnapshot),
 })
@@ -117,10 +136,12 @@ export const ProcessingStageAttempt = Schema.Struct({
   toolIdentity: Schema.Literals([
     'deterministic-stage-harness-v1',
     'deterministic-calibration-adapter-v1',
+    'deterministic-registration-adapter-v1',
   ]),
   resultKind: Schema.Literals([
     'deterministicStageEvidence',
     'deterministicCalibrationEvidence',
+    'deterministicRegistrationEvidence',
   ]),
   basedOnEarlierUpstream: Schema.Boolean,
   sourceRevisions: Schema.Array(
@@ -132,8 +153,11 @@ export const ProcessingStageAttempt = Schema.Struct({
   ),
   recommendations: Schema.Array(CalibrationRecommendation),
   overrides: Schema.Array(CalibrationOverride),
+  registrationInclusions: Schema.Array(RegistrationFrameInclusion),
   frameOutcomes: Schema.Array(CalibrationFrameOutcome),
   outputs: Schema.Array(CalibrationOutput),
+  registrationTransforms: Schema.Array(RegistrationTransform),
+  viableAssetIds: Schema.Array(AssetId),
   diagnostics: Schema.Array(Schema.NonEmptyString),
   stageOutcome: Schema.optionalKey(
     Schema.Literals(['Succeeded', 'Warning', 'Failed', 'Unavailable']),

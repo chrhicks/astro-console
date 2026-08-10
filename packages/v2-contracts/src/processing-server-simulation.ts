@@ -132,6 +132,7 @@ export const ProcessingAction = Schema.Literals([
   'UndoProcessingStageDraft',
   'RedoProcessingStageDraft',
   'SetCalibrationUseAnyway',
+  'SetRegistrationFrameIncluded',
   'RunProcessingProjectStage',
   'SelectProcessingStageResult',
   'StartProcessingSession',
@@ -173,6 +174,8 @@ export const ProcessingActionDenialReason = Schema.Literals([
   'stageResultUnavailable',
   'calibrationOverrideUnavailable',
   'calibrationLightsUnavailable',
+  'registrationFrameChoiceUnavailable',
+  'registrationReferenceUnavailable',
 ])
 
 export const ProcessingActionEligibility = Schema.TaggedUnion({
@@ -1724,6 +1727,23 @@ export function projectProcessingProjectActions(
       stage?.stage === 'Calibration' ||
       (upstreamAttempt?.state === 'succeeded' &&
         !upstreamAttempt.basedOnEarlierUpstream)
+    const latestCurrentAttempt = stage?.attempts
+      .filter(
+        (attempt) =>
+          attempt.state === 'succeeded' && !attempt.basedOnEarlierUpstream,
+      )
+      .at(-1)
+    const referenceAssetId = stage?.draft.settings.find(
+      (setting) => setting.key === 'referenceAssetId',
+    )?.value
+    const registrationReferenceReady =
+      stage?.stage !== 'Registration' ||
+      referenceAssetId === undefined ||
+      referenceAssetId === 'auto' ||
+      (upstreamAttempt?.outputs.some(
+        (output) => output.sourceAssetId === referenceAssetId,
+      ) ??
+        false)
     return {
       projectId,
       actions: [
@@ -1765,6 +1785,21 @@ export function projectProcessingProjectActions(
               : undefined),
         ),
         eligibility(
+          'SetRegistrationFrameIncluded',
+          reason ??
+            (stage?.stage !== 'Registration' ||
+            !latestCurrentAttempt?.frameOutcomes.some(
+              (outcome) =>
+                outcome.outcome === 'Warning' &&
+                latestCurrentAttempt.registrationTransforms.some(
+                  (transform) =>
+                    transform.assetId === outcome.assetId && transform.usable,
+                ),
+            )
+              ? 'registrationFrameChoiceUnavailable'
+              : undefined),
+        ),
+        eligibility(
           'RunProcessingProjectStage',
           reason ??
             (!executable
@@ -1782,9 +1817,11 @@ export function projectProcessingProjectActions(
                           source.availability === 'published'),
                     )
                   ? 'calibrationLightsUnavailable'
-                  : !upstreamReady
-                    ? 'upstreamResultRequired'
-                    : undefined),
+                  : !registrationReferenceReady
+                    ? 'registrationReferenceUnavailable'
+                    : !upstreamReady
+                      ? 'upstreamResultRequired'
+                      : undefined),
         ),
         eligibility(
           'SelectProcessingStageResult',

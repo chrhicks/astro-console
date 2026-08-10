@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–3 and Items 3.5.1–3.5.3 complete; Item 3.5.4 next**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–3 and Items 3.5.1–3.5.4 complete; Item 3.5.5 next**
 
 ## Current Position
 
@@ -209,6 +209,19 @@ preserves completed attempt evidence, and re-adds as a fresh advisory choice.
 This proves local deterministic orchestration and output evidence only; it does
 not prove astronomy-quality calibration or an external processing tool.
 
+Item 3.5.4 is complete as a focused Registration MVP. The bounded draft keeps
+one reference Light, alignment model, star-detection setting, and explicit
+warning-frame choices. Run or Rerun binds the attempt to the exact selected
+Calibration result and freezes source revisions, settings, choices, and
+deterministic adapter identity. Attempts retain per-Light outcomes,
+diagnostics, checksum-bound transforms, and the viable subset for Stacking;
+frames without a usable transform remain evidence but cannot enter that
+subset. Earlier attempts and the last valid result survive rerun and restart
+without replay. Functional and Designer review passed at wide, compact, and
+390 px phone widths. This proves deterministic local orchestration and
+evidence only, not astronomy-quality alignment or an external registration
+tool.
+
 After that simulator proof, an indoor GET-only readiness check reached ASCOM
 Remote at `192.168.4.104:11111`. Management and every device-property envelope
 returned `ErrorNumber: 0`. The configured identities were Telescope 0 `ASI
@@ -366,17 +379,15 @@ covered indoor frame.
 
 ## Next Accepted Item
 
-3.5.4. **Add explicit Registration.** Bind each attempt to the exact selected
-Calibration result, keep reference and registration settings in the bounded
-draft, retain per-frame transforms and diagnostics, and exclude only frames
-without a technically usable transform. Keep earlier attempts inspectable and
-require explicit Run or Rerun.
+3.5.5. **Add explicit Stacking and the saved Master boundary.** Bind each
+Stacking attempt to the exact selected Registration result, retain frame
+decisions and diagnostics, compare versioned results, and save one selected
+Master to Library for the later Develop handoff.
 
 ## Later Accepted Items
 
-Items 3.5.5 through 3.5.7 add explicit Stacking, a saved Master boundary,
-astronomy-specific Develop operations, and the final integrated operator
-review. Follow the ordered scope and proof in the
+Items 3.5.6 and 3.5.7 add astronomy-specific Develop operations and the final
+integrated operator review. Follow the ordered scope and proof in the
 [Item 3.5 Process workflow plan](process-workflow-plan.md).
 
 4. **Audit and promote the beta.** Verify all four exact Nightbook workflows

@@ -286,6 +286,10 @@ const processDenialMessages: Record<ProcessDenialReason, string> = {
     'Mismatched support can be included only after Calibration review.',
   calibrationLightsUnavailable:
     'At least one readable Light is required for Calibration.',
+  registrationFrameChoiceUnavailable:
+    'Only a current warning frame with a usable transform can change the next Stack input.',
+  registrationReferenceUnavailable:
+    'Choose a Light from the exact selected Calibration result.',
 }
 
 const processAction = (
@@ -402,6 +406,9 @@ export function ProcessPhone({
   const project = selectedProject(workspace)
   const calibration = project?.stages.find(
     (stage) => stage.stage === 'Calibration',
+  )
+  const registration = project?.stages.find(
+    (stage) => stage.stage === 'Registration',
   )
   return (
     <main
@@ -653,6 +660,54 @@ export function ProcessPhone({
                 ))}
               </div>
             </Stack>
+          </PanelBody>
+        </Panel>
+      ) : null}
+      {registration ? (
+        <Panel>
+          <PanelHeader
+            title="Registration evidence"
+            meta={`${registration.attempts.length} retained attempt${registration.attempts.length === 1 ? '' : 's'}`}
+          />
+          <PanelBody>
+            <div className="beta-process-phone-sources">
+              {registration.attempts.map((attempt) => (
+                <article
+                  className="beta-process-phone-source"
+                  key={attempt.attemptId}
+                >
+                  <b>{attempt.attemptId}</b>
+                  <span>
+                    {titleCase(attempt.state)} ·{' '}
+                    {attempt.stageOutcome ?? 'Pending'} · {attempt.toolIdentity}
+                  </span>
+                  <span>
+                    Upstream {attempt.upstreamAttemptId ?? 'not selected'}
+                  </span>
+                  <span>
+                    {attempt.viableAssetIds.length} Light
+                    {attempt.viableAssetIds.length === 1 ? '' : 's'} selected
+                    for the next Stack input
+                  </span>
+                  {attempt.frameOutcomes.map((outcome) => (
+                    <span key={outcome.assetId}>
+                      {outcome.assetId} · {outcome.outcome} · {outcome.message}
+                      {outcome.diagnostic ? ` · ${outcome.diagnostic}` : ''}
+                    </span>
+                  ))}
+                  <span>
+                    {attempt.registrationTransforms.length} retained transform
+                    {attempt.registrationTransforms.length === 1 ? '' : 's'}
+                  </span>
+                  {attempt.diagnostics.map((diagnostic) => (
+                    <span key={diagnostic}>{diagnostic}</span>
+                  ))}
+                  {registration.selectedAttemptId === attempt.attemptId ? (
+                    <strong>Selected result</strong>
+                  ) : null}
+                </article>
+              ))}
+            </div>
           </PanelBody>
         </Panel>
       ) : null}
@@ -952,6 +1007,10 @@ function ProjectStageDesktop({
     'SelectProcessingStageResult',
   )
   const overrideReason = processActionReason(actions, 'SetCalibrationUseAnyway')
+  const registrationChoiceReason = processActionReason(
+    actions,
+    'SetRegistrationFrameIncluded',
+  )
   const removeSourceReason = processActionReason(
     actions,
     'RemoveProcessingProjectSource',
@@ -965,6 +1024,27 @@ function ProjectStageDesktop({
   const allowUncalibrated =
     stage?.draft.settings.find((setting) => setting.key === 'allowUncalibrated')
       ?.value ?? 'true'
+  const calibration = project.stages.find(
+    (candidate) => candidate.stage === 'Calibration',
+  )
+  const selectedCalibration = calibration?.attempts.find(
+    (attempt) => attempt.attemptId === calibration.selectedAttemptId,
+  )
+  const registrationReference =
+    stage?.draft.settings.find((setting) => setting.key === 'referenceAssetId')
+      ?.value ?? 'auto'
+  const alignmentModel =
+    stage?.draft.settings.find((setting) => setting.key === 'alignmentModel')
+      ?.value ?? 'translation'
+  const starDetection =
+    stage?.draft.settings.find((setting) => setting.key === 'starDetection')
+      ?.value ?? 'balanced'
+  const latestRegistration = stage?.attempts
+    .filter(
+      (attempt) =>
+        attempt.state === 'succeeded' && !attempt.basedOnEarlierUpstream,
+    )
+    .at(-1)
   const updatedSettings = (key: string, value: string) => [
     ...(stage?.draft.settings.filter((setting) => setting.key !== key) ?? []),
     { key, value },
@@ -1048,13 +1128,17 @@ function ProjectStageDesktop({
                     statusLabel={
                       stage.stage === 'Calibration'
                         ? 'Deterministic Calibration evidence'
-                        : 'Deterministic framework evidence'
+                        : stage.stage === 'Registration'
+                          ? 'Deterministic Registration evidence'
+                          : 'Deterministic framework evidence'
                     }
                     title="Explicit stage control"
                     description={
                       stage.stage === 'Calibration'
                         ? 'Run freezes exact Lights, support revisions, retained compatibility facts, settings, mismatch choices, and the deterministic adapter identity. It does not claim astronomy calibration quality.'
-                        : 'Run records the frozen draft, exact source revisions, and upstream lineage. This slice does not perform or prove astronomy processing.'
+                        : stage.stage === 'Registration'
+                          ? 'Run freezes one exact selected Calibration result, the reference Light, alignment settings, frame choices, and deterministic transform evidence. It does not claim astronomy registration quality.'
+                          : 'Run records the frozen draft, exact source revisions, and upstream lineage. This slice does not perform or prove astronomy processing.'
                     }
                   />
                   {stage.stage === 'Calibration' ? (
@@ -1184,17 +1268,106 @@ function ProjectStageDesktop({
                       </div>
                     </>
                   ) : null}
+                  {stage.stage === 'Registration' ? (
+                    <>
+                      <DataList>
+                        <DataListItem
+                          label="Selected Calibration result"
+                          value={
+                            selectedCalibration?.attemptId ??
+                            'Run Calibration first'
+                          }
+                          detail={
+                            selectedCalibration
+                              ? `${selectedCalibration.outputs.length} calibrated Light output${selectedCalibration.outputs.length === 1 ? '' : 's'}`
+                              : 'Registration cannot run without an exact selected result.'
+                          }
+                        />
+                      </DataList>
+                      {latestRegistration?.frameOutcomes.some(
+                        (outcome) => outcome.outcome === 'Warning',
+                      ) ? (
+                        <div className="beta-process-calibration-matches">
+                          {latestRegistration.frameOutcomes
+                            .filter((outcome) => outcome.outcome === 'Warning')
+                            .map((outcome) => {
+                              const transform =
+                                latestRegistration.registrationTransforms.find(
+                                  (candidate) =>
+                                    candidate.assetId === outcome.assetId,
+                                )
+                              const included =
+                                stage.draft.registrationInclusions.some(
+                                  (choice) =>
+                                    choice.assetId === outcome.assetId,
+                                )
+                              return (
+                                <AttentionCard
+                                  key={outcome.assetId}
+                                  tone="warning"
+                                  statusLabel={
+                                    included
+                                      ? 'Included with alignment warning'
+                                      : 'Not selected for next Stack input'
+                                  }
+                                  title={`Light · ${outcome.assetId}`}
+                                  description={`${outcome.message} ${transform?.diagnostic ?? outcome.diagnostic ?? ''}`}
+                                  actions={
+                                    transform?.usable ? (
+                                      <Button
+                                        disabled={
+                                          pending !== undefined ||
+                                          registrationChoiceReason !== undefined
+                                        }
+                                        title={registrationChoiceReason}
+                                        onClick={() =>
+                                          command(
+                                            {
+                                              _tag: 'SetRegistrationFrameIncluded',
+                                              projectId: project.projectId,
+                                              expectedProjectRevision:
+                                                project.revision,
+                                              assetId: outcome.assetId,
+                                              included: !included,
+                                              idempotencyKey:
+                                                crypto.randomUUID(),
+                                            },
+                                            included
+                                              ? 'Keeping Light out of Stack input'
+                                              : 'Including Light in Stack input',
+                                          )
+                                        }
+                                      >
+                                        {included
+                                          ? 'Keep out of Stack input'
+                                          : 'Include this Light'}
+                                      </Button>
+                                    ) : undefined
+                                  }
+                                />
+                              )
+                            })}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : null}
                   <Field
                     label={
                       stage.stage === 'Calibration'
                         ? 'Calibration operation'
-                        : 'Draft profile'
+                        : stage.stage === 'Registration'
+                          ? 'Reference Light'
+                          : 'Draft profile'
                     }
                     hint={`Draft revision ${stage.draft.revision}`}
                   >
                     <Select
                       value={
-                        stage.stage === 'Calibration' ? operation : profile
+                        stage.stage === 'Calibration'
+                          ? operation
+                          : stage.stage === 'Registration'
+                            ? registrationReference
+                            : profile
                       }
                       disabled={
                         pending !== undefined || updateReason !== undefined
@@ -1209,7 +1382,9 @@ function ProjectStageDesktop({
                             settings: updatedSettings(
                               stage.stage === 'Calibration'
                                 ? 'operation'
-                                : 'profile',
+                                : stage.stage === 'Registration'
+                                  ? 'referenceAssetId'
+                                  : 'profile',
                               event.target.value,
                             ),
                             idempotencyKey: crypto.randomUUID(),
@@ -1224,6 +1399,21 @@ function ProjectStageDesktop({
                             Calibrate and debayer
                           </option>
                           <option value="calibrate-only">Calibrate only</option>
+                        </>
+                      ) : stage.stage === 'Registration' ? (
+                        <>
+                          <option value="auto">
+                            Auto · first calibrated Light
+                          </option>
+                          {selectedCalibration?.outputs.map((output) => (
+                            <option
+                              key={output.sourceAssetId}
+                              value={output.sourceAssetId}
+                            >
+                              {output.sourceAssetId} · revision{' '}
+                              {output.sourceAssetRevision}
+                            </option>
+                          ))}
                         </>
                       ) : (
                         <>
@@ -1265,6 +1455,69 @@ function ProjectStageDesktop({
                         <option value="false">Require selected support</option>
                       </Select>
                     </Field>
+                  ) : stage.stage === 'Registration' ? (
+                    <>
+                      <Field
+                        label="Alignment model"
+                        hint="A small deterministic adapter setting"
+                      >
+                        <Select
+                          value={alignmentModel}
+                          disabled={
+                            pending !== undefined || updateReason !== undefined
+                          }
+                          onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                            command(
+                              {
+                                _tag: 'UpdateProcessingStageDraft',
+                                projectId: project.projectId,
+                                expectedProjectRevision: project.revision,
+                                stage: 'Registration',
+                                settings: updatedSettings(
+                                  'alignmentModel',
+                                  event.target.value,
+                                ),
+                                idempotencyKey: crypto.randomUUID(),
+                              },
+                              'Updating alignment model',
+                            )
+                          }
+                        >
+                          <option value="translation">Translation</option>
+                          <option value="affine">Affine</option>
+                        </Select>
+                      </Field>
+                      <Field
+                        label="Star detection"
+                        hint="Balanced keeps reviewable transforms; strict excludes them"
+                      >
+                        <Select
+                          value={starDetection}
+                          disabled={
+                            pending !== undefined || updateReason !== undefined
+                          }
+                          onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                            command(
+                              {
+                                _tag: 'UpdateProcessingStageDraft',
+                                projectId: project.projectId,
+                                expectedProjectRevision: project.revision,
+                                stage: 'Registration',
+                                settings: updatedSettings(
+                                  'starDetection',
+                                  event.target.value,
+                                ),
+                                idempotencyKey: crypto.randomUUID(),
+                              },
+                              'Updating star detection',
+                            )
+                          }
+                        >
+                          <option value="balanced">Balanced</option>
+                          <option value="strict">Strict</option>
+                        </Select>
+                      </Field>
+                    </>
                   ) : null}
                   <Cluster>
                     <Button
@@ -1365,7 +1618,9 @@ function ProjectStageDesktop({
                                 {attempt.resultId} ·{' '}
                                 {attempt.stage === 'Calibration'
                                   ? 'deterministic Calibration evidence'
-                                  : 'deterministic stage evidence'}
+                                  : attempt.stage === 'Registration'
+                                    ? 'deterministic Registration evidence'
+                                    : 'deterministic stage evidence'}
                               </span>
                             ) : null}
                             {attempt.stage === 'Calibration' ? (
@@ -1394,6 +1649,37 @@ function ProjectStageDesktop({
                                     {attempt.outputs.length === 1 ? '' : 's'}
                                   </span>
                                 ) : null}
+                                {attempt.diagnostics.map((diagnostic) => (
+                                  <span key={diagnostic}>{diagnostic}</span>
+                                ))}
+                              </>
+                            ) : attempt.stage === 'Registration' ? (
+                              <>
+                                <span>
+                                  {attempt.viableAssetIds.length} Light
+                                  {attempt.viableAssetIds.length === 1
+                                    ? ''
+                                    : 's'}{' '}
+                                  selected for the next Stack input ·{' '}
+                                  {attempt.stageOutcome ?? 'Pending'}
+                                </span>
+                                {attempt.frameOutcomes.map((outcome) => (
+                                  <span key={outcome.assetId}>
+                                    {outcome.assetId} · {outcome.outcome} ·{' '}
+                                    revision {outcome.assetRevision} ·{' '}
+                                    {outcome.message}
+                                    {outcome.diagnostic
+                                      ? ` · ${outcome.diagnostic}`
+                                      : ''}
+                                  </span>
+                                ))}
+                                <span>
+                                  {attempt.registrationTransforms.length}{' '}
+                                  retained transform
+                                  {attempt.registrationTransforms.length === 1
+                                    ? ''
+                                    : 's'}
+                                </span>
                                 {attempt.diagnostics.map((diagnostic) => (
                                   <span key={diagnostic}>{diagnostic}</span>
                                 ))}

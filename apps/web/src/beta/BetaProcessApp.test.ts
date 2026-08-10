@@ -180,6 +180,7 @@ const projectWorkspace = Schema.decodeUnknownSync(ProcessingProjection)({
             revision: 0,
             settings: [],
             overrides: [],
+            registrationInclusions: [],
             undo: [],
             redo: [],
           },
@@ -192,6 +193,7 @@ const projectWorkspace = Schema.decodeUnknownSync(ProcessingProjection)({
             revision: 0,
             settings: [],
             overrides: [],
+            registrationInclusions: [],
             undo: [],
             redo: [],
           },
@@ -204,6 +206,7 @@ const projectWorkspace = Schema.decodeUnknownSync(ProcessingProjection)({
             revision: 0,
             settings: [],
             overrides: [],
+            registrationInclusions: [],
             undo: [],
             redo: [],
           },
@@ -314,9 +317,20 @@ test('renders persistent stage drafts, retained lineage, result selection, and p
               ...stage,
               draft: {
                 revision: 2,
-                settings: [{ key: 'profile', value: 'Alternate' }],
+                settings: [
+                  { key: 'referenceAssetId', value: 'auto' },
+                  { key: 'alignmentModel', value: 'affine' },
+                  { key: 'starDetection', value: 'balanced' },
+                ],
                 overrides: [],
-                undo: [{ settings: [], overrides: [] }],
+                registrationInclusions: [],
+                undo: [
+                  {
+                    settings: [],
+                    overrides: [],
+                    registrationInclusions: [],
+                  },
+                ],
                 redo: [],
               },
               attempts: [
@@ -325,9 +339,13 @@ test('renders persistent stage drafts, retained lineage, result selection, and p
                   stage: 'Registration',
                   state: 'succeeded',
                   draftRevision: 1,
-                  settings: [{ key: 'profile', value: 'Default' }],
-                  toolIdentity: 'deterministic-stage-harness-v1',
-                  resultKind: 'deterministicStageEvidence',
+                  settings: [
+                    { key: 'referenceAssetId', value: 'auto' },
+                    { key: 'alignmentModel', value: 'translation' },
+                    { key: 'starDetection', value: 'balanced' },
+                  ],
+                  toolIdentity: 'deterministic-registration-adapter-v1',
+                  resultKind: 'deterministicRegistrationEvidence',
                   basedOnEarlierUpstream: true,
                   sourceRevisions: [
                     {
@@ -338,8 +356,11 @@ test('renders persistent stage drafts, retained lineage, result selection, and p
                   ],
                   recommendations: [],
                   overrides: [],
+                  registrationInclusions: [],
                   frameOutcomes: [],
                   outputs: [],
+                  registrationTransforms: [],
+                  viableAssetIds: [],
                   diagnostics: [],
                   upstreamAttemptId: 'stage-attempt-calibration-1',
                   resultId: 'stage-result-registration-1',
@@ -381,10 +402,10 @@ test('renders persistent stage drafts, retained lineage, result selection, and p
     }),
   )
   assert.match(desktop, /Registration retained/)
-  assert.match(desktop, /Alternate/)
+  assert.match(desktop, /Affine/)
   assert.match(desktop, /Based on earlier source or upstream input/)
   assert.match(desktop, /Select result/)
-  assert.match(desktop, /does not perform or prove astronomy processing/)
+  assert.match(desktop, /does not claim astronomy registration quality/)
 
   const phone = renderToStaticMarkup(
     createElement(ProcessPhone, {
@@ -396,6 +417,216 @@ test('renders persistent stage drafts, retained lineage, result selection, and p
   assert.match(phone, /Earlier input lineage retained/)
   assert.match(phone, /Stage attempts/)
   assert.doesNotMatch(phone, /<button|<input|<select|<textarea/)
+})
+
+test('renders Registration reference, warning consequence, viable subset, and photographer-facing inclusion choice', () => {
+  const registered = Schema.decodeUnknownSync(ProcessingProjection)({
+    ...projectWorkspace,
+    projects: projectWorkspace.projects.map((project) => ({
+      ...project,
+      currentStage: 'Registration',
+      stages: project.stages.map((stage) => {
+        if (stage.stage === 'Calibration')
+          return {
+            ...stage,
+            attempts: [
+              {
+                attemptId: 'stage-attempt-calibration-registration-ui',
+                stage: 'Calibration',
+                state: 'succeeded',
+                draftRevision: 1,
+                settings: [],
+                toolIdentity: 'deterministic-calibration-adapter-v1',
+                resultKind: 'deterministicCalibrationEvidence',
+                basedOnEarlierUpstream: false,
+                sourceRevisions: [
+                  {
+                    assetId: 'asset-m27-006',
+                    assetRevision: 1,
+                    role: 'Lights',
+                  },
+                ],
+                recommendations: [],
+                overrides: [],
+                registrationInclusions: [],
+                frameOutcomes: [
+                  {
+                    assetId: 'asset-m27-006',
+                    assetRevision: 1,
+                    outcome: 'Warning',
+                    message: 'Calibration retained a usable Light output.',
+                    outputChecksum: 'sha256:calibrated-light',
+                  },
+                ],
+                outputs: [
+                  {
+                    sourceAssetId: 'asset-m27-006',
+                    sourceAssetRevision: 1,
+                    checksum: 'sha256:calibrated-light',
+                    format: 'deterministicEvidenceJson',
+                  },
+                ],
+                registrationTransforms: [],
+                viableAssetIds: [],
+                diagnostics: [],
+                resultId: 'stage-result-calibration-registration-ui',
+                outputChecksum: 'sha256:calibration-attempt',
+              },
+            ],
+            selectedAttemptId: 'stage-attempt-calibration-registration-ui',
+          }
+        if (stage.stage !== 'Registration') return stage
+        return {
+          ...stage,
+          draft: {
+            revision: 2,
+            settings: [
+              { key: 'referenceAssetId', value: 'asset-m27-006' },
+              { key: 'alignmentModel', value: 'translation' },
+              { key: 'starDetection', value: 'balanced' },
+            ],
+            overrides: [],
+            registrationInclusions: [],
+            undo: [],
+            redo: [],
+          },
+          attempts: [
+            {
+              attemptId: 'stage-attempt-registration-ui',
+              stage: 'Registration',
+              state: 'succeeded',
+              draftRevision: 1,
+              settings: [{ key: 'referenceAssetId', value: 'asset-m27-006' }],
+              toolIdentity: 'deterministic-registration-adapter-v1',
+              resultKind: 'deterministicRegistrationEvidence',
+              basedOnEarlierUpstream: false,
+              sourceRevisions: [
+                {
+                  assetId: 'asset-m27-006',
+                  assetRevision: 1,
+                  role: 'Lights',
+                },
+              ],
+              recommendations: [],
+              overrides: [],
+              registrationInclusions: [],
+              frameOutcomes: [
+                {
+                  assetId: 'asset-m27-006',
+                  assetRevision: 1,
+                  outcome: 'Warning',
+                  message:
+                    'A usable transform was retained, but this Light stays out of the next Stack input until included.',
+                  outputChecksum: 'sha256:registration-transform',
+                  diagnostic: 'AlignmentNeedsReview',
+                },
+              ],
+              outputs: [
+                {
+                  sourceAssetId: 'asset-m27-006',
+                  sourceAssetRevision: 1,
+                  checksum: 'sha256:registration-transform',
+                  format: 'deterministicEvidenceJson',
+                },
+              ],
+              registrationTransforms: [
+                {
+                  assetId: 'asset-m27-006',
+                  assetRevision: 1,
+                  referenceAssetId: 'asset-m27-006',
+                  referenceAssetRevision: 1,
+                  model: 'translation',
+                  coefficients: [1, 0, 0, 0, 1, 0],
+                  checksum: 'sha256:registration-transform',
+                  usable: true,
+                  diagnostic: 'AlignmentNeedsReview',
+                },
+              ],
+              viableAssetIds: [],
+              diagnostics: [
+                'Deterministic transform evidence only; astronomy registration quality is not claimed.',
+              ],
+              stageOutcome: 'Warning',
+              upstreamAttemptId: 'stage-attempt-calibration-registration-ui',
+              resultId: 'stage-result-registration-ui',
+              outputChecksum: 'sha256:registration-attempt',
+            },
+          ],
+          selectedAttemptId: 'stage-attempt-registration-ui',
+        }
+      }),
+    })),
+    projectActions: [
+      {
+        projectId: 'project-m27',
+        actions: [
+          { _tag: 'Eligible', action: 'NavigateProcessingProjectStage' },
+          { _tag: 'Eligible', action: 'UpdateProcessingStageDraft' },
+          {
+            _tag: 'Ineligible',
+            action: 'UndoProcessingStageDraft',
+            reason: 'draftUndoUnavailable',
+          },
+          {
+            _tag: 'Ineligible',
+            action: 'RedoProcessingStageDraft',
+            reason: 'draftRedoUnavailable',
+          },
+          {
+            _tag: 'Eligible',
+            action: 'SetRegistrationFrameIncluded',
+          },
+          { _tag: 'Eligible', action: 'RunProcessingProjectStage' },
+          { _tag: 'Eligible', action: 'SelectProcessingStageResult' },
+        ],
+      },
+    ],
+  })
+  const markup = renderToStaticMarkup(
+    createElement(BetaProcessApp, {
+      projection: processControllerProjection,
+      loading: false,
+      initialWorkspace: registered,
+    }),
+  )
+  assert.match(markup, /Selected Calibration result/)
+  assert.match(markup, /Reference Light/)
+  assert.match(markup, /Not selected for next Stack input/)
+  assert.match(markup, /Include this Light/)
+  assert.match(markup, /0 Lights selected for the next Stack input/)
+  assert.match(markup, /AlignmentNeedsReview/)
+
+  const included = Schema.decodeUnknownSync(ProcessingProjection)({
+    ...registered,
+    projects: registered.projects.map((project) => ({
+      ...project,
+      stages: project.stages.map((stage) =>
+        stage.stage === 'Registration'
+          ? {
+              ...stage,
+              draft: {
+                ...stage.draft,
+                registrationInclusions: [
+                  {
+                    assetId: 'asset-m27-006',
+                    decision: 'Include warning frame',
+                  },
+                ],
+              },
+            }
+          : stage,
+      ),
+    })),
+  })
+  const includedMarkup = renderToStaticMarkup(
+    createElement(BetaProcessApp, {
+      projection: processControllerProjection,
+      loading: false,
+      initialWorkspace: included,
+    }),
+  )
+  assert.match(includedMarkup, /Included with alignment warning/)
+  assert.match(includedMarkup, /Keep out of Stack input/)
 })
 
 test('renders service-owned Calibration review, draft policy, outcomes, and read-only phone evidence', () => {
@@ -440,6 +671,7 @@ test('renders service-owned Calibration review, draft policy, outcomes, and read
                   { key: 'allowUncalibrated', value: 'true' },
                 ],
                 overrides: [],
+                registrationInclusions: [],
                 undo: [],
                 redo: [],
               },
@@ -484,6 +716,7 @@ test('renders service-owned Calibration review, draft policy, outcomes, and read
                   ],
                   recommendations: [],
                   overrides: [],
+                  registrationInclusions: [],
                   frameOutcomes: [
                     {
                       assetId: 'asset-m27-006',
@@ -503,6 +736,8 @@ test('renders service-owned Calibration review, draft policy, outcomes, and read
                       format: 'deterministicEvidenceJson',
                     },
                   ],
+                  registrationTransforms: [],
+                  viableAssetIds: [],
                   diagnostics: [
                     'Deterministic adapter evidence only; astronomy calibration quality is not claimed.',
                   ],

@@ -184,6 +184,7 @@ export const acceptedCommandTags = [
   'UndoProcessingStageDraft',
   'RedoProcessingStageDraft',
   'SetCalibrationUseAnyway',
+  'SetRegistrationFrameIncluded',
   'RunProcessingProjectStage',
   'SelectProcessingStageResult',
   'ResumeProcessingSession',
@@ -379,6 +380,13 @@ export const Command = Schema.TaggedUnion({
     expectedProjectRevision: ProcessingProjectRevision,
     assetId: AssetId,
     useAnyway: Schema.Boolean,
+    ...DurableMutation,
+  },
+  SetRegistrationFrameIncluded: {
+    projectId: ProcessingProjectId,
+    expectedProjectRevision: ProcessingProjectRevision,
+    assetId: AssetId,
+    included: Schema.Boolean,
     ...DurableMutation,
   },
   RunProcessingProjectStage: {
