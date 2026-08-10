@@ -212,8 +212,14 @@ const projectStageNames = [
 const projectSteps = (
   project: ProcessWorkspace['projects'][number],
   viewedStage: ProjectStageName,
-) =>
-  projectStageNames.map((name) => {
+) => {
+  const stacking = project.stages.find(
+    (candidate) => candidate.stage === 'Stacking',
+  )
+  const selectedStack = stacking?.attempts.find(
+    (attempt) => attempt.attemptId === stacking.selectedAttemptId,
+  )
+  return projectStageNames.map((name) => {
     const stage = project.stages.find((candidate) => candidate.stage === name)
     const selected = stage?.attempts.find(
       (attempt) => attempt.attemptId === stage.selectedAttemptId,
@@ -229,28 +235,37 @@ const projectSteps = (
       description:
         name === 'Sources'
           ? `${project.sources.length} retained`
-          : selected?.state === 'succeeded' && !selected.basedOnEarlierUpstream
-            ? 'Result selected'
-            : active
-              ? 'Attempt active'
-              : stage?.attempts.length
-                ? `${stage.attempts.length} retained`
-                : name === 'Master'
-                  ? 'No result yet'
-                  : name === 'Develop'
-                    ? 'No saved Master'
-                    : 'Explicit Run later',
+          : name === 'Master' && selectedStack?.savedMaster
+            ? 'Saved Library Master'
+            : name === 'Develop' && project.developMasterAssetId
+              ? 'Saved Master open'
+              : selected?.state === 'succeeded' &&
+                  !selected.basedOnEarlierUpstream
+                ? 'Result selected'
+                : active
+                  ? 'Attempt active'
+                  : stage?.attempts.length
+                    ? `${stage.attempts.length} retained`
+                    : name === 'Master'
+                      ? 'No result yet'
+                      : name === 'Develop'
+                        ? 'No saved Master'
+                        : 'Explicit Run later',
       status: current
         ? ('current' as const)
         : failed
           ? ('failed' as const)
           : name === 'Sources' ||
+              (name === 'Master' && selectedStack?.savedMaster !== undefined) ||
+              (name === 'Develop' &&
+                project.developMasterAssetId !== undefined) ||
               (selected?.state === 'succeeded' &&
                 !selected.basedOnEarlierUpstream)
             ? ('complete' as const)
             : ('pending' as const),
     }
   })
+}
 
 const currentOutputId = (session: Session) => {
   if (session.historyPosition > 0)
@@ -290,6 +305,11 @@ const processDenialMessages: Record<ProcessDenialReason, string> = {
     'Only a current warning frame with a usable transform can change the next Stack input.',
   registrationReferenceUnavailable:
     'Choose a Light from the exact selected Calibration result.',
+  stackingFrameChoiceUnavailable:
+    'Only a technically usable registered Light can change this Stack input.',
+  stackingInputUnavailable: 'Include at least one technically usable Light.',
+  stackResultRequired: 'Select a completed Stack result first.',
+  savedMasterRequired: 'Save the selected Stack result before opening Develop.',
 }
 
 const processAction = (
@@ -409,6 +429,10 @@ export function ProcessPhone({
   )
   const registration = project?.stages.find(
     (stage) => stage.stage === 'Registration',
+  )
+  const stacking = project?.stages.find((stage) => stage.stage === 'Stacking')
+  const selectedStackingAttempt = stacking?.attempts.find(
+    (attempt) => attempt.attemptId === stacking.selectedAttemptId,
   )
   return (
     <main
@@ -707,6 +731,90 @@ export function ProcessPhone({
                   ) : null}
                 </article>
               ))}
+            </div>
+          </PanelBody>
+        </Panel>
+      ) : null}
+      {stacking ? (
+        <Panel>
+          <PanelHeader
+            title="Stacking and Master evidence"
+            meta={`${stacking.attempts.length} retained attempt${stacking.attempts.length === 1 ? '' : 's'}`}
+          />
+          <PanelBody>
+            <div className="beta-process-phone-sources">
+              {stacking.stackingRecommendations.map((recommendation) => (
+                <article
+                  className="beta-process-phone-source"
+                  key={recommendation.assetId}
+                >
+                  <b>
+                    {recommendation.assetId} · {recommendation.decision}
+                  </b>
+                  <span>
+                    {recommendation.technicallyUsable
+                      ? 'Technically usable'
+                      : 'No usable Registration transform'}
+                  </span>
+                  {recommendation.reasons.map((reason) => (
+                    <span key={reason}>{reason}</span>
+                  ))}
+                </article>
+              ))}
+              {stacking.attempts.map((attempt) => (
+                <article
+                  className="beta-process-phone-source"
+                  key={attempt.attemptId}
+                >
+                  <b>{attempt.attemptId}</b>
+                  <span>
+                    {titleCase(attempt.state)} ·{' '}
+                    {attempt.stageOutcome ?? 'Pending'} · {attempt.toolIdentity}
+                  </span>
+                  <span>
+                    Exact Registration input{' '}
+                    {attempt.upstreamAttemptId ?? 'not selected'}
+                  </span>
+                  <span>
+                    {attempt.stackingInputAssetIds.length} contributing Light
+                    {attempt.stackingInputAssetIds.length === 1 ? '' : 's'}
+                  </span>
+                  {attempt.frameOutcomes.map((outcome) => (
+                    <span key={outcome.assetId}>
+                      {outcome.assetId} · {outcome.outcome} · {outcome.message}
+                      {outcome.diagnostic ? ` · ${outcome.diagnostic}` : ''}
+                    </span>
+                  ))}
+                  {attempt.stackingOutput ? (
+                    <span>
+                      FITS Master evidence · {attempt.stackingOutput.checksum} ·{' '}
+                      {attempt.stackingOutput.diagnostic}
+                    </span>
+                  ) : null}
+                  {attempt.savedMaster ? (
+                    <strong>
+                      Saved Library Master · {attempt.savedMaster.assetId}
+                    </strong>
+                  ) : null}
+                  {stacking.selectedAttemptId === attempt.attemptId ? (
+                    <strong>Selected result</strong>
+                  ) : null}
+                </article>
+              ))}
+              {project?.developMasterAssetId ? (
+                <article className="beta-process-phone-source">
+                  <b>Develop handoff</b>
+                  <span>
+                    Exact saved Master · {project.developMasterAssetId}
+                  </span>
+                  <span>Develop operations arrive in Item 3.5.6.</span>
+                </article>
+              ) : selectedStackingAttempt?.savedMaster ? (
+                <article className="beta-process-phone-source">
+                  <b>Saved Master ready for Develop</b>
+                  <span>{selectedStackingAttempt.savedMaster.assetId}</span>
+                </article>
+              ) : null}
             </div>
           </PanelBody>
         </Panel>
@@ -1011,13 +1119,22 @@ function ProjectStageDesktop({
     actions,
     'SetRegistrationFrameIncluded',
   )
+  const stackingChoiceReason = processActionReason(
+    actions,
+    'SetStackingFrameIncluded',
+  )
+  const saveMasterReason = processActionReason(
+    actions,
+    'SaveProcessingProjectMaster',
+  )
+  const openDevelopReason = processActionReason(
+    actions,
+    'OpenProcessingProjectDevelop',
+  )
   const removeSourceReason = processActionReason(
     actions,
     'RemoveProcessingProjectSource',
   )
-  const profile =
-    stage?.draft.settings.find((setting) => setting.key === 'profile')?.value ??
-    'Default'
   const operation =
     stage?.draft.settings.find((setting) => setting.key === 'operation')
       ?.value ?? 'calibrate-and-debayer'
@@ -1045,6 +1162,24 @@ function ProjectStageDesktop({
         attempt.state === 'succeeded' && !attempt.basedOnEarlierUpstream,
     )
     .at(-1)
+  const registrationStage = project.stages.find(
+    (candidate) => candidate.stage === 'Registration',
+  )
+  const selectedRegistration = registrationStage?.attempts.find(
+    (attempt) => attempt.attemptId === registrationStage.selectedAttemptId,
+  )
+  const stackingStage = project.stages.find(
+    (candidate) => candidate.stage === 'Stacking',
+  )
+  const selectedStack = stackingStage?.attempts.find(
+    (attempt) => attempt.attemptId === stackingStage.selectedAttemptId,
+  )
+  const weighting =
+    stage?.draft.settings.find((setting) => setting.key === 'weighting')
+      ?.value ?? 'equal'
+  const rejection =
+    stage?.draft.settings.find((setting) => setting.key === 'rejection')
+      ?.value ?? 'winsorized-sigma'
   const updatedSettings = (key: string, value: string) => [
     ...(stage?.draft.settings.filter((setting) => setting.key !== key) ?? []),
     { key, value },
@@ -1130,7 +1265,7 @@ function ProjectStageDesktop({
                         ? 'Deterministic Calibration evidence'
                         : stage.stage === 'Registration'
                           ? 'Deterministic Registration evidence'
-                          : 'Deterministic framework evidence'
+                          : 'Deterministic Stacking evidence'
                     }
                     title="Explicit stage control"
                     description={
@@ -1138,7 +1273,7 @@ function ProjectStageDesktop({
                         ? 'Run freezes exact Lights, support revisions, retained compatibility facts, settings, mismatch choices, and the deterministic adapter identity. It does not claim astronomy calibration quality.'
                         : stage.stage === 'Registration'
                           ? 'Run freezes one exact selected Calibration result, the reference Light, alignment settings, frame choices, and deterministic transform evidence. It does not claim astronomy registration quality.'
-                          : 'Run records the frozen draft, exact source revisions, and upstream lineage. This slice does not perform or prove astronomy processing.'
+                          : 'Run freezes one exact selected Registration result, its viable transforms, weighting, rejection, and frame decisions. The FITS result is deterministic evidence, not an astronomy-quality stack.'
                     }
                   />
                   {stage.stage === 'Calibration' ? (
@@ -1351,13 +1486,91 @@ function ProjectStageDesktop({
                       ) : null}
                     </>
                   ) : null}
+                  {stage.stage === 'Stacking' ? (
+                    <>
+                      <DataList>
+                        <DataListItem
+                          label="Selected Registration result"
+                          value={
+                            selectedRegistration?.attemptId ??
+                            'Run Registration first'
+                          }
+                          detail={`${selectedRegistration?.viableAssetIds.length ?? 0} viable Light${selectedRegistration?.viableAssetIds.length === 1 ? '' : 's'} with exact retained transforms`}
+                        />
+                      </DataList>
+                      <div className="beta-process-calibration-matches">
+                        {stage.stackingRecommendations.map((recommendation) => {
+                          const choice = stage.draft.stackingFrameChoices.find(
+                            (candidate) =>
+                              candidate.assetId === recommendation.assetId,
+                          )
+                          const included =
+                            choice?.decision === 'Include' ||
+                            (choice === undefined &&
+                              recommendation.decision === 'Include')
+                          return (
+                            <AttentionCard
+                              key={recommendation.assetId}
+                              tone={
+                                !recommendation.technicallyUsable
+                                  ? 'danger'
+                                  : recommendation.decision === 'Include'
+                                    ? 'positive'
+                                    : 'warning'
+                              }
+                              statusLabel={
+                                included
+                                  ? recommendation.decision === 'Review'
+                                    ? 'Included after review'
+                                    : 'Included in this Stack draft'
+                                  : 'Excluded from this Stack draft'
+                              }
+                              title={`Light · ${recommendation.assetId}`}
+                              description={recommendation.reasons.join(' ')}
+                              actions={
+                                recommendation.technicallyUsable ? (
+                                  <Button
+                                    disabled={
+                                      pending !== undefined ||
+                                      stackingChoiceReason !== undefined
+                                    }
+                                    title={stackingChoiceReason}
+                                    onClick={() =>
+                                      command(
+                                        {
+                                          _tag: 'SetStackingFrameIncluded',
+                                          projectId: project.projectId,
+                                          expectedProjectRevision:
+                                            project.revision,
+                                          assetId: recommendation.assetId,
+                                          included: !included,
+                                          idempotencyKey: crypto.randomUUID(),
+                                        },
+                                        included
+                                          ? 'Excluding Light from this Stack'
+                                          : 'Including Light in this Stack',
+                                      )
+                                    }
+                                  >
+                                    {included
+                                      ? 'Exclude this Light'
+                                      : 'Include this Light'}
+                                  </Button>
+                                ) : undefined
+                              }
+                            />
+                          )
+                        })}
+                      </div>
+                    </>
+                  ) : null}
                   <Field
                     label={
                       stage.stage === 'Calibration'
                         ? 'Calibration operation'
                         : stage.stage === 'Registration'
                           ? 'Reference Light'
-                          : 'Draft profile'
+                          : 'Frame weighting'
                     }
                     hint={`Draft revision ${stage.draft.revision}`}
                   >
@@ -1367,7 +1580,7 @@ function ProjectStageDesktop({
                           ? operation
                           : stage.stage === 'Registration'
                             ? registrationReference
-                            : profile
+                            : weighting
                       }
                       disabled={
                         pending !== undefined || updateReason !== undefined
@@ -1384,7 +1597,7 @@ function ProjectStageDesktop({
                                 ? 'operation'
                                 : stage.stage === 'Registration'
                                   ? 'referenceAssetId'
-                                  : 'profile',
+                                  : 'weighting',
                               event.target.value,
                             ),
                             idempotencyKey: crypto.randomUUID(),
@@ -1417,9 +1630,10 @@ function ProjectStageDesktop({
                         </>
                       ) : (
                         <>
-                          <option>Default</option>
-                          <option>Alternate</option>
-                          <option>Review</option>
+                          <option value="equal">Equal contribution</option>
+                          <option value="signal-weighted">
+                            Signal weighted
+                          </option>
                         </>
                       )}
                     </Select>
@@ -1518,6 +1732,39 @@ function ProjectStageDesktop({
                         </Select>
                       </Field>
                     </>
+                  ) : stage.stage === 'Stacking' ? (
+                    <Field
+                      label="Rejection"
+                      hint="A small retained draft setting"
+                    >
+                      <Select
+                        value={rejection}
+                        disabled={
+                          pending !== undefined || updateReason !== undefined
+                        }
+                        onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                          command(
+                            {
+                              _tag: 'UpdateProcessingStageDraft',
+                              projectId: project.projectId,
+                              expectedProjectRevision: project.revision,
+                              stage: 'Stacking',
+                              settings: updatedSettings(
+                                'rejection',
+                                event.target.value,
+                              ),
+                              idempotencyKey: crypto.randomUUID(),
+                            },
+                            'Updating rejection setting',
+                          )
+                        }
+                      >
+                        <option value="winsorized-sigma">
+                          Winsorized sigma
+                        </option>
+                        <option value="none">No rejection</option>
+                      </Select>
+                    </Field>
                   ) : null}
                   <Cluster>
                     <Button
@@ -1620,7 +1867,7 @@ function ProjectStageDesktop({
                                   ? 'deterministic Calibration evidence'
                                   : attempt.stage === 'Registration'
                                     ? 'deterministic Registration evidence'
-                                    : 'deterministic stage evidence'}
+                                    : 'deterministic Stacking evidence'}
                               </span>
                             ) : null}
                             {attempt.stage === 'Calibration' ? (
@@ -1684,6 +1931,38 @@ function ProjectStageDesktop({
                                   <span key={diagnostic}>{diagnostic}</span>
                                 ))}
                               </>
+                            ) : attempt.stage === 'Stacking' ? (
+                              <>
+                                <span>
+                                  {attempt.stackingInputAssetIds.length} Light
+                                  {attempt.stackingInputAssetIds.length === 1
+                                    ? ''
+                                    : 's'}{' '}
+                                  contributed ·{' '}
+                                  {attempt.stageOutcome ?? 'Pending'}
+                                </span>
+                                {attempt.frameOutcomes.map((outcome) => (
+                                  <span key={outcome.assetId}>
+                                    {outcome.assetId} · {outcome.outcome} ·{' '}
+                                    {outcome.message}
+                                  </span>
+                                ))}
+                                {attempt.stackingOutput ? (
+                                  <span>
+                                    FITS Master evidence ·{' '}
+                                    {attempt.stackingOutput.checksum}
+                                  </span>
+                                ) : null}
+                                {attempt.savedMaster ? (
+                                  <strong>
+                                    Saved to Library ·{' '}
+                                    {attempt.savedMaster.assetId}
+                                  </strong>
+                                ) : null}
+                                {attempt.diagnostics.map((diagnostic) => (
+                                  <span key={diagnostic}>{diagnostic}</span>
+                                ))}
+                              </>
                             ) : null}
                             {stage.selectedAttemptId === attempt.attemptId ? (
                               <strong>Selected result</strong>
@@ -1716,15 +1995,101 @@ function ProjectStageDesktop({
                     )}
                   </div>
                 </>
+              ) : viewedStage === 'Master' ? (
+                <>
+                  <AttentionCard
+                    tone={
+                      selectedStack?.stackingOutput ? 'positive' : 'warning'
+                    }
+                    statusLabel={
+                      selectedStack?.savedMaster
+                        ? 'Saved Library Master'
+                        : 'Unsaved selected Stack result'
+                    }
+                    title="Linear Master"
+                    description={
+                      selectedStack?.stackingOutput
+                        ? `${selectedStack.stackingOutput.includedAssetIds.length} Lights · ${selectedStack.stackingOutput.diagnostic}`
+                        : 'Run Stacking and select a result before saving a Master.'
+                    }
+                  />
+                  {selectedStack ? (
+                    <DataList>
+                      <DataListItem
+                        label="Stack attempt"
+                        value={selectedStack.attemptId}
+                      />
+                      <DataListItem
+                        label="Registration attempt"
+                        value={selectedStack.upstreamAttemptId ?? 'Unavailable'}
+                      />
+                      <DataListItem
+                        label="Library asset"
+                        value={
+                          selectedStack.savedMaster?.assetId ?? 'Not saved yet'
+                        }
+                      />
+                    </DataList>
+                  ) : null}
+                  <Cluster>
+                    {!selectedStack?.savedMaster ? (
+                      <Button
+                        tone="primary"
+                        disabled={
+                          pending !== undefined ||
+                          saveMasterReason !== undefined
+                        }
+                        title={saveMasterReason}
+                        onClick={() =>
+                          command(
+                            {
+                              _tag: 'SaveProcessingProjectMaster',
+                              projectId: project.projectId,
+                              expectedProjectRevision: project.revision,
+                              idempotencyKey: crypto.randomUUID(),
+                            },
+                            'Saving selected Master to Library',
+                          )
+                        }
+                      >
+                        Save Master to Library
+                      </Button>
+                    ) : (
+                      <Button
+                        tone="primary"
+                        disabled={
+                          pending !== undefined ||
+                          openDevelopReason !== undefined
+                        }
+                        title={openDevelopReason}
+                        onClick={() => {
+                          command(
+                            {
+                              _tag: 'OpenProcessingProjectDevelop',
+                              projectId: project.projectId,
+                              expectedProjectRevision: project.revision,
+                              assetId: selectedStack.savedMaster?.assetId,
+                              idempotencyKey: crypto.randomUUID(),
+                            },
+                            'Opening saved Master in Develop',
+                          )
+                          onViewStage('Develop')
+                        }}
+                      >
+                        Open saved Master in Develop
+                      </Button>
+                    )}
+                  </Cluster>
+                </>
               ) : (
                 <AttentionCard
-                  tone="neutral"
-                  statusLabel="Persistent view"
-                  title={viewedStage}
+                  tone={project.developMasterAssetId ? 'positive' : 'warning'}
+                  statusLabel="Develop handoff"
+                  title="Exact saved Master"
                   description={
-                    viewedStage === 'Master'
-                      ? 'Selected Stacking results remain inspectable here. Saving a Master is Item 3.5.5.'
-                      : 'Develop opens an exact saved Master in Item 3.5.6.'
+                    project.developMasterAssetId
+                      ? `${project.developMasterAssetId} is open. Astronomy Develop operations arrive in Item 3.5.6.`
+                      : 'Save a selected Master before opening Develop.'
                   }
                 />
               )}

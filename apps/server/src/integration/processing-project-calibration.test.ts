@@ -647,6 +647,7 @@ test('3.5.3 normalizes a persisted 3.5.2 project shape on restart', () => {
     settings: [{ key: 'profile', value: 'old-default' }],
     overrides: [],
     registrationInclusions: [],
+    stackingFrameChoices: [],
   })
   assert.ok(recovered.stages[0]?.calibrationRecommendations)
   assert.equal(recovered.sources[0]?.libraryRole, 'original')

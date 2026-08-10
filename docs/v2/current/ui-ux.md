@@ -72,8 +72,10 @@ draft choices, attempt-scoped source inclusion or removal, per-Light outcomes,
 and deterministic output evidence. Item 3.5.4 closes explicit Registration
 reference and settings, per-Light transform outcomes, viable-subset selection,
 retained attempts, and exact Calibration lineage. The remaining work replaces
-the Stacking harness with the explicit stage behavior in the
-[Item 3.5 Process workflow plan](process-workflow-plan.md).
+the Develop placeholder with the astronomy workflow in the
+[Item 3.5 Process workflow plan](process-workflow-plan.md). Item 3.5.5 closes
+explicit Stacking decisions, versioned results, saved Library Master lineage,
+and the exact saved-Master Develop handoff.
 
 - Library selection and whole Capture Set intake must lead to a persistent
   Processing Project, not directly into transient worker progress.

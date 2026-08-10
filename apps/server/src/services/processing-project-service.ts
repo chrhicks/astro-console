@@ -11,8 +11,11 @@ import {
   ProcessingLibraryFormat,
   ProcessingLibraryRole,
   CalibrationOverride,
+  CalibrationFrameOutcome,
   CalibrationRecommendation,
   RegistrationFrameInclusion,
+  StackingFrameChoice,
+  StackingRecommendation,
   ProcessingProjectId,
   ProcessingProjectRevision,
   ProcessingProjectSource,
@@ -37,8 +40,11 @@ type ProjectCommand = Extract<
   | { readonly _tag: 'RedoProcessingStageDraft' }
   | { readonly _tag: 'SetCalibrationUseAnyway' }
   | { readonly _tag: 'SetRegistrationFrameIncluded' }
+  | { readonly _tag: 'SetStackingFrameIncluded' }
   | { readonly _tag: 'RunProcessingProjectStage' }
   | { readonly _tag: 'SelectProcessingStageResult' }
+  | { readonly _tag: 'SaveProcessingProjectMaster' }
+  | { readonly _tag: 'OpenProcessingProjectDevelop' }
 >
 
 const ProjectRow = Schema.Struct({ project: Schema.String })
@@ -56,6 +62,7 @@ const ProjectStageWorkPayload = Schema.Struct({
   stage: Schema.Literals(['Calibration', 'Registration', 'Stacking']),
 })
 const ReceiptRow = Schema.Struct({ response: Schema.String })
+const MasterArtifactRow = Schema.Struct({ checksum: Schema.String })
 const ProjectAcceptedResponse = Schema.Struct({
   outcome: Schema.Literal('accepted'),
   replayed: Schema.Boolean,
@@ -70,8 +77,11 @@ const ProjectAcceptedResponse = Schema.Struct({
     'projectStageDraftRedone',
     'calibrationUseAnywayUpdated',
     'registrationFrameInclusionUpdated',
+    'stackingFrameInclusionUpdated',
     'projectStageRunQueued',
     'projectStageResultSelected',
+    'projectMasterSaved',
+    'projectDevelopOpened',
   ]),
   project: ProcessingProject,
 })
@@ -106,6 +116,18 @@ const StoredDetail = Schema.Struct({
     }),
   ),
 })
+type StackingAttemptEvidence = {
+  readonly stageOutcome: 'Succeeded' | 'Warning' | 'Failed' | 'Unavailable'
+  readonly frameOutcomes: ReadonlyArray<typeof CalibrationFrameOutcome.Type>
+  readonly diagnostics: ReadonlyArray<string>
+  readonly stackingOutput?: {
+    readonly checksum: string
+    readonly format: 'fits'
+    readonly includedAssetIds: ReadonlyArray<typeof AssetId.Type>
+    readonly diagnostic: string
+  }
+  readonly outputArtifact?: { readonly path: string; readonly checksum: string }
+}
 
 export const isProcessingProjectCommand = (
   command: typeof Command.Type,
@@ -120,8 +142,11 @@ export const isProcessingProjectCommand = (
   Command.guards.RedoProcessingStageDraft(command) ||
   Command.guards.SetCalibrationUseAnyway(command) ||
   Command.guards.SetRegistrationFrameIncluded(command) ||
+  Command.guards.SetStackingFrameIncluded(command) ||
   Command.guards.RunProcessingProjectStage(command) ||
-  Command.guards.SelectProcessingStageResult(command)
+  Command.guards.SelectProcessingStageResult(command) ||
+  Command.guards.SaveProcessingProjectMaster(command) ||
+  Command.guards.OpenProcessingProjectDevelop(command)
 
 export function processingProjects(database: DatabaseSync) {
   return Schema.decodeUnknownSync(Schema.Array(ProjectRow))(
@@ -195,6 +220,7 @@ function normalizeStoredProject(
                     settings: entry,
                     overrides: [],
                     registrationInclusions: [],
+                    stackingFrameChoices: [],
                   }
                 : {
                     ...Schema.decodeUnknownSync(UnknownRecord)(entry),
@@ -204,6 +230,9 @@ function normalizeStoredProject(
                     registrationInclusions:
                       Schema.decodeUnknownSync(UnknownRecord)(entry)
                         .registrationInclusions ?? [],
+                    stackingFrameChoices:
+                      Schema.decodeUnknownSync(UnknownRecord)(entry)
+                        .stackingFrameChoices ?? [],
                   },
             )
           : []
@@ -213,10 +242,12 @@ function normalizeStoredProject(
           ...draft,
           overrides: draft.overrides ?? [],
           registrationInclusions: draft.registrationInclusions ?? [],
+          stackingFrameChoices: draft.stackingFrameChoices ?? [],
           undo: normalizeHistory(draft.undo),
           redo: normalizeHistory(draft.redo),
         },
         calibrationRecommendations: stage.calibrationRecommendations ?? [],
+        stackingRecommendations: stage.stackingRecommendations ?? [],
         attempts: Array.isArray(stage.attempts)
           ? stage.attempts.map((entry) => ({
               ...Schema.decodeUnknownSync(UnknownRecord)(entry),
@@ -228,6 +259,15 @@ function normalizeStoredProject(
               registrationInclusions:
                 Schema.decodeUnknownSync(UnknownRecord)(entry)
                   .registrationInclusions ?? [],
+              stackingRecommendations:
+                Schema.decodeUnknownSync(UnknownRecord)(entry)
+                  .stackingRecommendations ?? [],
+              stackingFrameChoices:
+                Schema.decodeUnknownSync(UnknownRecord)(entry)
+                  .stackingFrameChoices ?? [],
+              stackingInputAssetIds:
+                Schema.decodeUnknownSync(UnknownRecord)(entry)
+                  .stackingInputAssetIds ?? [],
               frameOutcomes:
                 Schema.decodeUnknownSync(UnknownRecord)(entry).frameOutcomes ??
                 [],
@@ -283,18 +323,46 @@ export function executeProcessingProjectCommand(
 
   let project: ProcessingProject
   let work: { workId: string; attemptId: string; stage: string } | undefined
+  let masterSave:
+    | {
+        assetId: typeof AssetId.Type
+        attemptId: typeof ProcessingStageAttemptId.Type
+        resultId: typeof ProcessingStageResultId.Type
+        registrationAttemptId: typeof ProcessingStageAttemptId.Type
+        checksum: string
+        includedAssetIds: ReadonlyArray<typeof AssetId.Type>
+        savedAt: string
+      }
+    | undefined
   if (Command.guards.NavigateProcessingProjectStage(command)) {
     if (current === undefined)
       return { outcome: 'rejected' as const, reason: 'ProjectNotFound' }
-    project = reviseProject(current, current.sources, {
-      currentStage: command.stage,
-    })
+    const selectedSavedMaster = current.stages
+      .find((stage) => stage.stage === 'Stacking')
+      ?.attempts.find(
+        (attempt) =>
+          attempt.attemptId ===
+          current.stages.find((stage) => stage.stage === 'Stacking')
+            ?.selectedAttemptId,
+      )?.savedMaster
+    if (command.stage === 'Develop') {
+      if (selectedSavedMaster === undefined)
+        return { outcome: 'rejected' as const, reason: 'SavedMasterRequired' }
+      project = reviseProject(current, current.sources, {
+        currentStage: command.stage,
+        developMasterAssetId: selectedSavedMaster.assetId,
+      })
+    } else
+      project = reviseProject(current, current.sources, {
+        currentStage: command.stage,
+      })
   } else if (
     Command.guards.UpdateProcessingStageDraft(command) ||
     Command.guards.UndoProcessingStageDraft(command) ||
     Command.guards.RedoProcessingStageDraft(command) ||
     Command.guards.SetCalibrationUseAnyway(command) ||
-    Command.guards.SetRegistrationFrameIncluded(command)
+    Command.guards.SetRegistrationFrameIncluded(command) ||
+    Command.guards.SetStackingFrameIncluded(command)
   ) {
     if (current === undefined)
       return { outcome: 'rejected' as const, reason: 'ProjectNotFound' }
@@ -302,7 +370,9 @@ export function executeProcessingProjectCommand(
       ? 'Calibration'
       : Command.guards.SetRegistrationFrameIncluded(command)
         ? 'Registration'
-        : command.stage
+        : Command.guards.SetStackingFrameIncluded(command)
+          ? 'Stacking'
+          : command.stage
     const stage = current.stages.find((item) => item.stage === stageName)
     if (stage === undefined)
       return { outcome: 'rejected' as const, reason: 'StageNotFound' }
@@ -336,10 +406,21 @@ export function executeProcessingProjectCommand(
           reason: 'RegistrationFrameChoiceUnavailable',
         }
     }
+    if (Command.guards.SetStackingFrameIncluded(command)) {
+      const recommendation = stage.stackingRecommendations.find(
+        (candidate) => candidate.assetId === command.assetId,
+      )
+      if (recommendation?.technicallyUsable !== true)
+        return {
+          outcome: 'rejected' as const,
+          reason: 'StackingFrameChoiceUnavailable',
+        }
+    }
     const snapshot = {
       settings: draft.settings,
       overrides: draft.overrides,
       registrationInclusions: draft.registrationInclusions,
+      stackingFrameChoices: draft.stackingFrameChoices,
     }
     const nextDraft = Command.guards.SetCalibrationUseAnyway(command)
       ? {
@@ -356,6 +437,7 @@ export function executeProcessingProjectCommand(
                 (override) => override.assetId !== command.assetId,
               ),
           registrationInclusions: draft.registrationInclusions,
+          stackingFrameChoices: draft.stackingFrameChoices,
           undo: [...draft.undo, snapshot].slice(-10),
           redo: [],
         }
@@ -377,41 +459,67 @@ export function executeProcessingProjectCommand(
               : draft.registrationInclusions.filter(
                   (choice) => choice.assetId !== command.assetId,
                 ),
+            stackingFrameChoices: draft.stackingFrameChoices,
             undo: [...draft.undo, snapshot].slice(-10),
             redo: [],
           }
-        : Command.guards.UpdateProcessingStageDraft(command)
+        : Command.guards.SetStackingFrameIncluded(command)
           ? {
               revision: draft.revision + 1,
-              settings: command.settings,
+              settings: draft.settings,
               overrides: draft.overrides,
               registrationInclusions: draft.registrationInclusions,
+              stackingFrameChoices: [
+                ...draft.stackingFrameChoices.filter(
+                  (choice) => choice.assetId !== command.assetId,
+                ),
+                {
+                  assetId: command.assetId,
+                  decision: command.included
+                    ? ('Include' as const)
+                    : ('Exclude' as const),
+                },
+              ],
               undo: [...draft.undo, snapshot].slice(-10),
               redo: [],
             }
-          : Command.guards.UndoProcessingStageDraft(command)
-            ? draft.undo.length === 0
-              ? undefined
-              : {
-                  revision: draft.revision + 1,
-                  settings: draft.undo.at(-1)?.settings ?? [],
-                  overrides: draft.undo.at(-1)?.overrides ?? [],
-                  registrationInclusions:
-                    draft.undo.at(-1)?.registrationInclusions ?? [],
-                  undo: draft.undo.slice(0, -1),
-                  redo: [snapshot, ...draft.redo].slice(0, 10),
-                }
-            : draft.redo.length === 0
-              ? undefined
-              : {
-                  revision: draft.revision + 1,
-                  settings: draft.redo[0]?.settings ?? [],
-                  overrides: draft.redo[0]?.overrides ?? [],
-                  registrationInclusions:
-                    draft.redo[0]?.registrationInclusions ?? [],
-                  undo: [...draft.undo, snapshot].slice(-10),
-                  redo: draft.redo.slice(1),
-                }
+          : Command.guards.UpdateProcessingStageDraft(command)
+            ? {
+                revision: draft.revision + 1,
+                settings: command.settings,
+                overrides: draft.overrides,
+                registrationInclusions: draft.registrationInclusions,
+                stackingFrameChoices: draft.stackingFrameChoices,
+                undo: [...draft.undo, snapshot].slice(-10),
+                redo: [],
+              }
+            : Command.guards.UndoProcessingStageDraft(command)
+              ? draft.undo.length === 0
+                ? undefined
+                : {
+                    revision: draft.revision + 1,
+                    settings: draft.undo.at(-1)?.settings ?? [],
+                    overrides: draft.undo.at(-1)?.overrides ?? [],
+                    registrationInclusions:
+                      draft.undo.at(-1)?.registrationInclusions ?? [],
+                    stackingFrameChoices:
+                      draft.undo.at(-1)?.stackingFrameChoices ?? [],
+                    undo: draft.undo.slice(0, -1),
+                    redo: [snapshot, ...draft.redo].slice(0, 10),
+                  }
+              : draft.redo.length === 0
+                ? undefined
+                : {
+                    revision: draft.revision + 1,
+                    settings: draft.redo[0]?.settings ?? [],
+                    overrides: draft.redo[0]?.overrides ?? [],
+                    registrationInclusions:
+                      draft.redo[0]?.registrationInclusions ?? [],
+                    stackingFrameChoices:
+                      draft.redo[0]?.stackingFrameChoices ?? [],
+                    undo: [...draft.undo, snapshot].slice(-10),
+                    redo: draft.redo.slice(1),
+                  }
     if (nextDraft === undefined)
       return { outcome: 'rejected' as const, reason: 'DraftHistoryUnavailable' }
     project = reviseProject(current, current.sources, {
@@ -453,6 +561,12 @@ export function executeProcessingProjectCommand(
             .find((item) => item.stage === 'Calibration')
             ?.attempts.find((item) => item.attemptId === upstream)
         : undefined
+    const registrationResult =
+      command.stage === 'Stacking' && upstream !== undefined
+        ? current.stages
+            .find((item) => item.stage === 'Registration')
+            ?.attempts.find((item) => item.attemptId === upstream)
+        : undefined
     if (
       command.stage === 'Registration' &&
       registrationReference(stage.draft.settings, upstreamResult) === undefined
@@ -460,6 +574,28 @@ export function executeProcessingProjectCommand(
       return {
         outcome: 'rejected' as const,
         reason: 'RegistrationReferenceUnavailable',
+      }
+    const stackRecommendations =
+      command.stage === 'Stacking'
+        ? stackingRecommendations(registrationResult)
+        : []
+    const stackingInputAssetIds = stackRecommendations.flatMap(
+      (recommendation) => {
+        const choice = stage.draft.stackingFrameChoices.find(
+          (candidate) => candidate.assetId === recommendation.assetId,
+        )
+        const included =
+          choice?.decision === 'Include' ||
+          (choice === undefined && recommendation.decision === 'Include')
+        return recommendation.technicallyUsable && included
+          ? [recommendation.assetId]
+          : []
+      },
+    )
+    if (command.stage === 'Stacking' && stackingInputAssetIds.length === 0)
+      return {
+        outcome: 'rejected' as const,
+        reason: 'StackingInputUnavailable',
       }
     const attemptId = ProcessingStageAttemptId.make(
       `stage-attempt-${randomUUID()}`,
@@ -475,13 +611,13 @@ export function executeProcessingProjectCommand(
           ? 'deterministic-calibration-adapter-v1'
           : command.stage === 'Registration'
             ? 'deterministic-registration-adapter-v1'
-            : 'deterministic-stage-harness-v1',
+            : 'deterministic-stacking-adapter-v1',
       resultKind:
         command.stage === 'Calibration'
           ? 'deterministicCalibrationEvidence'
           : command.stage === 'Registration'
             ? 'deterministicRegistrationEvidence'
-            : 'deterministicStageEvidence',
+            : 'deterministicStackingEvidence',
       basedOnEarlierUpstream: false,
       sourceRevisions:
         command.stage === 'Registration' && upstreamResult !== undefined
@@ -490,11 +626,21 @@ export function executeProcessingProjectCommand(
               assetRevision: source.assetRevision,
               role: 'Lights' as const,
             }))
-          : current.sources.map((source) => ({
-              assetId: source.assetId,
-              assetRevision: source.assetRevision,
-              role: source.role,
-            })),
+          : command.stage === 'Stacking' && registrationResult !== undefined
+            ? registrationResult.registrationTransforms
+                .filter((transform) =>
+                  registrationResult.viableAssetIds.includes(transform.assetId),
+                )
+                .map((transform) => ({
+                  assetId: transform.assetId,
+                  assetRevision: transform.assetRevision,
+                  role: 'Lights' as const,
+                }))
+            : current.sources.map((source) => ({
+                assetId: source.assetId,
+                assetRevision: source.assetRevision,
+                role: source.role,
+              })),
       recommendations:
         command.stage === 'Calibration' ? stage.calibrationRecommendations : [],
       overrides: command.stage === 'Calibration' ? stage.draft.overrides : [],
@@ -502,6 +648,10 @@ export function executeProcessingProjectCommand(
         command.stage === 'Registration'
           ? stage.draft.registrationInclusions
           : [],
+      stackingRecommendations: stackRecommendations,
+      stackingFrameChoices:
+        command.stage === 'Stacking' ? stage.draft.stackingFrameChoices : [],
+      stackingInputAssetIds,
       frameOutcomes: [],
       outputs: [],
       registrationTransforms: [],
@@ -536,6 +686,83 @@ export function executeProcessingProjectCommand(
         ...stage,
         selectedAttemptId: attempt.attemptId,
       }),
+    })
+  } else if (Command.guards.SaveProcessingProjectMaster(command)) {
+    if (current === undefined)
+      return { outcome: 'rejected' as const, reason: 'ProjectNotFound' }
+    const stage = current.stages.find((item) => item.stage === 'Stacking')
+    const attempt = stage?.attempts.find(
+      (item) => item.attemptId === stage.selectedAttemptId,
+    )
+    if (
+      stage === undefined ||
+      attempt?.state !== 'succeeded' ||
+      attempt.resultId === undefined ||
+      attempt.upstreamAttemptId === undefined ||
+      attempt.stackingOutput === undefined
+    )
+      return { outcome: 'rejected' as const, reason: 'StackResultRequired' }
+    if (attempt.savedMaster !== undefined) project = current
+    else {
+      const artifact = Schema.decodeUnknownSync(
+        Schema.optional(MasterArtifactRow),
+      )(
+        database
+          .prepare(
+            'SELECT checksum FROM processing_artifacts WHERE session_id=? AND output_id=?',
+          )
+          .get(current.projectId, `stack-output-${attempt.attemptId}`),
+      )
+      if (artifact?.checksum !== attempt.stackingOutput.checksum)
+        return { outcome: 'rejected' as const, reason: 'StackResultRequired' }
+      const savedAt = new Date().toISOString()
+      const save = {
+        assetId: AssetId.make(`asset-master-${randomUUID()}`),
+        attemptId: attempt.attemptId,
+        resultId: attempt.resultId,
+        registrationAttemptId: attempt.upstreamAttemptId,
+        checksum: attempt.stackingOutput.checksum,
+        includedAssetIds: attempt.stackingOutput.includedAssetIds,
+        savedAt,
+      }
+      masterSave = save
+      project = reviseProject(current, current.sources, {
+        currentStage: 'Master',
+        stages: replaceStage(current.stages, {
+          ...stage,
+          attempts: stage.attempts.map((candidate) =>
+            candidate.attemptId === attempt.attemptId
+              ? {
+                  ...candidate,
+                  savedMaster: {
+                    assetId: save.assetId,
+                    assetRevision: AssetRevision.make(1),
+                    checksum: save.checksum,
+                    projectId: current.projectId,
+                    registrationAttemptId: save.registrationAttemptId,
+                    stackingAttemptId: attempt.attemptId,
+                    stackResultId: save.resultId,
+                    savedAt,
+                  },
+                }
+              : candidate,
+          ),
+        }),
+      })
+    }
+  } else if (Command.guards.OpenProcessingProjectDevelop(command)) {
+    if (current === undefined)
+      return { outcome: 'rejected' as const, reason: 'ProjectNotFound' }
+    const saved = current.stages
+      .find((stage) => stage.stage === 'Stacking')
+      ?.attempts.find(
+        (attempt) => attempt.savedMaster?.assetId === command.assetId,
+      )?.savedMaster
+    if (saved === undefined)
+      return { outcome: 'rejected' as const, reason: 'SavedMasterRequired' }
+    project = reviseProject(current, current.sources, {
+      currentStage: 'Develop',
+      developMasterAssetId: saved.assetId,
     })
   } else if (Command.guards.AssignProcessingSourceRole(command)) {
     if (current === undefined)
@@ -631,9 +858,17 @@ export function executeProcessingProjectCommand(
                     ? ('calibrationUseAnywayUpdated' as const)
                     : Command.guards.SetRegistrationFrameIncluded(command)
                       ? ('registrationFrameInclusionUpdated' as const)
-                      : Command.guards.RunProcessingProjectStage(command)
-                        ? ('projectStageRunQueued' as const)
-                        : ('projectStageResultSelected' as const)
+                      : Command.guards.SetStackingFrameIncluded(command)
+                        ? ('stackingFrameInclusionUpdated' as const)
+                        : Command.guards.RunProcessingProjectStage(command)
+                          ? ('projectStageRunQueued' as const)
+                          : Command.guards.SelectProcessingStageResult(command)
+                            ? ('projectStageResultSelected' as const)
+                            : Command.guards.SaveProcessingProjectMaster(
+                                  command,
+                                )
+                              ? ('projectMasterSaved' as const)
+                              : ('projectDevelopOpened' as const)
   const response = {
     outcome: 'accepted' as const,
     replayed: false,
@@ -655,6 +890,57 @@ export function executeProcessingProjectCommand(
     database
       .prepare('INSERT INTO processing_project_receipts VALUES (?,?,?)')
       .run(command.idempotencyKey, identity.personId, JSON.stringify(response))
+    if (masterSave !== undefined) {
+      const detail = {
+        assetId: masterSave.assetId,
+        revision: 1,
+        role: 'linearMaster',
+        format: 'fits',
+        checksum: masterSave.checksum,
+        availability: 'availableLocally',
+        capturedAt: masterSave.savedAt,
+        comparisonGroupId: `processing-project-${project.projectId}`,
+        ...(project.targetName === undefined
+          ? {}
+          : { targetName: project.targetName }),
+        lineage: {
+          sourceAssetIds: masterSave.includedAssetIds,
+          processingSessionId: project.projectId,
+          processingOutputId: masterSave.resultId,
+          operationIds: [
+            masterSave.registrationAttemptId,
+            masterSave.attemptId,
+          ],
+        },
+        representations: [
+          { label: 'Saved deterministic Master retained', state: 'available' },
+        ],
+      }
+      database
+        .prepare('INSERT INTO library_assets VALUES (?,?,?,?,?,?,?,?,?,?)')
+        .run(
+          masterSave.assetId,
+          1,
+          'linearMaster',
+          'fits',
+          'availableLocally',
+          detail.comparisonGroupId,
+          masterSave.savedAt,
+          masterSave.savedAt,
+          0,
+          JSON.stringify(detail),
+        )
+      database
+        .prepare(
+          'UPDATE processing_artifacts SET saved=1 WHERE session_id=? AND output_id=?',
+        )
+        .run(project.projectId, `stack-output-${masterSave.attemptId}`)
+      database
+        .prepare(
+          'INSERT INTO process_asset_events (asset_id,event_type,checksum) VALUES (?,?,?)',
+        )
+        .run(masterSave.assetId, 'ProcessSaved', masterSave.checksum)
+    }
     if (work !== undefined)
       database
         .prepare(
@@ -825,15 +1111,20 @@ function initialStages(
                   { key: 'alignmentModel', value: 'translation' },
                   { key: 'starDetection', value: 'balanced' },
                 ]
-              : [],
+              : [
+                  { key: 'weighting', value: 'equal' },
+                  { key: 'rejection', value: 'winsorized-sigma' },
+                ],
         overrides: [],
         registrationInclusions: [],
+        stackingFrameChoices: [],
         undo: [],
         redo: [],
       },
       attempts: [],
       calibrationRecommendations:
         stage === 'Calibration' ? calibrationRecommendations(sources) : [],
+      stackingRecommendations: [],
     }),
   )
 }
@@ -934,6 +1225,16 @@ export function settleProcessingProjectStage(
           claimToken,
         )
       : undefined
+  const stackingEvidence =
+    attempt.stage === 'Stacking'
+      ? stackingAttemptEvidence(
+          project,
+          attempt,
+          checksum,
+          artifactPath,
+          claimToken,
+        )
+      : undefined
   const calibration =
     calibrationEvidence === undefined
       ? undefined
@@ -954,18 +1255,30 @@ export function settleProcessingProjectStage(
           registrationTransforms: registrationEvidence.transforms,
           viableAssetIds: registrationEvidence.viableAssetIds,
         }
-  const evidence = calibration ?? registration
+  const stacking =
+    stackingEvidence === undefined
+      ? undefined
+      : {
+          stageOutcome: stackingEvidence.stageOutcome,
+          frameOutcomes: stackingEvidence.frameOutcomes,
+          diagnostics: stackingEvidence.diagnostics,
+          ...(stackingEvidence.stackingOutput === undefined
+            ? {}
+            : { stackingOutput: stackingEvidence.stackingOutput }),
+        }
+  const evidence = calibration ?? registration ?? stacking
+  const successful =
+    stacking !== undefined
+      ? stacking.stackingOutput !== undefined
+      : evidence === undefined ||
+        ('outputs' in evidence &&
+          evidence.outputs.length > 0 &&
+          (registration === undefined ||
+            registration.viableAssetIds.length > 0))
   const completed = ProcessingStageAttempt.make({
     ...attempt,
-    state:
-      evidence === undefined || evidence.outputs.length > 0
-        ? registration === undefined || registration.viableAssetIds.length > 0
-          ? 'succeeded'
-          : 'failed'
-        : 'failed',
-    ...(evidence === undefined ||
-    (evidence.outputs.length > 0 &&
-      (registration === undefined || registration.viableAssetIds.length > 0))
+    state: successful ? 'succeeded' : 'failed',
+    ...(successful
       ? {
           resultId: ProcessingStageResultId.make(
             `stage-result-${attempt.attemptId}`,
@@ -980,6 +1293,9 @@ export function settleProcessingProjectStage(
       diagnostics: [],
       registrationTransforms: [],
       viableAssetIds: [],
+      stackingRecommendations: attempt.stackingRecommendations,
+      stackingFrameChoices: attempt.stackingFrameChoices,
+      stackingInputAssetIds: attempt.stackingInputAssetIds,
     }),
     startedAt: now,
     completedAt: now,
@@ -1035,7 +1351,7 @@ export function settleProcessingProjectStage(
       )
     for (const [index, artifact] of (
       calibrationEvidence?.outputArtifacts ?? []
-    ).entries())
+    ).entries()) {
       database
         .prepare(
           'INSERT OR REPLACE INTO processing_artifacts VALUES (?,?,?,?,?,?,0)',
@@ -1048,6 +1364,7 @@ export function settleProcessingProjectStage(
           artifact.path,
           artifact.checksum,
         )
+    }
     for (const [index, artifact] of (
       registrationEvidence?.outputArtifacts ?? []
     ).entries())
@@ -1062,6 +1379,19 @@ export function settleProcessingProjectStage(
           `registration-transform-${attempt.attemptId}-${index + 1}`,
           artifact.path,
           artifact.checksum,
+        )
+    if (stackingEvidence?.outputArtifact !== undefined)
+      database
+        .prepare(
+          'INSERT OR REPLACE INTO processing_artifacts VALUES (?,?,?,?,?,?,0)',
+        )
+        .run(
+          `${workId}:stacking:master`,
+          settledProject.projectId,
+          workId,
+          `stack-output-${attempt.attemptId}`,
+          stackingEvidence.outputArtifact.path,
+          stackingEvidence.outputArtifact.checksum,
         )
     database.exec('COMMIT')
     return {
@@ -1436,6 +1766,133 @@ function registrationAttemptEvidence(
   }
 }
 
+function stackingAttemptEvidence(
+  project: ProcessingProject,
+  attempt: typeof ProcessingStageAttempt.Type,
+  evidenceChecksum: string,
+  artifactPath: string,
+  claimToken: string,
+): StackingAttemptEvidence {
+  const registration = project.stages
+    .find((stage) => stage.stage === 'Registration')
+    ?.attempts.find(
+      (candidate) => candidate.attemptId === attempt.upstreamAttemptId,
+    )
+  const transforms = new Map(
+    registration?.registrationTransforms.map((transform) => [
+      transform.assetId,
+      transform,
+    ]) ?? [],
+  )
+  const frameOutcomes = attempt.stackingRecommendations.map(
+    (recommendation) => {
+      const included = attempt.stackingInputAssetIds.includes(
+        recommendation.assetId,
+      )
+      const transform = transforms.get(recommendation.assetId)
+      if (
+        registration === undefined ||
+        transform?.usable !== true ||
+        !registration.viableAssetIds.includes(recommendation.assetId)
+      )
+        return {
+          assetId: recommendation.assetId,
+          assetRevision: recommendation.assetRevision,
+          outcome: 'Unavailable' as const,
+          message:
+            'This Light has no usable transform in the exact Registration result.',
+          diagnostic: 'RegistrationTransformUnavailable',
+        }
+      return {
+        assetId: recommendation.assetId,
+        assetRevision: recommendation.assetRevision,
+        outcome:
+          recommendation.decision === 'Review' && included
+            ? ('Warning' as const)
+            : ('Succeeded' as const),
+        message: included
+          ? recommendation.decision === 'Review'
+            ? 'This technically usable Light is included after operator review.'
+            : 'This technically usable Light is included in the Stack.'
+          : 'This technically usable Light remains outside this Stack attempt.',
+        ...(recommendation.decision === 'Review' && included
+          ? { diagnostic: 'IncludedAfterReview' }
+          : {}),
+      }
+    },
+  )
+  const included = attempt.stackingInputAssetIds.filter(
+    (assetId) => transforms.get(assetId)?.usable === true,
+  )
+  if (registration === undefined || included.length === 0)
+    return {
+      stageOutcome: 'Unavailable' as const,
+      frameOutcomes,
+      diagnostics: [
+        'The exact selected Registration result has no usable Stack input.',
+      ],
+    }
+  const frozen = JSON.stringify({
+    kind: 'deterministicStackingEvidence',
+    upstreamAttemptId: attempt.upstreamAttemptId,
+    includedAssetIds: included,
+    transforms: included.map((assetId) => transforms.get(assetId)?.checksum),
+    settings: attempt.settings,
+    recommendations: attempt.stackingRecommendations,
+    choices: attempt.stackingFrameChoices,
+    toolIdentity: attempt.toolIdentity,
+    evidenceChecksum,
+  })
+  const pixel = createHash('sha256').update(frozen).digest().readUInt16BE(0)
+  const card = (key: string, value: string) =>
+    `${key.padEnd(8, ' ')}= ${value}`.padEnd(80, ' ')
+  const header = [
+    card('SIMPLE', '                    T'),
+    card('BITPIX', '                   16'),
+    card('NAXIS', '                    2'),
+    card('NAXIS1', '                    1'),
+    card('NAXIS2', '                    1'),
+    card('BZERO', '                32768'),
+    card('BSCALE', '                    1'),
+    'END'.padEnd(80, ' '),
+  ]
+    .join('')
+    .padEnd(2880, ' ')
+  const data = Buffer.alloc(2880)
+  data.writeUInt16BE(pixel, 0)
+  const bytes = Buffer.concat([Buffer.from(header, 'ascii'), data])
+  const outputChecksum = `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+  const path = `${artifactPath}.stacking.fits`
+  if (!existsSync(path)) {
+    const temporaryPath = `${path}.${claimToken}.tmp`
+    if (existsSync(temporaryPath)) {
+      if (!readFileSync(temporaryPath).equals(bytes))
+        throw new Error('temporary Stack output does not match frozen evidence')
+    } else writeFileSync(temporaryPath, bytes, { flag: 'wx' })
+    renameSync(temporaryPath, path)
+  }
+  if (!readFileSync(path).equals(bytes))
+    throw new Error('retained Stack output does not match frozen evidence')
+  return {
+    stageOutcome: frameOutcomes.some((outcome) => outcome.outcome === 'Warning')
+      ? ('Warning' as const)
+      : ('Succeeded' as const),
+    frameOutcomes,
+    diagnostics: [
+      'Deterministic FITS evidence only; astronomy stacking quality is not claimed.',
+      `${included.length} Light${included.length === 1 ? '' : 's'} contributed to this versioned Stack result.`,
+    ],
+    stackingOutput: {
+      checksum: outputChecksum,
+      format: 'fits' as const,
+      includedAssetIds: included,
+      diagnostic:
+        'Deterministic 1 x 1 FITS evidence; not an astronomy-quality image.',
+    },
+    outputArtifact: { path, checksum: outputChecksum },
+  }
+}
+
 function recomputeLineage(
   stages: ProcessingProject['stages'],
   sources: ProcessingProject['sources'],
@@ -1461,6 +1918,7 @@ function recomputeLineage(
     registrationInclusions: ReadonlyArray<
       typeof RegistrationFrameInclusion.Type
     >
+    stackingFrameChoices: ReadonlyArray<typeof StackingFrameChoice.Type>
   }) => ({
     ...snapshot,
     overrides: snapshot.overrides.filter((override) =>
@@ -1501,6 +1959,12 @@ function recomputeLineage(
   const selectedRegistration = registered?.attempts.find(
     (attempt) => attempt.attemptId === registered.selectedAttemptId,
   )
+  const stackRecommendations = stackingRecommendations(selectedRegistration)
+  const stackIds = new Set(
+    stackRecommendations
+      .filter((recommendation) => recommendation.technicallyUsable)
+      .map((recommendation) => recommendation.assetId),
+  )
   return stages.map((stage) =>
     stage.stage === 'Calibration'
       ? {
@@ -1511,6 +1975,13 @@ function recomputeLineage(
         ? (registered ?? stage)
         : {
             ...stage,
+            stackingRecommendations: stackRecommendations,
+            draft: {
+              ...stage.draft,
+              stackingFrameChoices: stage.draft.stackingFrameChoices.filter(
+                (choice) => stackIds.has(choice.assetId),
+              ),
+            },
             attempts: stage.attempts.map((attempt) => ({
               ...attempt,
               basedOnEarlierUpstream:
@@ -1519,6 +1990,37 @@ function recomputeLineage(
                 attempt.upstreamAttemptId !== selectedRegistration.attemptId,
             })),
           },
+  )
+}
+
+function stackingRecommendations(
+  registration: typeof ProcessingStageAttempt.Type | undefined,
+) {
+  if (registration?.state !== 'succeeded') return []
+  const viable = new Set(registration.viableAssetIds)
+  return registration.registrationTransforms.map((transform, index) =>
+    StackingRecommendation.make({
+      assetId: transform.assetId,
+      assetRevision: transform.assetRevision,
+      technicallyUsable: transform.usable && viable.has(transform.assetId),
+      decision:
+        !transform.usable || !viable.has(transform.assetId)
+          ? 'Exclude'
+          : index % 3 === 0
+            ? 'Include'
+            : index % 3 === 1
+              ? 'Review'
+              : 'Exclude',
+      reasons: [
+        !transform.usable || !viable.has(transform.assetId)
+          ? 'This Light has no transform in the exact viable Registration subset.'
+          : index % 3 === 0
+            ? 'The retained transform is usable and this frame is recommended for the Stack.'
+            : index % 3 === 1
+              ? 'The retained transform is usable; review this frame before adding its signal.'
+              : 'The retained transform is usable, but the deterministic quality review recommends leaving it out.',
+      ],
+    }),
   )
 }
 

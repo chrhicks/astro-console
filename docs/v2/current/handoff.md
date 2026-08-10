@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–3 and Items 3.5.1–3.5.4 complete; Item 3.5.5 next**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–3 and Items 3.5.1–3.5.5 complete; Item 3.5.6 next**
 
 ## Current Position
 
@@ -222,6 +222,18 @@ without replay. Functional and Designer review passed at wide, compact, and
 evidence only, not astronomy-quality alignment or an external registration
 tool.
 
+Item 3.5.5 is complete as a focused Stacking and saved Master MVP. The bounded
+draft keeps minimal weighting and rejection settings plus explicit usable-frame
+choices. Run or Rerun binds each attempt to the exact selected Registration
+result and retains versioned deterministic FITS evidence, diagnostics, and
+frame decisions. The owner may select an earlier result, save that exact result
+idempotently as a retained Library Master, and open Develop only from that
+saved asset. Restart preserves attempts, selection, Library lineage, and the
+handoff without replay. Functional and Designer review passed at wide,
+compact, and 390 px phone widths. This proves deterministic local orchestration
+and evidence only, not astronomy-quality stacking or an external processing
+tool.
+
 After that simulator proof, an indoor GET-only readiness check reached ASCOM
 Remote at `192.168.4.104:11111`. Management and every device-property envelope
 returned `ErrorNumber: 0`. The configured identities were Telescope 0 `ASI
@@ -379,15 +391,14 @@ covered indoor frame.
 
 ## Next Accepted Item
 
-3.5.5. **Add explicit Stacking and the saved Master boundary.** Bind each
-Stacking attempt to the exact selected Registration result, retain frame
-decisions and diagnostics, compare versioned results, and save one selected
-Master to Library for the later Develop handoff.
+3.5.6. **Add the astronomy Develop workspace.** Open the exact saved Library
+Master, keep Preview and Apply explicit, and add the accepted astronomy
+operation families with durable history, retry, and save lineage.
 
 ## Later Accepted Items
 
-Items 3.5.6 and 3.5.7 add astronomy-specific Develop operations and the final
-integrated operator review. Follow the ordered scope and proof in the
+Item 3.5.7 adds the final integrated operator review and closeout. Follow the
+ordered scope and proof in the
 [Item 3.5 Process workflow plan](process-workflow-plan.md).
 
 4. **Audit and promote the beta.** Verify all four exact Nightbook workflows

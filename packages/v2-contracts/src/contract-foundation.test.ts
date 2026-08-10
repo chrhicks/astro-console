@@ -240,6 +240,14 @@ const commandFixtures: ReadonlyArray<unknown> = [
     idempotencyKey: 'i-project-registration-frame',
   },
   {
+    _tag: 'SetStackingFrameIncluded',
+    projectId: 'project-1',
+    expectedProjectRevision: 6,
+    assetId: 'asset-light-2',
+    included: true,
+    idempotencyKey: 'i-project-stacking-frame',
+  },
+  {
     _tag: 'RunProcessingProjectStage',
     projectId: 'project-1',
     expectedProjectRevision: 6,
@@ -253,6 +261,19 @@ const commandFixtures: ReadonlyArray<unknown> = [
     stage: 'Calibration',
     attemptId: 'stage-attempt-1',
     idempotencyKey: 'i-project-9',
+  },
+  {
+    _tag: 'SaveProcessingProjectMaster',
+    projectId: 'project-1',
+    expectedProjectRevision: 8,
+    idempotencyKey: 'i-project-master-save',
+  },
+  {
+    _tag: 'OpenProcessingProjectDevelop',
+    projectId: 'project-1',
+    expectedProjectRevision: 9,
+    assetId: 'asset-master-1',
+    idempotencyKey: 'i-project-develop-open',
   },
   {
     _tag: 'ResumeProcessingSession',
@@ -346,7 +367,7 @@ const commandFixtures: ReadonlyArray<unknown> = [
 
 describe('Gate 5 contract foundation', () => {
   it('keeps the accepted command vocabulary closed', () => {
-    assert.equal(commandTags.length, 53)
+    assert.equal(commandTags.length, 56)
     assert.deepEqual(commandTags, acceptedCommandTags)
     assert.deepEqual(
       commandTags,

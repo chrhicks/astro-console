@@ -133,8 +133,11 @@ export const ProcessingAction = Schema.Literals([
   'RedoProcessingStageDraft',
   'SetCalibrationUseAnyway',
   'SetRegistrationFrameIncluded',
+  'SetStackingFrameIncluded',
   'RunProcessingProjectStage',
   'SelectProcessingStageResult',
+  'SaveProcessingProjectMaster',
+  'OpenProcessingProjectDevelop',
   'StartProcessingSession',
   'ResumeProcessingSession',
   'SyncProcessingPreview',
@@ -176,6 +179,10 @@ export const ProcessingActionDenialReason = Schema.Literals([
   'calibrationLightsUnavailable',
   'registrationFrameChoiceUnavailable',
   'registrationReferenceUnavailable',
+  'stackingFrameChoiceUnavailable',
+  'stackingInputUnavailable',
+  'stackResultRequired',
+  'savedMasterRequired',
 ])
 
 export const ProcessingActionEligibility = Schema.TaggedUnion({
@@ -1744,6 +1751,12 @@ export function projectProcessingProjectActions(
         (output) => output.sourceAssetId === referenceAssetId,
       ) ??
         false)
+    const stackingStage = project?.stages.find(
+      (item) => item.stage === 'Stacking',
+    )
+    const selectedStack = stackingStage?.attempts.find(
+      (attempt) => attempt.attemptId === stackingStage.selectedAttemptId,
+    )
     return {
       projectId,
       actions: [
@@ -1800,6 +1813,16 @@ export function projectProcessingProjectActions(
               : undefined),
         ),
         eligibility(
+          'SetStackingFrameIncluded',
+          reason ??
+            (stage?.stage !== 'Stacking' ||
+            !stage.stackingRecommendations.some(
+              (recommendation) => recommendation.technicallyUsable,
+            )
+              ? 'stackingFrameChoiceUnavailable'
+              : undefined),
+        ),
+        eligibility(
           'RunProcessingProjectStage',
           reason ??
             (!executable
@@ -1819,9 +1842,20 @@ export function projectProcessingProjectActions(
                   ? 'calibrationLightsUnavailable'
                   : !registrationReferenceReady
                     ? 'registrationReferenceUnavailable'
-                    : !upstreamReady
-                      ? 'upstreamResultRequired'
-                      : undefined),
+                    : stage.stage === 'Stacking' &&
+                        stage.stackingRecommendations.every(
+                          (recommendation) =>
+                            !recommendation.technicallyUsable ||
+                            (stage.draft.stackingFrameChoices.find(
+                              (choice) =>
+                                choice.assetId === recommendation.assetId,
+                            )?.decision ?? recommendation.decision) !==
+                              'Include',
+                        )
+                      ? 'stackingInputUnavailable'
+                      : !upstreamReady
+                        ? 'upstreamResultRequired'
+                        : undefined),
         ),
         eligibility(
           'SelectProcessingStageResult',
@@ -1831,6 +1865,21 @@ export function projectProcessingProjectActions(
               : stage.attempts.some((attempt) => attempt.state === 'succeeded')
                 ? undefined
                 : 'stageResultUnavailable'),
+        ),
+        eligibility(
+          'SaveProcessingProjectMaster',
+          reason ??
+            (selectedStack?.state === 'succeeded' &&
+            selectedStack.stackingOutput !== undefined
+              ? undefined
+              : 'stackResultRequired'),
+        ),
+        eligibility(
+          'OpenProcessingProjectDevelop',
+          reason ??
+            (selectedStack?.savedMaster === undefined
+              ? 'savedMasterRequired'
+              : undefined),
         ),
       ],
     }

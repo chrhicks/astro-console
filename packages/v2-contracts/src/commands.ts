@@ -185,8 +185,11 @@ export const acceptedCommandTags = [
   'RedoProcessingStageDraft',
   'SetCalibrationUseAnyway',
   'SetRegistrationFrameIncluded',
+  'SetStackingFrameIncluded',
   'RunProcessingProjectStage',
   'SelectProcessingStageResult',
+  'SaveProcessingProjectMaster',
+  'OpenProcessingProjectDevelop',
   'ResumeProcessingSession',
   'SyncProcessingPreview',
   'ApplyProcessingPreview',
@@ -389,6 +392,13 @@ export const Command = Schema.TaggedUnion({
     included: Schema.Boolean,
     ...DurableMutation,
   },
+  SetStackingFrameIncluded: {
+    projectId: ProcessingProjectId,
+    expectedProjectRevision: ProcessingProjectRevision,
+    assetId: AssetId,
+    included: Schema.Boolean,
+    ...DurableMutation,
+  },
   RunProcessingProjectStage: {
     projectId: ProcessingProjectId,
     expectedProjectRevision: ProcessingProjectRevision,
@@ -400,6 +410,17 @@ export const Command = Schema.TaggedUnion({
     expectedProjectRevision: ProcessingProjectRevision,
     stage: ExecutableProcessingStage,
     attemptId: ProcessingStageAttemptId,
+    ...DurableMutation,
+  },
+  SaveProcessingProjectMaster: {
+    projectId: ProcessingProjectId,
+    expectedProjectRevision: ProcessingProjectRevision,
+    ...DurableMutation,
+  },
+  OpenProcessingProjectDevelop: {
+    projectId: ProcessingProjectId,
+    expectedProjectRevision: ProcessingProjectRevision,
+    assetId: AssetId,
     ...DurableMutation,
   },
   ResumeProcessingSession: {

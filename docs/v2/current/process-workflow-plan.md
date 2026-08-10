@@ -1,6 +1,6 @@
 # Item 3.5 — Explicit Process Workflow
 
-Status: **Accepted epic; Items 3.5.1–3.5.4 complete; Item 3.5.5 next**
+Status: **Accepted epic; Items 3.5.1–3.5.5 complete; Item 3.5.6 next**
 
 Item 3 proved durable worker-owned execution. Item 3.5 reshapes that execution
 into the operator workflow: choose evidence, assign its role, run explicit
@@ -231,6 +231,8 @@ alignment or an external registration tool.
 
 ### Item 3.5.5 — Explicit Stacking And Saved Master
 
+**Status:** Complete.
+
 **Operator result:** Configure weights and rejection, inspect recommended
 Include/Exclude/Review decisions, run or rerun Stack, compare versioned results,
 select one Master, save it to Library, and open Develop from that exact saved
@@ -244,6 +246,18 @@ work is discarded.
 **Proof:** Cover mixed frame decisions, stage override, several Stack versions,
 Master save, exact Develop handoff, restart, and source/saved-artifact
 preservation.
+
+The completed MVP binds each Stacking attempt to one exact selected
+Registration result and its viable transforms. Its bounded draft keeps minimal
+weighting and rejection settings plus explicit frame choices through undo and
+redo. Run or Rerun freezes those facts and creates versioned deterministic
+FITS evidence with diagnostics and exact lineage. The owner may select an
+earlier result, save that exact result once as a retained Library Master, and
+open Develop only from that saved asset. Restart keeps attempts, selection,
+Library lineage, and the Develop handoff without replay. Local contract,
+SQLite service, worker, browser, and Designer proof cover this deterministic
+flow only; they do not prove astronomy-quality stacking or an external
+processing tool.
 
 ### Item 3.5.6 — Astronomy Develop Workspace
 

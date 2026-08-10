@@ -181,11 +181,13 @@ const projectWorkspace = Schema.decodeUnknownSync(ProcessingProjection)({
             settings: [],
             overrides: [],
             registrationInclusions: [],
+            stackingFrameChoices: [],
             undo: [],
             redo: [],
           },
           attempts: [],
           calibrationRecommendations: [],
+          stackingRecommendations: [],
         },
         {
           stage: 'Registration',
@@ -194,11 +196,13 @@ const projectWorkspace = Schema.decodeUnknownSync(ProcessingProjection)({
             settings: [],
             overrides: [],
             registrationInclusions: [],
+            stackingFrameChoices: [],
             undo: [],
             redo: [],
           },
           attempts: [],
           calibrationRecommendations: [],
+          stackingRecommendations: [],
         },
         {
           stage: 'Stacking',
@@ -207,11 +211,13 @@ const projectWorkspace = Schema.decodeUnknownSync(ProcessingProjection)({
             settings: [],
             overrides: [],
             registrationInclusions: [],
+            stackingFrameChoices: [],
             undo: [],
             redo: [],
           },
           attempts: [],
           calibrationRecommendations: [],
+          stackingRecommendations: [],
         },
       ],
       createdAt: '2026-08-09T00:00:00.000Z',
@@ -324,11 +330,13 @@ test('renders persistent stage drafts, retained lineage, result selection, and p
                 ],
                 overrides: [],
                 registrationInclusions: [],
+                stackingFrameChoices: [],
                 undo: [
                   {
                     settings: [],
                     overrides: [],
                     registrationInclusions: [],
+                    stackingFrameChoices: [],
                   },
                 ],
                 redo: [],
@@ -357,6 +365,9 @@ test('renders persistent stage drafts, retained lineage, result selection, and p
                   recommendations: [],
                   overrides: [],
                   registrationInclusions: [],
+                  stackingRecommendations: [],
+                  stackingFrameChoices: [],
+                  stackingInputAssetIds: [],
                   frameOutcomes: [],
                   outputs: [],
                   registrationTransforms: [],
@@ -449,6 +460,9 @@ test('renders Registration reference, warning consequence, viable subset, and ph
                 recommendations: [],
                 overrides: [],
                 registrationInclusions: [],
+                stackingRecommendations: [],
+                stackingFrameChoices: [],
+                stackingInputAssetIds: [],
                 frameOutcomes: [
                   {
                     assetId: 'asset-m27-006',
@@ -487,6 +501,7 @@ test('renders Registration reference, warning consequence, viable subset, and ph
             ],
             overrides: [],
             registrationInclusions: [],
+            stackingFrameChoices: [],
             undo: [],
             redo: [],
           },
@@ -510,6 +525,9 @@ test('renders Registration reference, warning consequence, viable subset, and ph
               recommendations: [],
               overrides: [],
               registrationInclusions: [],
+              stackingRecommendations: [],
+              stackingFrameChoices: [],
+              stackingInputAssetIds: [],
               frameOutcomes: [
                 {
                   assetId: 'asset-m27-006',
@@ -629,6 +647,227 @@ test('renders Registration reference, warning consequence, viable subset, and ph
   assert.match(includedMarkup, /Keep out of Stack input/)
 })
 
+test('renders Stacking decisions, versioned FITS evidence, saved Master, and exact Develop handoff', () => {
+  const stackAttempt = {
+    attemptId: 'stage-attempt-stacking-ui',
+    stage: 'Stacking' as const,
+    state: 'succeeded' as const,
+    draftRevision: 2,
+    settings: [
+      { key: 'weighting', value: 'equal' },
+      { key: 'rejection', value: 'winsorized-sigma' },
+    ],
+    toolIdentity: 'deterministic-stacking-adapter-v1' as const,
+    resultKind: 'deterministicStackingEvidence' as const,
+    basedOnEarlierUpstream: false,
+    sourceRevisions: [
+      { assetId: 'asset-m27-006', assetRevision: 1, role: 'Lights' as const },
+    ],
+    recommendations: [],
+    overrides: [],
+    registrationInclusions: [],
+    stackingRecommendations: [
+      {
+        assetId: 'asset-m27-006',
+        assetRevision: 1,
+        decision: 'Review' as const,
+        technicallyUsable: true,
+        reasons: ['Review this usable transform before adding its signal.'],
+      },
+    ],
+    stackingFrameChoices: [
+      { assetId: 'asset-m27-006', decision: 'Include' as const },
+    ],
+    stackingInputAssetIds: ['asset-m27-006'],
+    frameOutcomes: [
+      {
+        assetId: 'asset-m27-006',
+        assetRevision: 1,
+        outcome: 'Warning' as const,
+        message:
+          'This technically usable Light is included after operator review.',
+      },
+    ],
+    outputs: [],
+    registrationTransforms: [],
+    viableAssetIds: [],
+    stackingOutput: {
+      checksum: 'sha256:stack-ui',
+      format: 'fits' as const,
+      includedAssetIds: ['asset-m27-006'],
+      diagnostic:
+        'Deterministic 1 x 1 FITS evidence; not an astronomy-quality image.',
+    },
+    diagnostics: [
+      'Deterministic FITS evidence only; astronomy stacking quality is not claimed.',
+    ],
+    stageOutcome: 'Warning' as const,
+    upstreamAttemptId: 'stage-attempt-registration-ui',
+    resultId: 'stage-result-stacking-ui',
+    outputChecksum: 'sha256:stack-ui',
+  }
+  const stacking = Schema.decodeUnknownSync(ProcessingProjection)({
+    ...projectWorkspace,
+    projects: projectWorkspace.projects.map((project) => ({
+      ...project,
+      currentStage: 'Stacking',
+      stages: project.stages.map((stage) =>
+        stage.stage === 'Registration'
+          ? {
+              ...stage,
+              selectedAttemptId: 'stage-attempt-registration-ui',
+              attempts: [
+                {
+                  ...stackAttempt,
+                  attemptId: 'stage-attempt-registration-ui',
+                  stage: 'Registration',
+                  toolIdentity: 'deterministic-registration-adapter-v1',
+                  resultKind: 'deterministicRegistrationEvidence',
+                  upstreamAttemptId: 'stage-attempt-calibration-ui',
+                  stackingRecommendations: [],
+                  stackingFrameChoices: [],
+                  stackingInputAssetIds: [],
+                  frameOutcomes: [],
+                  registrationTransforms: [
+                    {
+                      assetId: 'asset-m27-006',
+                      assetRevision: 1,
+                      referenceAssetId: 'asset-m27-006',
+                      referenceAssetRevision: 1,
+                      model: 'translation',
+                      coefficients: [1, 0, 0, 0, 1, 0],
+                      checksum: 'sha256:transform-ui',
+                      usable: true,
+                    },
+                  ],
+                  viableAssetIds: ['asset-m27-006'],
+                },
+              ],
+            }
+          : stage.stage === 'Stacking'
+            ? {
+                ...stage,
+                draft: {
+                  revision: 2,
+                  settings: stackAttempt.settings,
+                  overrides: [],
+                  registrationInclusions: [],
+                  stackingFrameChoices: stackAttempt.stackingFrameChoices,
+                  undo: [],
+                  redo: [],
+                },
+                stackingRecommendations: stackAttempt.stackingRecommendations,
+                selectedAttemptId: stackAttempt.attemptId,
+                attempts: [stackAttempt],
+              }
+            : stage,
+      ),
+    })),
+    projectActions: [
+      {
+        projectId: 'project-m27',
+        actions: [
+          { _tag: 'Eligible', action: 'NavigateProcessingProjectStage' },
+          { _tag: 'Eligible', action: 'UpdateProcessingStageDraft' },
+          { _tag: 'Eligible', action: 'SetStackingFrameIncluded' },
+          { _tag: 'Eligible', action: 'RunProcessingProjectStage' },
+          { _tag: 'Eligible', action: 'SelectProcessingStageResult' },
+          { _tag: 'Eligible', action: 'SaveProcessingProjectMaster' },
+        ],
+      },
+    ],
+  })
+  const stackMarkup = renderToStaticMarkup(
+    createElement(BetaProcessApp, {
+      projection: processControllerProjection,
+      loading: false,
+      initialWorkspace: stacking,
+    }),
+  )
+  assert.match(stackMarkup, /Selected Registration result/)
+  assert.match(stackMarkup, /Included after review/)
+  assert.match(stackMarkup, /Exclude this Light/)
+  assert.match(stackMarkup, /Frame weighting/)
+  assert.match(stackMarkup, /FITS Master evidence/)
+
+  const saved = Schema.decodeUnknownSync(ProcessingProjection)({
+    ...stacking,
+    projects: stacking.projects.map((project) => ({
+      ...project,
+      currentStage: 'Master',
+      stages: project.stages.map((stage) =>
+        stage.stage !== 'Stacking'
+          ? stage
+          : {
+              ...stage,
+              attempts: stage.attempts.map((attempt) => ({
+                ...attempt,
+                savedMaster: {
+                  assetId: 'asset-master-ui',
+                  assetRevision: 1,
+                  checksum: 'sha256:stack-ui',
+                  projectId: project.projectId,
+                  registrationAttemptId: 'stage-attempt-registration-ui',
+                  stackingAttemptId: attempt.attemptId,
+                  stackResultId: 'stage-result-stacking-ui',
+                  savedAt: '2026-08-10T18:00:00.000Z',
+                },
+              })),
+            },
+      ),
+    })),
+    projectActions: [
+      {
+        projectId: 'project-m27',
+        actions: [
+          { _tag: 'Eligible', action: 'NavigateProcessingProjectStage' },
+          { _tag: 'Eligible', action: 'OpenProcessingProjectDevelop' },
+        ],
+      },
+    ],
+  })
+  const masterMarkup = renderToStaticMarkup(
+    createElement(BetaProcessApp, {
+      projection: processControllerProjection,
+      loading: false,
+      initialWorkspace: saved,
+    }),
+  )
+  assert.match(masterMarkup, /Saved Library Master/)
+  assert.match(masterMarkup, /asset-master-ui/)
+  assert.match(masterMarkup, /Open saved Master in Develop/)
+
+  const developed = Schema.decodeUnknownSync(ProcessingProjection)({
+    ...saved,
+    projects: saved.projects.map((project) => ({
+      ...project,
+      currentStage: 'Develop',
+      developMasterAssetId: 'asset-master-ui',
+    })),
+  })
+  const developMarkup = renderToStaticMarkup(
+    createElement(BetaProcessApp, {
+      projection: processControllerProjection,
+      loading: false,
+      initialWorkspace: developed,
+    }),
+  )
+  assert.match(developMarkup, /Saved Master open/)
+  assert.match(developMarkup, /Exact saved Master/)
+  const phoneMarkup = renderToStaticMarkup(
+    createElement(ProcessPhone, {
+      workspace: developed,
+      state: 'Current',
+    }),
+  )
+  assert.match(phoneMarkup, /Stacking and Master evidence/)
+  assert.match(phoneMarkup, /Exact Registration input/)
+  assert.match(phoneMarkup, /FITS Master evidence/)
+  assert.match(phoneMarkup, /Saved Library Master/)
+  assert.match(phoneMarkup, /Exact saved Master · asset-master-ui/)
+  assert.doesNotMatch(phoneMarkup, /<button/)
+})
+
 test('renders service-owned Calibration review, draft policy, outcomes, and read-only phone evidence', () => {
   const calibrated = Schema.decodeUnknownSync(ProcessingProjection)({
     ...projectWorkspace,
@@ -672,6 +911,7 @@ test('renders service-owned Calibration review, draft policy, outcomes, and read
                 ],
                 overrides: [],
                 registrationInclusions: [],
+                stackingFrameChoices: [],
                 undo: [],
                 redo: [],
               },
@@ -717,6 +957,9 @@ test('renders service-owned Calibration review, draft policy, outcomes, and read
                   recommendations: [],
                   overrides: [],
                   registrationInclusions: [],
+                  stackingRecommendations: [],
+                  stackingFrameChoices: [],
+                  stackingInputAssetIds: [],
                   frameOutcomes: [
                     {
                       assetId: 'asset-m27-006',

@@ -70,10 +70,24 @@ export const RegistrationFrameInclusion = Schema.Struct({
   decision: Schema.Literal('Include warning frame'),
 })
 
+export const StackingFrameChoice = Schema.Struct({
+  assetId: AssetId,
+  decision: Schema.Literals(['Include', 'Exclude']),
+})
+
+export const StackingRecommendation = Schema.Struct({
+  assetId: AssetId,
+  assetRevision: AssetRevision,
+  decision: Schema.Literals(['Include', 'Exclude', 'Review']),
+  technicallyUsable: Schema.Boolean,
+  reasons: Schema.Array(Schema.NonEmptyString),
+})
+
 export const CalibrationDraftSnapshot = Schema.Struct({
   settings: Schema.Array(ProcessingStageSetting),
   overrides: Schema.Array(CalibrationOverride),
   registrationInclusions: Schema.Array(RegistrationFrameInclusion),
+  stackingFrameChoices: Schema.Array(StackingFrameChoice),
 })
 
 export const CalibrationRecommendation = Schema.Struct({
@@ -123,6 +137,7 @@ export const ProcessingStageDraft = Schema.Struct({
   settings: Schema.Array(ProcessingStageSetting),
   overrides: Schema.Array(CalibrationOverride),
   registrationInclusions: Schema.Array(RegistrationFrameInclusion),
+  stackingFrameChoices: Schema.Array(StackingFrameChoice),
   undo: Schema.Array(CalibrationDraftSnapshot),
   redo: Schema.Array(CalibrationDraftSnapshot),
 })
@@ -137,11 +152,13 @@ export const ProcessingStageAttempt = Schema.Struct({
     'deterministic-stage-harness-v1',
     'deterministic-calibration-adapter-v1',
     'deterministic-registration-adapter-v1',
+    'deterministic-stacking-adapter-v1',
   ]),
   resultKind: Schema.Literals([
     'deterministicStageEvidence',
     'deterministicCalibrationEvidence',
     'deterministicRegistrationEvidence',
+    'deterministicStackingEvidence',
   ]),
   basedOnEarlierUpstream: Schema.Boolean,
   sourceRevisions: Schema.Array(
@@ -154,10 +171,33 @@ export const ProcessingStageAttempt = Schema.Struct({
   recommendations: Schema.Array(CalibrationRecommendation),
   overrides: Schema.Array(CalibrationOverride),
   registrationInclusions: Schema.Array(RegistrationFrameInclusion),
+  stackingRecommendations: Schema.Array(StackingRecommendation),
+  stackingFrameChoices: Schema.Array(StackingFrameChoice),
+  stackingInputAssetIds: Schema.Array(AssetId),
   frameOutcomes: Schema.Array(CalibrationFrameOutcome),
   outputs: Schema.Array(CalibrationOutput),
   registrationTransforms: Schema.Array(RegistrationTransform),
   viableAssetIds: Schema.Array(AssetId),
+  stackingOutput: Schema.optionalKey(
+    Schema.Struct({
+      checksum: Schema.NonEmptyString,
+      format: Schema.Literal('fits'),
+      includedAssetIds: Schema.Array(AssetId),
+      diagnostic: Schema.NonEmptyString,
+    }),
+  ),
+  savedMaster: Schema.optionalKey(
+    Schema.Struct({
+      assetId: AssetId,
+      assetRevision: AssetRevision,
+      checksum: Schema.NonEmptyString,
+      projectId: ProcessingProjectId,
+      registrationAttemptId: ProcessingStageAttemptId,
+      stackingAttemptId: ProcessingStageAttemptId,
+      stackResultId: ProcessingStageResultId,
+      savedAt: Schema.NonEmptyString,
+    }),
+  ),
   diagnostics: Schema.Array(Schema.NonEmptyString),
   stageOutcome: Schema.optionalKey(
     Schema.Literals(['Succeeded', 'Warning', 'Failed', 'Unavailable']),
@@ -175,6 +215,7 @@ export const ProcessingStageState = Schema.Struct({
   attempts: Schema.Array(ProcessingStageAttempt),
   selectedAttemptId: Schema.optionalKey(ProcessingStageAttemptId),
   calibrationRecommendations: Schema.Array(CalibrationRecommendation),
+  stackingRecommendations: Schema.Array(StackingRecommendation),
 })
 
 export const ProcessingProjectWarning = Schema.Struct({
@@ -222,6 +263,7 @@ export const ProcessingProject = Schema.Struct({
   warnings: Schema.Array(ProcessingProjectWarning),
   currentStage: ProcessingProjectStage,
   stages: Schema.Array(ProcessingStageState),
+  developMasterAssetId: Schema.optionalKey(AssetId),
   createdAt: Schema.NonEmptyString,
   updatedAt: Schema.NonEmptyString,
 })
