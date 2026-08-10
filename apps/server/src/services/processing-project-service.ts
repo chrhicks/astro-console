@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import type { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
 import {
@@ -7,6 +8,10 @@ import {
   CaptureSetId,
   Command,
   ProcessingProject,
+  ProcessingLibraryFormat,
+  ProcessingLibraryRole,
+  CalibrationOverride,
+  CalibrationRecommendation,
   ProcessingProjectId,
   ProcessingProjectRevision,
   ProcessingProjectSource,
@@ -23,11 +28,13 @@ type ProjectCommand = Extract<
   typeof Command.Type,
   | { readonly _tag: 'CreateProcessingProject' }
   | { readonly _tag: 'AddProcessingProjectSources' }
+  | { readonly _tag: 'RemoveProcessingProjectSource' }
   | { readonly _tag: 'AssignProcessingSourceRole' }
   | { readonly _tag: 'NavigateProcessingProjectStage' }
   | { readonly _tag: 'UpdateProcessingStageDraft' }
   | { readonly _tag: 'UndoProcessingStageDraft' }
   | { readonly _tag: 'RedoProcessingStageDraft' }
+  | { readonly _tag: 'SetCalibrationUseAnyway' }
   | { readonly _tag: 'RunProcessingProjectStage' }
   | { readonly _tag: 'SelectProcessingStageResult' }
 >
@@ -53,11 +60,13 @@ const ProjectAcceptedResponse = Schema.Struct({
   effect: Schema.Literals([
     'projectCreated',
     'projectSourcesAdded',
+    'projectSourceRemoved',
     'projectSourceRoleAssigned',
     'projectStageNavigated',
     'projectStageDraftUpdated',
     'projectStageDraftUndone',
     'projectStageDraftRedone',
+    'calibrationUseAnywayUpdated',
     'projectStageRunQueued',
     'projectStageResultSelected',
   ]),
@@ -69,7 +78,8 @@ const SourceRow = Schema.Struct({
   availability: Schema.String,
   comparison_group_id: Schema.String,
   captured_at: Schema.String,
-  role: Schema.String,
+  role: ProcessingLibraryRole,
+  format: ProcessingLibraryFormat,
   detail: Schema.String,
 })
 const StoredDetail = Schema.Struct({
@@ -99,11 +109,13 @@ export const isProcessingProjectCommand = (
 ): command is ProjectCommand =>
   Command.guards.CreateProcessingProject(command) ||
   Command.guards.AddProcessingProjectSources(command) ||
+  Command.guards.RemoveProcessingProjectSource(command) ||
   Command.guards.AssignProcessingSourceRole(command) ||
   Command.guards.NavigateProcessingProjectStage(command) ||
   Command.guards.UpdateProcessingStageDraft(command) ||
   Command.guards.UndoProcessingStageDraft(command) ||
   Command.guards.RedoProcessingStageDraft(command) ||
+  Command.guards.SetCalibrationUseAnyway(command) ||
   Command.guards.RunProcessingProjectStage(command) ||
   Command.guards.SelectProcessingStageResult(command)
 
@@ -118,12 +130,102 @@ export function processingProjects(database: DatabaseSync) {
     const stored = Schema.decodeUnknownSync(UnknownRecord)(
       JSON.parse(row.project),
     )
-    return Schema.decodeUnknownSync(ProcessingProject)({
+    const project = Schema.decodeUnknownSync(ProcessingProject)({
       currentStage: 'Sources',
       stages: initialStages(),
-      ...stored,
+      ...normalizeStoredProject(database, stored),
+    })
+    return ProcessingProject.make({
+      ...project,
+      stages: recomputeLineage(project.stages, project.sources),
     })
   })
+}
+
+function normalizeStoredProject(
+  database: DatabaseSync,
+  stored: typeof UnknownRecord.Type,
+) {
+  if (!Array.isArray(stored.stages)) return stored
+  return {
+    ...stored,
+    sources: Array.isArray(stored.sources)
+      ? stored.sources.map((value) => {
+          const source = Schema.decodeUnknownSync(UnknownRecord)(value)
+          const identity = Schema.decodeUnknownSync(
+            Schema.Struct({
+              assetId: AssetId,
+              assetRevision: AssetRevision,
+            }),
+          )(value)
+          const retained = Schema.decodeUnknownSync(
+            Schema.optional(
+              Schema.Struct({
+                role: ProcessingLibraryRole,
+                format: ProcessingLibraryFormat,
+              }),
+            ),
+          )(
+            database
+              .prepare(
+                'SELECT role,format FROM library_assets WHERE asset_id=? AND revision=?',
+              )
+              .get(identity.assetId, identity.assetRevision),
+          )
+          return {
+            ...source,
+            libraryRole: source.libraryRole ?? retained?.role ?? 'unknown',
+            libraryFormat:
+              source.libraryFormat ?? retained?.format ?? 'unknown',
+          }
+        })
+      : [],
+    stages: stored.stages.map((value) => {
+      const stage = Schema.decodeUnknownSync(UnknownRecord)(value)
+      const draft = Schema.decodeUnknownSync(UnknownRecord)(stage.draft)
+      const normalizeHistory = (history: unknown) =>
+        Array.isArray(history)
+          ? history.map((entry) =>
+              Array.isArray(entry)
+                ? { settings: entry, overrides: [] }
+                : {
+                    ...Schema.decodeUnknownSync(UnknownRecord)(entry),
+                    overrides:
+                      Schema.decodeUnknownSync(UnknownRecord)(entry)
+                        .overrides ?? [],
+                  },
+            )
+          : []
+      return {
+        ...stage,
+        draft: {
+          ...draft,
+          overrides: draft.overrides ?? [],
+          undo: normalizeHistory(draft.undo),
+          redo: normalizeHistory(draft.redo),
+        },
+        calibrationRecommendations: stage.calibrationRecommendations ?? [],
+        attempts: Array.isArray(stage.attempts)
+          ? stage.attempts.map((entry) => ({
+              ...Schema.decodeUnknownSync(UnknownRecord)(entry),
+              recommendations:
+                Schema.decodeUnknownSync(UnknownRecord)(entry)
+                  .recommendations ?? [],
+              overrides:
+                Schema.decodeUnknownSync(UnknownRecord)(entry).overrides ?? [],
+              frameOutcomes:
+                Schema.decodeUnknownSync(UnknownRecord)(entry).frameOutcomes ??
+                [],
+              outputs:
+                Schema.decodeUnknownSync(UnknownRecord)(entry).outputs ?? [],
+              diagnostics:
+                Schema.decodeUnknownSync(UnknownRecord)(entry).diagnostics ??
+                [],
+            }))
+          : [],
+      }
+    }),
+  }
 }
 
 export function executeProcessingProjectCommand(
@@ -169,42 +271,80 @@ export function executeProcessingProjectCommand(
   } else if (
     Command.guards.UpdateProcessingStageDraft(command) ||
     Command.guards.UndoProcessingStageDraft(command) ||
-    Command.guards.RedoProcessingStageDraft(command)
+    Command.guards.RedoProcessingStageDraft(command) ||
+    Command.guards.SetCalibrationUseAnyway(command)
   ) {
     if (current === undefined)
       return { outcome: 'rejected' as const, reason: 'ProjectNotFound' }
-    const stage = current.stages.find((item) => item.stage === command.stage)
+    const stageName = Command.guards.SetCalibrationUseAnyway(command)
+      ? 'Calibration'
+      : command.stage
+    const stage = current.stages.find((item) => item.stage === stageName)
     if (stage === undefined)
       return { outcome: 'rejected' as const, reason: 'StageNotFound' }
     const draft = stage.draft
-    const nextDraft = Command.guards.UpdateProcessingStageDraft(command)
+    if (Command.guards.SetCalibrationUseAnyway(command)) {
+      const recommendation = stage.calibrationRecommendations.find(
+        (candidate) => candidate.assetId === command.assetId,
+      )
+      if (recommendation?.compatibility !== 'Advisory mismatch')
+        return {
+          outcome: 'rejected' as const,
+          reason: 'CalibrationOverrideUnavailable',
+        }
+    }
+    const snapshot = {
+      settings: draft.settings,
+      overrides: draft.overrides,
+    }
+    const nextDraft = Command.guards.SetCalibrationUseAnyway(command)
       ? {
           revision: draft.revision + 1,
-          settings: command.settings,
-          undo: [...draft.undo, draft.settings].slice(-10),
+          settings: draft.settings,
+          overrides: command.useAnyway
+            ? [
+                ...draft.overrides.filter(
+                  (override) => override.assetId !== command.assetId,
+                ),
+                { assetId: command.assetId, decision: 'Use anyway' as const },
+              ]
+            : draft.overrides.filter(
+                (override) => override.assetId !== command.assetId,
+              ),
+          undo: [...draft.undo, snapshot].slice(-10),
           redo: [],
         }
-      : Command.guards.UndoProcessingStageDraft(command)
-        ? draft.undo.length === 0
-          ? undefined
-          : {
-              revision: draft.revision + 1,
-              settings: draft.undo.at(-1) ?? [],
-              undo: draft.undo.slice(0, -1),
-              redo: [draft.settings, ...draft.redo].slice(0, 10),
-            }
-        : draft.redo.length === 0
-          ? undefined
-          : {
-              revision: draft.revision + 1,
-              settings: draft.redo[0] ?? [],
-              undo: [...draft.undo, draft.settings].slice(-10),
-              redo: draft.redo.slice(1),
-            }
+      : Command.guards.UpdateProcessingStageDraft(command)
+        ? {
+            revision: draft.revision + 1,
+            settings: command.settings,
+            overrides: draft.overrides,
+            undo: [...draft.undo, snapshot].slice(-10),
+            redo: [],
+          }
+        : Command.guards.UndoProcessingStageDraft(command)
+          ? draft.undo.length === 0
+            ? undefined
+            : {
+                revision: draft.revision + 1,
+                settings: draft.undo.at(-1)?.settings ?? [],
+                overrides: draft.undo.at(-1)?.overrides ?? [],
+                undo: draft.undo.slice(0, -1),
+                redo: [snapshot, ...draft.redo].slice(0, 10),
+              }
+          : draft.redo.length === 0
+            ? undefined
+            : {
+                revision: draft.revision + 1,
+                settings: draft.redo[0]?.settings ?? [],
+                overrides: draft.redo[0]?.overrides ?? [],
+                undo: [...draft.undo, snapshot].slice(-10),
+                redo: draft.redo.slice(1),
+              }
     if (nextDraft === undefined)
       return { outcome: 'rejected' as const, reason: 'DraftHistoryUnavailable' }
     project = reviseProject(current, current.sources, {
-      currentStage: command.stage,
+      currentStage: stageName,
       stages: replaceStage(current.stages, { ...stage, draft: nextDraft }),
     })
   } else if (Command.guards.RunProcessingProjectStage(command)) {
@@ -213,6 +353,20 @@ export function executeProcessingProjectCommand(
     const stage = current.stages.find((item) => item.stage === command.stage)
     if (stage === undefined)
       return { outcome: 'rejected' as const, reason: 'StageNotFound' }
+    if (
+      command.stage === 'Calibration' &&
+      !current.sources.some(
+        (source) =>
+          source.role === 'Lights' &&
+          isCalibrationInputSource(source) &&
+          (source.availability === 'availableLocally' ||
+            source.availability === 'published'),
+      )
+    )
+      return {
+        outcome: 'rejected' as const,
+        reason: 'CalibrationLightsUnavailable',
+      }
     if (
       stage.attempts.some(
         (attempt) => attempt.state === 'queued' || attempt.state === 'running',
@@ -231,14 +385,26 @@ export function executeProcessingProjectCommand(
       state: 'queued',
       draftRevision: stage.draft.revision,
       settings: stage.draft.settings,
-      toolIdentity: 'deterministic-stage-harness-v1',
-      resultKind: 'deterministicStageEvidence',
+      toolIdentity:
+        command.stage === 'Calibration'
+          ? 'deterministic-calibration-adapter-v1'
+          : 'deterministic-stage-harness-v1',
+      resultKind:
+        command.stage === 'Calibration'
+          ? 'deterministicCalibrationEvidence'
+          : 'deterministicStageEvidence',
       basedOnEarlierUpstream: false,
       sourceRevisions: current.sources.map((source) => ({
         assetId: source.assetId,
         assetRevision: source.assetRevision,
         role: source.role,
       })),
+      recommendations:
+        command.stage === 'Calibration' ? stage.calibrationRecommendations : [],
+      overrides: command.stage === 'Calibration' ? stage.draft.overrides : [],
+      frameOutcomes: [],
+      outputs: [],
+      diagnostics: [],
       ...(upstream === undefined ? {} : { upstreamAttemptId: upstream }),
     })
     project = reviseProject(current, current.sources, {
@@ -292,6 +458,24 @@ export function executeProcessingProjectCommand(
           : candidate,
       ),
     )
+  } else if (Command.guards.RemoveProcessingProjectSource(command)) {
+    if (current === undefined)
+      return { outcome: 'rejected' as const, reason: 'ProjectNotFound' }
+    if (
+      current.stages.some((stage) =>
+        stage.attempts.some(
+          (attempt) =>
+            attempt.state === 'queued' || attempt.state === 'running',
+        ),
+      )
+    )
+      return { outcome: 'rejected' as const, reason: 'StageAttemptActive' }
+    if (!current.sources.some((source) => source.assetId === command.assetId))
+      return { outcome: 'rejected' as const, reason: 'SourceNotFound' }
+    project = reviseProject(
+      current,
+      current.sources.filter((source) => source.assetId !== command.assetId),
+    )
   } else {
     const selected = resolveSelection(database, command.selection)
     if (selected.length === 0)
@@ -308,7 +492,7 @@ export function executeProcessingProjectCommand(
           sources,
           warnings: [],
           currentStage: 'Sources',
-          stages: initialStages(),
+          stages: initialStages(sources),
           createdAt: now,
           updatedAt: now,
         }),
@@ -329,19 +513,23 @@ export function executeProcessingProjectCommand(
     ? ('projectCreated' as const)
     : Command.guards.AddProcessingProjectSources(command)
       ? ('projectSourcesAdded' as const)
-      : Command.guards.AssignProcessingSourceRole(command)
-        ? ('projectSourceRoleAssigned' as const)
-        : Command.guards.NavigateProcessingProjectStage(command)
-          ? ('projectStageNavigated' as const)
-          : Command.guards.UpdateProcessingStageDraft(command)
-            ? ('projectStageDraftUpdated' as const)
-            : Command.guards.UndoProcessingStageDraft(command)
-              ? ('projectStageDraftUndone' as const)
-              : Command.guards.RedoProcessingStageDraft(command)
-                ? ('projectStageDraftRedone' as const)
-                : Command.guards.RunProcessingProjectStage(command)
-                  ? ('projectStageRunQueued' as const)
-                  : ('projectStageResultSelected' as const)
+      : Command.guards.RemoveProcessingProjectSource(command)
+        ? ('projectSourceRemoved' as const)
+        : Command.guards.AssignProcessingSourceRole(command)
+          ? ('projectSourceRoleAssigned' as const)
+          : Command.guards.NavigateProcessingProjectStage(command)
+            ? ('projectStageNavigated' as const)
+            : Command.guards.UpdateProcessingStageDraft(command)
+              ? ('projectStageDraftUpdated' as const)
+              : Command.guards.UndoProcessingStageDraft(command)
+                ? ('projectStageDraftUndone' as const)
+                : Command.guards.RedoProcessingStageDraft(command)
+                  ? ('projectStageDraftRedone' as const)
+                  : Command.guards.SetCalibrationUseAnyway(command)
+                    ? ('calibrationUseAnywayUpdated' as const)
+                    : Command.guards.RunProcessingProjectStage(command)
+                      ? ('projectStageRunQueued' as const)
+                      : ('projectStageResultSelected' as const)
   const response = {
     outcome: 'accepted' as const,
     replayed: false,
@@ -403,7 +591,7 @@ function resolveSelection(
     database
       .prepare(
         `SELECT asset_id,revision,availability,comparison_group_id,captured_at,role,detail
-         FROM library_assets ORDER BY captured_at,asset_id`,
+         ,format FROM library_assets ORDER BY captured_at,asset_id`,
       )
       .all(),
   )
@@ -428,6 +616,8 @@ function projectSource(row: typeof SourceRow.Type) {
     assetRevision: AssetRevision.make(row.revision),
     role: 'Unassigned',
     suggestedRole,
+    libraryRole: row.role,
+    libraryFormat: row.format,
     ...(detail.captureSetId === undefined
       ? {}
       : { captureSetId: detail.captureSetId }),
@@ -499,7 +689,9 @@ function reviseProject(
     ProcessingProject.make({
       ...current,
       revision: ProcessingProjectRevision.make(current.revision + 1),
-      ...projectTarget(sources),
+      ...(current.targetName === undefined
+        ? projectTarget(sources)
+        : { targetName: current.targetName }),
       sources,
       ...changes,
       stages: recomputeLineage(changes.stages ?? current.stages, sources),
@@ -509,12 +701,28 @@ function reviseProject(
   )
 }
 
-function initialStages() {
+function initialStages(
+  sources: ReadonlyArray<typeof ProcessingProjectSource.Type> = [],
+) {
   return (['Calibration', 'Registration', 'Stacking'] as const).map((stage) =>
     ProcessingStageState.make({
       stage,
-      draft: { revision: 0, settings: [], undo: [], redo: [] },
+      draft: {
+        revision: 0,
+        settings:
+          stage === 'Calibration'
+            ? [
+                { key: 'operation', value: 'calibrate-and-debayer' },
+                { key: 'allowUncalibrated', value: 'true' },
+              ]
+            : [],
+        overrides: [],
+        undo: [],
+        redo: [],
+      },
       attempts: [],
+      calibrationRecommendations:
+        stage === 'Calibration' ? calibrationRecommendations(sources) : [],
     }),
   )
 }
@@ -582,11 +790,45 @@ export function settleProcessingProjectStage(
   )
     return { outcome: 'stale' as const }
   const now = new Date().toISOString()
+  const calibrationEvidence =
+    attempt.stage === 'Calibration'
+      ? calibrationAttemptEvidence(
+          project,
+          attempt,
+          checksum,
+          artifactPath,
+          claimToken,
+        )
+      : undefined
+  const calibration =
+    calibrationEvidence === undefined
+      ? undefined
+      : {
+          stageOutcome: calibrationEvidence.stageOutcome,
+          frameOutcomes: calibrationEvidence.frameOutcomes,
+          outputs: calibrationEvidence.outputs,
+          diagnostics: calibrationEvidence.diagnostics,
+        }
   const completed = ProcessingStageAttempt.make({
     ...attempt,
-    state: 'succeeded',
-    resultId: ProcessingStageResultId.make(`stage-result-${attempt.attemptId}`),
-    outputChecksum: checksum,
+    state:
+      calibration === undefined || calibration.outputs.length > 0
+        ? 'succeeded'
+        : 'failed',
+    ...(calibration === undefined || calibration.outputs.length > 0
+      ? {
+          resultId: ProcessingStageResultId.make(
+            `stage-result-${attempt.attemptId}`,
+          ),
+          outputChecksum: checksum,
+        }
+      : {}),
+    ...(calibration ?? {
+      stageOutcome: 'Succeeded' as const,
+      frameOutcomes: [],
+      outputs: [],
+      diagnostics: [],
+    }),
     startedAt: now,
     completedAt: now,
   })
@@ -595,7 +837,9 @@ export function settleProcessingProjectStage(
     attempts: stage.attempts.map((item) =>
       item.attemptId === attempt.attemptId ? completed : item,
     ),
-    selectedAttemptId: attempt.attemptId,
+    ...(completed.state === 'succeeded'
+      ? { selectedAttemptId: attempt.attemptId }
+      : {}),
   })
   const settledProject = reviseProject(project, project.sources, {
     stages: selectedStages,
@@ -604,9 +848,15 @@ export function settleProcessingProjectStage(
   try {
     const changed = database
       .prepare(
-        "UPDATE processing_work SET state='settled',settled_at=?,checkpoint='complete' WHERE work_id=? AND state='claimed' AND claim_token=?",
+        `UPDATE processing_work SET state=?,settled_at=?,checkpoint=? WHERE work_id=? AND state='claimed' AND claim_token=?`,
       )
-      .run(now, workId, claimToken)
+      .run(
+        completed.state === 'succeeded' ? 'settled' : 'failed',
+        now,
+        completed.state === 'succeeded' ? 'complete' : 'failed',
+        workId,
+        claimToken,
+      )
     if (changed.changes !== 1) throw new Error('stale project stage settlement')
     database
       .prepare(
@@ -631,11 +881,193 @@ export function settleProcessingProjectStage(
         artifactPath,
         checksum,
       )
+    for (const [index, artifact] of (
+      calibrationEvidence?.outputArtifacts ?? []
+    ).entries())
+      database
+        .prepare(
+          'INSERT OR REPLACE INTO processing_artifacts VALUES (?,?,?,?,?,?,0)',
+        )
+        .run(
+          `${workId}:calibration:${artifact.sourceAssetId}`,
+          settledProject.projectId,
+          workId,
+          `calibration-output-${attempt.attemptId}-${index + 1}`,
+          artifact.path,
+          artifact.checksum,
+        )
     database.exec('COMMIT')
-    return { outcome: 'settled' as const }
+    return {
+      outcome: 'settled' as const,
+      stageOutcome: completed.stageOutcome ?? 'Succeeded',
+    }
   } catch {
     database.exec('ROLLBACK')
     return { outcome: 'stale' as const }
+  }
+}
+
+function calibrationAttemptEvidence(
+  project: ProcessingProject,
+  attempt: typeof ProcessingStageAttempt.Type,
+  evidenceChecksum: string,
+  artifactPath: string,
+  claimToken: string,
+) {
+  const sources = new Map(
+    project.sources.map((source) => [source.assetId, source]),
+  )
+  const overrideIds = new Set(
+    attempt.overrides.map((override) => override.assetId),
+  )
+  const usableSupport = attempt.recommendations.filter(
+    (recommendation) =>
+      recommendation.decision === 'Include' ||
+      (recommendation.decision === 'Review' &&
+        overrideIds.has(recommendation.assetId)),
+  )
+  const adapterFailure = attempt.settings.some(
+    (setting) => setting.key === 'adapterMode' && setting.value === 'fail',
+  )
+  const allowUncalibrated =
+    attempt.settings.find((setting) => setting.key === 'allowUncalibrated')
+      ?.value !== 'false'
+  const outputArtifacts: Array<{
+    sourceAssetId: typeof AssetId.Type
+    sourceAssetRevision: typeof AssetRevision.Type
+    path: string
+    checksum: string
+  }> = []
+  const frameOutcomes = attempt.sourceRevisions
+    .filter((source) => source.role === 'Lights')
+    .map((input) => {
+      const source = sources.get(input.assetId)
+      if (
+        source === undefined ||
+        !isCalibrationInputSource(source) ||
+        (source.availability !== 'availableLocally' &&
+          source.availability !== 'published')
+      )
+        return {
+          assetId: input.assetId,
+          assetRevision: input.assetRevision,
+          outcome: 'Unavailable' as const,
+          message:
+            source !== undefined && !isCalibrationInputSource(source)
+              ? 'The frozen Light is not an original camera-raw or FITS Library asset.'
+              : 'The frozen Light bytes are not currently readable.',
+          diagnostic:
+            source !== undefined && !isCalibrationInputSource(source)
+              ? 'CalibrationInputUnsupported'
+              : 'SourceBytesUnavailable',
+        }
+      if (adapterFailure)
+        return {
+          assetId: input.assetId,
+          assetRevision: input.assetRevision,
+          outcome: 'Failed' as const,
+          message:
+            'The deterministic Calibration adapter reported a bounded failure.',
+          diagnostic: 'DeterministicAdapterFailure',
+        }
+      const matchingSupport = usableSupport.filter(
+        (support) =>
+          support.matchedLightAssetIds.includes(input.assetId) ||
+          overrideIds.has(support.assetId),
+      )
+      const warning = matchingSupport.length === 0
+      if (warning && !allowUncalibrated)
+        return {
+          assetId: input.assetId,
+          assetRevision: input.assetRevision,
+          outcome: 'Failed' as const,
+          message:
+            'No compatible or explicitly included mismatched support was selected and uncalibrated continuation is disabled.',
+          diagnostic: 'CalibrationSupportRequired',
+        }
+      const outputBytes = JSON.stringify({
+        kind: 'deterministicCalibrationEvidence',
+        sourceAssetId: input.assetId,
+        sourceAssetRevision: input.assetRevision,
+        frozenEvidenceChecksum: evidenceChecksum,
+        settings: attempt.settings,
+        recommendations: attempt.recommendations,
+        overrides: attempt.overrides,
+        toolIdentity: attempt.toolIdentity,
+      })
+      const outputChecksum = `sha256:${createHash('sha256')
+        .update(outputBytes)
+        .digest('hex')}`
+      const outputPath = `${artifactPath}.${outputArtifacts.length + 1}.calibration.json`
+      if (!existsSync(outputPath)) {
+        const temporaryPath = `${outputPath}.${claimToken}.tmp`
+        if (existsSync(temporaryPath)) {
+          if (readFileSync(temporaryPath, 'utf8') !== outputBytes)
+            throw new Error(
+              'temporary Calibration output does not match frozen evidence',
+            )
+        } else writeFileSync(temporaryPath, outputBytes, { flag: 'wx' })
+        renameSync(temporaryPath, outputPath)
+      }
+      const retainedBytes = readFileSync(outputPath, 'utf8')
+      if (retainedBytes !== outputBytes)
+        throw new Error(
+          'retained Calibration output does not match frozen evidence',
+        )
+      const retainedChecksum = `sha256:${createHash('sha256')
+        .update(retainedBytes)
+        .digest('hex')}`
+      if (retainedChecksum !== outputChecksum)
+        throw new Error('retained Calibration output checksum mismatch')
+      outputArtifacts.push({
+        sourceAssetId: input.assetId,
+        sourceAssetRevision: input.assetRevision,
+        path: outputPath,
+        checksum: outputChecksum,
+      })
+      return {
+        assetId: input.assetId,
+        assetRevision: input.assetRevision,
+        outcome: warning ? ('Warning' as const) : ('Succeeded' as const),
+        message: warning
+          ? 'Calibration continued without compatible support under the retained draft setting.'
+          : 'The deterministic adapter used compatible or explicitly included mismatched support.',
+        outputChecksum,
+      }
+    })
+  const outputs = frameOutcomes.flatMap((outcome) =>
+    outcome.outputChecksum === undefined
+      ? []
+      : [
+          {
+            sourceAssetId: outcome.assetId,
+            sourceAssetRevision: outcome.assetRevision,
+            checksum: outcome.outputChecksum,
+            format: 'deterministicEvidenceJson' as const,
+          },
+        ],
+  )
+  const stageOutcome =
+    outputs.length === 0
+      ? frameOutcomes.some((outcome) => outcome.outcome === 'Unavailable')
+        ? ('Unavailable' as const)
+        : ('Failed' as const)
+      : frameOutcomes.some((outcome) => outcome.outcome !== 'Succeeded')
+        ? ('Warning' as const)
+        : ('Succeeded' as const)
+  return {
+    stageOutcome,
+    frameOutcomes,
+    outputs,
+    diagnostics: [
+      'Deterministic adapter evidence only; astronomy calibration quality is not claimed.',
+      ...attempt.recommendations.flatMap((recommendation) =>
+        recommendation.reasons.map(
+          (reason) => `${recommendation.assetId}: ${reason}`,
+        ),
+      ),
+    ],
+    outputArtifacts,
   }
 }
 
@@ -649,8 +1081,34 @@ function recomputeLineage(
     role: source.role,
   }))
   const calibration = stages.find((stage) => stage.stage === 'Calibration')
+  const recommendations = calibrationRecommendations(sources)
+  const advisoryIds = new Set(
+    recommendations
+      .filter(
+        (recommendation) =>
+          recommendation.compatibility === 'Advisory mismatch',
+      )
+      .map((recommendation) => recommendation.assetId),
+  )
+  const retainCurrentOverrides = (snapshot: {
+    settings: ReadonlyArray<{ readonly key: string; readonly value: string }>
+    overrides: ReadonlyArray<typeof CalibrationOverride.Type>
+  }) => ({
+    ...snapshot,
+    overrides: snapshot.overrides.filter((override) =>
+      advisoryIds.has(override.assetId),
+    ),
+  })
   const calibrated = calibration && {
     ...calibration,
+    draft: {
+      ...calibration.draft,
+      overrides: calibration.draft.overrides.filter((override) =>
+        advisoryIds.has(override.assetId),
+      ),
+      undo: calibration.draft.undo.map(retainCurrentOverrides),
+      redo: calibration.draft.redo.map(retainCurrentOverrides),
+    },
     attempts: calibration.attempts.map((attempt) => ({
       ...attempt,
       basedOnEarlierUpstream:
@@ -677,7 +1135,10 @@ function recomputeLineage(
   )
   return stages.map((stage) =>
     stage.stage === 'Calibration'
-      ? (calibrated ?? stage)
+      ? {
+          ...(calibrated ?? stage),
+          calibrationRecommendations: recommendations,
+        }
       : stage.stage === 'Registration'
         ? (registered ?? stage)
         : {
@@ -691,6 +1152,112 @@ function recomputeLineage(
             })),
           },
   )
+}
+
+function calibrationRecommendations(
+  sources: ReadonlyArray<typeof ProcessingProjectSource.Type>,
+) {
+  const lights = sources.filter((source) => source.role === 'Lights')
+  return sources
+    .filter(
+      (source) => source.role !== 'Lights' && source.role !== 'Unassigned',
+    )
+    .map((source) => calibrationRecommendation(source, lights))
+}
+
+function calibrationRecommendation(
+  source: typeof ProcessingProjectSource.Type,
+  lights: ReadonlyArray<typeof ProcessingProjectSource.Type>,
+) {
+  if (!isCalibrationInputSource(source))
+    return CalibrationRecommendation.make({
+      assetId: source.assetId,
+      assetRevision: source.assetRevision,
+      role: source.role,
+      decision: 'Exclude',
+      compatibility: 'Technically unavailable',
+      reasons: [
+        source.libraryRole === 'unknown' || source.libraryFormat === 'unknown'
+          ? 'The exact Library role or format is unavailable, so this source cannot be used for Calibration.'
+          : `Calibration requires an original camera-raw or FITS asset; this source is ${source.libraryRole} / ${source.libraryFormat}.`,
+      ],
+      matchedLightAssetIds: [],
+    })
+  if (
+    source.availability !== 'availableLocally' &&
+    source.availability !== 'published'
+  )
+    return CalibrationRecommendation.make({
+      assetId: source.assetId,
+      assetRevision: source.assetRevision,
+      role: source.role,
+      decision: 'Exclude',
+      compatibility: 'Technically unavailable',
+      reasons: ['The retained source bytes are not currently readable.'],
+      matchedLightAssetIds: [],
+    })
+  const matched: Array<typeof AssetId.Type> = []
+  const mismatches: Array<string> = []
+  for (const light of lights) {
+    const facts = compatibilityFacts(source, light)
+    if (facts.length === 0) matched.push(light.assetId)
+    else mismatches.push(...facts.map((fact) => `${light.assetId}: ${fact}`))
+  }
+  const reasons = [
+    ...(mismatches.length === 0
+      ? [
+          'Retained exposure, filter, binning, and camera facts are compatible where applicable.',
+        ]
+      : mismatches),
+    'Gain and temperature are not retained and were not evaluated.',
+  ]
+  return CalibrationRecommendation.make({
+    assetId: source.assetId,
+    assetRevision: source.assetRevision,
+    role: source.role,
+    decision: mismatches.length === 0 ? 'Include' : 'Review',
+    compatibility: mismatches.length === 0 ? 'Compatible' : 'Advisory mismatch',
+    reasons,
+    matchedLightAssetIds: matched,
+  })
+}
+
+function isCalibrationInputSource(source: typeof ProcessingProjectSource.Type) {
+  return (
+    source.libraryRole === 'original' &&
+    (source.libraryFormat === 'cameraRaw' || source.libraryFormat === 'fits')
+  )
+}
+
+function compatibilityFacts(
+  support: typeof ProcessingProjectSource.Type,
+  light: typeof ProcessingProjectSource.Type,
+) {
+  const facts: Array<string> = []
+  const compare = (
+    label: string,
+    supportValue: string | number | undefined,
+    lightValue: string | number | undefined,
+  ) => {
+    if (supportValue === undefined || lightValue === undefined)
+      facts.push(`${label} is not retained for both sources`)
+    else if (supportValue !== lightValue) facts.push(`${label} differs`)
+  }
+  compare('binning', support.provenance.binning, light.provenance.binning)
+  compare(
+    'camera identity',
+    support.provenance.cameraDeviceId,
+    light.provenance.cameraDeviceId,
+  )
+  if (support.role === 'Darks')
+    compare(
+      'exposure',
+      support.provenance.exposureSeconds,
+      light.provenance.exposureSeconds,
+    )
+  if (support.role === 'Flats' || support.role === 'Dark flats')
+    compare('filter', support.provenance.filter, light.provenance.filter)
+  return facts
 }
 
 function projectTarget(

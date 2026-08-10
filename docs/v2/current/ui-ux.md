@@ -67,8 +67,10 @@ complete Library detail for Process outputs, and deterministic unfinished
 session resume. Item 3.5.1 also closes Library selection, whole Capture Set
 intake, and the persistent Processing Project Sources view. Item 3.5.2 closes
 persistent stage navigation, drafts, retained attempts, selected results, and
-exact upstream lineage. The remaining work replaces the deterministic stage
-harness with the explicit stage behavior in the
+exact upstream lineage. Item 3.5.3 closes explicit Calibration recommendations,
+draft choices, attempt-scoped source inclusion or removal, per-Light outcomes,
+and deterministic output evidence. The remaining work replaces the Registration and Stacking
+harnesses with the explicit stage behavior in the
 [Item 3.5 Process workflow plan](process-workflow-plan.md).
 
 - Library selection and whole Capture Set intake must lead to a persistent

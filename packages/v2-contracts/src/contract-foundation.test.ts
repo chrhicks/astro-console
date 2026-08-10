@@ -180,6 +180,13 @@ const commandFixtures: ReadonlyArray<unknown> = [
     idempotencyKey: 'i-project-2',
   },
   {
+    _tag: 'RemoveProcessingProjectSource',
+    projectId: 'project-1',
+    expectedProjectRevision: 1,
+    assetId: 'asset-1',
+    idempotencyKey: 'i-project-remove',
+  },
+  {
     _tag: 'AssignProcessingSourceRole',
     projectId: 'project-1',
     expectedProjectRevision: 1,
@@ -215,6 +222,14 @@ const commandFixtures: ReadonlyArray<unknown> = [
     expectedProjectRevision: 5,
     stage: 'Calibration',
     idempotencyKey: 'i-project-7',
+  },
+  {
+    _tag: 'SetCalibrationUseAnyway',
+    projectId: 'project-1',
+    expectedProjectRevision: 6,
+    assetId: 'asset-dark-1',
+    useAnyway: true,
+    idempotencyKey: 'i-project-override',
   },
   {
     _tag: 'RunProcessingProjectStage',
@@ -323,7 +338,7 @@ const commandFixtures: ReadonlyArray<unknown> = [
 
 describe('Gate 5 contract foundation', () => {
   it('keeps the accepted command vocabulary closed', () => {
-    assert.equal(commandTags.length, 50)
+    assert.equal(commandTags.length, 52)
     assert.deepEqual(commandTags, acceptedCommandTags)
     assert.deepEqual(
       commandTags,

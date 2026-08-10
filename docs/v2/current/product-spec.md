@@ -651,14 +651,16 @@ share the target.
 Manual judgment has clear precedence. `Rejected` frames are excluded.
 `Accepted` frames are included unless bytes are unavailable, corrupt,
 incomplete, or technically incompatible with the group. An accepted frame may
-override a quality-based platform exclusion, and the UI names that override.
+replace a quality-based platform exclusion, and the UI names the resulting
+inclusion rather than its internal mechanism.
 An `Unreviewed` frame follows an `Include` or `Exclude` determination; an
 `Unreviewed` frame with a `Review` determination enters the exception queue.
-Technical ineligibility cannot be overridden and always includes an exact
-reason. Metadata and quality concerns remain advisory. `Use anyway` is a stage
-draft decision that can participate in draft undo/redo. A started attempt
-freezes that override; a later attempt inherits it only through an explicit
-rerun-with-same-settings choice.
+Technical ineligibility cannot be included and always includes an exact reason.
+Metadata and quality concerns remain advisory. The UI names the source type and
+consequence, for example `Use this Flat` or `Remove from project`. Explicit
+inclusion is a stage-draft decision that can participate in draft undo/redo. A
+started attempt freezes that choice. Removing the project source prunes the
+current draft choice while completed attempts retain their exact evidence.
 
 Platform determination may use retained capture integrity, pointing evidence,
 inspection metrics, and group-relative Build evaluation. A plate solve supports

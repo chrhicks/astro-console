@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–3 and Items 3.5.1–3.5.2 complete; Item 3.5.3 next**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–3 and Items 3.5.1–3.5.3 complete; Item 3.5.4 next**
 
 ## Current Position
 
@@ -167,7 +167,8 @@ target-owned Processing Project with Library multi-select and whole Capture Set
 intake, source roles, and persistent explicit Calibration, Registration,
 Stacking, Master, and Develop stages. Every executable stage has an explicit
 Run or Rerun action and retained attempts. Quality and metadata findings remain
-advisory; `Use anyway` is frozen only into the current attempt. Develop stays
+advisory; an explicit mismatched-source inclusion is frozen only into the
+current attempt. Develop stays
 focused on astronomy operations such as astrometry, background extraction,
 color calibration, green-noise reduction, stretching, color controls, and
 star removal/addition. General layers, masks, and compositing are out of scope.
@@ -191,6 +192,22 @@ Worker settlement publishes fresh Process state without timer polling, and
 restart keeps drafts, attempts, selections, artifacts, and stale-lineage
 evidence. The deterministic stage harness proves service orchestration and
 persistence only; it does not prove astronomy processing quality.
+
+Item 3.5.3 is complete. Calibration now projects service-owned compatible,
+advisory, and technically unavailable support decisions from retained source
+facts. The bounded draft keeps the operation, missing-support policy, and
+attempt-scoped source-inclusion choices through undo and redo. The UI tells the
+owner whether a support source is excluded or included despite a mismatch and
+offers `Use this Flat` or `Remove from project`. Explicit Run or Rerun freezes
+exact source revisions, Library roles and formats,
+recommendations, settings, overrides, and deterministic adapter identity.
+Attempts retain per-Light outcomes, diagnostics, and checksum-bound JSON
+outputs. Failed reruns keep the last selected valid result, and restart does
+not replay claimed work. Derived or unknown Library inputs are unusable and
+cannot be included. Source removal is blocked while stage work is active,
+preserves completed attempt evidence, and re-adds as a fresh advisory choice.
+This proves local deterministic orchestration and output evidence only; it does
+not prove astronomy-quality calibration or an external processing tool.
 
 After that simulator proof, an indoor GET-only readiness check reached ASCOM
 Remote at `192.168.4.104:11111`. Management and every device-property envelope
@@ -349,16 +366,17 @@ covered indoor frame.
 
 ## Next Accepted Item
 
-3.5.3. **Add explicit Calibration.** Freeze selected source roles, calibration
-inputs, settings, overrides, tool identity, outputs, and per-frame outcomes in
-each attempt. Keep metadata and quality concerns advisory, preserve the last
-valid result through failure and restart, and require explicit Run or Rerun.
+3.5.4. **Add explicit Registration.** Bind each attempt to the exact selected
+Calibration result, keep reference and registration settings in the bounded
+draft, retain per-frame transforms and diagnostics, and exclude only frames
+without a technically usable transform. Keep earlier attempts inspectable and
+require explicit Run or Rerun.
 
 ## Later Accepted Items
 
-Items 3.5.4 through 3.5.7 add explicit Registration and Stacking, a saved
-Master boundary, astronomy-specific Develop operations, and the final
-integrated operator review. Follow the ordered scope and proof in the
+Items 3.5.5 through 3.5.7 add explicit Stacking, a saved Master boundary,
+astronomy-specific Develop operations, and the final integrated operator
+review. Follow the ordered scope and proof in the
 [Item 3.5 Process workflow plan](process-workflow-plan.md).
 
 4. **Audit and promote the beta.** Verify all four exact Nightbook workflows

@@ -96,7 +96,7 @@ test('project stages accept before work, settle exact evidence atomically, and r
   project = processSnapshot(database, owner).projects[0]
   const attempt = project?.stages[0]?.attempts[0]
   assert.equal(attempt?.state, 'succeeded')
-  assert.equal(attempt?.toolIdentity, 'deterministic-stage-harness-v1')
+  assert.equal(attempt?.toolIdentity, 'deterministic-calibration-adapter-v1')
   assert.equal(attempt?.sourceRevisions.length, project?.sources.length)
   assert.equal(
     database
@@ -104,7 +104,7 @@ test('project stages accept before work, settle exact evidence atomically, and r
         'SELECT count(*) AS count FROM processing_artifacts WHERE work_id=?',
       )
       .get(work.work_id)?.count,
-    1,
+    1 + (attempt?.outputs.length ?? 0),
   )
   assert.deepEqual(
     settleProcessingProjectStage(

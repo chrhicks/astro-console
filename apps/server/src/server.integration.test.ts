@@ -4190,7 +4190,7 @@ test('project stage worker settlement publishes one fresh SSE projection while i
   )
   assert.equal(
     settledWorkspace.projects[0]?.stages[0]?.attempts[0]?.resultKind,
-    'deterministicStageEvidence',
+    'deterministicCalibrationEvidence',
   )
   assert.equal(
     publicationEvents.filter((event) => event === 'publish').length,

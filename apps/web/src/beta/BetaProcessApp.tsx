@@ -88,6 +88,17 @@ const titleCase = (value: string) =>
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/^./, (v) => v.toUpperCase())
 
+const calibrationSupportLabel = (role: string) =>
+  role === 'Flats'
+    ? 'Flat'
+    : role === 'Darks'
+      ? 'Dark'
+      : role === 'Bias'
+        ? 'Bias frame'
+        : role === 'Dark flats'
+          ? 'Dark flat'
+          : role
+
 const processAuthorityConfirmed = (projection: Projection) =>
   projection.shell.freshness.startsWith('Current ') &&
   projection.shell.membership === 'Owner member' &&
@@ -252,6 +263,10 @@ const processDenialMessages: Record<ProcessDenialReason, string> = {
   upstreamResultRequired: 'Select the required upstream result first.',
   stageAttemptActive: 'Wait for the current stage attempt.',
   stageResultUnavailable: 'No completed stage result is available.',
+  calibrationOverrideUnavailable:
+    'Mismatched support can be included only after Calibration review.',
+  calibrationLightsUnavailable:
+    'At least one readable Light is required for Calibration.',
 }
 
 const processAction = (
@@ -276,6 +291,20 @@ function ProcessActionDenial({ reason }: { reason: string | undefined }) {
       <b>Unavailable:</b> {reason}
     </p>
   ) : null
+}
+
+function CalibrationReasonList({
+  reasons,
+}: {
+  reasons: ReadonlyArray<string>
+}) {
+  return (
+    <ul className="beta-process-calibration-reasons">
+      {reasons.map((reason) => (
+        <li key={reason}>{reason}</li>
+      ))}
+    </ul>
+  )
 }
 
 const lifecycleSteps = (session: Session) => [
@@ -352,6 +381,9 @@ export function ProcessPhone({
 }) {
   const session = selectedSession(workspace)
   const project = selectedProject(workspace)
+  const calibration = project?.stages.find(
+    (stage) => stage.stage === 'Calibration',
+  )
   return (
     <main
       id="beta-workspace"
@@ -515,6 +547,9 @@ export function ProcessPhone({
                   </span>
                   <span>Suggested: {source.suggestedRole}</span>
                   <span>
+                    Library: {source.libraryRole} · {source.libraryFormat}
+                  </span>
+                  <span>
                     {source.provenance.exposureSeconds === undefined
                       ? 'Exposure not recorded'
                       : `${source.provenance.exposureSeconds}s`}
@@ -525,6 +560,80 @@ export function ProcessPhone({
                 </article>
               ))}
             </div>
+          </PanelBody>
+        </Panel>
+      ) : null}
+      {calibration ? (
+        <Panel>
+          <PanelHeader
+            title="Calibration evidence"
+            meta={`${calibration.calibrationRecommendations.length} support review${calibration.calibrationRecommendations.length === 1 ? '' : 's'}`}
+          />
+          <PanelBody>
+            <Stack>
+              <p>
+                Matches use retained exposure, filter, binning, and camera
+                identity where applicable. Gain and temperature are not retained
+                and are not evaluated.
+              </p>
+              <div className="beta-process-phone-sources">
+                {calibration.calibrationRecommendations.map(
+                  (recommendation) => (
+                    <article
+                      className="beta-process-phone-source"
+                      key={recommendation.assetId}
+                    >
+                      <b>
+                        {recommendation.role} · {recommendation.assetId}
+                      </b>
+                      <span>
+                        {recommendation.decision} ·{' '}
+                        {recommendation.compatibility}
+                      </span>
+                      <CalibrationReasonList reasons={recommendation.reasons} />
+                      <span>
+                        {calibration.draft.overrides.some(
+                          (override) =>
+                            override.assetId === recommendation.assetId,
+                        )
+                          ? 'Included despite mismatch in the current draft'
+                          : 'Excluded from Calibration in the current draft'}
+                      </span>
+                    </article>
+                  ),
+                )}
+                {calibration.attempts.map((attempt) => (
+                  <article
+                    className="beta-process-phone-source"
+                    key={attempt.attemptId}
+                  >
+                    <b>{attempt.attemptId}</b>
+                    <span>
+                      {titleCase(attempt.state)} ·{' '}
+                      {attempt.stageOutcome ?? 'Pending'} ·{' '}
+                      {attempt.toolIdentity}
+                    </span>
+                    <span>
+                      {attempt.outputs.length} deterministic JSON evidence
+                      output{attempt.outputs.length === 1 ? '' : 's'}
+                    </span>
+                    {attempt.frameOutcomes.map((outcome) => (
+                      <span key={outcome.assetId}>
+                        {outcome.assetId} · {outcome.outcome} ·{' '}
+                        {outcome.message}
+                        {outcome.diagnostic ? ` · ${outcome.diagnostic}` : ''}
+                      </span>
+                    ))}
+                    {attempt.diagnostics.map((diagnostic) => (
+                      <span key={diagnostic}>{diagnostic}</span>
+                    ))}
+                    {calibration.selectedAttemptId === attempt.attemptId ? (
+                      <strong>Selected result</strong>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            </Stack>
           </PanelBody>
         </Panel>
       ) : null}
@@ -725,7 +834,7 @@ function ProjectSourcesDesktop({
                     <div role="cell">
                       <Field
                         label="Source role"
-                        hint={`Suggested: ${source.suggestedRole}`}
+                        hint={`Suggested: ${source.suggestedRole} · Library ${source.libraryRole} / ${source.libraryFormat}`}
                       >
                         <Select
                           value={source.role}
@@ -823,9 +932,24 @@ function ProjectStageDesktop({
     actions,
     'SelectProcessingStageResult',
   )
+  const overrideReason = processActionReason(actions, 'SetCalibrationUseAnyway')
+  const removeSourceReason = processActionReason(
+    actions,
+    'RemoveProcessingProjectSource',
+  )
   const profile =
     stage?.draft.settings.find((setting) => setting.key === 'profile')?.value ??
     'Default'
+  const operation =
+    stage?.draft.settings.find((setting) => setting.key === 'operation')
+      ?.value ?? 'calibrate-and-debayer'
+  const allowUncalibrated =
+    stage?.draft.settings.find((setting) => setting.key === 'allowUncalibrated')
+      ?.value ?? 'true'
+  const updatedSettings = (key: string, value: string) => [
+    ...(stage?.draft.settings.filter((setting) => setting.key !== key) ?? []),
+    { key, value },
+  ]
   return (
     <main
       id="beta-workspace"
@@ -902,16 +1026,157 @@ function ProjectStageDesktop({
                 <>
                   <AttentionCard
                     tone="neutral"
-                    statusLabel="Deterministic framework evidence"
+                    statusLabel={
+                      stage.stage === 'Calibration'
+                        ? 'Deterministic Calibration evidence'
+                        : 'Deterministic framework evidence'
+                    }
                     title="Explicit stage control"
-                    description="Run records the frozen draft, exact source revisions, and upstream lineage. This slice does not perform or prove astronomy processing."
+                    description={
+                      stage.stage === 'Calibration'
+                        ? 'Run freezes exact Lights, support revisions, retained compatibility facts, settings, mismatch choices, and the deterministic adapter identity. It does not claim astronomy calibration quality.'
+                        : 'Run records the frozen draft, exact source revisions, and upstream lineage. This slice does not perform or prove astronomy processing.'
+                    }
                   />
+                  {stage.stage === 'Calibration' ? (
+                    <>
+                      <p className="beta-process-calibration-intro">
+                        Match evidence uses retained exposure, filter, binning,
+                        and camera identity where applicable. Gain and
+                        temperature are not retained and are not evaluated.
+                      </p>
+                      <div className="beta-process-calibration-matches">
+                        {stage.calibrationRecommendations.length === 0 ? (
+                          <AttentionCard
+                            tone="warning"
+                            statusLabel="No support selected"
+                            title="Calibration support"
+                            description="The draft permits deterministic uncalibrated continuation for readable Lights."
+                          />
+                        ) : (
+                          stage.calibrationRecommendations.map(
+                            (recommendation) => {
+                              const overridden = stage.draft.overrides.some(
+                                (override) =>
+                                  override.assetId === recommendation.assetId,
+                              )
+                              const supportLabel = calibrationSupportLabel(
+                                recommendation.role,
+                              )
+                              return (
+                                <AttentionCard
+                                  key={recommendation.assetId}
+                                  tone={
+                                    recommendation.compatibility ===
+                                    'Compatible'
+                                      ? 'positive'
+                                      : recommendation.compatibility ===
+                                          'Technically unavailable'
+                                        ? 'danger'
+                                        : 'warning'
+                                  }
+                                  statusLabel={
+                                    recommendation.compatibility ===
+                                    'Advisory mismatch'
+                                      ? overridden
+                                        ? 'Included despite mismatch'
+                                        : 'Excluded from Calibration'
+                                      : `${recommendation.decision} · ${recommendation.compatibility}`
+                                  }
+                                  title={`${recommendation.role} · ${recommendation.assetId}`}
+                                  description={
+                                    <Stack gap={4}>
+                                      {recommendation.compatibility ===
+                                      'Advisory mismatch' ? (
+                                        <p className="beta-process-calibration-intro">
+                                          This {supportLabel} does not match the
+                                          Lights and will{' '}
+                                          {overridden ? '' : 'not '}
+                                          be used for the next Calibration run.
+                                        </p>
+                                      ) : null}
+                                      <CalibrationReasonList
+                                        reasons={recommendation.reasons}
+                                      />
+                                    </Stack>
+                                  }
+                                  actions={
+                                    recommendation.compatibility ===
+                                    'Advisory mismatch' ? (
+                                      <Cluster>
+                                        {!overridden ? (
+                                          <Button
+                                            disabled={
+                                              pending !== undefined ||
+                                              overrideReason !== undefined
+                                            }
+                                            title={overrideReason}
+                                            onClick={() =>
+                                              command(
+                                                {
+                                                  _tag: 'SetCalibrationUseAnyway',
+                                                  projectId: project.projectId,
+                                                  expectedProjectRevision:
+                                                    project.revision,
+                                                  assetId:
+                                                    recommendation.assetId,
+                                                  useAnyway: true,
+                                                  idempotencyKey:
+                                                    crypto.randomUUID(),
+                                                },
+                                                `Including ${supportLabel}`,
+                                              )
+                                            }
+                                          >
+                                            Use this {supportLabel}
+                                          </Button>
+                                        ) : null}
+                                        <Button
+                                          disabled={
+                                            pending !== undefined ||
+                                            removeSourceReason !== undefined
+                                          }
+                                          title={removeSourceReason}
+                                          onClick={() =>
+                                            command(
+                                              {
+                                                _tag: 'RemoveProcessingProjectSource',
+                                                projectId: project.projectId,
+                                                expectedProjectRevision:
+                                                  project.revision,
+                                                assetId: recommendation.assetId,
+                                                idempotencyKey:
+                                                  crypto.randomUUID(),
+                                              },
+                                              `Removing ${supportLabel} from project`,
+                                            )
+                                          }
+                                        >
+                                          Remove from project
+                                        </Button>
+                                      </Cluster>
+                                    ) : undefined
+                                  }
+                                />
+                              )
+                            },
+                          )
+                        )}
+                      </div>
+                    </>
+                  ) : null}
                   <Field
-                    label="Draft profile"
+                    label={
+                      stage.stage === 'Calibration'
+                        ? 'Calibration operation'
+                        : 'Draft profile'
+                    }
                     hint={`Draft revision ${stage.draft.revision}`}
                   >
                     <Select
-                      value={profile}
+                      value={
+                        stage.stage === 'Calibration' ? operation : profile
+                      }
                       disabled={
                         pending !== undefined || updateReason !== undefined
                       }
@@ -922,20 +1187,66 @@ function ProjectStageDesktop({
                             projectId: project.projectId,
                             expectedProjectRevision: project.revision,
                             stage: stage.stage,
-                            settings: [
-                              { key: 'profile', value: event.target.value },
-                            ],
+                            settings: updatedSettings(
+                              stage.stage === 'Calibration'
+                                ? 'operation'
+                                : 'profile',
+                              event.target.value,
+                            ),
                             idempotencyKey: crypto.randomUUID(),
                           },
                           `Updating ${stage.stage} draft`,
                         )
                       }
                     >
-                      <option>Default</option>
-                      <option>Alternate</option>
-                      <option>Review</option>
+                      {stage.stage === 'Calibration' ? (
+                        <>
+                          <option value="calibrate-and-debayer">
+                            Calibrate and debayer
+                          </option>
+                          <option value="calibrate-only">Calibrate only</option>
+                        </>
+                      ) : (
+                        <>
+                          <option>Default</option>
+                          <option>Alternate</option>
+                          <option>Review</option>
+                        </>
+                      )}
                     </Select>
                   </Field>
+                  {stage.stage === 'Calibration' ? (
+                    <Field
+                      label="Missing support policy"
+                      hint="A draft choice retained by undo and redo"
+                    >
+                      <Select
+                        value={allowUncalibrated}
+                        disabled={
+                          pending !== undefined || updateReason !== undefined
+                        }
+                        onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                          command(
+                            {
+                              _tag: 'UpdateProcessingStageDraft',
+                              projectId: project.projectId,
+                              expectedProjectRevision: project.revision,
+                              stage: stage.stage,
+                              settings: updatedSettings(
+                                'allowUncalibrated',
+                                event.target.value,
+                              ),
+                              idempotencyKey: crypto.randomUUID(),
+                            },
+                            'Updating missing support policy',
+                          )
+                        }
+                      >
+                        <option value="true">Allow with warning</option>
+                        <option value="false">Require selected support</option>
+                      </Select>
+                    </Field>
+                  ) : null}
                   <Cluster>
                     <Button
                       disabled={
@@ -1032,9 +1343,42 @@ function ProjectStageDesktop({
                             ) : null}
                             {attempt.resultId ? (
                               <span>
-                                {attempt.resultId} · deterministic stage
-                                evidence
+                                {attempt.resultId} ·{' '}
+                                {attempt.stage === 'Calibration'
+                                  ? 'deterministic Calibration evidence'
+                                  : 'deterministic stage evidence'}
                               </span>
+                            ) : null}
+                            {attempt.stage === 'Calibration' ? (
+                              <>
+                                <span>
+                                  {attempt.overrides.length} mismatched support
+                                  inclusion
+                                  {attempt.overrides.length === 1
+                                    ? ''
+                                    : 's'} · {attempt.stageOutcome ?? 'Pending'}
+                                </span>
+                                {attempt.frameOutcomes.map((outcome) => (
+                                  <span key={outcome.assetId}>
+                                    {outcome.assetId} · {outcome.outcome} ·{' '}
+                                    revision {outcome.assetRevision} ·{' '}
+                                    {outcome.message}
+                                    {outcome.diagnostic
+                                      ? ` · ${outcome.diagnostic}`
+                                      : ''}
+                                  </span>
+                                ))}
+                                {attempt.outputs.length ? (
+                                  <span>
+                                    {attempt.outputs.length} deterministic JSON
+                                    evidence output
+                                    {attempt.outputs.length === 1 ? '' : 's'}
+                                  </span>
+                                ) : null}
+                                {attempt.diagnostics.map((diagnostic) => (
+                                  <span key={diagnostic}>{diagnostic}</span>
+                                ))}
+                              </>
                             ) : null}
                             {stage.selectedAttemptId === attempt.attemptId ? (
                               <strong>Selected result</strong>

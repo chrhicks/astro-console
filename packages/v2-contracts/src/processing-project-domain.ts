@@ -9,6 +9,25 @@ import {
   ProcessingStageResultId,
 } from './primitives.js'
 
+export const ProcessingLibraryRole = Schema.Literals([
+  'original',
+  'linearMaster',
+  'intermediate',
+  'final',
+  'preview',
+  'diagnostic',
+  'unknown',
+])
+
+export const ProcessingLibraryFormat = Schema.Literals([
+  'cameraRaw',
+  'fits',
+  'tiff',
+  'png',
+  'jpeg',
+  'unknown',
+])
+
 export const ProcessingProjectStage = Schema.Literals([
   'Sources',
   'Calibration',
@@ -41,11 +60,52 @@ export const ProcessingStageSetting = Schema.Struct({
   value: Schema.NonEmptyString,
 })
 
+export const CalibrationOverride = Schema.Struct({
+  assetId: AssetId,
+  decision: Schema.Literal('Use anyway'),
+})
+
+export const CalibrationDraftSnapshot = Schema.Struct({
+  settings: Schema.Array(ProcessingStageSetting),
+  overrides: Schema.Array(CalibrationOverride),
+})
+
+export const CalibrationRecommendation = Schema.Struct({
+  assetId: AssetId,
+  assetRevision: AssetRevision,
+  role: ProcessingSourceRole,
+  decision: Schema.Literals(['Include', 'Exclude', 'Review']),
+  compatibility: Schema.Literals([
+    'Compatible',
+    'Advisory mismatch',
+    'Technically unavailable',
+  ]),
+  reasons: Schema.Array(Schema.NonEmptyString),
+  matchedLightAssetIds: Schema.Array(AssetId),
+})
+
+export const CalibrationFrameOutcome = Schema.Struct({
+  assetId: AssetId,
+  assetRevision: AssetRevision,
+  outcome: Schema.Literals(['Succeeded', 'Warning', 'Failed', 'Unavailable']),
+  message: Schema.NonEmptyString,
+  outputChecksum: Schema.optionalKey(Schema.NonEmptyString),
+  diagnostic: Schema.optionalKey(Schema.NonEmptyString),
+})
+
+export const CalibrationOutput = Schema.Struct({
+  sourceAssetId: AssetId,
+  sourceAssetRevision: AssetRevision,
+  checksum: Schema.NonEmptyString,
+  format: Schema.Literal('deterministicEvidenceJson'),
+})
+
 export const ProcessingStageDraft = Schema.Struct({
   revision: Schema.Int,
   settings: Schema.Array(ProcessingStageSetting),
-  undo: Schema.Array(Schema.Array(ProcessingStageSetting)),
-  redo: Schema.Array(Schema.Array(ProcessingStageSetting)),
+  overrides: Schema.Array(CalibrationOverride),
+  undo: Schema.Array(CalibrationDraftSnapshot),
+  redo: Schema.Array(CalibrationDraftSnapshot),
 })
 
 export const ProcessingStageAttempt = Schema.Struct({
@@ -54,8 +114,14 @@ export const ProcessingStageAttempt = Schema.Struct({
   state: Schema.Literals(['queued', 'running', 'succeeded', 'failed']),
   draftRevision: Schema.Int,
   settings: Schema.Array(ProcessingStageSetting),
-  toolIdentity: Schema.Literal('deterministic-stage-harness-v1'),
-  resultKind: Schema.Literal('deterministicStageEvidence'),
+  toolIdentity: Schema.Literals([
+    'deterministic-stage-harness-v1',
+    'deterministic-calibration-adapter-v1',
+  ]),
+  resultKind: Schema.Literals([
+    'deterministicStageEvidence',
+    'deterministicCalibrationEvidence',
+  ]),
   basedOnEarlierUpstream: Schema.Boolean,
   sourceRevisions: Schema.Array(
     Schema.Struct({
@@ -63,6 +129,14 @@ export const ProcessingStageAttempt = Schema.Struct({
       assetRevision: AssetRevision,
       role: ProcessingSourceRole,
     }),
+  ),
+  recommendations: Schema.Array(CalibrationRecommendation),
+  overrides: Schema.Array(CalibrationOverride),
+  frameOutcomes: Schema.Array(CalibrationFrameOutcome),
+  outputs: Schema.Array(CalibrationOutput),
+  diagnostics: Schema.Array(Schema.NonEmptyString),
+  stageOutcome: Schema.optionalKey(
+    Schema.Literals(['Succeeded', 'Warning', 'Failed', 'Unavailable']),
   ),
   upstreamAttemptId: Schema.optionalKey(ProcessingStageAttemptId),
   resultId: Schema.optionalKey(ProcessingStageResultId),
@@ -76,6 +150,7 @@ export const ProcessingStageState = Schema.Struct({
   draft: ProcessingStageDraft,
   attempts: Schema.Array(ProcessingStageAttempt),
   selectedAttemptId: Schema.optionalKey(ProcessingStageAttemptId),
+  calibrationRecommendations: Schema.Array(CalibrationRecommendation),
 })
 
 export const ProcessingProjectWarning = Schema.Struct({
@@ -94,6 +169,8 @@ export const ProcessingProjectSource = Schema.Struct({
   assetRevision: AssetRevision,
   role: ProcessingSourceRole,
   suggestedRole: ProcessingSourceRole,
+  libraryRole: ProcessingLibraryRole,
+  libraryFormat: ProcessingLibraryFormat,
   captureSetId: Schema.optionalKey(CaptureSetId),
   targetName: Schema.optionalKey(Schema.NonEmptyString),
   capturedAt: Schema.NonEmptyString,

@@ -125,11 +125,13 @@ const PressureProjection = Schema.Struct({
 export const ProcessingAction = Schema.Literals([
   'CreateProcessingProject',
   'AddProcessingProjectSources',
+  'RemoveProcessingProjectSource',
   'AssignProcessingSourceRole',
   'NavigateProcessingProjectStage',
   'UpdateProcessingStageDraft',
   'UndoProcessingStageDraft',
   'RedoProcessingStageDraft',
+  'SetCalibrationUseAnyway',
   'RunProcessingProjectStage',
   'SelectProcessingStageResult',
   'StartProcessingSession',
@@ -169,6 +171,8 @@ export const ProcessingActionDenialReason = Schema.Literals([
   'upstreamResultRequired',
   'stageAttemptActive',
   'stageResultUnavailable',
+  'calibrationOverrideUnavailable',
+  'calibrationLightsUnavailable',
 ])
 
 export const ProcessingActionEligibility = Schema.TaggedUnion({
@@ -1724,6 +1728,7 @@ export function projectProcessingProjectActions(
       projectId,
       actions: [
         eligibility('AddProcessingProjectSources', reason),
+        eligibility('RemoveProcessingProjectSource', reason),
         eligibility('AssignProcessingSourceRole', reason),
         eligibility('NavigateProcessingProjectStage', reason),
         eligibility(
@@ -1749,15 +1754,37 @@ export function projectProcessingProjectActions(
                 : undefined),
         ),
         eligibility(
+          'SetCalibrationUseAnyway',
+          reason ??
+            (stage?.stage !== 'Calibration' ||
+            !stage.calibrationRecommendations.some(
+              (recommendation) =>
+                recommendation.compatibility === 'Advisory mismatch',
+            )
+              ? 'calibrationOverrideUnavailable'
+              : undefined),
+        ),
+        eligibility(
           'RunProcessingProjectStage',
           reason ??
             (!executable
               ? 'projectStageRequired'
               : active
                 ? 'stageAttemptActive'
-                : !upstreamReady
-                  ? 'upstreamResultRequired'
-                  : undefined),
+                : stage.stage === 'Calibration' &&
+                    !project?.sources.some(
+                      (source) =>
+                        source.role === 'Lights' &&
+                        source.libraryRole === 'original' &&
+                        (source.libraryFormat === 'cameraRaw' ||
+                          source.libraryFormat === 'fits') &&
+                        (source.availability === 'availableLocally' ||
+                          source.availability === 'published'),
+                    )
+                  ? 'calibrationLightsUnavailable'
+                  : !upstreamReady
+                    ? 'upstreamResultRequired'
+                    : undefined),
         ),
         eligibility(
           'SelectProcessingStageResult',

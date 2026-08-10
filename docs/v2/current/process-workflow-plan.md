@@ -1,6 +1,6 @@
 # Item 3.5 — Explicit Process Workflow
 
-Status: **Accepted epic; Items 3.5.1–3.5.2 complete; Item 3.5.3 next**
+Status: **Accepted epic; Items 3.5.1–3.5.3 complete; Item 3.5.4 next**
 
 Item 3 proved durable worker-owned execution. Item 3.5 reshapes that execution
 into the operator workflow: choose evidence, assign its role, run explicit
@@ -96,19 +96,22 @@ sourcing, or a normalized database row for every frame decision.
   attempt, asset, path, and checksum values remain durable domain evidence, not
   metric labels.
 
-## Decisions And Overrides
+## Decisions And Source Inclusion
 
 Keep different kinds of judgment distinct:
 
 - Library judgment: `Accepted`, `Rejected`, or `Unreviewed`.
 - Platform recommendation: `Include`, `Exclude`, or `Review`.
 - Stage outcome: `Succeeded`, `Warning`, `Failed`, or `Unavailable`.
-- Operator override: `Use anyway`.
+- Operator choice: use an advisory source for the current stage or remove it
+  from the project.
 
-`Use anyway` belongs to the current stage draft and its resulting attempt.
-Draft undo/redo may add or remove it before Run. Once Run starts, the attempt
-freezes the decision. A later attempt does not inherit it unless the owner
-explicitly chooses to rerun with the same settings.
+The UI names the source type and the actual consequence, for example `Use this
+Flat` or `Remove from project`. The inclusion choice belongs to the current
+stage draft and its resulting attempt. Draft undo/redo may add or remove it
+before Run. Once Run starts, the attempt freezes the decision. Removing a
+source from the project prunes the current draft choice but does not remove
+completed attempt evidence.
 
 Only technically impossible work is unavailable. Examples include missing or
 unreadable bytes and a frame with no usable registration transform. Metadata
@@ -168,18 +171,34 @@ production processing quality.
 
 ### Item 3.5.3 — Explicit Calibration
 
+**Status:** Complete.
+
 **Operator result:** Assign Lights and calibration roles, inspect metadata and
-recommendations, adjust a Calibration draft, record `Use anyway` where needed,
-and explicitly Run or Rerun. Inspect per-frame outcomes and continue
-uncalibrated where the selected operation technically permits it.
+recommendations, adjust a Calibration draft, explicitly include a mismatched
+support source or remove it from the project, and Run or Rerun. Inspect
+per-frame outcomes and continue uncalibrated where the selected operation
+technically permits it.
 
 **Service scope:** Freeze calibration inputs, settings, overrides, tool
 identity, outputs, and frame outcomes into each attempt. Preserve the last
 valid result through failure and restart.
 
 **Proof:** Cover compatible and mismatched support frames, a changed draft,
-override undo/redo, partial success, exact rerun inputs, and restart without
-replay.
+inclusion undo/redo, source removal and re-add, partial success, exact rerun
+inputs, and restart without replay.
+
+The completed slice freezes exact source revisions, Library roles and formats,
+recommendations, settings, overrides, tool identity, per-Light outcomes, and
+checksum-bound deterministic JSON outputs. Derived or unknown Library inputs
+are technically unavailable and cannot be included. Advisory mismatches can be
+included explicitly for the current draft, or removed from the project. Undo
+and redo retain the draft choice. Removal is blocked while stage work is active
+and never deletes completed attempt evidence; re-add creates a fresh advisory
+choice. Failed reruns keep the last selected valid result, and claimed work
+resumes without replay. Local contract, SQLite service, worker, web, and
+browser evidence cover these paths. The adapter proves deterministic
+orchestration and evidence materialization only; it does not prove
+astronomy-quality calibration or an external processing tool.
 
 ### Item 3.5.4 — Explicit Registration
 

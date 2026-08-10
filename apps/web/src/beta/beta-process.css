@@ -91,6 +91,7 @@
 @media (max-width: 600px) {
   .beta-process-phone {
     overflow-x: hidden;
+    grid-auto-rows: max-content;
   }
   .beta-process-phone-sources {
     display: grid;
@@ -136,6 +137,7 @@
   display: grid;
   grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
   gap: 8px;
+  overflow: hidden;
 }
 
 .beta-process-project-rail,
@@ -144,8 +146,17 @@
   min-height: 0;
 }
 
+.beta-process-project-sources {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
 .beta-process-project-sources .nb-panel-body {
-  overflow: auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .beta-process-source-table {
@@ -183,6 +194,34 @@
   gap: 6px;
 }
 
+.beta-process-calibration-intro {
+  margin: 0;
+  color: var(--nb-muted);
+  font: 600 10px/1.5 var(--nb-font-mono);
+}
+
+.beta-process-calibration-matches {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 6px;
+}
+
+.beta-process-calibration-reasons {
+  margin: 0;
+  padding-left: 16px;
+  display: grid;
+  gap: 2px;
+}
+
+.beta-process-calibration-reasons li {
+  overflow-wrap: anywhere;
+}
+
+.beta-process-phone-source > .beta-process-calibration-reasons {
+  color: var(--nb-muted);
+  font: 600 10px/1.4 var(--nb-font-mono);
+}
+
 .beta-process-attempts article {
   display: grid;
   gap: 3px;
@@ -212,6 +251,7 @@
 @media (max-width: 900px) and (min-width: 601px) {
   .beta-process-project-grid {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .beta-process-source-table {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   ProcessingProjection,
@@ -151,6 +152,8 @@ const projectWorkspace = Schema.decodeUnknownSync(ProcessingProjection)({
           assetRevision: 1,
           role: 'Lights',
           suggestedRole: 'Lights',
+          libraryRole: 'original',
+          libraryFormat: 'cameraRaw',
           captureSetId: 'm27-night-1',
           targetName: 'M27',
           capturedAt: '2026-08-07T02:13:00.000Z',
@@ -173,18 +176,39 @@ const projectWorkspace = Schema.decodeUnknownSync(ProcessingProjection)({
       stages: [
         {
           stage: 'Calibration',
-          draft: { revision: 0, settings: [], undo: [], redo: [] },
+          draft: {
+            revision: 0,
+            settings: [],
+            overrides: [],
+            undo: [],
+            redo: [],
+          },
           attempts: [],
+          calibrationRecommendations: [],
         },
         {
           stage: 'Registration',
-          draft: { revision: 0, settings: [], undo: [], redo: [] },
+          draft: {
+            revision: 0,
+            settings: [],
+            overrides: [],
+            undo: [],
+            redo: [],
+          },
           attempts: [],
+          calibrationRecommendations: [],
         },
         {
           stage: 'Stacking',
-          draft: { revision: 0, settings: [], undo: [], redo: [] },
+          draft: {
+            revision: 0,
+            settings: [],
+            overrides: [],
+            undo: [],
+            redo: [],
+          },
           attempts: [],
+          calibrationRecommendations: [],
         },
       ],
       createdAt: '2026-08-09T00:00:00.000Z',
@@ -291,7 +315,8 @@ test('renders persistent stage drafts, retained lineage, result selection, and p
               draft: {
                 revision: 2,
                 settings: [{ key: 'profile', value: 'Alternate' }],
-                undo: [[]],
+                overrides: [],
+                undo: [{ settings: [], overrides: [] }],
                 redo: [],
               },
               attempts: [
@@ -311,6 +336,11 @@ test('renders persistent stage drafts, retained lineage, result selection, and p
                       role: 'Lights',
                     },
                   ],
+                  recommendations: [],
+                  overrides: [],
+                  frameOutcomes: [],
+                  outputs: [],
+                  diagnostics: [],
                   upstreamAttemptId: 'stage-attempt-calibration-1',
                   resultId: 'stage-result-registration-1',
                   outputChecksum: 'sha256:registration-1',
@@ -366,6 +396,217 @@ test('renders persistent stage drafts, retained lineage, result selection, and p
   assert.match(phone, /Earlier input lineage retained/)
   assert.match(phone, /Stage attempts/)
   assert.doesNotMatch(phone, /<button|<input|<select|<textarea/)
+})
+
+test('renders service-owned Calibration review, draft policy, outcomes, and read-only phone evidence', () => {
+  const calibrated = Schema.decodeUnknownSync(ProcessingProjection)({
+    ...projectWorkspace,
+    projects: projectWorkspace.projects.map((project) => ({
+      ...project,
+      currentStage: 'Calibration',
+      sources: [
+        ...project.sources,
+        {
+          assetId: 'asset-flat-ha',
+          assetRevision: 1,
+          role: 'Flats',
+          suggestedRole: 'Flats',
+          libraryRole: 'original',
+          libraryFormat: 'cameraRaw',
+          capturedAt: '2026-08-07T02:13:00.000Z',
+          checksum: 'sha256:flat-ha',
+          availability: 'availableLocally',
+          provenance: {
+            runId: 'run-flat-1',
+            sequenceId: 'sequence-flat',
+            rigId: 'rig-1',
+            cameraDeviceId: 'camera-1',
+            exposureSeconds: 2,
+            filter: 'Ha',
+            binning: 1,
+          },
+          warnings: [],
+        },
+      ],
+      stages: project.stages.map((stage) =>
+        stage.stage !== 'Calibration'
+          ? stage
+          : {
+              ...stage,
+              draft: {
+                revision: 2,
+                settings: [
+                  { key: 'operation', value: 'calibrate-and-debayer' },
+                  { key: 'allowUncalibrated', value: 'true' },
+                ],
+                overrides: [],
+                undo: [],
+                redo: [],
+              },
+              calibrationRecommendations: [
+                {
+                  assetId: 'asset-flat-ha',
+                  assetRevision: 1,
+                  role: 'Flats',
+                  decision: 'Review',
+                  compatibility: 'Advisory mismatch',
+                  reasons: [
+                    'asset-m27-006: filter differs',
+                    'Gain and temperature are not retained and were not evaluated.',
+                  ],
+                  matchedLightAssetIds: [],
+                },
+              ],
+              attempts: [
+                {
+                  attemptId: 'stage-attempt-calibration-1',
+                  stage: 'Calibration',
+                  state: 'succeeded',
+                  draftRevision: 1,
+                  settings: [
+                    { key: 'operation', value: 'calibrate-and-debayer' },
+                    { key: 'allowUncalibrated', value: 'true' },
+                  ],
+                  toolIdentity: 'deterministic-calibration-adapter-v1',
+                  resultKind: 'deterministicCalibrationEvidence',
+                  basedOnEarlierUpstream: false,
+                  sourceRevisions: [
+                    {
+                      assetId: 'asset-m27-006',
+                      assetRevision: 1,
+                      role: 'Lights',
+                    },
+                    {
+                      assetId: 'asset-flat-ha',
+                      assetRevision: 1,
+                      role: 'Flats',
+                    },
+                  ],
+                  recommendations: [],
+                  overrides: [],
+                  frameOutcomes: [
+                    {
+                      assetId: 'asset-m27-006',
+                      assetRevision: 1,
+                      outcome: 'Warning',
+                      message:
+                        'Calibration continued without compatible support.',
+                      outputChecksum: 'sha256:cal-output',
+                      diagnostic: 'ReviewSupport',
+                    },
+                  ],
+                  outputs: [
+                    {
+                      sourceAssetId: 'asset-m27-006',
+                      sourceAssetRevision: 1,
+                      checksum: 'sha256:cal-output',
+                      format: 'deterministicEvidenceJson',
+                    },
+                  ],
+                  diagnostics: [
+                    'Deterministic adapter evidence only; astronomy calibration quality is not claimed.',
+                  ],
+                  stageOutcome: 'Warning',
+                  resultId: 'stage-result-calibration-1',
+                  outputChecksum: 'sha256:attempt',
+                },
+              ],
+              selectedAttemptId: 'stage-attempt-calibration-1',
+            },
+      ),
+    })),
+    projectActions: [
+      {
+        projectId: 'project-m27',
+        actions: [
+          { _tag: 'Eligible', action: 'NavigateProcessingProjectStage' },
+          { _tag: 'Eligible', action: 'UpdateProcessingStageDraft' },
+          { _tag: 'Eligible', action: 'UndoProcessingStageDraft' },
+          { _tag: 'Eligible', action: 'RedoProcessingStageDraft' },
+          { _tag: 'Eligible', action: 'RunProcessingProjectStage' },
+          { _tag: 'Eligible', action: 'SelectProcessingStageResult' },
+          {
+            _tag: 'Ineligible',
+            action: 'SetCalibrationUseAnyway',
+            reason: 'readOnlyClient',
+          },
+        ],
+      },
+    ],
+  })
+  const desktop = renderToStaticMarkup(
+    createElement(BetaProcessApp, {
+      projection: processControllerProjection,
+      loading: false,
+      initialWorkspace: calibrated,
+    }),
+  )
+  assert.match(desktop, /Deterministic Calibration evidence/)
+  assert.match(desktop, /Gain and temperature are not retained/)
+  assert.match(desktop, /Allow with warning/)
+  assert.match(desktop, /Require selected support/)
+  assert.match(desktop, /Excluded from Calibration/)
+  assert.match(desktop, /Use this Flat/)
+  assert.match(desktop, /Remove from project/)
+  assert.match(desktop, /This Flat does not match the Lights/)
+  assert.match(desktop, /control-capable desktop client is required/)
+  assert.match(desktop, /Calibration continued without compatible support/)
+  assert.match(desktop, /ReviewSupport/)
+  assert.match(desktop, /deterministic JSON evidence output/)
+
+  const overridden = Schema.decodeUnknownSync(ProcessingProjection)({
+    ...calibrated,
+    projects: calibrated.projects.map((project) => ({
+      ...project,
+      stages: project.stages.map((stage) =>
+        stage.stage === 'Calibration'
+          ? {
+              ...stage,
+              draft: {
+                ...stage.draft,
+                overrides: [
+                  { assetId: 'asset-flat-ha', decision: 'Use anyway' },
+                ],
+              },
+            }
+          : stage,
+      ),
+    })),
+  })
+  const overriddenDesktop = renderToStaticMarkup(
+    createElement(BetaProcessApp, {
+      projection: processControllerProjection,
+      loading: false,
+      initialWorkspace: overridden,
+    }),
+  )
+  assert.match(overriddenDesktop, /Included despite mismatch/)
+  assert.match(overriddenDesktop, /Remove from project/)
+  assert.doesNotMatch(overriddenDesktop, /Use this Flat/)
+  assert.doesNotMatch(overriddenDesktop, /Remove override/)
+
+  const phone = renderToStaticMarkup(
+    createElement(ProcessPhone, { workspace: calibrated, state: 'Current' }),
+  )
+  assert.match(phone, /Calibration evidence/)
+  assert.match(phone, /Advisory mismatch/)
+  assert.match(phone, /deterministic-calibration-adapter-v1/)
+  assert.match(phone, /Selected result/)
+  assert.doesNotMatch(phone, /<button|<input|<select|<textarea/)
+})
+
+test('keeps the project stage header stable while its body owns vertical scroll', () => {
+  const styles = readFileSync(new URL('./beta-process.css', import.meta.url), {
+    encoding: 'utf8',
+  })
+  assert.match(
+    styles,
+    /\.beta-process-project-sources\s*\{[^}]*display:\s*grid;[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\);[^}]*overflow:\s*hidden;/s,
+  )
+  assert.match(
+    styles,
+    /\.beta-process-project-sources \.nb-panel-body\s*\{[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto;/s,
+  )
 })
 
 test('shows the service-owned needs-review queue with evidence and blocks Build', () => {

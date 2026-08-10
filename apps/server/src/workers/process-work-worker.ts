@@ -237,7 +237,9 @@ export function createProcessWorkWorker(options: {
     const bytes = JSON.stringify({
       adapter:
         row.kind === 'projectStage'
-          ? 'deterministic-stage-harness-v1'
+          ? stage === 'Calibration'
+            ? 'deterministic-calibration-adapter-v1'
+            : 'deterministic-stage-harness-v1'
           : 'deterministic-file-v1',
       kind: row.kind,
       stage,
@@ -263,7 +265,10 @@ export function createProcessWorkWorker(options: {
         artifactPath,
       )
       return settled.outcome === 'settled'
-        ? { outcome: 'completed', kind: row.kind }
+        ? settled.stageOutcome === 'Failed' ||
+          settled.stageOutcome === 'Unavailable'
+          ? { outcome: 'failed', kind: row.kind }
+          : { outcome: 'completed', kind: row.kind }
         : { outcome: 'stale', kind: row.kind }
     }
     if (row.kind === 'build') {
