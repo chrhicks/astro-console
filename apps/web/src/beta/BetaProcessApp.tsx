@@ -29,7 +29,11 @@ import {
 } from 'react'
 import type { ProcessSourceHandoff, ReviewRequest } from '../library-client'
 import type { Projection } from '../presentation'
-import { BetaCommandBar, type BetaControlPresentation } from './BetaObserveApp'
+import {
+  BetaCommandBar,
+  type BetaControlPresentation,
+  type BetaControlSubmit,
+} from './BetaObserveApp'
 import '@nightbook/ui/styles.css'
 import './beta-observe.css'
 import './beta-process.css'
@@ -48,6 +52,7 @@ type HandoffState = 'loading' | 'not-found' | 'not-local' | 'unavailable'
 export type BetaProcessAppProps = {
   projection: Projection
   loading: boolean
+  submitControl?: BetaControlSubmit
   sourceAssetId?: string | undefined
   sourceHandoff?: ProcessSourceHandoff | undefined
   sourceHandoffState?: HandoffState | undefined
@@ -123,6 +128,20 @@ const processControlPresentation = (
       subject: 'Read-only phone projection',
       presence: 'Process mutations require a current desktop owner.',
       protection: 'Phone Process evidence is intentionally read-only.',
+      currentUiHref: '/process',
+    }
+  if (projection.shell.control.actions.some((action) => action.kind === 'take'))
+    return {
+      label: 'Control · view',
+      dialogLabel: 'Process authority',
+      heading: 'Process authority',
+      state: 'unheld',
+      tone: 'warning',
+      subjectLabel: 'Controller',
+      subject: projection.shell.controller,
+      presence: projection.shell.control.presence,
+      protection:
+        'Take shared control before using controller-owned Process actions.',
       currentUiHref: '/process',
     }
   if (processAuthorityConfirmed(projection))
@@ -2254,10 +2273,12 @@ export function ProcessCommandBar({
   projection,
   loading,
   phone,
+  submitControl,
 }: {
   projection: Projection
   loading: boolean
   phone: boolean
+  submitControl?: BetaControlSubmit
 }) {
   return (
     <BetaCommandBar
@@ -2265,6 +2286,8 @@ export function ProcessCommandBar({
       loading={loading}
       workspace="process"
       controlPresentation={processControlPresentation(projection, phone)}
+      submitControl={submitControl}
+      allowControlAction={!phone}
     />
   )
 }
@@ -2348,6 +2371,9 @@ export function BetaProcessApp(props: BetaProcessAppProps) {
         projection={props.projection}
         loading={props.loading}
         phone={phone}
+        {...(props.submitControl === undefined
+          ? {}
+          : { submitControl: props.submitControl })}
       />
       {phone ? (
         <ProcessPhone workspace={workspace} state={state} />

@@ -2,6 +2,7 @@ import {
   ActionPanel,
   AttemptTrail,
   AttentionCard,
+  Button,
   DataList,
   DataListItem,
   EvidenceViewport,
@@ -17,14 +18,16 @@ import {
   type Tone,
 } from '@nightbook/ui'
 import {
+  CommandId,
   IdempotencyKey,
   type ObserveWorkspaceProjection,
 } from '@astro-console/v2-contracts'
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   ObserveCommandSubmission,
   type ObserveAction,
 } from '../observe-command-client'
+import { type CommandSubmission, type ControlIntent } from '../command-client'
 import type { PreflightRefreshSubmission } from '../preflight-refresh-client'
 import type {
   HealthFact,
@@ -53,7 +56,12 @@ export type BetaObserveAppProps = {
       | 'AbortAcquire',
   ) => Promise<void>
   approvePointingCorrection?: (proposalId: string) => Promise<void>
+  submitControl?: BetaControlSubmit
 }
+
+export type BetaControlSubmit = (
+  intent: ControlIntent,
+) => Promise<CommandSubmission>
 
 const lifecycleStages = [
   { id: 'preflight', label: 'Preflight' },
@@ -781,21 +789,65 @@ export type BetaControlPresentation = {
   currentUiHref: string
 }
 
+export const projectedTakeControlAction = (shell: ShellView) =>
+  shell.control.readOnly
+    ? undefined
+    : shell.control.actions.find((action) => action.kind === 'take')
+
 function BetaControl({
   shell,
   loading,
   presentation,
+  submitControl,
+  allowAction,
 }: {
   shell: ShellView
   loading: boolean
   presentation: BetaControlPresentation | undefined
+  submitControl: BetaControlSubmit | undefined
+  allowAction: boolean
 }) {
   const [open, setOpen] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [message, setMessage] = useState<string | undefined>()
   const panelId = useId()
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const takeAction = allowAction ? projectedTakeControlAction(shell) : undefined
+  const takeControl = () => {
+    if (
+      takeAction === undefined ||
+      shell.control.readOnly ||
+      submitControl === undefined ||
+      pending
+    )
+      return
+    setPending(true)
+    setMessage(undefined)
+    void submitControl({
+      _tag: 'TakeControl',
+      commandId: CommandId.make(crypto.randomUUID()),
+      idempotencyKey: IdempotencyKey.make(crypto.randomUUID()),
+    }).then(
+      (result) => {
+        setPending(false)
+        setMessage(
+          result._tag === 'Accepted'
+            ? 'Control action recorded. Waiting for the current service projection.'
+            : `${result._tag === 'Rejected' ? result.failure.summary : result.reason} ${result.safeNextAction}`,
+        )
+      },
+      () => {
+        setPending(false)
+        setMessage('Control action could not reach the service.')
+      },
+    )
+  }
   useEffect(() => {
     if (!open) return
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
+      if (event.key !== 'Escape') return
+      setOpen(false)
+      requestAnimationFrame(() => triggerRef.current?.focus())
     }
     document.addEventListener('keydown', closeOnEscape)
     return () => document.removeEventListener('keydown', closeOnEscape)
@@ -803,6 +855,7 @@ function BetaControl({
   return (
     <div className="beta-control">
       <button
+        ref={triggerRef}
         className="beta-control-trigger"
         type="button"
         aria-expanded={open}
@@ -843,9 +896,27 @@ function BetaControl({
             />
           </DataList>
           <p>{presentation?.protection ?? shell.protection}</p>
-          <a href={presentation?.currentUiHref ?? '/observe'}>
-            Open current UI
-          </a>
+          {message ? <p role="status">{message}</p> : null}
+          <div className="beta-control-actions">
+            {takeAction !== undefined && !shell.control.readOnly ? (
+              <Button
+                tone="primary"
+                size="small"
+                disabled={loading || pending || submitControl === undefined}
+                title={
+                  submitControl === undefined
+                    ? 'Control command service is not ready.'
+                    : undefined
+                }
+                onClick={takeControl}
+              >
+                {pending ? 'Taking control…' : takeAction.label}
+              </Button>
+            ) : null}
+            <a href={presentation?.currentUiHref ?? '/observe'}>
+              Open current UI
+            </a>
+          </div>
         </section>
       ) : null}
     </div>
@@ -857,9 +928,13 @@ function BetaCommandBar({
   loading,
   workspace = 'observe',
   controlPresentation,
+  submitControl,
+  allowControlAction = true,
 }: Pick<BetaObserveAppProps, 'projection' | 'loading'> & {
   workspace?: 'plan' | 'observe' | 'library' | 'process'
   controlPresentation?: BetaControlPresentation | undefined
+  submitControl?: BetaControlSubmit | undefined
+  allowControlAction?: boolean
 }) {
   const run = projection.shell.currentRun
   const progress =
@@ -929,6 +1004,8 @@ function BetaCommandBar({
           shell={projection.shell}
           loading={loading}
           presentation={controlPresentation}
+          submitControl={submitControl}
+          allowAction={allowControlAction}
         />
       </header>
       <DevelopmentSimulationStrip readOnly={projection.shell.readOnly} />
@@ -1417,7 +1494,12 @@ export function BetaObserveApp(props: BetaObserveAppProps) {
       <a className="beta-skip-link" href="#beta-workspace">
         Skip to Observe evidence
       </a>
-      <BetaCommandBar projection={props.projection} loading={props.loading} />
+      <BetaCommandBar
+        projection={props.projection}
+        loading={props.loading}
+        submitControl={props.submitControl}
+        allowControlAction={!phone}
+      />
       {phone ? (
         <BetaObservePhone {...props} />
       ) : (

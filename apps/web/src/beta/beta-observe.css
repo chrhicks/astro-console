@@ -414,8 +414,14 @@
   font-size: 10px;
 }
 
-.beta-control-flyout > a {
-  display: inline-block;
+.beta-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.beta-control-actions > a {
   color: var(--nb-accent);
   font: 10px var(--nb-font-mono);
 }

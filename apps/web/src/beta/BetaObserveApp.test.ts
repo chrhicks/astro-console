@@ -12,7 +12,11 @@ import { BootstrapClientState } from '../bootstrap-client'
 import { projectBootstrapState } from '../bootstrap-projection'
 import { unavailableProjection } from '../future-adapter'
 import { PreflightRefreshSubmission } from '../preflight-refresh-client'
-import { BetaObserveApp, BetaObservePhone } from './BetaObserveApp'
+import {
+  BetaObserveApp,
+  BetaObservePhone,
+  projectedTakeControlAction,
+} from './BetaObserveApp'
 
 const preflightProjection = () =>
   projectBootstrapState(
@@ -44,6 +48,33 @@ const preflightProjection = () =>
       }),
     }),
   )
+
+test('uses only the service-projected Take control action in owner view mode', () => {
+  const ownerView = projectBootstrapState(
+    BootstrapClientState.Current({
+      snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)(
+        bootstrapFixtures.noRun,
+      ),
+    }),
+  )
+  const phoneView = projectBootstrapState(
+    BootstrapClientState.Current({
+      snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)(
+        bootstrapFixtures.phone,
+      ),
+    }),
+  )
+  assert.equal(ownerView.shell.readOnly, true)
+  assert.deepEqual(projectedTakeControlAction(ownerView.shell), {
+    kind: 'take',
+    label: 'Take control',
+  })
+  assert.equal(projectedTakeControlAction(phoneView.shell), undefined)
+  assert.equal(
+    projectedTakeControlAction(unavailableProjection.shell),
+    undefined,
+  )
+})
 
 const targetSnapshot = (
   acquire: unknown,

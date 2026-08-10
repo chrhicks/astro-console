@@ -38,7 +38,7 @@ import {
 } from 'react'
 import { PlanCommandSubmission, type PlanAction } from '../plan-command-client'
 import type { Projection, StatusTone } from '../presentation'
-import { BetaCommandBar } from './BetaObserveApp'
+import { BetaCommandBar, type BetaControlSubmit } from './BetaObserveApp'
 import '@nightbook/ui/styles.css'
 import './beta-observe.css'
 import './beta-plan.css'
@@ -64,6 +64,7 @@ export type BetaPlanAppProps = {
     action: PlanAction,
     key: typeof IdempotencyKey.Type,
   ) => Promise<PlanCommandSubmission>
+  submitControl?: BetaControlSubmit
 }
 
 const tone = (value: StatusTone): Tone => {
@@ -1354,6 +1355,8 @@ export function BetaPlanApp(props: BetaPlanAppProps) {
         projection={props.projection}
         loading={props.loading}
         workspace="plan"
+        submitControl={props.submitControl}
+        allowControlAction={!phone}
       />
       {phone ? (
         <BetaPlanPhone projection={props.projection} loading={props.loading} />

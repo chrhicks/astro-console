@@ -35,7 +35,7 @@ import type {
   LibraryQuery,
 } from '../library-client'
 import type { Projection } from '../presentation'
-import { BetaCommandBar } from './BetaObserveApp'
+import { BetaCommandBar, type BetaControlSubmit } from './BetaObserveApp'
 import '@nightbook/ui/styles.css'
 import './beta-observe.css'
 import './beta-library.css'
@@ -62,6 +62,7 @@ type LibraryIntake = {
 export type BetaLibraryAppProps = {
   projection: Projection
   loading: boolean
+  submitControl?: BetaControlSubmit
   assetId?: string
   page: {
     readonly query: LibraryQuery
@@ -1636,6 +1637,8 @@ export function BetaLibraryApp(props: BetaLibraryAppProps) {
         projection={props.projection}
         loading={props.loading}
         workspace="library"
+        submitControl={props.submitControl}
+        allowControlAction={!phone}
       />
       {phone ? (
         <BetaLibraryPhone

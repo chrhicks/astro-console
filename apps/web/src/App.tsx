@@ -799,6 +799,7 @@ export function App() {
         <BetaObserveApp
           projection={projection}
           loading={!projectionReceived}
+          {...(submitControl === undefined ? {} : { submitControl })}
           {...(submitObserve === undefined || projection.shell.readOnly
             ? {}
             : { submit: submitObserve })}
@@ -834,6 +835,7 @@ export function App() {
         <BetaPlanApp
           projection={projection}
           loading={!projectionReceived}
+          {...(submitControl === undefined ? {} : { submitControl })}
           {...(submitPlan === undefined || projection.shell.readOnly
             ? {}
             : { submit: submitPlan })}
@@ -853,6 +855,7 @@ export function App() {
         <BetaLibraryApp
           projection={projection}
           loading={!projectionReceived}
+          {...(submitControl === undefined ? {} : { submitControl })}
           page={{
             query: libraryQuery,
             ...(libraryPage.value === undefined
@@ -894,6 +897,7 @@ export function App() {
         <BetaProcessApp
           projection={projection}
           loading={!projectionReceived}
+          {...(submitControl === undefined ? {} : { submitControl })}
           sourceAssetId={
             route.kind === 'process-source' ? route.sourceAssetId : undefined
           }
