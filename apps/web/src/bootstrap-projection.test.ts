@@ -52,6 +52,24 @@ test('projects a fresh authoritative snapshot with distinct health facts', () =>
   assert.equal('action' in projection.observe, false)
 })
 
+test('keeps the global bootstrap version available when no run is active', () => {
+  const current = snapshot('fresh')
+  const next = Schema.decodeUnknownSync(BootstrapSnapshot)({
+    ...current,
+    snapshotVersion: current.snapshotVersion + 1,
+    eventCursor: current.eventCursor + 1,
+  })
+  const first = projectBootstrapState(
+    BootstrapClientState.Current({ snapshot: current }),
+  )
+  const second = projectBootstrapState(
+    BootstrapClientState.Current({ snapshot: next }),
+  )
+  assert.equal(current.activeRun._tag, 'None')
+  assert.equal(first.snapshotVersion, current.snapshotVersion)
+  assert.equal(second.snapshotVersion, current.snapshotVersion + 1)
+})
+
 test('shows tunnel failure as remote viewing unavailable without changing active-run truth', () => {
   const active = Schema.decodeUnknownSync(BootstrapSnapshot)({
     ...bootstrapFixtures.fresh,

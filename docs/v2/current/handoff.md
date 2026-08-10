@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–3 and Item 3.5.1 complete; Item 3.5.2 next**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–3 and Items 3.5.1–3.5.2 complete; Item 3.5.3 next**
 
 ## Current Position
 
@@ -183,6 +183,15 @@ concerns as warnings. Process now keeps a persistent Sources view across
 restart. Intake does not enqueue Build or Calibration work, and phone remains
 read-only.
 
+Item 3.5.2 is complete. Processing Projects keep persistent Sources,
+Calibration, Registration, Stacking, Master, and Develop navigation. The three
+executable stages have bounded draft undo and redo, explicit Run or Rerun,
+append-only attempts, selected results, and exact source or upstream lineage.
+Worker settlement publishes fresh Process state without timer polling, and
+restart keeps drafts, attempts, selections, artifacts, and stale-lineage
+evidence. The deterministic stage harness proves service orchestration and
+persistence only; it does not prove astronomy processing quality.
+
 After that simulator proof, an indoor GET-only readiness check reached ASCOM
 Remote at `192.168.4.104:11111`. Management and every device-property envelope
 returned `ErrorNumber: 0`. The configured identities were Telescope 0 `ASI
@@ -340,17 +349,16 @@ covered indoor frame.
 
 ## Next Accepted Item
 
-3.5.2. **Add persistent stage drafts, attempts, and navigation.** Keep Sources,
-Calibration, Registration, Stacking, Master, and Develop navigable. Add bounded
-draft undo and redo, append-only attempts, selected results, and explicit Run
-or Rerun actions without replaying claimed work after restart.
+3.5.3. **Add explicit Calibration.** Freeze selected source roles, calibration
+inputs, settings, overrides, tool identity, outputs, and per-frame outcomes in
+each attempt. Keep metadata and quality concerns advisory, preserve the last
+valid result through failure and restart, and require explicit Run or Rerun.
 
 ## Later Accepted Items
 
-Items 3.5.3 through 3.5.7 add explicit Calibration, Registration, and Stacking,
-a saved Master boundary,
-astronomy-specific Develop operations, and the final integrated operator
-review. Follow the ordered scope and proof in the
+Items 3.5.4 through 3.5.7 add explicit Registration and Stacking, a saved
+Master boundary, astronomy-specific Develop operations, and the final
+integrated operator review. Follow the ordered scope and proof in the
 [Item 3.5 Process workflow plan](process-workflow-plan.md).
 
 4. **Audit and promote the beta.** Verify all four exact Nightbook workflows

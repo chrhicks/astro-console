@@ -126,6 +126,12 @@ export const ProcessingAction = Schema.Literals([
   'CreateProcessingProject',
   'AddProcessingProjectSources',
   'AssignProcessingSourceRole',
+  'NavigateProcessingProjectStage',
+  'UpdateProcessingStageDraft',
+  'UndoProcessingStageDraft',
+  'RedoProcessingStageDraft',
+  'RunProcessingProjectStage',
+  'SelectProcessingStageResult',
   'StartProcessingSession',
   'ResumeProcessingSession',
   'SyncProcessingPreview',
@@ -157,6 +163,12 @@ export const ProcessingActionDenialReason = Schema.Literals([
   'outputRequired',
   'assistantFindingRequired',
   'saveInProgress',
+  'projectStageRequired',
+  'draftUndoUnavailable',
+  'draftRedoUnavailable',
+  'upstreamResultRequired',
+  'stageAttemptActive',
+  'stageResultUnavailable',
 ])
 
 export const ProcessingActionEligibility = Schema.TaggedUnion({
@@ -200,6 +212,7 @@ export const ProcessingProjection = Schema.Struct({
           'retry',
           'save',
           'cleanup',
+          'projectStage',
         ]),
         state: Schema.Literals([
           'pending',
@@ -216,6 +229,9 @@ export const ProcessingProjection = Schema.Struct({
             'align',
             'evaluate',
             'stack',
+            'Calibration',
+            'Registration',
+            'Stacking',
           ]),
         ),
         checkpoint: Schema.optionalKey(Schema.NonEmptyString),
@@ -1676,17 +1692,85 @@ function projectSessionActions(
 }
 
 export function projectProcessingProjectActions(
-  projectIds: ReadonlyArray<typeof ProcessingProjectId.Type>,
+  projects: ReadonlyArray<ProcessingProject | typeof ProcessingProjectId.Type>,
   authority: ProcessingAuthority,
 ) {
   const reason = authorityReason(authority)
-  return projectIds.map((projectId) => ({
-    projectId,
-    actions: [
-      eligibility('AddProcessingProjectSources', reason),
-      eligibility('AssignProcessingSourceRole', reason),
-    ],
-  }))
+  return projects.map((value) => {
+    const project = typeof value === 'string' ? undefined : value
+    const projectId = typeof value === 'string' ? value : value.projectId
+    const stage = project?.stages.find(
+      (item) => item.stage === project.currentStage,
+    )
+    const executable = stage !== undefined
+    const active =
+      stage?.attempts.some(
+        (attempt) => attempt.state === 'queued' || attempt.state === 'running',
+      ) ?? false
+    const upstreamStage =
+      stage?.stage === 'Registration'
+        ? project?.stages.find((item) => item.stage === 'Calibration')
+        : stage?.stage === 'Stacking'
+          ? project?.stages.find((item) => item.stage === 'Registration')
+          : undefined
+    const upstreamAttempt = upstreamStage?.attempts.find(
+      (attempt) => attempt.attemptId === upstreamStage.selectedAttemptId,
+    )
+    const upstreamReady =
+      stage?.stage === 'Calibration' ||
+      (upstreamAttempt?.state === 'succeeded' &&
+        !upstreamAttempt.basedOnEarlierUpstream)
+    return {
+      projectId,
+      actions: [
+        eligibility('AddProcessingProjectSources', reason),
+        eligibility('AssignProcessingSourceRole', reason),
+        eligibility('NavigateProcessingProjectStage', reason),
+        eligibility(
+          'UpdateProcessingStageDraft',
+          reason ?? (executable ? undefined : 'projectStageRequired'),
+        ),
+        eligibility(
+          'UndoProcessingStageDraft',
+          reason ??
+            (!executable
+              ? 'projectStageRequired'
+              : stage.draft.undo.length === 0
+                ? 'draftUndoUnavailable'
+                : undefined),
+        ),
+        eligibility(
+          'RedoProcessingStageDraft',
+          reason ??
+            (!executable
+              ? 'projectStageRequired'
+              : stage.draft.redo.length === 0
+                ? 'draftRedoUnavailable'
+                : undefined),
+        ),
+        eligibility(
+          'RunProcessingProjectStage',
+          reason ??
+            (!executable
+              ? 'projectStageRequired'
+              : active
+                ? 'stageAttemptActive'
+                : !upstreamReady
+                  ? 'upstreamResultRequired'
+                  : undefined),
+        ),
+        eligibility(
+          'SelectProcessingStageResult',
+          reason ??
+            (!executable
+              ? 'projectStageRequired'
+              : stage.attempts.some((attempt) => attempt.state === 'succeeded')
+                ? undefined
+                : 'stageResultUnavailable'),
+        ),
+      ],
+    }
+  })
 }
 
 function rejected(

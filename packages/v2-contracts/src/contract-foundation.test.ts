@@ -188,6 +188,50 @@ const commandFixtures: ReadonlyArray<unknown> = [
     idempotencyKey: 'i-project-3',
   },
   {
+    _tag: 'NavigateProcessingProjectStage',
+    projectId: 'project-1',
+    expectedProjectRevision: 2,
+    stage: 'Calibration',
+    idempotencyKey: 'i-project-4',
+  },
+  {
+    _tag: 'UpdateProcessingStageDraft',
+    projectId: 'project-1',
+    expectedProjectRevision: 3,
+    stage: 'Calibration',
+    settings: [{ key: 'mode', value: 'default' }],
+    idempotencyKey: 'i-project-5',
+  },
+  {
+    _tag: 'UndoProcessingStageDraft',
+    projectId: 'project-1',
+    expectedProjectRevision: 4,
+    stage: 'Calibration',
+    idempotencyKey: 'i-project-6',
+  },
+  {
+    _tag: 'RedoProcessingStageDraft',
+    projectId: 'project-1',
+    expectedProjectRevision: 5,
+    stage: 'Calibration',
+    idempotencyKey: 'i-project-7',
+  },
+  {
+    _tag: 'RunProcessingProjectStage',
+    projectId: 'project-1',
+    expectedProjectRevision: 6,
+    stage: 'Calibration',
+    idempotencyKey: 'i-project-8',
+  },
+  {
+    _tag: 'SelectProcessingStageResult',
+    projectId: 'project-1',
+    expectedProjectRevision: 7,
+    stage: 'Calibration',
+    attemptId: 'stage-attempt-1',
+    idempotencyKey: 'i-project-9',
+  },
+  {
     _tag: 'ResumeProcessingSession',
     sessionId: 'process-1',
     expectedProcessingRevision: 5,
@@ -279,7 +323,7 @@ const commandFixtures: ReadonlyArray<unknown> = [
 
 describe('Gate 5 contract foundation', () => {
   it('keeps the accepted command vocabulary closed', () => {
-    assert.equal(commandTags.length, 44)
+    assert.equal(commandTags.length, 50)
     assert.deepEqual(commandTags, acceptedCommandTags)
     assert.deepEqual(
       commandTags,

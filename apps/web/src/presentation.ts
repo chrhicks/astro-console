@@ -166,6 +166,7 @@ export type LibraryAsset = {
 }
 export type LibraryView = { assets: readonly LibraryAsset[]; action?: Action }
 export type Projection = {
+  snapshotVersion: number
   shell: ShellView
   plan: PlanView
   observe: ObserveView

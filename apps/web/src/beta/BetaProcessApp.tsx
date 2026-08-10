@@ -38,6 +38,7 @@ export type ProcessWorkspace = typeof ProcessingProjection.Type
 type Session = ProcessWorkspace['sessions'][number]
 type ProcessAction = ProcessWorkspace['actions'][number]
 type ProcessActionName = ProcessAction['action']
+type ProjectStageName = ProcessWorkspace['projects'][number]['currentStage']
 type ProcessDenialReason = Extract<
   ProcessAction,
   { _tag: 'Ineligible' }
@@ -169,44 +170,57 @@ const selectedProject = (workspace: ProcessWorkspace | undefined) =>
     (project) => project.projectId === workspace.selectedProjectId,
   ) ?? workspace?.projects.at(-1)
 
-const projectSteps = [
-  {
-    id: 'sources',
-    label: 'Sources',
-    description: 'Current',
-    status: 'current' as const,
-  },
-  {
-    id: 'calibration',
-    label: 'Calibration',
-    description: 'Explicit Run later',
-    status: 'pending' as const,
-  },
-  {
-    id: 'registration',
-    label: 'Registration',
-    description: 'Explicit Run later',
-    status: 'pending' as const,
-  },
-  {
-    id: 'stacking',
-    label: 'Stacking',
-    description: 'Explicit Run later',
-    status: 'pending' as const,
-  },
-  {
-    id: 'master',
-    label: 'Master',
-    description: 'No result yet',
-    status: 'pending' as const,
-  },
-  {
-    id: 'develop',
-    label: 'Develop',
-    description: 'No saved Master',
-    status: 'pending' as const,
-  },
-]
+const projectStageNames = [
+  'Sources',
+  'Calibration',
+  'Registration',
+  'Stacking',
+  'Master',
+  'Develop',
+] as const
+
+const projectSteps = (
+  project: ProcessWorkspace['projects'][number],
+  viewedStage: ProjectStageName,
+) =>
+  projectStageNames.map((name) => {
+    const stage = project.stages.find((candidate) => candidate.stage === name)
+    const selected = stage?.attempts.find(
+      (attempt) => attempt.attemptId === stage.selectedAttemptId,
+    )
+    const active = stage?.attempts.some(
+      (attempt) => attempt.state === 'queued' || attempt.state === 'running',
+    )
+    const failed = stage?.attempts.at(-1)?.state === 'failed'
+    const current = viewedStage === name
+    return {
+      id: name.toLowerCase(),
+      label: name,
+      description:
+        name === 'Sources'
+          ? `${project.sources.length} retained`
+          : selected?.state === 'succeeded' && !selected.basedOnEarlierUpstream
+            ? 'Result selected'
+            : active
+              ? 'Attempt active'
+              : stage?.attempts.length
+                ? `${stage.attempts.length} retained`
+                : name === 'Master'
+                  ? 'No result yet'
+                  : name === 'Develop'
+                    ? 'No saved Master'
+                    : 'Explicit Run later',
+      status: current
+        ? ('current' as const)
+        : failed
+          ? ('failed' as const)
+          : name === 'Sources' ||
+              (selected?.state === 'succeeded' &&
+                !selected.basedOnEarlierUpstream)
+            ? ('complete' as const)
+            : ('pending' as const),
+    }
+  })
 
 const currentOutputId = (session: Session) => {
   if (session.historyPosition > 0)
@@ -232,6 +246,12 @@ const processDenialMessages: Record<ProcessDenialReason, string> = {
   outputRequired: 'Create a durable processing output first.',
   assistantFindingRequired: 'No current assistant finding is available.',
   saveInProgress: 'Wait for the current Library save to finish.',
+  projectStageRequired: 'Choose Calibration, Registration, or Stacking.',
+  draftUndoUnavailable: 'There is no earlier draft setting.',
+  draftRedoUnavailable: 'There is no later draft setting.',
+  upstreamResultRequired: 'Select the required upstream result first.',
+  stageAttemptActive: 'Wait for the current stage attempt.',
+  stageResultUnavailable: 'No completed stage result is available.',
 }
 
 const processAction = (
@@ -320,12 +340,13 @@ const buildStageItems = (
   }))
 }
 
+const buildStage = (value: string | undefined) =>
+  buildStageNames.find((candidate) => candidate === value)
+
 export function ProcessPhone({
-  projection,
   workspace,
   state,
 }: {
-  projection: Projection
   workspace: ProcessWorkspace | undefined
   state: string
 }) {
@@ -345,7 +366,7 @@ export function ProcessPhone({
           </h1>
         </div>
         <StatusIndicator
-          label={project ? 'Sources' : (session?.lifecycle ?? state)}
+          label={project ? project.currentStage : (session?.lifecycle ?? state)}
           tone={project || session ? 'positive' : 'neutral'}
         />
       </header>
@@ -376,7 +397,11 @@ export function ProcessPhone({
             />
             <DataListItem
               label="Phase"
-              value={project ? 'Sources' : (session?.phase ?? 'Unavailable')}
+              value={
+                project
+                  ? project.currentStage
+                  : (session?.phase ?? 'Unavailable')
+              }
             />
             {!project ? (
               <>
@@ -418,6 +443,35 @@ export function ProcessPhone({
                 <DataListItem
                   label="Warnings"
                   value={String(project.warnings.length)}
+                />
+                <DataListItem
+                  label="Stage draft"
+                  value={
+                    project.stages.find(
+                      (stage) => stage.stage === project.currentStage,
+                    )?.draft.revision === undefined
+                      ? 'Not editable in this stage'
+                      : `Revision ${project.stages.find((stage) => stage.stage === project.currentStage)?.draft.revision}`
+                  }
+                />
+                <DataListItem
+                  label="Stage attempts"
+                  value={String(
+                    project.stages.find(
+                      (stage) => stage.stage === project.currentStage,
+                    )?.attempts.length ?? 0,
+                  )}
+                  detail={
+                    project.stages.find(
+                      (stage) => stage.stage === project.currentStage,
+                    )?.selectedAttemptId
+                      ? `Selected ${project.stages.find((stage) => stage.stage === project.currentStage)?.selectedAttemptId}`
+                      : 'No selected result'
+                  }
+                />
+                <DataListItem
+                  label="Available views"
+                  value="Sources · Calibration · Registration · Stacking · Master · Develop"
                 />
               </>
             ) : null}
@@ -474,6 +528,39 @@ export function ProcessPhone({
           </PanelBody>
         </Panel>
       ) : null}
+      {project ? (
+        <Panel>
+          <PanelHeader title="All stage evidence" meta="Read only" />
+          <PanelBody>
+            <div className="beta-process-phone-sources">
+              {project.stages.map((stage) => (
+                <article
+                  className="beta-process-phone-source"
+                  key={stage.stage}
+                >
+                  <b>{stage.stage}</b>
+                  <span>
+                    Draft {stage.draft.revision} · {stage.attempts.length}{' '}
+                    retained attempt{stage.attempts.length === 1 ? '' : 's'}
+                  </span>
+                  <span>
+                    {stage.selectedAttemptId
+                      ? `Selected ${stage.selectedAttemptId}`
+                      : 'No selected result'}
+                  </span>
+                  <span>
+                    {stage.attempts.some(
+                      (attempt) => attempt.basedOnEarlierUpstream,
+                    )
+                      ? 'Earlier input lineage retained'
+                      : 'No earlier lineage result'}
+                  </span>
+                </article>
+              ))}
+            </div>
+          </PanelBody>
+        </Panel>
+      ) : null}
       {session && !project ? (
         <Panel>
           <PanelHeader title="Current evidence" meta="Last confirmed" />
@@ -492,7 +579,7 @@ export function ProcessPhone({
         </Panel>
       ) : null}
       <p className="beta-process-phone-protection">
-        {projection.shell.protection}
+        Read-only: Process mutations require a current desktop owner.
       </p>
     </main>
   )
@@ -503,14 +590,25 @@ function ProjectSourcesDesktop({
   pending,
   message,
   assignmentReason,
+  navigationReason,
+  viewedStage,
+  onViewStage,
   command,
 }: {
   project: ProcessWorkspace['projects'][number]
   pending: string | undefined
   message: string | undefined
   assignmentReason: string | undefined
+  navigationReason: string | undefined
+  viewedStage: ProcessWorkspace['projects'][number]['currentStage']
+  onViewStage: (
+    stage: ProcessWorkspace['projects'][number]['currentStage'],
+  ) => void
   command: (command: object, label: string) => void
 }) {
+  const calibrationAttemptCount =
+    project.stages.find((stage) => stage.stage === 'Calibration')?.attempts
+      .length ?? 0
   const roles = [
     'Lights',
     'Darks',
@@ -545,8 +643,31 @@ function ProjectSourcesDesktop({
               <ProcessActionDenial reason={assignmentReason} />
               <StepRail
                 label="Processing Project stages"
-                activeId="sources"
-                items={projectSteps}
+                activeId={viewedStage.toLowerCase()}
+                items={projectSteps(project, viewedStage)}
+                onActiveChange={(id: string) => {
+                  const stage = projectStageNames.find(
+                    (candidate) => candidate.toLowerCase() === id,
+                  )
+                  if (
+                    stage === undefined ||
+                    stage === viewedStage ||
+                    pending !== undefined
+                  )
+                    return
+                  onViewStage(stage)
+                  if (navigationReason === undefined)
+                    command(
+                      {
+                        _tag: 'NavigateProcessingProjectStage',
+                        projectId: project.projectId,
+                        expectedProjectRevision: project.revision,
+                        stage,
+                        idempotencyKey: crypto.randomUUID(),
+                      },
+                      `Opening ${stage}`,
+                    )
+                }}
               />
               <a
                 className="nb-button nb-button--secondary nb-button--medium"
@@ -558,7 +679,14 @@ function ProjectSourcesDesktop({
           </PanelBody>
         </Panel>
         <Panel className="beta-process-project-sources">
-          <PanelHeader title="Sources" meta="No Calibration work has started" />
+          <PanelHeader
+            title="Sources"
+            meta={
+              calibrationAttemptCount
+                ? `${calibrationAttemptCount} Calibration attempt${calibrationAttemptCount === 1 ? '' : 's'} retained`
+                : 'No Calibration work has started'
+            }
+          />
           <PanelBody>
             <Stack>
               {project.warnings.map((warning) => (
@@ -652,6 +780,310 @@ function ProjectSourcesDesktop({
                 title="Calibration is explicit"
                 description="These exact asset revisions are retained as project sources. No Calibration, Registration, or Stacking work starts from source intake."
               />
+            </Stack>
+          </PanelBody>
+        </Panel>
+      </div>
+    </main>
+  )
+}
+
+function ProjectStageDesktop({
+  project,
+  actions,
+  pending,
+  message,
+  command,
+  viewedStage,
+  onViewStage,
+}: {
+  project: ProcessWorkspace['projects'][number]
+  actions: ReadonlyArray<ProcessAction> | undefined
+  pending: string | undefined
+  message: string | undefined
+  command: (command: object, label: string) => void
+  viewedStage: ProcessWorkspace['projects'][number]['currentStage']
+  onViewStage: (
+    stage: ProcessWorkspace['projects'][number]['currentStage'],
+  ) => void
+}) {
+  const stage = project.stages.find((item) => item.stage === viewedStage)
+  const navigationReason = processActionReason(
+    actions,
+    'NavigateProcessingProjectStage',
+  )
+  const updateReason = processActionReason(
+    actions,
+    'UpdateProcessingStageDraft',
+  )
+  const runReason = processActionReason(actions, 'RunProcessingProjectStage')
+  const undoReason = processActionReason(actions, 'UndoProcessingStageDraft')
+  const redoReason = processActionReason(actions, 'RedoProcessingStageDraft')
+  const selectReason = processActionReason(
+    actions,
+    'SelectProcessingStageResult',
+  )
+  const profile =
+    stage?.draft.settings.find((setting) => setting.key === 'profile')?.value ??
+    'Default'
+  return (
+    <main
+      id="beta-workspace"
+      className="beta-desktop-workspace beta-process-workspace beta-process-project"
+      aria-busy={!!pending}
+    >
+      <PageHeader
+        eyebrow="Process / Processing Project"
+        title={project.name}
+        meta={`${viewedStage} · ${project.targetName ?? 'Target not set'}`}
+        actions={
+          <StatusIndicator
+            tone={
+              stage?.attempts.some(
+                (attempt) =>
+                  attempt.state === 'queued' || attempt.state === 'running',
+              )
+                ? 'warning'
+                : 'positive'
+            }
+            label={`${viewedStage} retained`}
+            detail={`Project revision ${project.revision}`}
+          />
+        }
+      />
+      <div className="beta-process-project-grid">
+        <Panel className="beta-process-project-rail">
+          <PanelHeader title="Workflow" meta="Persistent project" />
+          <PanelBody>
+            <Stack>
+              <StepRail
+                label="Processing Project stages"
+                activeId={viewedStage.toLowerCase()}
+                items={projectSteps(project, viewedStage)}
+                onActiveChange={(id: string) => {
+                  const nextStage = projectStageNames.find(
+                    (candidate) => candidate.toLowerCase() === id,
+                  )
+                  if (
+                    nextStage === undefined ||
+                    nextStage === viewedStage ||
+                    pending !== undefined
+                  )
+                    return
+                  onViewStage(nextStage)
+                  if (navigationReason === undefined)
+                    command(
+                      {
+                        _tag: 'NavigateProcessingProjectStage',
+                        projectId: project.projectId,
+                        expectedProjectRevision: project.revision,
+                        stage: nextStage,
+                        idempotencyKey: crypto.randomUUID(),
+                      },
+                      `Opening ${nextStage}`,
+                    )
+                }}
+              />
+            </Stack>
+          </PanelBody>
+        </Panel>
+        <Panel className="beta-process-project-sources">
+          <PanelHeader
+            title={viewedStage}
+            meta={
+              stage
+                ? `${stage.attempts.length} retained attempt${stage.attempts.length === 1 ? '' : 's'}`
+                : 'Persistent view'
+            }
+          />
+          <PanelBody>
+            <Stack>
+              {stage ? (
+                <>
+                  <AttentionCard
+                    tone="neutral"
+                    statusLabel="Deterministic framework evidence"
+                    title="Explicit stage control"
+                    description="Run records the frozen draft, exact source revisions, and upstream lineage. This slice does not perform or prove astronomy processing."
+                  />
+                  <Field
+                    label="Draft profile"
+                    hint={`Draft revision ${stage.draft.revision}`}
+                  >
+                    <Select
+                      value={profile}
+                      disabled={
+                        pending !== undefined || updateReason !== undefined
+                      }
+                      onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                        command(
+                          {
+                            _tag: 'UpdateProcessingStageDraft',
+                            projectId: project.projectId,
+                            expectedProjectRevision: project.revision,
+                            stage: stage.stage,
+                            settings: [
+                              { key: 'profile', value: event.target.value },
+                            ],
+                            idempotencyKey: crypto.randomUUID(),
+                          },
+                          `Updating ${stage.stage} draft`,
+                        )
+                      }
+                    >
+                      <option>Default</option>
+                      <option>Alternate</option>
+                      <option>Review</option>
+                    </Select>
+                  </Field>
+                  <Cluster>
+                    <Button
+                      disabled={
+                        pending !== undefined || undoReason !== undefined
+                      }
+                      title={undoReason}
+                      onClick={() =>
+                        command(
+                          {
+                            _tag: 'UndoProcessingStageDraft',
+                            projectId: project.projectId,
+                            expectedProjectRevision: project.revision,
+                            stage: stage.stage,
+                            idempotencyKey: crypto.randomUUID(),
+                          },
+                          'Undoing draft',
+                        )
+                      }
+                    >
+                      Undo draft
+                    </Button>
+                    <Button
+                      disabled={
+                        pending !== undefined || redoReason !== undefined
+                      }
+                      title={redoReason}
+                      onClick={() =>
+                        command(
+                          {
+                            _tag: 'RedoProcessingStageDraft',
+                            projectId: project.projectId,
+                            expectedProjectRevision: project.revision,
+                            stage: stage.stage,
+                            idempotencyKey: crypto.randomUUID(),
+                          },
+                          'Redoing draft',
+                        )
+                      }
+                    >
+                      Redo draft
+                    </Button>
+                    <Button
+                      tone="primary"
+                      disabled={
+                        pending !== undefined || runReason !== undefined
+                      }
+                      title={runReason}
+                      onClick={() =>
+                        command(
+                          {
+                            _tag: 'RunProcessingProjectStage',
+                            projectId: project.projectId,
+                            expectedProjectRevision: project.revision,
+                            stage: stage.stage,
+                            idempotencyKey: crypto.randomUUID(),
+                          },
+                          `${stage.attempts.length ? 'Rerunning' : 'Running'} ${stage.stage}`,
+                        )
+                      }
+                    >
+                      {stage.attempts.length ? 'Rerun' : 'Run'} {stage.stage}
+                    </Button>
+                  </Cluster>
+                  <ProcessActionDenial reason={runReason} />
+                  <div className="beta-process-attempts">
+                    {stage.attempts.length === 0 ? (
+                      <p>
+                        No attempts yet. Work starts only after explicit Run.
+                      </p>
+                    ) : (
+                      stage.attempts
+                        .slice()
+                        .reverse()
+                        .map((attempt) => (
+                          <article key={attempt.attemptId}>
+                            <b>{attempt.attemptId}</b>
+                            <span>
+                              {titleCase(attempt.state)} · draft{' '}
+                              {attempt.draftRevision}
+                            </span>
+                            <span>
+                              {attempt.sourceRevisions.length} exact source
+                              inputs · {attempt.toolIdentity}
+                            </span>
+                            <span>
+                              {attempt.upstreamAttemptId
+                                ? `Upstream ${attempt.upstreamAttemptId}`
+                                : 'Source revisions are the upstream input'}
+                            </span>
+                            {attempt.basedOnEarlierUpstream ? (
+                              <strong>
+                                Based on earlier source or upstream input
+                              </strong>
+                            ) : null}
+                            {attempt.resultId ? (
+                              <span>
+                                {attempt.resultId} · deterministic stage
+                                evidence
+                              </span>
+                            ) : null}
+                            {stage.selectedAttemptId === attempt.attemptId ? (
+                              <strong>Selected result</strong>
+                            ) : attempt.state === 'succeeded' ? (
+                              <Button
+                                disabled={
+                                  pending !== undefined ||
+                                  selectReason !== undefined
+                                }
+                                title={selectReason}
+                                onClick={() =>
+                                  command(
+                                    {
+                                      _tag: 'SelectProcessingStageResult',
+                                      projectId: project.projectId,
+                                      expectedProjectRevision: project.revision,
+                                      stage: stage.stage,
+                                      attemptId: attempt.attemptId,
+                                      idempotencyKey: crypto.randomUUID(),
+                                    },
+                                    `Selecting ${stage.stage} result`,
+                                  )
+                                }
+                              >
+                                Select result
+                              </Button>
+                            ) : null}
+                          </article>
+                        ))
+                    )}
+                  </div>
+                </>
+              ) : (
+                <AttentionCard
+                  tone="neutral"
+                  statusLabel="Persistent view"
+                  title={viewedStage}
+                  description={
+                    viewedStage === 'Master'
+                      ? 'Selected Stacking results remain inspectable here. Saving a Master is Item 3.5.5.'
+                      : 'Develop opens an exact saved Master in Item 3.5.6.'
+                  }
+                />
+              )}
+              {message ? (
+                <p className="beta-process-message" role="status">
+                  {message}
+                </p>
+              ) : null}
             </Stack>
           </PanelBody>
         </Panel>
@@ -866,17 +1298,30 @@ function ProcessDesktop({
     (work) => work.sessionId === session?.sessionId && work.kind === 'build',
   )
   const [showReference, setShowReference] = useState(false)
+  const [viewedProjectStage, setViewedProjectStage] =
+    useState<ProjectStageName>()
   const authorityReason = processCommandsProtected(projection)
     ? 'Current desktop owner authority is not confirmed.'
     : undefined
   if (project) {
+    const viewedStage = viewedProjectStage ?? project.currentStage
+    const projectActions = workspace?.projectActions.find(
+      (entry) => entry.projectId === project.projectId,
+    )?.actions
     const assignmentReason =
       authorityReason ??
-      processActionReason(
-        workspace?.projectActions.find(
-          (entry) => entry.projectId === project.projectId,
-        )?.actions,
-        'AssignProcessingSourceRole',
+      processActionReason(projectActions, 'AssignProcessingSourceRole')
+    if (viewedStage !== 'Sources')
+      return (
+        <ProjectStageDesktop
+          project={project}
+          actions={projectActions}
+          pending={pending}
+          message={message}
+          command={command}
+          viewedStage={viewedStage}
+          onViewStage={setViewedProjectStage}
+        />
       )
     return (
       <ProjectSourcesDesktop
@@ -884,6 +1329,12 @@ function ProcessDesktop({
         pending={pending}
         message={message}
         assignmentReason={assignmentReason}
+        navigationReason={
+          authorityReason ??
+          processActionReason(projectActions, 'NavigateProcessingProjectStage')
+        }
+        viewedStage={viewedStage}
+        onViewStage={setViewedProjectStage}
         command={command}
       />
     )
@@ -1020,18 +1471,22 @@ function ProcessDesktop({
                 <StepRail
                   label="Build stages"
                   activeId={
-                    workspace?.work?.find(
-                      (work) =>
-                        work.sessionId === session.sessionId &&
-                        work.kind === 'build',
-                    )?.stage ?? 'validate'
+                    buildStage(
+                      workspace?.work?.find(
+                        (work) =>
+                          work.sessionId === session.sessionId &&
+                          work.kind === 'build',
+                      )?.stage,
+                    ) ?? 'validate'
                   }
                   items={buildStageItems(
-                    workspace?.work?.find(
-                      (work) =>
-                        work.sessionId === session.sessionId &&
-                        work.kind === 'build',
-                    )?.stage,
+                    buildStage(
+                      workspace?.work?.find(
+                        (work) =>
+                          work.sessionId === session.sessionId &&
+                          work.kind === 'build',
+                      )?.stage,
+                    ),
                   )}
                 />
               ) : null}
@@ -1428,7 +1883,7 @@ function ProcessStatusStrip({
       </span>
       <span className="beta-process-status-desktop">
         {project
-          ? `Sources · project revision ${project.revision}`
+          ? `${project.currentStage} · project revision ${project.revision}`
           : session
             ? `${titleCase(session.phase)} · revision ${session.revision}`
             : 'Durable workspace ready'}
@@ -1445,7 +1900,7 @@ function ProcessStatusStrip({
           aria-hidden="true"
         />
         <b>Process</b> ·{' '}
-        {project ? 'Sources' : (session?.phase ?? 'No session')}
+        {project ? project.currentStage : (session?.phase ?? 'No session')}
       </span>
     </footer>
   )
@@ -1508,23 +1963,7 @@ export function BetaProcessApp(props: BetaProcessAppProps) {
   )
   useEffect(() => {
     if (!props.initialWorkspace) void refresh()
-  }, [
-    props.initialWorkspace,
-    props.projection.observe.snapshotVersion,
-    refresh,
-  ])
-  useEffect(() => {
-    if (
-      !workspace?.work?.some(
-        (work) => work.state === 'pending' || work.state === 'claimed',
-      )
-    )
-      return
-    const timer = window.setInterval(() => {
-      if (!pendingRef.current) void refresh('Worker progress · current')
-    }, 500)
-    return () => window.clearInterval(timer)
-  }, [refresh, workspace?.work])
+  }, [props.initialWorkspace, props.projection.snapshotVersion, refresh])
   const command = useCallback(
     (value: object, label: string) => {
       if (pendingRef.current || processCommandsProtected(props.projection))
@@ -1534,19 +1973,11 @@ export function BetaProcessApp(props: BetaProcessAppProps) {
       setPending(label)
       setState(label)
       void sendCommand(value).then(
-        async () => {
+        () => {
           if (current !== generation.current) return
           pendingRef.current = false
           setPending(undefined)
-          await refresh('Command accepted · current')
-          const reconcileGeneration = generation.current
-          window.setTimeout(() => {
-            if (
-              reconcileGeneration === generation.current &&
-              !pendingRef.current
-            )
-              void refresh('Current')
-          }, 700)
+          setState('Command accepted · awaiting projection')
         },
         async () => {
           if (current !== generation.current) return
@@ -1575,11 +2006,7 @@ export function BetaProcessApp(props: BetaProcessAppProps) {
         phone={phone}
       />
       {phone ? (
-        <ProcessPhone
-          projection={props.projection}
-          workspace={workspace}
-          state={state}
-        />
+        <ProcessPhone workspace={workspace} state={state} />
       ) : (
         <ProcessDesktop
           projection={props.projection}

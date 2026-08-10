@@ -235,8 +235,8 @@ are complete; owner review inserted Item 3.5 before Item 4:
 with a target-owned Processing Project and explicit, inspectable stages:
 
 - **3.5.1 Complete —** Library selection and Processing Project intake.
-- **3.5.2 Next —** Stage drafts, attempts, and persistent navigation.
-- **3.5.3 —** Explicit Calibration.
+- **3.5.2 Complete —** Stage drafts, attempts, and persistent navigation.
+- **3.5.3 Next —** Explicit Calibration.
 - **3.5.4 —** Explicit Registration.
 - **3.5.5 —** Explicit Stacking and saved Master.
 - **3.5.6 —** Astronomy Develop workspace.

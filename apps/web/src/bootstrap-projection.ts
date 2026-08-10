@@ -93,6 +93,7 @@ function projectSnapshot(
     health,
   }
   return {
+    snapshotVersion: snapshot.snapshotVersion,
     shell,
     plan: plan(snapshot, freshness, reason),
     observe: observe(
@@ -183,6 +184,7 @@ function readinessTone(
 
 function unavailableProjection(reason: string): Projection {
   return {
+    snapshotVersion: 0,
     shell: {
       service: 'Service unavailable',
       environment: 'Authoritative projection',

@@ -65,9 +65,10 @@ For one demo workflow or state at a time:
 The first three Process projection gaps are closed: per-action eligibility,
 complete Library detail for Process outputs, and deterministic unfinished
 session resume. Item 3.5.1 also closes Library selection, whole Capture Set
-intake, and the persistent Processing Project Sources view. The remaining work
-replaces the broad automatic Build model with the explicit, persistent stages
-in the
+intake, and the persistent Processing Project Sources view. Item 3.5.2 closes
+persistent stage navigation, drafts, retained attempts, selected results, and
+exact upstream lineage. The remaining work replaces the deterministic stage
+harness with the explicit stage behavior in the
 [Item 3.5 Process workflow plan](process-workflow-plan.md).
 
 - Library selection and whole Capture Set intake must lead to a persistent

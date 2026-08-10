@@ -154,7 +154,10 @@ import {
   tracedSqliteOperation,
 } from '../observability/sqlite-telemetry.ts'
 import { createRunExecutorWorker } from '../workers/run-executor-worker.ts'
-import { createProcessWorkWorker } from '../workers/process-work-worker.ts'
+import {
+  createProcessWorkWorker,
+  processWorkResultChangesProjection,
+} from '../workers/process-work-worker.ts'
 import {
   acquireSqliteRepository,
   polarSession,
@@ -245,6 +248,10 @@ export function createLocalWebService(
     readonly admissionObservability?: AdmissionObservation
     readonly processWorkRoot?: string
     readonly processFailBuildStage?: 'align'
+    readonly processWorkAutoRun?: boolean
+    readonly observeProjectionPublication?: (
+      event: 'connect' | 'disconnect' | 'publish' | 'writeFailure',
+    ) => void
   } = {},
 ) {
   const database = openOriginDatabase(databasePath)
@@ -557,14 +564,16 @@ export function createLocalWebService(
           controllerDisconnected: (identity) =>
             stateRepository.controllerDisconnected(identity),
           responseHeaders,
-          observe: (event) =>
+          observe: (event) => {
+            options.observeProjectionPublication?.(event)
             telemetry.runSync(
               recordOperationalEvent({
                 scope: 'projection',
                 operation: `sse.${event}`,
                 outcome: event === 'writeFailure' ? 'failed' : 'success',
               }),
-            ),
+            )
+          },
         }),
       ),
     ),
@@ -577,6 +586,10 @@ export function createLocalWebService(
   let closed = false
   const publish = (type: string, cursor: number) =>
     Effect.runSync(projectionPublication.publish(type, cursor))
+  const publishProcessingProjection = () => {
+    const cursor = stateRepository.advanceProjectionCursor()
+    publish('ProcessingProjected', cursor)
+  }
   const runExecutor =
     options.cameraProvider === undefined ||
     options.runExecutionContext === undefined ||
@@ -666,14 +679,23 @@ export function createLocalWebService(
             telemetry.runSync(recordProcessPressureMetric(state)),
         }),
   })
-  const processWorkFiber = Effect.runFork(
-    Effect.sync(() => processWorkWorker.pass()).pipe(
-      Effect.catch((cause) =>
-        Effect.logError('ProcessWorkWorker.pass failed', cause),
-      ),
-      Effect.repeat(Schedule.spaced('250 millis')),
-    ),
-  )
+  const processWorkPass = () => {
+    const result = processWorkWorker.pass()
+    if (processWorkResultChangesProjection(result))
+      publishProcessingProjection()
+    return result
+  }
+  const processWorkFiber =
+    options.processWorkAutoRun === false
+      ? undefined
+      : Effect.runFork(
+          Effect.sync(processWorkPass).pipe(
+            Effect.catch((cause) =>
+              Effect.logError('ProcessWorkWorker.pass failed', cause),
+            ),
+            Effect.repeat(Schedule.spaced('250 millis')),
+          ),
+        )
   const targetAcquisitionProvider =
     options.targetAcquisitionProvider ??
     (options.configuredTargetProvider !== undefined &&
@@ -1094,10 +1116,7 @@ export function createLocalWebService(
                         identity,
                       )
                       if (result.outcome === 'accepted')
-                        publish(
-                          'ProcessingProjected',
-                          stateRepository.state().eventCursor,
-                        )
+                        publishProcessingProjection()
                       return json(
                         response,
                         result.outcome === 'accepted' ? 202 : 409,
@@ -1599,7 +1618,8 @@ export function createLocalWebService(
     closed = true
     if (runExecutorFiber !== undefined)
       Effect.runSync(Fiber.interrupt(runExecutorFiber))
-    Effect.runSync(Fiber.interrupt(processWorkFiber))
+    if (processWorkFiber !== undefined)
+      Effect.runSync(Fiber.interrupt(processWorkFiber))
     Effect.runSync(projectionPublication.close())
     database.close()
   }
@@ -1784,7 +1804,7 @@ export function createLocalWebService(
     cleanupSavedOrphans,
     advanceFakeRun,
     runExecutorPass: () => runExecutor?.pass(),
-    processWorkPass: () => processWorkWorker.pass(),
+    processWorkPass,
     enqueueRunExposureAbort: (runId: string) =>
       runExecutor?.enqueueAbort(runId),
   }

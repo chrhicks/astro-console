@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
 import { settleProcessWork } from '../services/process-workspace.ts'
+import { settleProcessingProjectStage } from '../services/processing-project-service.ts'
 
 const buildStages = [
   'validate',
@@ -23,6 +24,7 @@ const buildStages = [
 
 const BuildStage = Schema.Literals(buildStages)
 const WorkKind = Schema.Literals([
+  'projectStage',
   'build',
   'preview',
   'apply',
@@ -35,7 +37,12 @@ const WorkRow = Schema.Struct({
   kind: WorkKind,
   payload: Schema.String,
   state: Schema.Literals(['pending', 'claimed']),
-  stage: Schema.NullOr(BuildStage),
+  stage: Schema.NullOr(
+    Schema.Union([
+      BuildStage,
+      Schema.Literals(['Calibration', 'Registration', 'Stacking']),
+    ]),
+  ),
   claim_token: Schema.NullOr(Schema.String),
   attempts: Schema.Int,
 })
@@ -78,7 +85,8 @@ const SessionPayload = Schema.Struct({ sessionId: Schema.String })
 
 type WorkRow = typeof WorkRow.Type
 export type ProcessWorkKind = typeof WorkKind.Type
-export type ProcessWorkStage = typeof BuildStage.Type | ProcessWorkKind
+export type ProcessWorkStage =
+  Exclude<(typeof WorkRow.Type)['stage'], null> | ProcessWorkKind
 
 export type ProcessWorkPassResult =
   | { readonly outcome: 'idle' }
@@ -88,6 +96,13 @@ export type ProcessWorkPassResult =
   | { readonly outcome: 'stale'; readonly kind: WorkRow['kind'] }
   | { readonly outcome: 'failed'; readonly kind: WorkRow['kind'] }
   | { readonly outcome: 'pressureThrottled' | 'pressurePaused' }
+
+export const processWorkResultChangesProjection = (
+  result: ProcessWorkPassResult,
+) =>
+  result.outcome === 'checkpointed' ||
+  result.outcome === 'completed' ||
+  result.outcome === 'failed'
 
 export type ProcessWorkTrace = (
   kind: WorkRow['kind'],
@@ -220,7 +235,10 @@ export function createProcessWorkWorker(options: {
 
     const artifactPath = outputPath(options.outputRoot, row.work_id, stage)
     const bytes = JSON.stringify({
-      adapter: 'deterministic-file-v1',
+      adapter:
+        row.kind === 'projectStage'
+          ? 'deterministic-stage-harness-v1'
+          : 'deterministic-file-v1',
       kind: row.kind,
       stage,
       payloadDigest: digest(row.payload),
@@ -236,6 +254,18 @@ export function createProcessWorkWorker(options: {
     if (readFileSync(artifactPath, 'utf8') !== bytes)
       return { outcome: 'claimedUnresolved', kind: row.kind }
     const checksum = `sha256:${digest(readFileSync(artifactPath))}`
+    if (row.kind === 'projectStage') {
+      const settled = settleProcessingProjectStage(
+        options.database,
+        row.work_id,
+        claimToken,
+        checksum,
+        artifactPath,
+      )
+      return settled.outcome === 'settled'
+        ? { outcome: 'completed', kind: row.kind }
+        : { outcome: 'stale', kind: row.kind }
+    }
     if (row.kind === 'build') {
       const index = buildStages.findIndex((candidate) => candidate === stage)
       const next = buildStages[index + 1]

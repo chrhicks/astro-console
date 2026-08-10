@@ -119,6 +119,7 @@ export interface StateSqliteRepositoryShape {
   readonly expireReconnectGrace: () => void
   readonly sseProjection: (identity: LocalIdentity) => string
   readonly commit: (values: Record<string, unknown>) => void
+  readonly advanceProjectionCursor: () => number
   readonly persistEvidence: (
     evidence: Evidence,
     identity: () => LocalIdentity,
@@ -151,6 +152,22 @@ export const stateSqliteRepositoryLayer = (
       const put = db.prepare('UPDATE state SET value=? WHERE key=?')
       for (const [key, value] of Object.entries(values))
         put.run(JSON.stringify(value), key)
+    }
+    const advanceProjectionCursor = () => {
+      const current = state()
+      const cursor = current.eventCursor + 1
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        commit({
+          snapshotVersion: current.snapshotVersion + 1,
+          eventCursor: cursor,
+        })
+        db.exec('COMMIT')
+        return cursor
+      } catch (error) {
+        db.exec('ROLLBACK')
+        throw error
+      }
     }
     const expireControlRequests = () => {
       db.prepare('DELETE FROM control_requests WHERE expires_at<=?').run(
@@ -492,6 +509,7 @@ export const stateSqliteRepositoryLayer = (
       expireReconnectGrace,
       sseProjection,
       commit,
+      advanceProjectionCursor,
       persistEvidence,
       persistPreflight,
     }

@@ -169,6 +169,24 @@ const projectWorkspace = Schema.decodeUnknownSync(ProcessingProjection)({
         },
       ],
       warnings: [],
+      currentStage: 'Sources',
+      stages: [
+        {
+          stage: 'Calibration',
+          draft: { revision: 0, settings: [], undo: [], redo: [] },
+          attempts: [],
+        },
+        {
+          stage: 'Registration',
+          draft: { revision: 0, settings: [], undo: [], redo: [] },
+          attempts: [],
+        },
+        {
+          stage: 'Stacking',
+          draft: { revision: 0, settings: [], undo: [], redo: [] },
+          attempts: [],
+        },
+      ],
       createdAt: '2026-08-09T00:00:00.000Z',
       updatedAt: '2026-08-09T00:01:00.000Z',
     },
@@ -234,12 +252,20 @@ test('uses the service-owned project action denial for role controls', () => {
   )
   assert.match(markup, /control-capable desktop client is required/)
   assert.match(markup, /<select class="nb-select" disabled=""/)
+  assert.match(markup, /aria-label="Processing Project stages"/)
+  assert.match(
+    markup,
+    /<button type="button"><span[^>]*>02<\/span><div><b>Calibration<\/b>/,
+  )
+  assert.doesNotMatch(
+    markup,
+    /<button[^>]*disabled=""[^>]*>Calibration<\/button>/,
+  )
 })
 
 test('phone project summary does not mix in an unrelated selected session', () => {
   const markup = renderToStaticMarkup(
     createElement(ProcessPhone, {
-      projection: processControllerProjection,
       workspace: projectWorkspace,
       state: 'Current',
     }),
@@ -248,6 +274,98 @@ test('phone project summary does not mix in an unrelated selected session', () =
   assert.match(markup, /Project summary/)
   assert.match(markup, /Frozen sources/)
   assert.doesNotMatch(markup, /History|Frozen candidates|Current evidence/)
+})
+
+test('renders persistent stage drafts, retained lineage, result selection, and phone evidence', () => {
+  const staged = Schema.decodeUnknownSync(ProcessingProjection)({
+    ...projectWorkspace,
+    projects: projectWorkspace.projects.map((project) => ({
+      ...project,
+      revision: 7,
+      currentStage: 'Registration',
+      stages: project.stages.map((stage) =>
+        stage.stage !== 'Registration'
+          ? stage
+          : {
+              ...stage,
+              draft: {
+                revision: 2,
+                settings: [{ key: 'profile', value: 'Alternate' }],
+                undo: [[]],
+                redo: [],
+              },
+              attempts: [
+                {
+                  attemptId: 'stage-attempt-registration-1',
+                  stage: 'Registration',
+                  state: 'succeeded',
+                  draftRevision: 1,
+                  settings: [{ key: 'profile', value: 'Default' }],
+                  toolIdentity: 'deterministic-stage-harness-v1',
+                  resultKind: 'deterministicStageEvidence',
+                  basedOnEarlierUpstream: true,
+                  sourceRevisions: [
+                    {
+                      assetId: 'asset-m27-006',
+                      assetRevision: 1,
+                      role: 'Lights',
+                    },
+                  ],
+                  upstreamAttemptId: 'stage-attempt-calibration-1',
+                  resultId: 'stage-result-registration-1',
+                  outputChecksum: 'sha256:registration-1',
+                  startedAt: '2026-08-09T00:02:00.000Z',
+                  completedAt: '2026-08-09T00:02:01.000Z',
+                },
+              ],
+            },
+      ),
+    })),
+    projectActions: [
+      {
+        projectId: 'project-m27',
+        actions: [
+          { _tag: 'Eligible', action: 'NavigateProcessingProjectStage' },
+          { _tag: 'Eligible', action: 'UpdateProcessingStageDraft' },
+          { _tag: 'Eligible', action: 'UndoProcessingStageDraft' },
+          {
+            _tag: 'Ineligible',
+            action: 'RedoProcessingStageDraft',
+            reason: 'draftRedoUnavailable',
+          },
+          {
+            _tag: 'Ineligible',
+            action: 'RunProcessingProjectStage',
+            reason: 'upstreamResultRequired',
+          },
+          { _tag: 'Eligible', action: 'SelectProcessingStageResult' },
+        ],
+      },
+    ],
+  })
+  const desktop = renderToStaticMarkup(
+    createElement(BetaProcessApp, {
+      projection: processControllerProjection,
+      loading: false,
+      initialWorkspace: staged,
+    }),
+  )
+  assert.match(desktop, /Registration retained/)
+  assert.match(desktop, /Alternate/)
+  assert.match(desktop, /Based on earlier source or upstream input/)
+  assert.match(desktop, /Select result/)
+  assert.match(desktop, /does not perform or prove astronomy processing/)
+
+  const phone = renderToStaticMarkup(
+    createElement(ProcessPhone, {
+      workspace: staged,
+      state: 'Current',
+    }),
+  )
+  assert.match(phone, /All stage evidence/)
+  assert.match(phone, /Earlier input lineage retained/)
+  assert.match(phone, /Stage attempts/)
+  assert.doesNotMatch(phone, /<button|<input|<select|<textarea/)
 })
 
 test('shows the service-owned needs-review queue with evidence and blocks Build', () => {
@@ -334,7 +452,6 @@ test('protects every Process mutation when current authority is unavailable', ()
 test('phone Process projection contains evidence and zero mutation controls', () => {
   const bodyMarkup = renderToStaticMarkup(
     createElement(ProcessPhone, {
-      projection: processControllerProjection,
       workspace,
       state: 'Current',
     }),

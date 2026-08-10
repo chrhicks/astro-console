@@ -1,6 +1,6 @@
 # Item 3.5 — Explicit Process Workflow
 
-Status: **Accepted epic; Item 3.5.1 complete; Item 3.5.2 next**
+Status: **Accepted epic; Items 3.5.1–3.5.2 complete; Item 3.5.3 next**
 
 Item 3 proved durable worker-owned execution. Item 3.5 reshapes that execution
 into the operator workflow: choose evidence, assign its role, run explicit
@@ -141,6 +141,8 @@ production processing quality, a provider command, or a physical capture.
 
 ### Item 3.5.2 — Stage Drafts, Attempts, And Navigation
 
+**Status:** Complete.
+
 **Operator result:** Move among persistent Sources, Calibration, Registration,
 Stacking, Master, and Develop views. Inspect earlier attempts and selected
 results at any time. Explicit Run and Rerun replace the broad automatic Build
@@ -154,6 +156,15 @@ OpenTelemetry evidence from Item 3.
 **Proof:** Show that command acceptance returns before work completes, restart
 does not replay claimed work, stale settlement is rejected, and older
 downstream results remain inspectable after an upstream rerun.
+
+The completed slice proves these paths through local contracts, SQLite service
+integration, web tests, and functional browser inspection. Draft history keeps
+at most ten undo and ten redo snapshots. Attempts remain append-only and freeze
+exact source revisions, roles, settings, and selected upstream lineage. A
+deterministic stage harness proves command acceptance, worker claim and
+settlement, artifact persistence, live projection refresh, and restart-safe
+mechanics. It does not prove Calibration, Registration, or Stacking science or
+production processing quality.
 
 ### Item 3.5.3 — Explicit Calibration
 

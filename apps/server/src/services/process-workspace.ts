@@ -77,10 +77,7 @@ export function processSnapshot(
   return Schema.decodeUnknownSync(ProcessingProjection)({
     ...projection,
     projects,
-    projectActions: projectProcessingProjectActions(
-      projects.map((project) => project.projectId),
-      authority,
-    ),
+    projectActions: projectProcessingProjectActions(projects, authority),
     ...(projects.length === 0
       ? {}
       : { selectedProjectId: projects.at(-1)?.projectId }),

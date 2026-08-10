@@ -42,8 +42,8 @@ export const projectionPublicationLayer = (dependencies: {
       const publish = (type: string, cursor: number) =>
         Effect.sync(() => {
           void type
-          void cursor
           if (closed) return
+          emittedCursor = Math.max(emittedCursor, cursor)
           for (const [response, identity] of listeners)
             try {
               response.write(dependencies.eventFor(identity))

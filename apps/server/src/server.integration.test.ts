@@ -72,6 +72,10 @@ import { alpacaPreflightProvider } from './providers/alpaca-preflight-provider.t
 import { alpacaCameraProvider } from './providers/alpaca-camera-provider.ts'
 import { materializeCapturedFrame } from './services/captured-frame-intake.ts'
 import { createPlateSolveWorker } from './workers/plate-solve-worker.ts'
+import {
+  executeProcessCommand,
+  processSnapshot,
+} from './services/process-workspace.ts'
 
 function createFixtureService(
   databasePath?: Parameters<typeof createLocalWebService>[0],
@@ -4097,6 +4101,108 @@ async function nextEvent(
   assert.ok(event.value !== undefined)
   return new TextDecoder().decode(event.value)
 }
+
+test('project stage worker settlement publishes one fresh SSE projection while idle polling stays quiet', async (t) => {
+  const publicationEvents: Array<
+    'connect' | 'disconnect' | 'publish' | 'writeFailure'
+  > = []
+  const root = mkdtempSync(join(tmpdir(), 'astro-stage-publication-'))
+  const service = createLocalWebService(
+    join(root, 'state.sqlite'),
+    undefined,
+    undefined,
+    undefined,
+    {
+      fixture: 'm27',
+      processWorkRoot: root,
+      processWorkAutoRun: false,
+      observeProjectionPublication: (event) => publicationEvents.push(event),
+    },
+  )
+  const listener = await service.listen()
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const stream = await fetch(`http://127.0.0.1:${listener.port}/api/events`)
+  const reader = stream.body?.getReader()
+  await nextEvent(reader)
+  const identity = {
+    personId: 'owner-chicks',
+    clientId: 'desktop-owner',
+    role: 'owner' as const,
+    capability: 'controlCapable' as const,
+  }
+  assert.equal(
+    executeProcessCommand(
+      service.database,
+      {
+        commandId: crypto.randomUUID(),
+        command: {
+          _tag: 'CreateProcessingProject',
+          name: 'Live worker projection',
+          selection: { assetIds: [], captureSetIds: ['m27-stack-1'] },
+          idempotencyKey: 'live-worker-project',
+        },
+      },
+      identity,
+    ).outcome,
+    'accepted',
+  )
+  const project = processSnapshot(service.database, identity).projects[0]
+  assert.ok(project)
+  assert.equal(
+    executeProcessCommand(
+      service.database,
+      {
+        commandId: crypto.randomUUID(),
+        command: {
+          _tag: 'RunProcessingProjectStage',
+          projectId: project.projectId,
+          expectedProjectRevision: project.revision,
+          stage: 'Calibration',
+          idempotencyKey: 'live-worker-calibration',
+        },
+      },
+      identity,
+    ).outcome,
+    'accepted',
+  )
+
+  const beforeSettlement = publicationEvents.filter(
+    (event) => event === 'publish',
+  ).length
+  assert.deepEqual(service.processWorkPass(), {
+    outcome: 'completed',
+    kind: 'projectStage',
+  })
+  const settledEvent = await nextEvent(reader)
+  assert.match(settledEvent, /id: 1/)
+  assert.match(settledEvent, /"snapshotVersion":2/)
+  const settledWorkspace = Schema.decodeUnknownSync(ProcessingProjection)(
+    await (
+      await fetch(`http://127.0.0.1:${listener.port}/api/workspaces/process`)
+    ).json(),
+  )
+  assert.equal(
+    settledWorkspace.projects[0]?.stages[0]?.attempts[0]?.state,
+    'succeeded',
+  )
+  assert.equal(
+    settledWorkspace.projects[0]?.stages[0]?.attempts[0]?.resultKind,
+    'deterministicStageEvidence',
+  )
+  assert.equal(
+    publicationEvents.filter((event) => event === 'publish').length,
+    beforeSettlement + 1,
+  )
+
+  assert.deepEqual(service.processWorkPass(), { outcome: 'idle' })
+  assert.equal(
+    publicationEvents.filter((event) => event === 'publish').length,
+    beforeSettlement + 1,
+  )
+})
 
 test('fresh SQLite initialization creates the current V2 tables', () => {
   const databasePath = join(
