@@ -7,9 +7,6 @@ import {
 import { Schema } from 'effect'
 import { BootstrapClientState } from './bootstrap-client'
 import { projectBootstrapState } from './bootstrap-projection'
-import { renderToStaticMarkup } from 'react-dom/server'
-import { createElement } from 'react'
-import { ObserveView } from './workspaces/ObserveView'
 
 const snapshot = (fixture: keyof typeof bootstrapFixtures) =>
   Schema.decodeUnknownSync(BootstrapSnapshot)(bootstrapFixtures[fixture])
@@ -206,25 +203,20 @@ test('projects unavailable state without invented service or workspace truth', (
   assert.equal(projection.shell.health[0]?.state, 'unavailable')
   assert.equal(projection.observe.phase, 'Unavailable')
   assert.equal(projection.observe.detailAvailable, false)
-  assert.equal(projection.library.assets.length, 0)
 })
 
-test('bootstrap projections render unavailable Observe evidence without fixture imagery or claims', () => {
+test('bootstrap projections keep unavailable Observe evidence free of fixture claims', () => {
   const projection = projectBootstrapState(
     BootstrapClientState.Current({ snapshot: snapshot('fresh') }),
   )
-  const observe = renderToStaticMarkup(
-    createElement(ObserveView, { view: projection.observe }),
-  )
-  assert.match(observe, /Detailed evidence unavailable/)
   assert.match(
-    observe,
+    projection.observe.evidence,
     /Detailed Observe evidence is unavailable from bootstrap/,
   )
-  assert.doesNotMatch(observe, /evidence-image/)
+  assert.doesNotMatch(projection.observe.annotation, /fixture/i)
 })
 
-test('Observe renders fake lifecycle evidence and omits terminal controls', () => {
+test('Observe projects fake lifecycle evidence and a terminal outcome', () => {
   const projection = projectBootstrapState(
     BootstrapClientState.Current({
       snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)({
@@ -254,12 +246,9 @@ test('Observe renders fake lifecycle evidence and omits terminal controls', () =
       }),
     }),
   )
-  const markup = renderToStaticMarkup(
-    createElement(ObserveView, { view: projection.observe }),
-  )
-  assert.match(markup, /Current fake lifecycle evidence/)
-  assert.doesNotMatch(markup, /Current verified evidence/)
-  assert.doesNotMatch(markup, /<button/)
+  assert.equal(projection.observe.heading, 'Terminal fake/fixture outcome')
+  assert.match(projection.observe.status, /no physical capture is claimed/)
+  assert.equal(projection.observe.source?.terminalOutcome, 'stopped')
 })
 
 test('projects retained Verify evidence without claiming Library intake is still pending', () => {
@@ -304,7 +293,7 @@ test('projects retained Verify evidence without claiming Library intake is still
   )
 })
 
-test('Observe promotes Polar alignment guidance and its action before fixture lifecycle detail', () => {
+test('Observe promotes Polar alignment guidance before fixture lifecycle detail', () => {
   const projection = projectBootstrapState(
     BootstrapClientState.Current({
       snapshot: observeSnapshot(ineligibleObserveActions('activeRunRequired'), {
@@ -338,25 +327,16 @@ test('Observe promotes Polar alignment guidance and its action before fixture li
       }),
     }),
   )
-  const markup = renderToStaticMarkup(
-    createElement(ObserveView, {
-      view: projection.observe,
-      polarCommand: async () => undefined,
-    }),
-  )
-  assert.match(markup, /Current polar alignment evidence/)
-  assert.match(markup, /Polar alignment guidance is current/)
+  assert.match(projection.observe.status, /Polar alignment guidance is current/)
   assert.match(
-    markup,
+    projection.observe.annotation,
     /Fixture provenance: measurement evidence is deterministic/,
   )
-  assert.match(markup, /Manual Alt\/Az guidance/)
-  assert.match(markup, /Capture polar measurement/)
-  assert.match(markup, /Run lifecycle/)
-  assert.ok(
-    markup.indexOf('Manual Alt/Az guidance') < markup.indexOf('Run lifecycle'),
+  assert.equal(projection.observe.heading, 'Complete polar alignment')
+  assert.equal(
+    projection.observe.source?.acquire?.actions[0]?.action,
+    'CapturePolarAlignmentMeasurement',
   )
-  assert.doesNotMatch(markup, /Current fixture lifecycle evidence/)
 })
 
 test('projects membership and server capability independently', () => {
@@ -391,7 +371,7 @@ test('projects membership and server capability independently', () => {
   )
 })
 
-test('projects current controller actions and renders Manage only when eligible', () => {
+test('projects current controller actions and Manage only when eligible', () => {
   const projection = projectBootstrapState(
     BootstrapClientState.Current({
       snapshot: observeSnapshot({
@@ -404,9 +384,6 @@ test('projects current controller actions and renders Manage only when eligible'
       }),
     }),
   )
-  const markup = renderToStaticMarkup(
-    createElement(ObserveView, { view: projection.observe }),
-  )
   assert.equal(projection.shell.readOnly, false)
   assert.equal(
     projection.shell.capability,
@@ -416,7 +393,10 @@ test('projects current controller actions and renders Manage only when eligible'
     projection.shell.protection,
     'Controls are service-projected and current-revision guarded.',
   )
-  assert.match(markup, /Manage the current fake\/fixture run/)
+  assert.equal(
+    projection.observe.heading,
+    'Manage the current fake/fixture run',
+  )
 })
 
 test('projects non-controller and phone Observe clients as monitoring-only', () => {
@@ -447,26 +427,25 @@ test('projects non-controller and phone Observe clients as monitoring-only', () 
       }),
     }),
   )
-  const nonControllerMarkup = renderToStaticMarkup(
-    createElement(ObserveView, { view: nonController.observe }),
-  )
-  const phoneMarkup = renderToStaticMarkup(
-    createElement(ObserveView, { view: phone.observe }),
-  )
   assert.equal(nonController.shell.readOnly, true)
   assert.equal(
     nonController.shell.capability,
     'Control-capable client / no eligible action',
   )
-  assert.match(nonControllerMarkup, /Monitor the current fake\/fixture run/)
-  assert.match(nonControllerMarkup, /Another client holds control/)
-  assert.doesNotMatch(
-    nonControllerMarkup,
-    /Manage the current fake\/fixture run/,
+  assert.equal(
+    nonController.observe.heading,
+    'Monitor the current fake/fixture run',
+  )
+  assert.match(
+    nonController.observe.recovery ?? '',
+    /Another client holds control/,
   )
   assert.equal(phone.shell.readOnly, true)
   assert.equal(phone.shell.capability, 'Read-only client / no eligible action')
-  assert.match(phoneMarkup, /No action is currently eligible. Monitor/)
+  assert.match(
+    phone.observe.recovery ?? '',
+    /No action is currently eligible. Monitor/,
+  )
 })
 
 test('keeps stale eligible controls protected and finds Plan-only eligible actions', () => {

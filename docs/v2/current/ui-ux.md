@@ -28,9 +28,8 @@ package source for component behavior and public APIs. `READINESS.md` and
 verification surface.
 
 The older Astro Console visual guides, component grammar, UX catalog, and
-Phase 0.5 material are historical. The retained presentation remains available
-temporarily through `?ui=legacy`, but it is not a design reference and should
-not receive further visual-system work.
+Phase 0.5 material are historical. The former Astro Console presentation has
+been removed.
 
 ## Ownership Boundary
 
@@ -96,9 +95,7 @@ is next; it does not change the visual authority.
 
 ## Promotion State
 
-Normal Plan, Observe, Library, Library detail, and Process routes now render
-Nightbook. Existing `?ui=beta` links remain compatible. `?ui=legacy` is the
-temporary retained-presentation comparison and rollback path. Retiring that
-code is a later cleanup after the promoted routes have operated successfully.
-The root route `/` maps to the promoted Plan workspace; `/?ui=legacy` maps to
-the retained Plan presentation.
+Plan, Observe, Library, Library detail, and Process routes render Nightbook.
+The former presentation has been removed. Existing `?ui=beta` and `?ui=legacy`
+links remain compatible and resolve to Nightbook; generated links omit the
+presentation parameter. The root route `/` maps to Plan.

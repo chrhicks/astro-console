@@ -40,17 +40,17 @@ exposure and abort, provider and reconciliation failures, bounded image
 retrieval, restart without replay, target-evidence progression, solve/no-solve
 inputs, and pinned focus-quality facts.
 
-## Inspect the beta UI
+## Inspect the Nightbook UI
 
 After preparing the current four FITS files, start the complete local
-simulation, Astro Console origin, beta web app, and isolated inspection browser
+simulation, Astro Console origin, Nightbook web app, and isolated inspection browser
 with one command:
 
 ```sh
 npm run dev:sim:inspect
 ```
 
-The default opens `/observe?ui=beta` as the desktop owner with the
+The default opens `/observe` as the desktop owner with the
 `exposure-success` scenario. The runner verifies every FITS file used by every
 selectable scenario against the committed checksums before it starts Astro
 Console. It keeps its database, retained originals, previews, and Chrome
@@ -62,10 +62,10 @@ Use bounded options when a focused state is needed:
 npm run dev:sim:inspect -- \
   --scenario=focus-quality-degradation \
   --client=phone \
-  --path=/library?ui=beta
+  --path=/library
 ```
 
-The beta simulation strip identifies the app as simulated, selects or resets a
+The Nightbook simulation strip identifies the app as simulated, selects or resets a
 scenario, advances the deterministic clock, and shows the pinned FITS filename
 and checksum. **Load** changes simulator state; it does not run the named
 workflow. The current UI drivers are:
@@ -76,7 +76,7 @@ workflow. The current UI drivers are:
 - `exposure-success`: **Capture test frame** uses the normal Plan, Preflight,
   camera command, captured-original, and Library routes, then links to the
   retained Library asset; and
-- every other scenario: the strip names that its beta UI driver is not yet
+- every other scenario: the strip names that its Nightbook UI driver is not yet
   implemented and leaves capture disabled. The scenario remains available for
   direct simulator and adapter tests.
 

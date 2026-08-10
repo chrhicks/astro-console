@@ -26,7 +26,7 @@ export function parseDevSimInspectArguments(arguments_) {
   if (!clients.includes(client))
     throw new Error('--client must be owner, friend, or phone')
 
-  const path = values.get('path') ?? '/observe?ui=beta'
+  const path = values.get('path') ?? '/observe'
   if (!path.startsWith('/') || /[\r\n\\]/.test(path))
     throw new Error('--path must be a local path that starts with /')
 

@@ -45,11 +45,10 @@ correction, verification, modest capture, and Library handoff. The remaining
 Phase 5 work is owner-observed live provider and physical outdoor proof.
 
 The official presentation is the Nightbook React demo and `@nightbook/ui`
-package in the external Nightbook workspace. Astro Console now renders that
-presentation by default for Plan, Observe, Library, and Process. Existing
-`?ui=beta` links remain compatible. The retained presentation is available
-temporarily through `?ui=legacy` for comparison and rollback until a later
-cleanup; it is not design authority.
+package in the external Nightbook workspace. Astro Console renders that
+presentation for Plan, Observe, Library, and Process. The former presentation
+has been removed. Existing `?ui=beta` and `?ui=legacy` links remain compatible,
+but generated links omit the presentation parameter.
 
 ## Context Rules
 

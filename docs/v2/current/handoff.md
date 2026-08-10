@@ -12,12 +12,11 @@ abort, immutable original intake, and local solve evidence. Phase 5 simulator
 preparation adds the complete beta target-acquisition and recovery journey; the
 owner-observed outdoor half remains open.
 
-Nightbook is the default presentation for Plan, Observe, Library, Library
-detail, and Process. Existing `?ui=beta` links remain compatible. The former
-presentation is retained temporarily at `?ui=legacy` for comparison and
-rollback; its visual system and component grammar are not UI authority. The
-root route `/` maps to the promoted Plan workspace, while `/?ui=legacy` maps to
-the retained Plan presentation.
+Nightbook is the only presentation for Plan, Observe, Library, Library detail,
+and Process. The former presentation and its client-only command paths have
+been removed. Existing `?ui=beta` and `?ui=legacy` links remain compatible and
+resolve to Nightbook; generated links omit the presentation parameter. The
+root route `/` maps to Plan.
 
 ## UI Direction
 
@@ -310,12 +309,13 @@ simulator Acquire checkpoint is `cde00c9`
 ## Development Simulation Inspection
 
 From `apps/server`, `npm run dev:sim:inspect` starts the bounded Alpaca
-simulator, an isolated Astro Console origin, the beta web app, and a dedicated
+simulator, an isolated Astro Console origin, the Nightbook web app, and a dedicated
 inspection browser. Before startup, it enumerates the evidence from every
 declared scenario, restores the requested scenario, and verifies the four
 referenced local FITS copies against the committed SHA-256 manifest.
 
-All beta workspaces show a persistent **Simulation - not live hardware** strip.
+All Nightbook workspaces show a persistent **Simulation - not live hardware**
+strip.
 Desktop owners can select and reset scenarios and advance deterministic time.
 **Load** changes simulator state only; it does not replace the installed Plan
 or provider. When a loaded scenario does not match the launch scenario, the UI
@@ -326,7 +326,7 @@ The normal `exposure-success` launch installs one development-only M101
 `cameraOnly` Plan with one 15-second frame. Accept and start the definition,
 refresh Preflight in Observe, inspect durable work during Capture, and use
 **Advance 16s**. Observe reaches Verify after the service retrieves and retains
-the frame. **Review captured frame in Library** opens the exact beta detail for
+the frame. **Review captured frame in Library** opens the exact Nightbook detail for
 preview, download, and Accept or Reject review.
 
 The `target-evidence-progression` launch installs the NGC 7000 deep-sky Plan.
@@ -421,7 +421,8 @@ covered indoor frame.
 **Run the ad-hoc architecture audit in a separate session.** Review the
 promoted system's current contracts, services, persistence, workers, web
 composition, deployment seams, and tests. Report prioritized findings before
-authorizing refactors. Do not combine this audit with legacy UI cleanup.
+authorizing refactors. The legacy UI cleanup is complete and does not start
+this audit.
 
 ## Later Accepted Items
 

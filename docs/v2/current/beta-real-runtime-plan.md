@@ -402,11 +402,12 @@ workflow and subsequent route promotion are now complete locally.
   390 px phone widths.
 - Promote only after every enabled action has a real command path and every
   unavailable action has a typed reason.
-- Retire the old presentation in a later cleanup after promotion.
+- Retire the old presentation after promotion.
 
-Completed locally August 10, 2026. Normal Plan, Observe, Library, Library
-detail, and Process routes now render Nightbook; existing `?ui=beta` links stay
-compatible and `?ui=legacy` is the temporary retained-presentation fallback.
+Completed locally August 10, 2026. Plan, Observe, Library, Library detail, and
+Process routes render Nightbook. The former presentation has been removed.
+Existing `?ui=beta` and `?ui=legacy` links stay compatible and resolve to
+Nightbook; generated links omit the presentation parameter.
 The final audit corrected exact Library-to-Process handoff precedence,
 completed Observe evidence, exact final Library operation IDs, compact Develop
 containment, and promoted-shell wording. Functional and Designer proof passed
@@ -435,7 +436,7 @@ The first approved bundle is the **beta real-truth development foundation**:
 2. prepare the checksum-pinned real-frame scenario pack;
 3. implement the bounded Alpaca simulator;
 4. drive one real-frame simulated exposure through Observe, Library intake,
-   restart, and the beta UI; and
+   restart, and the Nightbook UI; and
 5. finish with live GET-only configured-rig activation, without a hardware
    command.
 

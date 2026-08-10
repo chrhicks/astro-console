@@ -129,7 +129,6 @@ const processControlPresentation = (
       subject: 'Read-only phone projection',
       presence: 'Process mutations require a current desktop owner.',
       protection: 'Phone Process evidence is intentionally read-only.',
-      currentUiHref: '/process',
     }
   if (projection.shell.control.actions.some((action) => action.kind === 'take'))
     return {
@@ -143,7 +142,6 @@ const processControlPresentation = (
       presence: projection.shell.control.presence,
       protection:
         'Take shared control before using controller-owned Process actions.',
-      currentUiHref: '/process',
     }
   if (processAuthorityConfirmed(projection))
     return {
@@ -157,7 +155,6 @@ const processControlPresentation = (
       presence: 'Current desktop owner · control-capable client',
       protection:
         'Process commands remain service-owned and current-revision guarded.',
-      currentUiHref: '/process',
     }
   return {
     label: 'Process · view',
@@ -169,7 +166,6 @@ const processControlPresentation = (
     subject: 'Process authority unavailable',
     presence: 'Current desktop owner authority is not confirmed.',
     protection: 'Process commands are protected until authority is current.',
-    currentUiHref: '/process',
   }
 }
 

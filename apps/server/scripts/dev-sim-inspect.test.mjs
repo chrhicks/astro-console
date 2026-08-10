@@ -13,12 +13,12 @@ import {
 } from './dev-sim-inspect-config.mjs'
 
 describe('dev simulation inspector arguments', () => {
-  it('uses the beta Observe exposure-success defaults', () => {
+  it('uses the Nightbook Observe exposure-success defaults', () => {
     assert.equal(devSimInspectFixture, 'plan-draft')
     assert.deepEqual(parseDevSimInspectArguments([]), {
       scenario: 'exposure-success',
       client: 'owner',
-      path: '/observe?ui=beta',
+      path: '/observe',
     })
   })
 
@@ -27,12 +27,12 @@ describe('dev simulation inspector arguments', () => {
       parseDevSimInspectArguments([
         '--scenario=focus-quality-degradation',
         '--client=phone',
-        '--path=/library?ui=beta',
+        '--path=/library',
       ]),
       {
         scenario: 'focus-quality-degradation',
         client: 'phone',
-        path: '/library?ui=beta',
+        path: '/library',
       },
     )
   })

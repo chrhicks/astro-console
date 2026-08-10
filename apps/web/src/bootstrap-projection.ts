@@ -102,7 +102,6 @@ function projectSnapshot(
       reason,
       currentRun?.target ?? 'No active run',
     ),
-    library: { assets: [] },
   }
 }
 
@@ -241,7 +240,6 @@ function unavailableProjection(reason: string): Projection {
       facts: ['Rig, control, and recovery facts are unavailable.'],
       lifecycle: lifecycle,
     },
-    library: { assets: [] },
   }
 }
 

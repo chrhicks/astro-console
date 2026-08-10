@@ -29,20 +29,8 @@ import { projectBootstrapState } from './bootstrap-projection'
 import { createBootstrapRuntime } from './bootstrap-runtime'
 import { unavailableProjection } from './future-adapter'
 import type { Projection } from './presentation'
-import {
-  parseRoute,
-  routeWithProjection,
-  routeWorkspace,
-  type Route,
-} from './routes'
-import {
-  isLegacyWorkspaceLocation,
-  isNightbookWorkspaceLocation,
-  legacyHref,
-  nightbookHref,
-} from './beta/route'
-import { Shell } from './Shell'
-import { LibraryView } from './workspaces/LibraryView'
+import { parseRoute, routeWorkspace, type Route } from './routes'
+import { nightbookHref } from './beta/route'
 import {
   LibraryClient,
   LibraryAssetUnavailable,
@@ -55,17 +43,8 @@ import {
   type ProcessSourceHandoff,
   type ReviewRequest,
 } from './library-client'
-import { ObserveView } from './workspaces/ObserveView'
-import { PlanView } from './workspaces/PlanView'
-import { ProcessView } from './workspaces/ProcessView'
-import {
-  loadLiveFrameReview,
-  type LiveFrameReview,
-} from './live-frame-review-client'
 
 const currentRoute = () => parseRoute(location.pathname, location.search)
-const currentNightbookWorkspace = () =>
-  isNightbookWorkspaceLocation(location.pathname, location.search)
 const BetaObserveApp = lazy(() => import('./beta/BetaObserveApp'))
 const BetaLibraryApp = lazy(() => import('./beta/BetaLibraryApp'))
 const BetaPlanApp = lazy(() => import('./beta/BetaPlanApp'))
@@ -92,9 +71,6 @@ export function App() {
   const projectionRef = useRef(projection)
   projectionRef.current = projection
   const [route, setRoute] = useState<Route>(currentRoute)
-  const [nightbookWorkspace, setNightbookWorkspace] = useState(
-    currentNightbookWorkspace,
-  )
   const [projectionReceived, setProjectionReceived] = useState(false)
   const [submitPlan, setSubmitPlan] = useState<
     | ((
@@ -116,25 +92,8 @@ export function App() {
   const [refreshPreflight, setRefreshPreflight] = useState<
     (() => Promise<PreflightRefreshSubmission>) | undefined
   >()
-  const [polarCommand, setPolarCommand] = useState<
-    | ((action: 'capture' | 'accept', attemptId?: string) => Promise<void>)
-    | undefined
-  >()
   const [targetAcquisitionCommand, setTargetAcquisitionCommand] = useState<
     (() => Promise<void>) | undefined
-  >()
-  const [recordLiveFrameEvidence, setRecordLiveFrameEvidence] = useState<
-    (() => Promise<void>) | undefined
-  >()
-  const [managedCaptureCommand, setManagedCaptureCommand] = useState<
-    | ((
-        action:
-          | 'StartManagedCapture'
-          | 'PauseManagedCapture'
-          | 'StopManagedCapture'
-          | 'RecenterManagedCapture',
-      ) => Promise<void>)
-    | undefined
   >()
   const [acquireRecoveryCommand, setAcquireRecoveryCommand] = useState<
     | ((
@@ -147,14 +106,6 @@ export function App() {
   >()
   const [approvePointingCorrection, setApprovePointingCorrection] = useState<
     ((proposalId: string) => Promise<void>) | undefined
-  >()
-  const [revisePointingCorrection, setRevisePointingCorrection] = useState<
-    | ((
-        proposalId: string,
-        rightAscensionArcsec: number,
-        declinationArcsec: number,
-      ) => Promise<void>)
-    | undefined
   >()
   const workspace = routeWorkspace(route)
   const initialRoute = useRef(true)
@@ -173,15 +124,10 @@ export function App() {
     value: LibraryAssetDetail | undefined
     state: 'loading' | 'not-found' | 'unavailable' | undefined
   }>({ value: undefined, state: undefined })
-  const [liveFrameReview, setLiveFrameReview] = useState<{
-    value: LiveFrameReview | undefined
-    state: 'loading' | 'unavailable' | undefined
-  }>({ value: undefined, state: undefined })
   const libraryPageGeneration = useRef(0)
   const libraryDetailGeneration = useRef(0)
   const processSourceGeneration = useRef(0)
   const [processSourceRefresh, setProcessSourceRefresh] = useState(0)
-  const liveFrameReviewGeneration = useRef(0)
   const [processSource, setProcessSource] = useState<{
     value: ProcessSourceHandoff | undefined
     state: 'loading' | 'not-found' | 'not-local' | 'unavailable' | undefined
@@ -190,35 +136,8 @@ export function App() {
     route.kind === 'asset' ? route.assetId : undefined
 
   useEffect(() => {
-    const frame = projection.observe.source?.acquire?.liveFrame
-    if (!projection.observe.detailAvailable || frame === undefined) {
-      setLiveFrameReview({ value: undefined, state: undefined })
-      return
-    }
-    const generation = ++liveFrameReviewGeneration.current
-    setLiveFrameReview({ value: undefined, state: 'loading' })
-    void loadLiveFrameReview().then(
-      (value) => {
-        if (generation === liveFrameReviewGeneration.current)
-          setLiveFrameReview({ value, state: undefined })
-      },
-      () => {
-        if (generation === liveFrameReviewGeneration.current)
-          setLiveFrameReview({ value: undefined, state: 'unavailable' })
-      },
-    )
-    return () => {
-      liveFrameReviewGeneration.current += 1
-    }
-  }, [
-    projection.observe.detailAvailable,
-    projection.observe.source?.acquire?.liveFrame?.sourceFrameAssetId,
-    projection.observe.snapshotVersion,
-  ])
-  useEffect(() => {
     const onPopState = () => {
       setRoute(currentRoute())
-      setNightbookWorkspace(currentNightbookWorkspace())
     }
     addEventListener('popstate', onPopState)
     return () => removeEventListener('popstate', onPopState)
@@ -369,39 +288,6 @@ export function App() {
           }),
         ),
     )
-    setPolarCommand(
-      () => async (action: 'capture' | 'accept', attemptId?: string) => {
-        const observe = projectionRef.current.observe
-        if (
-          observe.source?.acquire === undefined ||
-          observe.leaseRevision === undefined
-        )
-          throw new Error('Polar state unavailable')
-        const intent =
-          action === 'capture'
-            ? {
-                _tag: 'CapturePolarAlignmentMeasurement',
-                expectedLeaseRevision: observe.leaseRevision,
-                expectedRunRevision: observe.source.revision,
-                expectedAcquireRevision: observe.source.acquire.revision,
-                idempotencyKey: crypto.randomUUID(),
-              }
-            : {
-                _tag: 'AcceptPolarAlignmentEvidence',
-                expectedLeaseRevision: observe.leaseRevision,
-                expectedRunRevision: observe.source.revision,
-                expectedAcquireRevision: observe.source.acquire.revision,
-                attemptId,
-                idempotencyKey: crypto.randomUUID(),
-              }
-        const response = await fetch('/api/acquire/commands', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ intent }),
-        })
-        if (!response.ok) throw new Error('Polar command rejected')
-      },
-    )
     setTargetAcquisitionCommand(() => async () => {
       const observe = projectionRef.current.observe
       if (
@@ -424,59 +310,6 @@ export function App() {
       })
       if (!response.ok) throw new Error('Target acquisition command rejected')
     })
-    setRecordLiveFrameEvidence(() => async () => {
-      const observe = projectionRef.current.observe
-      if (
-        observe.source?.acquire === undefined ||
-        observe.leaseRevision === undefined
-      )
-        throw new Error('Live frame evidence state unavailable')
-      const response = await fetch('/api/acquire/commands', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          intent: {
-            _tag: 'RecordLiveFrameEvidence',
-            expectedLeaseRevision: observe.leaseRevision,
-            expectedRunRevision: observe.source.revision,
-            expectedAcquireRevision: observe.source.acquire.revision,
-            idempotencyKey: crypto.randomUUID(),
-          },
-        }),
-      })
-      if (!response.ok) throw new Error('Live frame evidence command rejected')
-    })
-    setManagedCaptureCommand(
-      () =>
-        async (
-          action:
-            | 'StartManagedCapture'
-            | 'PauseManagedCapture'
-            | 'StopManagedCapture'
-            | 'RecenterManagedCapture',
-        ) => {
-          const observe = projectionRef.current.observe
-          if (
-            observe.source?.acquire === undefined ||
-            observe.leaseRevision === undefined
-          )
-            throw new Error('Managed capture state unavailable')
-          const response = await fetch('/api/acquire/commands', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              intent: {
-                _tag: action,
-                expectedLeaseRevision: observe.leaseRevision,
-                expectedRunRevision: observe.source.revision,
-                expectedAcquireRevision: observe.source.acquire.revision,
-                idempotencyKey: crypto.randomUUID(),
-              },
-            }),
-          })
-          if (!response.ok) throw new Error('Managed capture command rejected')
-        },
-    )
     setAcquireRecoveryCommand(
       () =>
         async (
@@ -538,38 +371,6 @@ export function App() {
       })
       if (!response.ok) throw new Error('Pointing correction rejected')
     })
-    setRevisePointingCorrection(
-      () =>
-        async (
-          proposalId: string,
-          rightAscensionArcsec: number,
-          declinationArcsec: number,
-        ) => {
-          const observe = projectionRef.current.observe
-          if (
-            observe.source?.acquire === undefined ||
-            observe.leaseRevision === undefined
-          )
-            throw new Error('Pointing correction state unavailable')
-          const response = await fetch('/api/acquire/commands', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              intent: {
-                _tag: 'RevisePointingCorrection',
-                expectedLeaseRevision: observe.leaseRevision,
-                expectedRunRevision: observe.source.revision,
-                expectedAcquireRevision: observe.source.acquire.revision,
-                proposalId,
-                correction: { rightAscensionArcsec, declinationArcsec },
-                idempotencyKey: crypto.randomUUID(),
-              },
-            }),
-          })
-          if (!response.ok)
-            throw new Error('Pointing correction revision rejected')
-        },
-    )
     const fiber = runtime.runFork(
       Effect.gen(function* () {
         const client = yield* BootstrapClient
@@ -588,12 +389,9 @@ export function App() {
       setSubmitObserve(undefined)
       setSubmitControl(undefined)
       setRefreshPreflight(undefined)
-      setPolarCommand(undefined)
       setTargetAcquisitionCommand(undefined)
-      setRecordLiveFrameEvidence(undefined)
-      setManagedCaptureCommand(undefined)
+      setAcquireRecoveryCommand(undefined)
       setApprovePointingCorrection(undefined)
-      setRevisePointingCorrection(undefined)
       void runtime
         .runPromise(Fiber.interrupt(fiber))
         .then(() => runtime.dispose())
@@ -606,42 +404,6 @@ export function App() {
     }
     requestAnimationFrame(() => document.querySelector('h1')?.focus())
   }, [route])
-  const navigate = (next: Exclude<Route, { kind: 'not-found' }>) => {
-    const path = routeWithProjection(next)
-    const href = isLegacyWorkspaceLocation(location.pathname, location.search)
-      ? legacyHref(path, location.search)
-      : nightbookHref(path, location.search)
-    history.pushState(null, '', href)
-    setRoute(next)
-    setNightbookWorkspace(
-      isNightbookWorkspaceLocation(
-        new URL(href, location.origin).pathname,
-        new URL(href, location.origin).search,
-      ),
-    )
-  }
-  const intercept = (
-    event: React.MouseEvent<HTMLAnchorElement>,
-    next: Exclude<Route, { kind: 'not-found' }>,
-  ) => {
-    if (
-      event.defaultPrevented ||
-      event.metaKey ||
-      event.ctrlKey ||
-      event.shiftKey ||
-      event.altKey
-    )
-      return
-    event.preventDefault()
-    navigate(next)
-  }
-  const link = (next: Exclude<Route, { kind: 'not-found' }>) => ({
-    href: isLegacyWorkspaceLocation(location.pathname, location.search)
-      ? legacyHref(routeWithProjection(next), location.search)
-      : nightbookHref(routeWithProjection(next), location.search),
-    onClick: (event: React.MouseEvent<HTMLAnchorElement>) =>
-      intercept(event, next),
-  })
   const changeLibraryQuery = (query: LibraryQuery) => {
     setLibraryPage({
       value: undefined,
@@ -657,7 +419,6 @@ export function App() {
     if (next.kind !== 'asset') return
     history.pushState(null, '', href)
     setRoute(next)
-    setNightbookWorkspace(true)
   }
   const openNightbookProcess = (assetId: string) => {
     const href = nightbookHref(
@@ -669,7 +430,6 @@ export function App() {
     if (next.kind !== 'process-source') return
     history.pushState(null, '', href)
     setRoute(next)
-    setNightbookWorkspace(true)
   }
   const reviewLibraryAsset = async (review: {
     decision: 'accepted' | 'rejected' | 'unreviewed'
@@ -718,99 +478,9 @@ export function App() {
     }
   }
 
-  const content =
-    route.kind === 'not-found' ? (
-      <NotFound />
-    ) : workspace === 'observe' ? (
-      <ObserveView
-        key={
-          projection.observe.source === undefined
-            ? 'unavailable'
-            : projection.observe.source.runId
-        }
-        view={projection.observe}
-        {...(liveFrameReview.value === undefined
-          ? {}
-          : { liveFrameReview: liveFrameReview.value })}
-        {...(liveFrameReview.state === undefined
-          ? {}
-          : { liveFrameReviewState: liveFrameReview.state })}
-        readOnly={projection.shell.readOnly}
-        {...(submitObserve === undefined ? {} : { submit: submitObserve })}
-        {...(refreshPreflight === undefined ||
-        projection.shell.readOnly ||
-        projection.observe.source?.phase !== 'preflight'
-          ? {}
-          : { refreshPreflight })}
-        {...(polarCommand === undefined || projection.shell.readOnly
-          ? {}
-          : { polarCommand })}
-        {...(targetAcquisitionCommand === undefined || projection.shell.readOnly
-          ? {}
-          : { targetAcquisitionCommand })}
-        {...(recordLiveFrameEvidence === undefined || projection.shell.readOnly
-          ? {}
-          : { recordLiveFrameEvidence })}
-        {...(managedCaptureCommand === undefined || projection.shell.readOnly
-          ? {}
-          : { managedCaptureCommand })}
-        {...(acquireRecoveryCommand === undefined || projection.shell.readOnly
-          ? {}
-          : { acquireRecoveryCommand })}
-        {...(approvePointingCorrection === undefined ||
-        projection.shell.readOnly
-          ? {}
-          : { approvePointingCorrection })}
-        {...(revisePointingCorrection === undefined || projection.shell.readOnly
-          ? {}
-          : { revisePointingCorrection })}
-      />
-    ) : workspace === 'library' ? (
-      <LibraryView
-        view={projection.library}
-        assetId={route.kind === 'asset' ? route.assetId : undefined}
-        link={link}
-        page={{
-          query: libraryQuery,
-          ...(libraryPage.value === undefined
-            ? {}
-            : { value: libraryPage.value }),
-          ...(libraryPage.message === undefined
-            ? {}
-            : { message: libraryPage.message }),
-        }}
-        {...(libraryDetail.value === undefined
-          ? {}
-          : { detail: libraryDetail.value })}
-        {...(libraryDetail.state === undefined
-          ? {}
-          : { detailState: libraryDetail.state })}
-        onQuery={changeLibraryQuery}
-        readOnly={projection.shell.readOnly}
-        onReview={(decision) => {
-          void reviewLibraryAsset({ decision }).catch(() => undefined)
-        }}
-      />
-    ) : workspace === 'process' ? (
-      <ProcessView
-        sourceAssetId={
-          route.kind === 'process-source' ? route.sourceAssetId : undefined
-        }
-        {...(processSource.value === undefined
-          ? {}
-          : { sourceHandoff: processSource.value })}
-        {...(processSource.state === undefined
-          ? {}
-          : { sourceHandoffState: processSource.state })}
-      />
-    ) : (
-      <PlanView
-        view={projection.plan}
-        {...(submitPlan === undefined ? {} : { submit: submitPlan })}
-      />
-    )
+  if (route.kind === 'not-found') return <NotFound />
 
-  if (nightbookWorkspace && workspace === 'observe')
+  if (workspace === 'observe')
     return (
       <Suspense
         fallback={
@@ -846,7 +516,7 @@ export function App() {
       </Suspense>
     )
 
-  if (nightbookWorkspace && workspace === 'plan')
+  if (workspace === 'plan')
     return (
       <Suspense
         fallback={
@@ -866,7 +536,7 @@ export function App() {
       </Suspense>
     )
 
-  if (nightbookWorkspace && workspace === 'library')
+  if (workspace === 'library')
     return (
       <Suspense
         fallback={
@@ -908,7 +578,7 @@ export function App() {
       </Suspense>
     )
 
-  if (nightbookWorkspace && workspace === 'process')
+  if (workspace === 'process')
     return (
       <Suspense
         fallback={
@@ -935,17 +605,7 @@ export function App() {
       </Suspense>
     )
 
-  return (
-    <Shell
-      workspace={workspace}
-      view={projection.shell}
-      link={link}
-      result={undefined}
-      {...(submitControl === undefined ? {} : { submitControl })}
-    >
-      {content}
-    </Shell>
-  )
+  return <NotFound />
 }
 
 function NotFound() {

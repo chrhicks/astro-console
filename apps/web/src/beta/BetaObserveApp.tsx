@@ -37,7 +37,7 @@ import type {
   StatusTone,
 } from '../presentation'
 import { DevelopmentSimulationStrip } from './development-simulation'
-import { legacyHref, nightbookHref } from './route'
+import { nightbookHref } from './route'
 import '@nightbook/ui/styles.css'
 import './beta-observe.css'
 
@@ -787,7 +787,6 @@ export type BetaControlPresentation = {
   subject: string
   presence: string
   protection: string
-  currentUiHref: string
 }
 
 export const projectedTakeControlAction = (shell: ShellView) =>
@@ -799,14 +798,12 @@ function BetaControl({
   shell,
   loading,
   presentation,
-  legacyUiHref,
   submitControl,
   allowAction,
 }: {
   shell: ShellView
   loading: boolean
   presentation: BetaControlPresentation | undefined
-  legacyUiHref: string
   submitControl: BetaControlSubmit | undefined
   allowAction: boolean
 }) {
@@ -900,8 +897,8 @@ function BetaControl({
           </DataList>
           <p>{presentation?.protection ?? shell.protection}</p>
           {message ? <p role="status">{message}</p> : null}
-          <div className="beta-control-actions">
-            {takeAction !== undefined && !shell.control.readOnly ? (
+          {takeAction !== undefined && !shell.control.readOnly ? (
+            <div className="beta-control-actions">
               <Button
                 tone="primary"
                 size="small"
@@ -915,9 +912,8 @@ function BetaControl({
               >
                 {pending ? 'Taking control…' : takeAction.label}
               </Button>
-            ) : null}
-            <a href={legacyUiHref}>Open legacy UI</a>
-          </div>
+            </div>
+          ) : null}
         </section>
       ) : null}
     </div>
@@ -1005,9 +1001,6 @@ function BetaCommandBar({
           shell={projection.shell}
           loading={loading}
           presentation={controlPresentation}
-          legacyUiHref={legacyHref(
-            controlPresentation?.currentUiHref ?? `/${workspace}`,
-          )}
           submitControl={submitControl}
           allowAction={allowControlAction}
         />

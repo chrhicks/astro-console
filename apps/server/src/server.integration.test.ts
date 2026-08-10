@@ -5596,7 +5596,6 @@ test('serves the web bundle with route fallback while preserving API precedence'
   writeFileSync(join(webDistPath, 'index.html'), '<main>Nightbook</main>')
   writeFileSync(join(assets, 'index-abcdefgh.js'), 'export {}')
   writeFileSync(join(assets, 'index-abcdefgh.css'), 'body{}')
-  writeFileSync(join(webDistPath, 'alignment-aperture-light.svg'), '<svg/>')
   writeFileSync(join(root, 'outside.js'), 'outside')
   symlinkSync(join(root, 'outside.js'), join(assets, 'outside.js'))
   const service = createLocalWebService(
@@ -5648,9 +5647,6 @@ test('serves the web bundle with route fallback while preserving API precedence'
     stylesheet.headers.get('content-type'),
     'text/css; charset=utf-8',
   )
-  const symbol = await fetch(`${base}/alignment-aperture-light.svg`)
-  assert.equal(symbol.headers.get('content-type'), 'image/svg+xml')
-  assert.equal(symbol.headers.get('cache-control'), 'no-store')
   assert.equal((await fetch(`${base}/api/unknown`)).status, 404)
   assert.equal(
     (await fetch(`${base}/api/unknown`)).headers.get('content-type'),

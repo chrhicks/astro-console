@@ -368,7 +368,7 @@ function unavailableGuide(summary: string): DevelopmentSimulationScenarioGuide {
     driver: {
       _tag: 'Unavailable',
       reason:
-        'The beta UI driver is not implemented yet; Load changes simulator state only.',
+        'The Nightbook UI driver is not implemented yet; Load changes simulator state only.',
     },
   }
 }
