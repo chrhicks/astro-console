@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–3 and Items 3.5.1–3.5.6 complete; Item 3.5.7 next**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–3 and Item 3.5 complete; beta audit and route-promotion decision next**
 
 ## Current Position
 
@@ -247,6 +247,18 @@ passed at wide, compact, and 390 px phone widths. This proves deterministic
 local orchestration and evidence only, not astronomy-quality processing,
 Siril, RC Astro, or another external processing tool.
 
+Item 3.5.7 closes the accepted Process epic. One retained M27 project combined
+four exact revision-1 originals from `m27-stack-1` and `m27-stack-2`, retained
+two Calibration attempts and two Registration attempts with explicit warning
+choices, saved the selected Stack as an exact Library Master, applied one
+Develop operation, and saved the final Library asset. The final asset keeps the
+saved Master as its direct source and exposes the exact selected Calibration,
+Registration, Stack, and Develop attempt lineage. Restart retained six settled
+work rows, two save events, exact checksums, and zero active or replayed work.
+Functional and Designer review passed at wide, compact, and 390 px phone
+widths; phone remained read-only. This proves local deterministic service,
+SQLite, and browser behavior only.
+
 After that simulator proof, an indoor GET-only readiness check reached ASCOM
 Remote at `192.168.4.104:11111`. Management and every device-property envelope
 returned `ErrorNumber: 0`. The configured identities were Telescope 0 `ASI
@@ -404,20 +416,16 @@ covered indoor frame.
 
 ## Next Accepted Item
 
-3.5.7. **Run the integrated operator review and closeout.** Exercise the full
-Library-to-Develop Processing Project path, retain every stage attempt and
-lineage boundary, complete responsive functional and Designer review, and
-leave beta route promotion as the next explicit owner decision.
+4. **Audit and promote the beta.** Verify all four exact Nightbook workflows
+and shell states against service truth, run functional and Designer review at
+wide, compact, and 390 px phone widths, and make route promotion an explicit
+owner decision. Retire the old presentation only after promotion.
 
 ## Later Accepted Items
 
 Follow the ordered scope and proof in the
 [Item 3.5 Process workflow plan](process-workflow-plan.md).
 
-4. **Audit and promote the beta.** Verify all four exact Nightbook workflows
-   and shell states against service truth, run functional and Designer review
-   at wide, compact, and 390 px phone widths, and make route promotion an
-   explicit owner decision. Retire the old presentation only after promotion.
 5. **Repair the scheduled host backup job.** The pre-update backup and isolated
    restore drill succeeded, but `astro-console-backup.timer` currently calls a
    script that expects container `astro-console-origin` while Compose creates

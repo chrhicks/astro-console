@@ -288,7 +288,16 @@ test('Develop freezes one saved Master, applies typed operations, retries, and s
     }),
   )(JSON.parse(library.detail))
   assert.deepEqual(detail.lineage.sourceAssetIds, [saved.assetId])
-  assert.equal(detail.lineage.operationIds[0], saved.stackingAttemptId)
+  const selectedRegistration = current.stages
+    .find((stage) => stage.stage === 'Registration')
+    ?.attempts.find(
+      (attempt) => attempt.attemptId === saved.registrationAttemptId,
+    )
+  assert.deepEqual(detail.lineage.operationIds.slice(0, 3), [
+    selectedRegistration?.upstreamAttemptId,
+    saved.registrationAttemptId,
+    saved.stackingAttemptId,
+  ])
   assert.equal(detail.lineage.operationIds.at(-1), savedResult.attemptId)
 
   const denied = execute(

@@ -378,7 +378,7 @@ const libraryAssetId = (assetId: string, requireStableId = true) =>
   Schema.decodeUnknownEffect(LibraryAssetDetail.fields.assetId)(assetId).pipe(
     Effect.flatMap((id) =>
       !requireStableId ||
-      /^asset-(?:m27-\d{3}|process-[0-9a-f-]+|source-[a-z0-9-]+|capture-[a-z0-9-]+)$/.test(
+      /^asset-(?:m27-\d{3}|process-[0-9a-f-]+|master-[0-9a-f-]+|develop-[0-9a-f-]+|source-[a-z0-9-]+|capture-[a-z0-9-]+)$/.test(
         id,
       )
         ? Effect.succeed(id)

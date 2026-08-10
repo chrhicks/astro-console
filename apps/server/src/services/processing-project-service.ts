@@ -1068,9 +1068,25 @@ export function executeProcessingProjectCommand(
         outputId: entry.outputId,
         savedAt,
       })
+      const stackingAttempt = current.stages
+        .find((stage) => stage.stage === 'Stacking')
+        ?.attempts.find(
+          (attempt) => attempt.attemptId === develop.base.stackingAttemptId,
+        )
+      const registrationAttempt = current.stages
+        .find((stage) => stage.stage === 'Registration')
+        ?.attempts.find(
+          (attempt) => attempt.attemptId === stackingAttempt?.upstreamAttemptId,
+        )
       developSave = {
         ...saved,
         operationIds: [
+          ...(registrationAttempt?.upstreamAttemptId === undefined
+            ? []
+            : [registrationAttempt.upstreamAttemptId]),
+          ...(stackingAttempt?.upstreamAttemptId === undefined
+            ? []
+            : [stackingAttempt.upstreamAttemptId]),
           develop.base.stackingAttemptId,
           ...develop.history
             .slice(0, develop.historyCursor)

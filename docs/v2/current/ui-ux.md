@@ -76,8 +76,10 @@ Stacking decisions, versioned results, saved Library Master lineage, and the
 exact saved-Master Develop handoff. Item 3.5.6 closes the deterministic
 astronomy Develop workspace, explicit Preview and Apply boundary, linear
 history, paired star outputs, retry, comparison, and Library saves. The
-remaining Item 3.5 work is the integrated review and closeout in the
-[Item 3.5 Process workflow plan](process-workflow-plan.md).
+integrated Item 3.5 review is also complete: the retained two-Capture-Set M27
+journey passed functional and Designer review across all six Process stages,
+public Library detail, restart, wide, compact, and read-only phone states. The
+next work is the explicit beta audit and route-promotion decision.
 
 - Library selection and whole Capture Set intake must lead to a persistent
   Processing Project, not directly into transient worker progress.

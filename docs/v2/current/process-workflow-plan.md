@@ -1,6 +1,6 @@
 # Item 3.5 — Explicit Process Workflow
 
-Status: **Accepted epic; Items 3.5.1–3.5.6 complete; Item 3.5.7 next**
+Status: **Complete; integrated functional and Designer review passed August 10, 2026**
 
 Item 3 proved durable worker-owned execution. Item 3.5 reshapes that execution
 into the operator workflow: choose evidence, assign its role, run explicit
@@ -312,6 +312,15 @@ artifact. Every completed attempt remains inspectable after fast worker work.
 px, including keyboard, focus, overflow, console, restart, retry, warning,
 override, and read-only phone evidence. Reconcile current documentation and
 leave Item 4 route promotion as the next explicit owner decision.
+
+**Completed proof:** One retained M27 project combined four exact revision-1
+originals from two Capture Sets. It kept earlier Calibration and Registration
+attempts, explicit warning choices, the selected Stack, saved Master, one
+Develop operation, and the final Library asset. Restart preserved all settled
+work, checksums, and exact Calibration-to-Develop lineage without replay.
+Functional and Designer review passed at 1440, 820, and 390 px with clean
+console, keyboard and scroll evidence, and no phone mutation controls. This is
+local deterministic service, SQLite, and browser proof only.
 
 ## Explicit Non-Goals
 
