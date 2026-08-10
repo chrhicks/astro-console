@@ -186,7 +186,7 @@ test('renders the Nightbook Plan shell and real typed editor controls', () => {
   assert.match(markup, /type="number"/)
   assert.match(markup, /Save draft/)
   assert.match(markup, /Accept run definition/)
-  assert.match(markup, /href="\/plan\?ui=beta" aria-current="page"/)
+  assert.match(markup, /href="\/plan" aria-current="page"/)
 })
 
 test('renders active accepted state without exposing draft save', () => {

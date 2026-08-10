@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–3 and Item 3.5 complete; beta audit and route-promotion decision next**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–4 complete locally; ad-hoc architecture audit next**
 
 ## Current Position
 
@@ -12,9 +12,12 @@ abort, immutable original intake, and local solve evidence. Phase 5 simulator
 preparation adds the complete beta target-acquisition and recovery journey; the
 owner-observed outdoor half remains open.
 
-The existing workspace presentation remains the default route. It is retained
-only until the newer beta presentation is ready to replace it; its local visual
-system and component grammar are no longer UI authority.
+Nightbook is the default presentation for Plan, Observe, Library, Library
+detail, and Process. Existing `?ui=beta` links remain compatible. The former
+presentation is retained temporarily at `?ui=legacy` for comparison and
+rollback; its visual system and component grammar are not UI authority. The
+root route `/` maps to the promoted Plan workspace, while `/?ui=legacy` maps to
+the retained Plan presentation.
 
 ## UI Direction
 
@@ -23,14 +26,13 @@ The official UI and UX reference is the composed React demo in:
 `/Users/chicks/dev/personal/kimi_workspace/nightbook-prototype/apps/nightbook-demo`
 
 The same workspace owns the `@nightbook/ui` source, component Gallery, and
-package verification. Astro Console's `?ui=beta` workspaces are a high-level
-integration pass that validated the package and supplied feedback. They are not
-the source design authority.
+package verification. Astro Console's promoted workspaces are an integration
+of that authority with local service projections; they are not a separate
+design authority.
 
-The desired outcome is to align the beta with real Astro Console projections
-and then promote it as the main UI. Follow the lightweight
-[UI and UX direction](ui-ux.md). Former Astro Console visual guides, UX
-catalogs, component grammar, and Phase 0.5 material are archived.
+Keep the promoted presentation aligned with real Astro Console projections and
+the lightweight [UI and UX direction](ui-ux.md). Former Astro Console visual
+guides, UX catalogs, component grammar, and Phase 0.5 material are archived.
 
 The accepted implementation sequence is the
 [Nightbook beta real-runtime plan](beta-real-runtime-plan.md). It uses a small,
@@ -403,23 +405,23 @@ separate `arch-sig-noz` repository.
 ## Proof Boundary
 
 Completed evidence covers local contracts, service behavior, SQLite/HTTP/SSE,
-browser presentation, the opt-in beta integration, deterministic simulated
+browser presentation, locally promoted Nightbook routes, deterministic simulated
 Alpaca behavior, real-frame executor retrieval and intake, pixel-derived local
 preview, one covered-camera physical exposure, live Alpaca ImageBytes transfer,
 restart without replay, remote ingress and control, one isolated real
 camera-original intake, local solve-only evidence, current GET-only
 provider/device communication for the selected ASI mount, imaging camera, and
 focuser, and deterministic worker-owned Process execution. It does not prove
-beta route promotion, production deployment of the beta, mount movement, live
+production deployment of the promoted routes, mount movement, live
 abort behavior, production processing tools, or sky image quality from the
 covered indoor frame.
 
 ## Next Accepted Item
 
-4. **Audit and promote the beta.** Verify all four exact Nightbook workflows
-and shell states against service truth, run functional and Designer review at
-wide, compact, and 390 px phone widths, and make route promotion an explicit
-owner decision. Retire the old presentation only after promotion.
+**Run the ad-hoc architecture audit in a separate session.** Review the
+promoted system's current contracts, services, persistence, workers, web
+composition, deployment seams, and tests. Report prioritized findings before
+authorizing refactors. Do not combine this audit with legacy UI cleanup.
 
 ## Later Accepted Items
 

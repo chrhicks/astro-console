@@ -179,7 +179,7 @@ test('renders truthful loading and unavailable evidence without inert content', 
   assert.match(unavailable, /No authoritative run evidence/)
   assert.match(unavailable, /Reconnect to load a complete service snapshot/)
   assert.match(unavailable, /Observe evidence details/)
-  assert.match(unavailable, /Backyard observatory · beta/)
+  assert.match(unavailable, /Backyard observatory/)
   assert.match(unavailable, /OBSERVE \/ AUTHORITATIVE LIFECYCLE/i)
   assert.match(unavailable, /Session acquire/i)
   assert.match(unavailable, /Target acquire/i)
@@ -337,10 +337,7 @@ test('keeps Verify inside Capture while leading with durable executor evidence',
     'durable executor work should precede supporting evidence facts',
   )
   assert.match(markup, /Review captured frame in Library/)
-  assert.match(
-    markup,
-    /href="\/library\/assets\/asset-capture-run-frame-1\?ui=beta"/,
-  )
+  assert.match(markup, /href="\/library\/assets\/asset-capture-run-frame-1"/)
   assert.match(markup, /Retrieve Frame/)
   const phoneMarkup = renderToStaticMarkup(
     createElement(BetaObservePhone, { projection, loading: false }),
@@ -348,7 +345,7 @@ test('keeps Verify inside Capture while leading with durable executor evidence',
   assert.match(phoneMarkup, /Review captured frame in Library/)
   assert.match(
     phoneMarkup,
-    /href="\/library\/assets\/asset-capture-run-frame-1\?ui=beta"/,
+    /href="\/library\/assets\/asset-capture-run-frame-1"/,
   )
   assert.doesNotMatch(phoneMarkup, /<button/)
 })
@@ -380,6 +377,49 @@ test('keeps an active Acquire retry in Target acquire when the outer run remains
   )
   assert.match(markup, /<h1>Target acquire<\/h1>/)
   assert.match(markup, />Target acquire<\/span><strong>50%<\/strong>/)
+})
+
+test('leaves completed Acquire evidence behind and exposes the exact captured Library asset', () => {
+  const base = targetProjection({
+    ...solvingAcquire,
+    phase: 'completed',
+    attemptCount: 1,
+    actions: [{ _tag: 'Available', action: 'RecordLiveFrameEvidence' }],
+  })
+  const source = base.observe.source
+  assert.ok(source)
+  const projection = {
+    ...base,
+    observe: {
+      ...base.observe,
+      phase: 'Complete' as const,
+      source: {
+        ...source,
+        phase: 'completed' as const,
+        terminalOutcome: 'completed' as const,
+        latestCapturedAssetId: 'asset-capture-final-1',
+        executorWork: [
+          {
+            workId: 'work-retrieve-final-1',
+            kind: 'RetrieveFrame' as const,
+            state: 'completed' as const,
+          },
+        ],
+      },
+    },
+  }
+  const markup = renderToStaticMarkup(
+    createElement(BetaObserveApp, { projection, loading: false }),
+  )
+  assert.match(markup, /<h1>Complete<\/h1>/)
+  assert.doesNotMatch(markup, /Target-acquisition context/)
+  assert.match(markup, /Durable executor work/)
+  assert.match(markup, /href="\/library\/assets\/asset-capture-final-1"/)
+  const phoneMarkup = renderToStaticMarkup(
+    createElement(BetaObservePhone, { projection, loading: false }),
+  )
+  assert.doesNotMatch(phoneMarkup, /beta-phone-target-evidence/)
+  assert.match(phoneMarkup, /Review captured frame in Library/)
 })
 
 test('renders exact solved correction evidence and approval without inventing revise eligibility', () => {

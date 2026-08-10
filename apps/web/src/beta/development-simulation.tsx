@@ -10,6 +10,7 @@ import {
   type FlyoutTriggerProps,
 } from '@nightbook/ui'
 import { useEffect, useState, type ChangeEvent } from 'react'
+import { nightbookHref } from './route'
 
 export type DevelopmentSimulationFrame = {
   readonly id: string
@@ -280,8 +281,8 @@ export function DevelopmentSimulationSurface({
               : 16}
             s
           </Button>
-          <a href="/plan?ui=beta">Plan</a>
-          <a href="/observe?ui=beta">Observe</a>
+          <a href={nightbookHref('/plan')}>Plan</a>
+          <a href={nightbookHref('/observe')}>Observe</a>
         </div>
       ) : (
         <span className="beta-simulation-protection">

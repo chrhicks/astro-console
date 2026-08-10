@@ -37,6 +37,7 @@ import type {
   StatusTone,
 } from '../presentation'
 import { DevelopmentSimulationStrip } from './development-simulation'
+import { legacyHref, nightbookHref } from './route'
 import '@nightbook/ui/styles.css'
 import './beta-observe.css'
 
@@ -798,12 +799,14 @@ function BetaControl({
   shell,
   loading,
   presentation,
+  legacyUiHref,
   submitControl,
   allowAction,
 }: {
   shell: ShellView
   loading: boolean
   presentation: BetaControlPresentation | undefined
+  legacyUiHref: string
   submitControl: BetaControlSubmit | undefined
   allowAction: boolean
 }) {
@@ -913,9 +916,7 @@ function BetaControl({
                 {pending ? 'Taking control…' : takeAction.label}
               </Button>
             ) : null}
-            <a href={presentation?.currentUiHref ?? '/observe'}>
-              Open current UI
-            </a>
+            <a href={legacyUiHref}>Open legacy UI</a>
           </div>
         </section>
       ) : null}
@@ -951,36 +952,36 @@ function BetaCommandBar({
       <header className="beta-command-bar">
         <a
           className="beta-brand"
-          href={`/${workspace}?ui=beta`}
-          aria-label={`Nightbook beta ${workspaceLabel}`}
+          href={nightbookHref(`/${workspace}`)}
+          aria-label={`Nightbook ${workspaceLabel}`}
         >
           <span aria-hidden="true">N</span>
           <span>
             <strong>Nightbook</strong>
-            <small>Backyard observatory · beta</small>
+            <small>Backyard observatory</small>
           </span>
         </a>
         <nav aria-label="Workspaces">
           <a
-            href="/plan?ui=beta"
+            href={nightbookHref('/plan')}
             aria-current={workspace === 'plan' ? 'page' : undefined}
           >
             Plan
           </a>
           <a
-            href="/observe?ui=beta"
+            href={nightbookHref('/observe')}
             aria-current={workspace === 'observe' ? 'page' : undefined}
           >
             Observe
           </a>
           <a
-            href="/library?ui=beta"
+            href={nightbookHref('/library')}
             aria-current={workspace === 'library' ? 'page' : undefined}
           >
             Library
           </a>
           <a
-            href="/process?ui=beta"
+            href={nightbookHref('/process')}
             aria-current={workspace === 'process' ? 'page' : undefined}
           >
             Process
@@ -1004,6 +1005,9 @@ function BetaCommandBar({
           shell={projection.shell}
           loading={loading}
           presentation={controlPresentation}
+          legacyUiHref={legacyHref(
+            controlPresentation?.currentUiHref ?? `/${workspace}`,
+          )}
           submitControl={submitControl}
           allowAction={allowControlAction}
         />
@@ -1052,7 +1056,9 @@ export function BetaObservePhone({
   const progress = observeProgress(projection)
   const view = projection.observe
   const acquire = view.source?.acquire
-  const targetAcquisition = acquire?.acquisitionMethod !== undefined
+  const targetAcquisition =
+    acquire?.acquisitionMethod !== undefined &&
+    (acquire.phase !== 'completed' || view.source?.phase === 'acquire')
   const attempts = targetAcquisition ? attemptItems(acquire) : []
   return (
     <section
@@ -1111,7 +1117,9 @@ export function BetaObservePhone({
       {view.source?.latestCapturedAssetId !== undefined ? (
         <a
           className="beta-phone-library-link"
-          href={`/library/assets/${encodeURIComponent(view.source.latestCapturedAssetId)}?ui=beta`}
+          href={nightbookHref(
+            `/library/assets/${encodeURIComponent(view.source.latestCapturedAssetId)}`,
+          )}
         >
           Review captured frame in Library
         </a>
@@ -1355,7 +1363,8 @@ function BetaObserveDesktop({
         orientation="horizontal"
       />
 
-      {source?.acquire?.acquisitionMethod !== undefined ? (
+      {source?.acquire?.acquisitionMethod !== undefined &&
+      (source.acquire.phase !== 'completed' || source.phase === 'acquire') ? (
         <BetaTargetStage
           projection={projection}
           {...(targetAcquisitionCommand === undefined
@@ -1431,7 +1440,9 @@ function BetaObserveDesktop({
                 {source?.latestCapturedAssetId !== undefined ? (
                   <a
                     className="beta-simulation-library-link"
-                    href={`/library/assets/${encodeURIComponent(source.latestCapturedAssetId)}?ui=beta`}
+                    href={nightbookHref(
+                      `/library/assets/${encodeURIComponent(source.latestCapturedAssetId)}`,
+                    )}
                   >
                     Review captured frame in Library
                   </a>

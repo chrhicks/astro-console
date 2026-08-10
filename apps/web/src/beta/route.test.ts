@@ -1,44 +1,74 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  isBetaObserveLocation,
-  isBetaPlanLocation,
-  isBetaProcessLocation,
-  isBetaWorkspaceLocation,
+  isLegacyWorkspaceLocation,
+  isNightbookObserveLocation,
+  isNightbookPlanLocation,
+  isNightbookProcessLocation,
+  isNightbookWorkspaceLocation,
+  legacyHref,
+  nightbookHref,
 } from './route'
 
-test('recognizes only the explicit Observe beta URL marker', () => {
-  assert.equal(isBetaObserveLocation('/observe', '?ui=beta'), true)
-  assert.equal(isBetaObserveLocation('/observe', '?x=1&ui=beta'), true)
-  assert.equal(isBetaObserveLocation('/observe', ''), false)
-  assert.equal(isBetaObserveLocation('/observe', '?ui=current'), false)
-  assert.equal(isBetaObserveLocation('/plan', '?ui=beta'), false)
-  assert.equal(isBetaObserveLocation('/observe/beta', '?ui=beta'), false)
+test('uses Nightbook for normal and beta-compatible Observe routes', () => {
+  assert.equal(isNightbookObserveLocation('/observe', ''), true)
+  assert.equal(isNightbookObserveLocation('/observe', '?ui=beta'), true)
+  assert.equal(isNightbookObserveLocation('/observe', '?x=1&ui=beta'), true)
+  assert.equal(isNightbookObserveLocation('/observe', '?ui=current'), true)
+  assert.equal(isNightbookObserveLocation('/observe', '?ui=legacy'), false)
+  assert.equal(isNightbookObserveLocation('/plan', ''), false)
+  assert.equal(isNightbookObserveLocation('/observe/beta', ''), false)
 })
 
-test('recognizes the bounded Library beta routes', () => {
-  assert.equal(isBetaWorkspaceLocation('/library', '?ui=beta'), true)
+test('bounds Nightbook and explicit legacy to the promoted workspace routes', () => {
+  assert.equal(isNightbookWorkspaceLocation('/', ''), true)
+  assert.equal(isNightbookWorkspaceLocation('/', '?ui=beta&trace=1'), true)
+  assert.equal(isLegacyWorkspaceLocation('/', '?ui=legacy&trace=1'), true)
+  assert.equal(isNightbookWorkspaceLocation('/library', ''), true)
   assert.equal(
-    isBetaWorkspaceLocation('/library/assets/asset-1', '?ui=beta'),
+    isNightbookWorkspaceLocation('/library/assets/asset-1', '?ui=beta'),
     true,
   )
-  assert.equal(isBetaWorkspaceLocation('/library', ''), false)
-  assert.equal(isBetaWorkspaceLocation('/library/compare', '?ui=beta'), false)
+  assert.equal(isLegacyWorkspaceLocation('/library', '?ui=legacy'), true)
   assert.equal(
-    isBetaWorkspaceLocation('/observe/assets/asset-1', '?ui=beta'),
+    isLegacyWorkspaceLocation('/library/assets/asset-1', '?ui=legacy'),
+    true,
+  )
+  assert.equal(isNightbookWorkspaceLocation('/library/compare', ''), false)
+  assert.equal(
+    isLegacyWorkspaceLocation('/observe/assets/asset-1', '?ui=legacy'),
     false,
   )
-  assert.equal(isBetaWorkspaceLocation('/process', '?ui=beta'), true)
+  assert.equal(isNightbookWorkspaceLocation('/process', ''), true)
 })
 
-test('recognizes the explicit Process beta URL marker', () => {
-  assert.equal(isBetaProcessLocation('/process', '?ui=beta'), true)
-  assert.equal(isBetaProcessLocation('/process', ''), false)
-  assert.equal(isBetaProcessLocation('/library', '?ui=beta'), false)
+test('promotes normal Process and Plan while retaining beta compatibility', () => {
+  assert.equal(isNightbookProcessLocation('/process', ''), true)
+  assert.equal(isNightbookProcessLocation('/process', '?ui=beta'), true)
+  assert.equal(isNightbookProcessLocation('/process', '?ui=legacy'), false)
+  assert.equal(isNightbookPlanLocation('/plan', ''), true)
+  assert.equal(isNightbookPlanLocation('/plan', '?ui=beta'), true)
+  assert.equal(isNightbookPlanLocation('/plan', '?ui=legacy'), false)
+  assert.equal(isNightbookPlanLocation('/', ''), true)
+  assert.equal(isNightbookPlanLocation('/', '?ui=beta&trace=1'), true)
+  assert.equal(isNightbookPlanLocation('/', '?ui=legacy&trace=1'), false)
 })
 
-test('recognizes the explicit Plan beta URL marker', () => {
-  assert.equal(isBetaPlanLocation('/plan', '?ui=beta'), true)
-  assert.equal(isBetaPlanLocation('/plan', ''), false)
-  assert.equal(isBetaPlanLocation('/observe', '?ui=beta'), false)
+test('builds clean Nightbook links and explicit legacy links without losing unrelated queries', () => {
+  assert.equal(
+    nightbookHref('/observe', '?ui=beta&scenario=m27'),
+    '/observe?scenario=m27',
+  )
+  assert.equal(
+    nightbookHref('/process?sourceAssetId=asset-1', '?ui=beta&trace=1'),
+    '/process?trace=1&sourceAssetId=asset-1',
+  )
+  assert.equal(
+    nightbookHref('/library', '?sourceAssetId=asset-1&trace=1'),
+    '/library?trace=1',
+  )
+  assert.equal(
+    legacyHref('/process?sourceAssetId=asset-1', '?ui=beta&trace=1'),
+    '/process?trace=1&sourceAssetId=asset-1&ui=legacy',
+  )
 })

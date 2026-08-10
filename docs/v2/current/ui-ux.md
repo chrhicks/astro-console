@@ -1,11 +1,11 @@
 # UI And UX Direction
 
-Status: **current direction for the Nightbook UI migration**
+Status: **current direction after Nightbook route promotion**
 
 ## Goal
 
-Promote the opt-in Astro Console beta presentation to the main UI. The beta is
-an integration client for the official Nightbook demo and `@nightbook/ui`; it
+Keep the promoted Astro Console presentation aligned with the official
+Nightbook demo and `@nightbook/ui`. Astro Console is an integration client; it
 is not a separate design authority.
 
 ## Visual And Interaction Authority
@@ -28,9 +28,9 @@ package source for component behavior and public APIs. `READINESS.md` and
 verification surface.
 
 The older Astro Console visual guides, component grammar, UX catalog, and
-Phase 0.5 material are historical. Existing non-beta `apps/web` workspaces and
-CSS remain running code until promotion, but they are not design references
-and should not receive further visual-system work.
+Phase 0.5 material are historical. The retained presentation remains available
+temporarily through `?ui=legacy`, but it is not a design reference and should
+not receive further visual-system work.
 
 ## Ownership Boundary
 
@@ -57,8 +57,8 @@ For one demo workflow or state at a time:
 5. Compose the beta from `@nightbook/ui` and application-owned adapters.
 6. Compare the result with the demo at wide, compact, and 390 px phone widths;
    also check keyboard, focus, overflow, console, and read-only behavior.
-7. Promote the beta route only after all four workspaces pass the agreed
-   functional and visual review.
+7. Keep normal routes on Nightbook after changes pass the agreed functional
+   and visual review.
 
 ## Known Alignment Work
 
@@ -79,7 +79,8 @@ history, paired star outputs, retry, comparison, and Library saves. The
 integrated Item 3.5 review is also complete: the retained two-Capture-Set M27
 journey passed functional and Designer review across all six Process stages,
 public Library detail, restart, wide, compact, and read-only phone states. The
-next work is the explicit beta audit and route-promotion decision.
+route audit and promotion are complete. A separate ad-hoc architecture audit
+is next; it does not change the visual authority.
 
 - Library selection and whole Capture Set intake must lead to a persistent
   Processing Project, not directly into transient worker progress.
@@ -93,10 +94,11 @@ next work is the explicit beta audit and route-promotion decision.
   astronomy operations without drifting into layers, masks, compositing, or a
   general Photoshop-style editor.
 
-## Promotion Boundary
+## Promotion State
 
-Until the owner approves route promotion, `?ui=beta` remains the comparison
-and integration path and the existing routes remain the default. Promotion is
-a later product decision with its own functional and Designer evidence. Old UI
-code retirement follows successful promotion; it is not part of design
-authority cleanup.
+Normal Plan, Observe, Library, Library detail, and Process routes now render
+Nightbook. Existing `?ui=beta` links remain compatible. `?ui=legacy` is the
+temporary retained-presentation comparison and rollback path. Retiring that
+code is a later cleanup after the promoted routes have operated successfully.
+The root route `/` maps to the promoted Plan workspace; `/?ui=legacy` maps to
+the retained Plan presentation.

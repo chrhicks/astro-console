@@ -34,6 +34,7 @@ import {
   type BetaControlPresentation,
   type BetaControlSubmit,
 } from './BetaObserveApp'
+import { nightbookHref } from './route'
 import '@nightbook/ui/styles.css'
 import './beta-observe.css'
 import './beta-process.css'
@@ -425,10 +426,72 @@ const buildStage = (value: string | undefined) =>
 export function ProcessPhone({
   workspace,
   state,
+  sourceAssetId,
+  sourceHandoff,
+  sourceHandoffState,
 }: {
   workspace: ProcessWorkspace | undefined
   state: string
+  sourceAssetId?: string | undefined
+  sourceHandoff?: ProcessSourceHandoff | undefined
+  sourceHandoffState?: HandoffState | undefined
 }) {
+  if (sourceAssetId !== undefined)
+    return (
+      <main
+        id="beta-workspace"
+        className="beta-phone-workspace beta-process-phone"
+      >
+        <header className="beta-phone-header">
+          <div>
+            <p>Process source / read only</p>
+            <h1>{sourceAssetId}</h1>
+          </div>
+          <StatusIndicator
+            label={sourceHandoff ? 'Library source resolved' : state}
+            tone={sourceHandoff ? 'positive' : 'neutral'}
+          />
+        </header>
+        <AttentionCard
+          tone="warning"
+          statusLabel="Read-only on phone"
+          title="Exact Library handoff"
+          description="Start or add this source from the desktop workspace."
+        />
+        <Panel>
+          <PanelHeader title="Source evidence" meta="Service owned" />
+          <PanelBody>
+            <DataList>
+              <DataListItem label="Asset" value={sourceAssetId} />
+              <DataListItem
+                label="State"
+                value={
+                  sourceHandoff
+                    ? 'Resolved'
+                    : titleCase(sourceHandoffState ?? state)
+                }
+              />
+              {sourceHandoff ? (
+                <>
+                  <DataListItem
+                    label="Revision"
+                    value={String(sourceHandoff.revision)}
+                  />
+                  <DataListItem
+                    label="Representation"
+                    value={`${titleCase(sourceHandoff.role)} · ${sourceHandoff.format}`}
+                  />
+                  <DataListItem
+                    label="Availability"
+                    value={titleCase(sourceHandoff.availability)}
+                  />
+                </>
+              ) : null}
+            </DataList>
+          </PanelBody>
+        </Panel>
+      </main>
+    )
   const session = selectedSession(workspace)
   const project = selectedProject(workspace)
   const calibration = project?.stages.find(
@@ -1063,7 +1126,7 @@ function ProjectSourcesDesktop({
               />
               <a
                 className="nb-button nb-button--secondary nb-button--medium"
-                href="/library?ui=beta"
+                href={nightbookHref('/library')}
               >
                 Add sources from Library
               </a>
@@ -1717,7 +1780,9 @@ function ProjectDevelopDesktop({
       {develop.savedResults.map((saved) => (
         <a
           key={saved.assetId}
-          href={`/library/assets/${encodeURIComponent(saved.assetId)}?ui=beta`}
+          href={nightbookHref(
+            `/library/assets/${encodeURIComponent(saved.assetId)}`,
+          )}
         >
           Saved Library Develop result · {saved.assetId} · {saved.checksum}
         </a>
@@ -2907,7 +2972,7 @@ function SourceEntry({
           ) : (
             <a
               className="nb-button nb-button--secondary nb-button--medium"
-              href="/library?ui=beta"
+              href={nightbookHref('/library')}
             >
               Open Library
             </a>
@@ -2960,6 +3025,53 @@ function ProcessDesktop({
   const authorityReason = processCommandsProtected(projection)
     ? 'Current desktop owner authority is not confirmed.'
     : undefined
+  const startReason =
+    authorityReason ??
+    processActionReason(workspace?.actions, 'StartProcessingSession')
+  if (sourceAssetId !== undefined)
+    return (
+      <main
+        id="beta-workspace"
+        className="beta-desktop-workspace beta-process-workspace"
+      >
+        <PageHeader
+          eyebrow="Process / Library handoff"
+          title="Review the exact processing source"
+          actions={
+            <StatusIndicator
+              label={message ?? (workspace ? 'Ready' : 'Loading')}
+              tone={workspace ? 'positive' : 'neutral'}
+            />
+          }
+        />
+        <SourceEntry
+          assetId={sourceAssetId}
+          handoff={sourceHandoff}
+          state={sourceHandoffState}
+          disabled={startReason !== undefined || !!pending}
+          disabledReason={startReason}
+          start={() =>
+            sourceHandoff &&
+            command(
+              {
+                _tag: 'StartProcessingSession',
+                selection: 'recommended',
+                sourceAssetIds: sourceHandoff.recommendedSet?.candidates
+                  .filter(
+                    (candidate) => candidate.effectiveDecision === 'include',
+                  )
+                  .map((candidate) => candidate.assetId) ?? [
+                  sourceHandoff.sourceAssetId,
+                ],
+                idempotencyKey: crypto.randomUUID(),
+              },
+              'Starting session',
+            )
+          }
+          onReviewCandidate={onReviewCandidate}
+        />
+      </main>
+    )
   if (project) {
     const viewedStage = viewedProjectStage ?? project.currentStage
     const projectActions = workspace?.projectActions.find(
@@ -2996,9 +3108,6 @@ function ProcessDesktop({
       />
     )
   }
-  const startReason =
-    authorityReason ??
-    processActionReason(workspace?.actions, 'StartProcessingSession')
   if (!session)
     return (
       <main
@@ -3503,7 +3612,9 @@ function ProcessDesktop({
               {session.savedAssetIds.map((assetId) => (
                 <a
                   key={assetId}
-                  href={`/library/assets/${encodeURIComponent(assetId)}?ui=beta`}
+                  href={nightbookHref(
+                    `/library/assets/${encodeURIComponent(assetId)}`,
+                  )}
                 >
                   Saved Library asset · {assetId}
                 </a>
@@ -3519,9 +3630,11 @@ function ProcessDesktop({
 function ProcessStatusStrip({
   projection,
   workspace,
+  sourceAssetId,
 }: {
   projection: Projection
   workspace: ProcessWorkspace | undefined
+  sourceAssetId?: string | undefined
 }) {
   const session = selectedSession(workspace)
   const project = selectedProject(workspace)
@@ -3536,14 +3649,20 @@ function ProcessStatusStrip({
           aria-hidden="true"
         />
         <b>Process</b> ·{' '}
-        {project ? 'Processing Project' : (session?.lifecycle ?? 'No session')}
+        {sourceAssetId
+          ? 'Library handoff'
+          : project
+            ? 'Processing Project'
+            : (session?.lifecycle ?? 'No session')}
       </span>
       <span className="beta-process-status-desktop">
-        {project
-          ? `${project.currentStage} · project revision ${project.revision}`
-          : session
-            ? `${titleCase(session.phase)} · revision ${session.revision}`
-            : 'Durable workspace ready'}
+        {sourceAssetId
+          ? `Exact source · ${sourceAssetId}`
+          : project
+            ? `${project.currentStage} · project revision ${project.revision}`
+            : session
+              ? `${titleCase(session.phase)} · revision ${session.revision}`
+              : 'Durable workspace ready'}
       </span>
       <span className="beta-process-status-desktop">
         {workspace?.pressure.state ?? 'unknown'} pressure ·{' '}
@@ -3557,7 +3676,11 @@ function ProcessStatusStrip({
           aria-hidden="true"
         />
         <b>Process</b> ·{' '}
-        {project ? project.currentStage : (session?.phase ?? 'No session')}
+        {sourceAssetId
+          ? 'Library handoff'
+          : project
+            ? project.currentStage
+            : (session?.phase ?? 'No session')}
       </span>
     </footer>
   )
@@ -3670,7 +3793,13 @@ export function BetaProcessApp(props: BetaProcessAppProps) {
           : { submitControl: props.submitControl })}
       />
       {phone ? (
-        <ProcessPhone workspace={workspace} state={state} />
+        <ProcessPhone
+          workspace={workspace}
+          state={state}
+          sourceAssetId={props.sourceAssetId}
+          sourceHandoff={props.sourceHandoff}
+          sourceHandoffState={props.sourceHandoffState}
+        />
       ) : (
         <ProcessDesktop
           projection={props.projection}
@@ -3688,7 +3817,11 @@ export function BetaProcessApp(props: BetaProcessAppProps) {
           onReviewCandidate={props.onReviewCandidate}
         />
       )}
-      <ProcessStatusStrip projection={props.projection} workspace={workspace} />
+      <ProcessStatusStrip
+        projection={props.projection}
+        workspace={workspace}
+        sourceAssetId={props.sourceAssetId}
+      />
     </div>
   )
 }

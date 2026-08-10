@@ -36,6 +36,7 @@ import type {
 } from '../library-client'
 import type { Projection } from '../presentation'
 import { BetaCommandBar, type BetaControlSubmit } from './BetaObserveApp'
+import { nightbookHref } from './route'
 import '@nightbook/ui/styles.css'
 import './beta-observe.css'
 import './beta-library.css'
@@ -200,10 +201,12 @@ function AssetNavigator({
   }
   return (
     <nav className="beta-library-assets" aria-label="Frame review navigation">
-      <a href="/library?ui=beta">Catalog</a>
+      <a href={nightbookHref('/library')}>Catalog</a>
       {previous ? (
         <a
-          href={`/library/assets/${encodeURIComponent(previous.assetId)}?ui=beta`}
+          href={nightbookHref(
+            `/library/assets/${encodeURIComponent(previous.assetId)}`,
+          )}
           onClick={(event) => follow(event, previous.assetId)}
         >
           Previous
@@ -218,7 +221,9 @@ function AssetNavigator({
       </div>
       {next ? (
         <a
-          href={`/library/assets/${encodeURIComponent(next.assetId)}?ui=beta`}
+          href={nightbookHref(
+            `/library/assets/${encodeURIComponent(next.assetId)}`,
+          )}
           onClick={(event) => follow(event, next.assetId)}
         >
           Next
@@ -494,7 +499,9 @@ function LibraryCatalog({
                           Select frame
                         </label>
                         <a
-                          href={`/library/assets/${encodeURIComponent(asset.assetId)}?ui=beta`}
+                          href={nightbookHref(
+                            `/library/assets/${encodeURIComponent(asset.assetId)}`,
+                          )}
                           onClick={(event) => follow(event, asset.assetId)}
                         >
                           <b>{compactAssetId(asset.assetId)}</b>
@@ -612,6 +619,13 @@ function LineagePanel({ detail }: { detail: LibraryAssetDetail }) {
                   ? `${detail.lineage.operationIds.length} operation${detail.lineage.operationIds.length === 1 ? '' : 's'}`
                   : 'Build output'
               }
+            />
+          ) : null}
+          {detail.lineage.operationIds?.length ? (
+            <DataListItem
+              label="Operations"
+              value={detail.lineage.operationIds.join(', ')}
+              detail="Exact applied operation lineage"
             />
           ) : null}
           <DataListItem
@@ -1384,6 +1398,18 @@ export function BetaLibraryPhone({
                     value={detail.lineage.processingSessionId}
                   />
                 ) : null}
+                {detail.lineage.processingOutputId ? (
+                  <DataListItem
+                    label="Process output"
+                    value={detail.lineage.processingOutputId}
+                  />
+                ) : null}
+                {detail.lineage.operationIds?.length ? (
+                  <DataListItem
+                    label="Operations"
+                    value={detail.lineage.operationIds.join(', ')}
+                  />
+                ) : null}
                 <DataListItem
                   label="Source"
                   value={
@@ -1451,7 +1477,9 @@ export function BetaLibraryPhone({
                   {assets.map((asset) => (
                     <a
                       key={asset.assetId}
-                      href={`/library/assets/${encodeURIComponent(asset.assetId)}?ui=beta`}
+                      href={nightbookHref(
+                        `/library/assets/${encodeURIComponent(asset.assetId)}`,
+                      )}
                     >
                       <b>{compactAssetId(asset.assetId)}</b>
                       <span>
@@ -1618,7 +1646,7 @@ export function BetaLibraryApp(props: BetaLibraryAppProps) {
             result.outcome !== 'accepted'
           )
             throw new Error('Project intake rejected')
-          location.assign('/process?ui=beta')
+          location.assign(nightbookHref('/process'))
         })
         .catch(() => setMessage('The project intake was not accepted.'))
         .finally(() => setPending(false))

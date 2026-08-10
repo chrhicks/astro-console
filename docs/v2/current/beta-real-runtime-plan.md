@@ -1,6 +1,6 @@
 # Nightbook Beta Real-Runtime Plan
 
-Status: **accepted — configured Acquire prepared and simulator-proven; outdoor proof and optional live abort pending**
+Status: **accepted — Nightbook routes promoted locally; configured Acquire prepared and simulator-proven; outdoor proof and optional live abort pending**
 
 Accepted: August 8, 2026
 
@@ -391,8 +391,8 @@ changes the product workflow around that foundation:
 Do not slow deterministic work to make transient states easier to watch. Keep
 the completed attempts and evidence navigable instead. The detailed product,
 service, proof, and non-goal boundaries are in the
-[Item 3.5 Process workflow plan](process-workflow-plan.md). Item 4 remains after
-Item 3.5.7.
+[Item 3.5 Process workflow plan](process-workflow-plan.md). The explicit
+workflow and subsequent route promotion are now complete locally.
 
 ### 9. Audit and promote the beta
 
@@ -403,6 +403,17 @@ Item 3.5.7.
 - Promote only after every enabled action has a real command path and every
   unavailable action has a typed reason.
 - Retire the old presentation in a later cleanup after promotion.
+
+Completed locally August 10, 2026. Normal Plan, Observe, Library, Library
+detail, and Process routes now render Nightbook; existing `?ui=beta` links stay
+compatible and `?ui=legacy` is the temporary retained-presentation fallback.
+The final audit corrected exact Library-to-Process handoff precedence,
+completed Observe evidence, exact final Library operation IDs, compact Develop
+containment, and promoted-shell wording. Functional and Designer proof passed
+wide, compact, and 390 px with contracts 187/187, server 202/202, and web
+151/151. This is local route, retained-fixture, simulator, service, and browser
+proof; it does not prove deployment or new provider, hardware, or physical
+behavior.
 
 ## Proof Boundary
 

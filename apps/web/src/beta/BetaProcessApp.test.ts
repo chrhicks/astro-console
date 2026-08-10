@@ -1232,6 +1232,10 @@ test('keeps the project stage header stable while its body owns vertical scroll'
     styles,
     /\.beta-process-project-sources \.nb-panel-body\s*\{[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto;/s,
   )
+  assert.match(
+    styles,
+    /@media \(max-width: 1180px\) and \(min-width: 601px\)\s*\{\s*\.beta-process-develop-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s,
+  )
 })
 
 test('shows the service-owned needs-review queue with evidence and blocks Build', () => {
@@ -1297,6 +1301,68 @@ test('shows the service-owned needs-review queue with evidence and blocks Build'
     markup,
     /<button[^>]*disabled=""[^>]*>Build recommended set<\/button>/,
   )
+})
+
+test('an exact Library handoff takes precedence over an existing selected project', () => {
+  const sourceHandoff = Schema.decodeUnknownSync(ProcessSourceHandoff)({
+    sourceAssetId: 'asset-m27-006',
+    revision: 1,
+    role: 'original',
+    format: 'cameraRaw',
+    availability: 'availableLocally',
+    comparisonGroupId: 'm27-stack-1',
+    lineage: { sourceAssetIds: ['asset-m27-005'] },
+    processing: {
+      availability: 'available',
+      currentFixtureFacts: ['Deterministic file-backed adapter.'],
+    },
+  })
+  const markup = renderToStaticMarkup(
+    createElement(BetaProcessApp, {
+      projection: processControllerProjection,
+      loading: false,
+      sourceAssetId: sourceHandoff.sourceAssetId,
+      sourceHandoff,
+      initialWorkspace: projectWorkspace,
+    }),
+  )
+
+  assert.match(markup, /Process \/ Library handoff/)
+  assert.match(markup, /Review the exact processing source/)
+  assert.match(markup, /asset-m27-006/)
+  assert.match(markup, /Process<\/b> · Library handoff/)
+  assert.match(markup, /Exact source · asset-m27-006/)
+  assert.doesNotMatch(markup, /M27 multi-night/)
+})
+
+test('phone keeps an exact Library handoff read only even when a project exists', () => {
+  const sourceHandoff = Schema.decodeUnknownSync(ProcessSourceHandoff)({
+    sourceAssetId: 'asset-m27-006',
+    revision: 1,
+    role: 'original',
+    format: 'cameraRaw',
+    availability: 'availableLocally',
+    comparisonGroupId: 'm27-stack-1',
+    lineage: { sourceAssetIds: ['asset-m27-005'] },
+    processing: {
+      availability: 'available',
+      currentFixtureFacts: ['Deterministic file-backed adapter.'],
+    },
+  })
+  const markup = renderToStaticMarkup(
+    createElement(ProcessPhone, {
+      workspace: projectWorkspace,
+      state: 'Current',
+      sourceAssetId: sourceHandoff.sourceAssetId,
+      sourceHandoff,
+    }),
+  )
+
+  assert.match(markup, /Exact Library handoff/)
+  assert.match(markup, /asset-m27-006/)
+  assert.match(markup, /Original · cameraRaw/)
+  assert.doesNotMatch(markup, /M27 multi-night/)
+  assert.doesNotMatch(markup, /<button|<input|<select|<textarea/)
 })
 
 test('protects every Process mutation when current authority is unavailable', () => {

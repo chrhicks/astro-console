@@ -111,8 +111,8 @@ test('simulation surface carries explicit real-frame context and desktop control
   assert.match(markup, />Load</)
   assert.match(markup, />Reset</)
   assert.match(markup, />Advance 16s</)
-  assert.match(markup, /href="\/plan\?ui=beta"/)
-  assert.match(markup, /href="\/observe\?ui=beta"/)
+  assert.match(markup, /href="\/plan"/)
+  assert.match(markup, /href="\/observe"/)
   assert.doesNotMatch(markup, /Capture test frame/)
   assert.doesNotMatch(markup, /CompleteCameraExposure/)
   assert.doesNotMatch(markup, /Library evidence/)
@@ -159,7 +159,7 @@ test('ready-rig names the normal Observe path without a direct command button', 
   assert.doesNotMatch(markup, />Run preflight test</)
   assert.doesNotMatch(markup, />Capture test frame</)
   assert.match(markup, /Continue through Plan and Observe/)
-  assert.match(markup, /href="\/observe\?ui=beta"/)
+  assert.match(markup, /href="\/observe"/)
 })
 
 test('NGC 7000 target acquisition shows its 120-second advance and normal workflow guide', () => {

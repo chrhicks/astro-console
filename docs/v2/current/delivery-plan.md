@@ -242,8 +242,12 @@ with a target-owned Processing Project and explicit, inspectable stages:
 - **3.5.6 Complete —** Astronomy Develop workspace.
 - **3.5.7 Complete —** Integrated operator review and closeout.
 
-4. Audit all four Nightbook beta workspaces and make route promotion an explicit
-   owner decision.
+4. **Complete —** Audit all four Nightbook workspaces and promote Nightbook to
+   the normal routes with a temporary explicit legacy fallback.
+
+**Next ad-hoc item —** Run a separate architecture audit of the promoted
+system. Report and prioritize findings before authorizing refactors; do not mix
+the audit into route promotion.
 5. Repair the scheduled host backup container-name mismatch.
 6. Remove only the unused failed-build and index-download staging copies after
    retaining the deployed release, installed solver indexes, and verified SSD

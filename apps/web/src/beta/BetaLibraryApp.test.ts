@@ -155,13 +155,13 @@ test('renders one real frame-review task from Library contracts', () => {
   assert.match(markup, /Available · Not loaded/)
   assert.match(markup, /Previous/)
   assert.match(markup, /Next/)
-  assert.match(markup, /href="\/library\?ui=beta">Catalog/)
-  assert.match(markup, /asset-m27-002\?ui=beta/)
+  assert.match(markup, /href="\/library">Catalog/)
+  assert.match(markup, /href="\/library\/assets\/asset-m27-002"/)
   assert.match(markup, /<dt>Rig<\/dt>/)
   assert.match(markup, /rig-backyard-primary/)
   assert.match(markup, /<dt>Camera<\/dt>/)
   assert.match(markup, /camera-asi2600mc-pro/)
-  assert.match(markup, /Backyard observatory · beta/)
+  assert.match(markup, /Backyard observatory/)
   assert.match(markup, /aria-current="page">Library/)
   assert.doesNotMatch(markup, /Computed delta/)
 })
@@ -193,8 +193,8 @@ test('renders a service-page catalog grouped only by projected identities', () =
   assert.match(markup, /Newest first/)
   assert.match(markup, /m27-night-1/)
   assert.match(markup, /2 loaded representations/)
-  assert.match(markup, /\/library\/assets\/asset-m27-001\?ui=beta/)
-  assert.match(markup, /\/library\/assets\/asset-m27-002\?ui=beta/)
+  assert.match(markup, /\/library\/assets\/asset-m27-001/)
+  assert.match(markup, /\/library\/assets\/asset-m27-002/)
   assert.match(markup, /★ 4\/5/)
   assert.match(markup, /Unreviewed/)
   assert.match(markup, /☆ Not rated/)
@@ -347,7 +347,34 @@ test('renders complete Process output lineage without invented capture lineage',
   assert.match(markup, /session-process-1/)
   assert.match(markup, /<dt>Process output<\/dt>/)
   assert.match(markup, /output-process-1/)
+  assert.match(markup, /<dt>Operations<\/dt>/)
+  assert.match(markup, /operation-stretch-1/)
   assert.doesNotMatch(markup, /<dt>Run<\/dt>|<dt>Solve<\/dt>/)
+})
+
+test('phone retains exact Process output and operation lineage without controls', () => {
+  const processDetail = Schema.decodeUnknownSync(LibraryAssetDetailSchema)({
+    ...detail,
+    lineage: {
+      sourceAssetIds: ['asset-master-1'],
+      processingSessionId: 'project-1',
+      processingOutputId: 'develop-output-1',
+      operationIds: ['calibration-attempt-1', 'develop-attempt-1'],
+    },
+  })
+  const markup = renderToStaticMarkup(
+    createElement(BetaLibraryPhone, {
+      projection: controllerProjection,
+      loading: false,
+      page: { query, value: page },
+      detail: processDetail,
+    }),
+  )
+  assert.match(markup, /<dt>Process output<\/dt>/)
+  assert.match(markup, /develop-output-1/)
+  assert.match(markup, /<dt>Operations<\/dt>/)
+  assert.match(markup, /calibration-attempt-1, develop-attempt-1/)
+  assert.doesNotMatch(markup, /<button/)
 })
 
 test('phone is evidence, availability, and lineage without mutation controls', () => {
@@ -403,7 +430,7 @@ test('phone catalog is useful read-only service evidence with navigation only', 
   assert.match(markup, /☆ Not rated/)
   assert.match(markup, /Rejected/)
   assert.match(markup, /Revision 1/)
-  assert.match(markup, /\?ui=beta/)
+  assert.doesNotMatch(markup, /\?ui=/)
   assert.doesNotMatch(markup, /<button|<input|<select|<textarea/)
 })
 

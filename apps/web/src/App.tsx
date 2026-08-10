@@ -35,7 +35,12 @@ import {
   routeWorkspace,
   type Route,
 } from './routes'
-import { isBetaWorkspaceLocation } from './beta/route'
+import {
+  isLegacyWorkspaceLocation,
+  isNightbookWorkspaceLocation,
+  legacyHref,
+  nightbookHref,
+} from './beta/route'
 import { Shell } from './Shell'
 import { LibraryView } from './workspaces/LibraryView'
 import {
@@ -59,8 +64,8 @@ import {
 } from './live-frame-review-client'
 
 const currentRoute = () => parseRoute(location.pathname, location.search)
-const currentBetaWorkspace = () =>
-  isBetaWorkspaceLocation(location.pathname, location.search)
+const currentNightbookWorkspace = () =>
+  isNightbookWorkspaceLocation(location.pathname, location.search)
 const BetaObserveApp = lazy(() => import('./beta/BetaObserveApp'))
 const BetaLibraryApp = lazy(() => import('./beta/BetaLibraryApp'))
 const BetaPlanApp = lazy(() => import('./beta/BetaPlanApp'))
@@ -87,7 +92,9 @@ export function App() {
   const projectionRef = useRef(projection)
   projectionRef.current = projection
   const [route, setRoute] = useState<Route>(currentRoute)
-  const [betaWorkspace, setBetaWorkspace] = useState(currentBetaWorkspace)
+  const [nightbookWorkspace, setNightbookWorkspace] = useState(
+    currentNightbookWorkspace,
+  )
   const [projectionReceived, setProjectionReceived] = useState(false)
   const [submitPlan, setSubmitPlan] = useState<
     | ((
@@ -211,7 +218,7 @@ export function App() {
   useEffect(() => {
     const onPopState = () => {
       setRoute(currentRoute())
-      setBetaWorkspace(currentBetaWorkspace())
+      setNightbookWorkspace(currentNightbookWorkspace())
     }
     addEventListener('popstate', onPopState)
     return () => removeEventListener('popstate', onPopState)
@@ -601,9 +608,17 @@ export function App() {
   }, [route])
   const navigate = (next: Exclude<Route, { kind: 'not-found' }>) => {
     const path = routeWithProjection(next)
-    history.pushState(null, '', path)
+    const href = isLegacyWorkspaceLocation(location.pathname, location.search)
+      ? legacyHref(path, location.search)
+      : nightbookHref(path, location.search)
+    history.pushState(null, '', href)
     setRoute(next)
-    setBetaWorkspace(false)
+    setNightbookWorkspace(
+      isNightbookWorkspaceLocation(
+        new URL(href, location.origin).pathname,
+        new URL(href, location.origin).search,
+      ),
+    )
   }
   const intercept = (
     event: React.MouseEvent<HTMLAnchorElement>,
@@ -621,7 +636,9 @@ export function App() {
     navigate(next)
   }
   const link = (next: Exclude<Route, { kind: 'not-found' }>) => ({
-    href: routeWithProjection(next),
+    href: isLegacyWorkspaceLocation(location.pathname, location.search)
+      ? legacyHref(routeWithProjection(next), location.search)
+      : nightbookHref(routeWithProjection(next), location.search),
     onClick: (event: React.MouseEvent<HTMLAnchorElement>) =>
       intercept(event, next),
   })
@@ -632,21 +649,27 @@ export function App() {
     })
     setLibraryQuery(query)
   }
-  const selectBetaLibraryAsset = (assetId: string) => {
+  const selectNightbookLibraryAsset = (assetId: string) => {
     const path = `/library/assets/${encodeURIComponent(assetId)}`
-    const next = parseRoute(path, '?ui=beta')
+    const href = nightbookHref(path, location.search)
+    const url = new URL(href, location.origin)
+    const next = parseRoute(url.pathname, url.search)
     if (next.kind !== 'asset') return
-    history.pushState(null, '', `${path}?ui=beta`)
+    history.pushState(null, '', href)
     setRoute(next)
-    setBetaWorkspace(true)
+    setNightbookWorkspace(true)
   }
-  const openBetaProcess = (assetId: string) => {
-    const search = `?sourceAssetId=${encodeURIComponent(assetId)}&ui=beta`
-    const next = parseRoute('/process', search)
+  const openNightbookProcess = (assetId: string) => {
+    const href = nightbookHref(
+      `/process?sourceAssetId=${encodeURIComponent(assetId)}`,
+      location.search,
+    )
+    const url = new URL(href, location.origin)
+    const next = parseRoute(url.pathname, url.search)
     if (next.kind !== 'process-source') return
-    history.pushState(null, '', `/process${search}`)
+    history.pushState(null, '', href)
     setRoute(next)
-    setBetaWorkspace(true)
+    setNightbookWorkspace(true)
   }
   const reviewLibraryAsset = async (review: {
     decision: 'accepted' | 'rejected' | 'unreviewed'
@@ -787,12 +810,12 @@ export function App() {
       />
     )
 
-  if (betaWorkspace && workspace === 'observe')
+  if (nightbookWorkspace && workspace === 'observe')
     return (
       <Suspense
         fallback={
-          <main aria-busy="true" aria-label="Loading Nightbook beta">
-            Loading Nightbook beta…
+          <main aria-busy="true" aria-label="Loading Nightbook Observe">
+            Loading Nightbook Observe…
           </main>
         }
       >
@@ -823,12 +846,12 @@ export function App() {
       </Suspense>
     )
 
-  if (betaWorkspace && workspace === 'plan')
+  if (nightbookWorkspace && workspace === 'plan')
     return (
       <Suspense
         fallback={
-          <main aria-busy="true" aria-label="Loading Nightbook Plan beta">
-            Loading Nightbook Plan beta…
+          <main aria-busy="true" aria-label="Loading Nightbook Plan">
+            Loading Nightbook Plan…
           </main>
         }
       >
@@ -843,12 +866,12 @@ export function App() {
       </Suspense>
     )
 
-  if (betaWorkspace && workspace === 'library')
+  if (nightbookWorkspace && workspace === 'library')
     return (
       <Suspense
         fallback={
-          <main aria-busy="true" aria-label="Loading Nightbook Library beta">
-            Loading Nightbook Library beta…
+          <main aria-busy="true" aria-label="Loading Nightbook Library">
+            Loading Nightbook Library…
           </main>
         }
       >
@@ -866,7 +889,7 @@ export function App() {
               : { message: libraryPage.message }),
           }}
           onQuery={changeLibraryQuery}
-          onSelectAsset={selectBetaLibraryAsset}
+          onSelectAsset={selectNightbookLibraryAsset}
           {...(selectedLibraryAssetId === undefined
             ? {}
             : { assetId: selectedLibraryAssetId })}
@@ -880,17 +903,17 @@ export function App() {
             ? {}
             : { onReview: reviewLibraryAsset })}
           loadDetail={loadLibraryAssetDetail}
-          onOpenProcess={openBetaProcess}
+          onOpenProcess={openNightbookProcess}
         />
       </Suspense>
     )
 
-  if (betaWorkspace && workspace === 'process')
+  if (nightbookWorkspace && workspace === 'process')
     return (
       <Suspense
         fallback={
-          <main aria-busy="true" aria-label="Loading Nightbook Process beta">
-            Loading Nightbook Process beta…
+          <main aria-busy="true" aria-label="Loading Nightbook Process">
+            Loading Nightbook Process…
           </main>
         }
       >

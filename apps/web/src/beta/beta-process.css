@@ -217,6 +217,12 @@
   gap: 6px;
 }
 
+@media (max-width: 1180px) and (min-width: 601px) {
+  .beta-process-develop-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .beta-process-calibration-intro {
   margin: 0;
   color: var(--nb-muted);
@@ -283,10 +289,6 @@
 
   .beta-process-source-row {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  }
-
-  .beta-process-develop-grid {
-    grid-template-columns: minmax(0, 1fr);
   }
 }
 

@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; Process execution and Item 3.5 complete; beta audit and route-promotion decision next**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; Process execution and Item 3.5 complete; Nightbook routes promoted locally; ad-hoc architecture audit next**
 
 Keep normal working context small. Do not read the complete V2 tree.
 
@@ -44,12 +44,12 @@ live-shaped path is proven through the simulator from target slew through
 correction, verification, modest capture, and Library handoff. The remaining
 Phase 5 work is owner-observed live provider and physical outdoor proof.
 
-The official future presentation is the Nightbook React demo and
-`@nightbook/ui` package in the external Nightbook workspace. Astro Console has
-an opt-in `?ui=beta` integration for all four workspaces. It remains an
-integration and feedback surface until projection alignment and explicit route
-promotion are complete. Existing non-beta pages remain the default, but their
-local visual system is not current design authority.
+The official presentation is the Nightbook React demo and `@nightbook/ui`
+package in the external Nightbook workspace. Astro Console now renders that
+presentation by default for Plan, Observe, Library, and Process. Existing
+`?ui=beta` links remain compatible. The retained presentation is available
+temporarily through `?ui=legacy` for comparison and rollback until a later
+cleanup; it is not design authority.
 
 ## Context Rules
 
