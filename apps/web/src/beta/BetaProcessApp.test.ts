@@ -841,9 +841,140 @@ test('renders Stacking decisions, versioned FITS evidence, saved Master, and exa
     ...saved,
     projects: saved.projects.map((project) => ({
       ...project,
+      revision: 12,
       currentStage: 'Develop',
       developMasterAssetId: 'asset-master-ui',
+      develop: {
+        base: {
+          assetId: 'asset-master-ui',
+          assetRevision: 1,
+          checksum: 'sha256:stack-ui',
+          stackingAttemptId: 'stage-attempt-stacking-ui',
+          stackResultId: 'stage-result-stacking-ui',
+        },
+        draft: {
+          revision: 3,
+          operation: { _tag: 'AddStars' },
+          undo: [
+            {
+              operation: { _tag: 'RemoveStars', mode: 'balanced' },
+            },
+          ],
+          redo: [],
+        },
+        preview: {
+          previewId: 'develop-preview-ui',
+          draftRevision: 3,
+          inputCheckpointId: 'develop-checkpoint-starless-ui',
+          operation: { _tag: 'AddStars' },
+          toolIdentity: 'deterministic-develop-adapter-v1',
+          checksum: 'sha256:develop-preview-ui',
+          synchronizedAt: '2026-08-10T19:00:00.000Z',
+        },
+        attempts: [
+          {
+            attemptId: 'develop-attempt-remove-stars-ui',
+            state: 'succeeded',
+            inputCheckpointId: 'develop-checkpoint-base-ui',
+            previewId: 'develop-preview-remove-ui',
+            draftRevision: 2,
+            operation: { _tag: 'RemoveStars', mode: 'balanced' },
+            toolIdentity: 'deterministic-develop-adapter-v1',
+            inputChecksum: 'sha256:stack-ui',
+            relatedInputOutputIds: [],
+            outputs: [
+              {
+                outputId: 'develop-output-starless-ui',
+                checksum: 'sha256:starless-ui',
+                format: 'fits',
+                relation: 'starless',
+                diagnostic:
+                  'Deterministic starless FITS evidence; astronomy quality is not claimed.',
+              },
+              {
+                outputId: 'develop-output-stars-ui',
+                checksum: 'sha256:stars-ui',
+                format: 'fits',
+                relation: 'starCompanion',
+                diagnostic:
+                  'Deterministic star companion FITS evidence; astronomy quality is not claimed.',
+              },
+            ],
+            diagnostics: [
+              'Related starless and star companion outputs retained.',
+            ],
+            completedAt: '2026-08-10T19:00:01.000Z',
+          },
+          {
+            attemptId: 'develop-attempt-add-stars-ui',
+            state: 'failed',
+            inputCheckpointId: 'develop-checkpoint-starless-ui',
+            previewId: 'develop-preview-ui',
+            draftRevision: 3,
+            operation: { _tag: 'AddStars' },
+            toolIdentity: 'deterministic-develop-adapter-v1',
+            inputChecksum: 'sha256:starless-ui',
+            relatedInputOutputIds: [
+              'develop-output-starless-ui',
+              'develop-output-stars-ui',
+            ],
+            outputs: [],
+            diagnostics: [
+              'Input bytes unavailable; the last valid checkpoint is retained.',
+            ],
+            completedAt: '2026-08-10T19:00:02.000Z',
+          },
+        ],
+        history: [
+          {
+            checkpointId: 'develop-checkpoint-starless-ui',
+            attemptId: 'develop-attempt-remove-stars-ui',
+            outputId: 'develop-output-starless-ui',
+            checksum: 'sha256:starless-ui',
+            operation: { _tag: 'RemoveStars', mode: 'balanced' },
+            relatedOutputIds: ['develop-output-stars-ui'],
+          },
+        ],
+        historyCursor: 1,
+        failedAttemptId: 'develop-attempt-add-stars-ui',
+        savedResults: [
+          {
+            assetId: 'asset-developed-ui',
+            assetRevision: 1,
+            checksum: 'sha256:starless-ui',
+            checkpointId: 'develop-checkpoint-starless-ui',
+            attemptId: 'develop-attempt-remove-stars-ui',
+            outputId: 'develop-output-starless-ui',
+            savedAt: '2026-08-10T19:00:03.000Z',
+          },
+        ],
+      },
     })),
+    projectActions: [
+      {
+        projectId: 'project-m27',
+        actions: [
+          { _tag: 'Eligible', action: 'NavigateProcessingProjectStage' },
+          { _tag: 'Eligible', action: 'UpdateProcessingDevelopDraft' },
+          { _tag: 'Eligible', action: 'UndoProcessingDevelopDraft' },
+          {
+            _tag: 'Ineligible',
+            action: 'RedoProcessingDevelopDraft',
+            reason: 'draftRedoUnavailable',
+          },
+          { _tag: 'Eligible', action: 'SyncProcessingDevelopPreview' },
+          { _tag: 'Eligible', action: 'ApplyProcessingDevelopPreview' },
+          { _tag: 'Eligible', action: 'UndoProcessingDevelopStep' },
+          {
+            _tag: 'Ineligible',
+            action: 'RedoProcessingDevelopStep',
+            reason: 'redoUnavailable',
+          },
+          { _tag: 'Eligible', action: 'RetryProcessingDevelopApply' },
+          { _tag: 'Eligible', action: 'SaveProcessingDevelopResult' },
+        ],
+      },
+    ],
   })
   const developMarkup = renderToStaticMarkup(
     createElement(BetaProcessApp, {
@@ -852,8 +983,20 @@ test('renders Stacking decisions, versioned FITS evidence, saved Master, and exa
       initialWorkspace: developed,
     }),
   )
-  assert.match(developMarkup, /Saved Master open/)
-  assert.match(developMarkup, /Exact saved Master/)
+  assert.match(developMarkup, /Exact saved Master stays unchanged/)
+  assert.match(developMarkup, /Astronomy operation/)
+  assert.match(developMarkup, /Astrometry \/ WCS/)
+  assert.match(developMarkup, /Background extraction/)
+  assert.match(developMarkup, /Astronomy color calibration/)
+  assert.match(developMarkup, /Green-noise reduction/)
+  assert.match(developMarkup, /Add stars back/)
+  assert.match(developMarkup, /Apply exact preview/)
+  assert.match(developMarkup, /Hold to compare original/)
+  assert.match(developMarkup, /Retry exact failed operation/)
+  assert.match(developMarkup, /Last valid checkpoint retained/)
+  assert.match(developMarkup, /Starless FITS evidence/)
+  assert.match(developMarkup, /Star Companion FITS evidence/)
+  assert.match(developMarkup, /Saved Library Develop result/)
   const phoneMarkup = renderToStaticMarkup(
     createElement(ProcessPhone, {
       workspace: developed,
@@ -865,7 +1008,11 @@ test('renders Stacking decisions, versioned FITS evidence, saved Master, and exa
   assert.match(phoneMarkup, /FITS Master evidence/)
   assert.match(phoneMarkup, /Saved Library Master/)
   assert.match(phoneMarkup, /Exact saved Master · asset-master-ui/)
-  assert.doesNotMatch(phoneMarkup, /<button/)
+  assert.match(phoneMarkup, /Astronomy Develop evidence/)
+  assert.match(phoneMarkup, /Applied history/)
+  assert.match(phoneMarkup, /last valid checkpoint is retained/)
+  assert.match(phoneMarkup, /astronomy-quality processing is not claimed/)
+  assert.doesNotMatch(phoneMarkup, /<button|<input|<select|<textarea/)
 })
 
 test('renders service-owned Calibration review, draft policy, outcomes, and read-only phone evidence', () => {

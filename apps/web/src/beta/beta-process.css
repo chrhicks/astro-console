@@ -194,6 +194,29 @@
   gap: 6px;
 }
 
+.beta-process-develop {
+  display: grid;
+  gap: 8px;
+}
+
+.beta-process-develop-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.25fr) minmax(260px, 0.75fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.beta-process-develop-grid .nb-evidence,
+.beta-process-develop-grid .nb-evidence-canvas {
+  min-height: 280px;
+}
+
+.beta-process-develop-color {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
 .beta-process-calibration-intro {
   margin: 0;
   color: var(--nb-muted);
@@ -260,6 +283,10 @@
 
   .beta-process-source-row {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .beta-process-develop-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

@@ -138,6 +138,15 @@ export const ProcessingAction = Schema.Literals([
   'SelectProcessingStageResult',
   'SaveProcessingProjectMaster',
   'OpenProcessingProjectDevelop',
+  'UpdateProcessingDevelopDraft',
+  'UndoProcessingDevelopDraft',
+  'RedoProcessingDevelopDraft',
+  'SyncProcessingDevelopPreview',
+  'ApplyProcessingDevelopPreview',
+  'UndoProcessingDevelopStep',
+  'RedoProcessingDevelopStep',
+  'RetryProcessingDevelopApply',
+  'SaveProcessingDevelopResult',
   'StartProcessingSession',
   'ResumeProcessingSession',
   'SyncProcessingPreview',
@@ -183,6 +192,11 @@ export const ProcessingActionDenialReason = Schema.Literals([
   'stackingInputUnavailable',
   'stackResultRequired',
   'savedMasterRequired',
+  'developBaseRequired',
+  'developPreviewRequired',
+  'developApplyActive',
+  'developFailedAttemptRequired',
+  'developAppliedResultRequired',
 ])
 
 export const ProcessingActionEligibility = Schema.TaggedUnion({
@@ -227,6 +241,7 @@ export const ProcessingProjection = Schema.Struct({
           'save',
           'cleanup',
           'projectStage',
+          'projectDevelopApply',
         ]),
         state: Schema.Literals([
           'pending',
@@ -246,6 +261,7 @@ export const ProcessingProjection = Schema.Struct({
             'Calibration',
             'Registration',
             'Stacking',
+            'Develop',
           ]),
         ),
         checkpoint: Schema.optionalKey(Schema.NonEmptyString),
@@ -1757,6 +1773,15 @@ export function projectProcessingProjectActions(
     const selectedStack = stackingStage?.attempts.find(
       (attempt) => attempt.attemptId === stackingStage.selectedAttemptId,
     )
+    const develop = project?.develop
+    const developActive =
+      develop?.attempts.some(
+        (attempt) => attempt.state === 'queued' || attempt.state === 'running',
+      ) ?? false
+    const currentDevelopEntry =
+      develop === undefined || develop.historyCursor === 0
+        ? undefined
+        : develop.history[develop.historyCursor - 1]
     return {
       projectId,
       actions: [
@@ -1879,6 +1904,75 @@ export function projectProcessingProjectActions(
           reason ??
             (selectedStack?.savedMaster === undefined
               ? 'savedMasterRequired'
+              : undefined),
+        ),
+        eligibility(
+          'UpdateProcessingDevelopDraft',
+          reason ?? (develop === undefined ? 'developBaseRequired' : undefined),
+        ),
+        eligibility(
+          'UndoProcessingDevelopDraft',
+          reason ??
+            (develop === undefined
+              ? 'developBaseRequired'
+              : develop.draft.undo.length === 0
+                ? 'draftUndoUnavailable'
+                : undefined),
+        ),
+        eligibility(
+          'RedoProcessingDevelopDraft',
+          reason ??
+            (develop === undefined
+              ? 'developBaseRequired'
+              : develop.draft.redo.length === 0
+                ? 'draftRedoUnavailable'
+                : undefined),
+        ),
+        eligibility(
+          'SyncProcessingDevelopPreview',
+          reason ?? (develop === undefined ? 'developBaseRequired' : undefined),
+        ),
+        eligibility(
+          'ApplyProcessingDevelopPreview',
+          reason ??
+            (develop === undefined
+              ? 'developBaseRequired'
+              : developActive
+                ? 'developApplyActive'
+                : develop.preview === undefined ||
+                    develop.preview.draftRevision !== develop.draft.revision
+                  ? 'developPreviewRequired'
+                  : undefined),
+        ),
+        eligibility(
+          'UndoProcessingDevelopStep',
+          reason ??
+            (develop === undefined || develop.historyCursor === 0
+              ? 'undoUnavailable'
+              : undefined),
+        ),
+        eligibility(
+          'RedoProcessingDevelopStep',
+          reason ??
+            (develop === undefined ||
+            develop.historyCursor >= develop.history.length
+              ? 'redoUnavailable'
+              : undefined),
+        ),
+        eligibility(
+          'RetryProcessingDevelopApply',
+          reason ??
+            (develop === undefined || develop.failedAttemptId === undefined
+              ? 'developFailedAttemptRequired'
+              : developActive
+                ? 'developApplyActive'
+                : undefined),
+        ),
+        eligibility(
+          'SaveProcessingDevelopResult',
+          reason ??
+            (develop === undefined || currentDevelopEntry === undefined
+              ? 'developAppliedResultRequired'
               : undefined),
         ),
       ],

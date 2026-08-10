@@ -239,8 +239,8 @@ with a target-owned Processing Project and explicit, inspectable stages:
 - **3.5.3 Complete —** Explicit Calibration.
 - **3.5.4 Complete —** Explicit Registration.
 - **3.5.5 Complete —** Explicit Stacking and saved Master.
-- **3.5.6 Next —** Astronomy Develop workspace.
-- **3.5.7 —** Integrated operator review and closeout.
+- **3.5.6 Complete —** Astronomy Develop workspace.
+- **3.5.7 Next —** Integrated operator review and closeout.
 
 4. Audit all four Nightbook beta workspaces and make route promotion an explicit
    owner decision.

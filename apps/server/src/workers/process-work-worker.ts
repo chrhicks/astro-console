@@ -12,6 +12,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
 import { settleProcessWork } from '../services/process-workspace.ts'
 import { settleProcessingProjectStage } from '../services/processing-project-service.ts'
+import { settleProcessingProjectDevelop } from '../services/processing-project-service.ts'
 
 const buildStages = [
   'validate',
@@ -25,6 +26,7 @@ const buildStages = [
 const BuildStage = Schema.Literals(buildStages)
 const WorkKind = Schema.Literals([
   'projectStage',
+  'projectDevelopApply',
   'build',
   'preview',
   'apply',
@@ -40,7 +42,7 @@ const WorkRow = Schema.Struct({
   stage: Schema.NullOr(
     Schema.Union([
       BuildStage,
-      Schema.Literals(['Calibration', 'Registration', 'Stacking']),
+      Schema.Literals(['Calibration', 'Registration', 'Stacking', 'Develop']),
     ]),
   ),
   claim_token: Schema.NullOr(Schema.String),
@@ -242,7 +244,9 @@ export function createProcessWorkWorker(options: {
             : stage === 'Registration'
               ? 'deterministic-registration-adapter-v1'
               : 'deterministic-stacking-adapter-v1'
-          : 'deterministic-file-v1',
+          : row.kind === 'projectDevelopApply'
+            ? 'deterministic-develop-adapter-v1'
+            : 'deterministic-file-v1',
       kind: row.kind,
       stage,
       payloadDigest: digest(row.payload),
@@ -271,6 +275,19 @@ export function createProcessWorkWorker(options: {
           settled.stageOutcome === 'Unavailable'
           ? { outcome: 'failed', kind: row.kind }
           : { outcome: 'completed', kind: row.kind }
+        : { outcome: 'stale', kind: row.kind }
+    }
+    if (row.kind === 'projectDevelopApply') {
+      const settled = settleProcessingProjectDevelop(
+        options.database,
+        row.work_id,
+        claimToken,
+        artifactPath,
+      )
+      return settled.outcome === 'settled'
+        ? settled.successful
+          ? { outcome: 'completed', kind: row.kind }
+          : { outcome: 'failed', kind: row.kind }
         : { outcome: 'stale', kind: row.kind }
     }
     if (row.kind === 'build') {

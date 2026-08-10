@@ -5,8 +5,20 @@ import { Schema } from 'effect'
 import {
   AssetId,
   AssetRevision,
+  AttemptId,
   CaptureSetId,
+  CheckpointId,
   Command,
+  DevelopAttempt,
+  DevelopDraft,
+  DevelopHistoryEntry,
+  DevelopOutput,
+  DevelopOperation,
+  DevelopPreview,
+  DevelopSavedResult,
+  DevelopState,
+  PreviewId,
+  ProcessingOutputId,
   ProcessingProject,
   ProcessingLibraryFormat,
   ProcessingLibraryRole,
@@ -45,6 +57,15 @@ type ProjectCommand = Extract<
   | { readonly _tag: 'SelectProcessingStageResult' }
   | { readonly _tag: 'SaveProcessingProjectMaster' }
   | { readonly _tag: 'OpenProcessingProjectDevelop' }
+  | { readonly _tag: 'UpdateProcessingDevelopDraft' }
+  | { readonly _tag: 'UndoProcessingDevelopDraft' }
+  | { readonly _tag: 'RedoProcessingDevelopDraft' }
+  | { readonly _tag: 'SyncProcessingDevelopPreview' }
+  | { readonly _tag: 'ApplyProcessingDevelopPreview' }
+  | { readonly _tag: 'UndoProcessingDevelopStep' }
+  | { readonly _tag: 'RedoProcessingDevelopStep' }
+  | { readonly _tag: 'RetryProcessingDevelopApply' }
+  | { readonly _tag: 'SaveProcessingDevelopResult' }
 >
 
 const ProjectRow = Schema.Struct({ project: Schema.String })
@@ -61,8 +82,18 @@ const ProjectStageWorkPayload = Schema.Struct({
   attemptId: ProcessingStageAttemptId,
   stage: Schema.Literals(['Calibration', 'Registration', 'Stacking']),
 })
+const ProjectDevelopWorkPayload = Schema.Struct({
+  projectId: ProcessingProjectId,
+  projectRevision: ProcessingProjectRevision,
+  attemptId: AttemptId,
+  stage: Schema.Literal('Develop'),
+})
 const ReceiptRow = Schema.Struct({ response: Schema.String })
 const MasterArtifactRow = Schema.Struct({ checksum: Schema.String })
+const DevelopArtifactRow = Schema.Struct({
+  path: Schema.String,
+  checksum: Schema.String,
+})
 const ProjectAcceptedResponse = Schema.Struct({
   outcome: Schema.Literal('accepted'),
   replayed: Schema.Boolean,
@@ -82,6 +113,15 @@ const ProjectAcceptedResponse = Schema.Struct({
     'projectStageResultSelected',
     'projectMasterSaved',
     'projectDevelopOpened',
+    'projectDevelopDraftUpdated',
+    'projectDevelopDraftUndone',
+    'projectDevelopDraftRedone',
+    'projectDevelopPreviewSynchronized',
+    'projectDevelopApplyQueued',
+    'projectDevelopStepUndone',
+    'projectDevelopStepRedone',
+    'projectDevelopRetryQueued',
+    'projectDevelopResultSaved',
   ]),
   project: ProcessingProject,
 })
@@ -146,7 +186,16 @@ export const isProcessingProjectCommand = (
   Command.guards.RunProcessingProjectStage(command) ||
   Command.guards.SelectProcessingStageResult(command) ||
   Command.guards.SaveProcessingProjectMaster(command) ||
-  Command.guards.OpenProcessingProjectDevelop(command)
+  Command.guards.OpenProcessingProjectDevelop(command) ||
+  Command.guards.UpdateProcessingDevelopDraft(command) ||
+  Command.guards.UndoProcessingDevelopDraft(command) ||
+  Command.guards.RedoProcessingDevelopDraft(command) ||
+  Command.guards.SyncProcessingDevelopPreview(command) ||
+  Command.guards.ApplyProcessingDevelopPreview(command) ||
+  Command.guards.UndoProcessingDevelopStep(command) ||
+  Command.guards.RedoProcessingDevelopStep(command) ||
+  Command.guards.RetryProcessingDevelopApply(command) ||
+  Command.guards.SaveProcessingDevelopResult(command)
 
 export function processingProjects(database: DatabaseSync) {
   return Schema.decodeUnknownSync(Schema.Array(ProjectRow))(
@@ -322,7 +371,14 @@ export function executeProcessingProjectCommand(
     return { outcome: 'rejected' as const, reason: 'ProjectRevisionConflict' }
 
   let project: ProcessingProject
-  let work: { workId: string; attemptId: string; stage: string } | undefined
+  let work:
+    | {
+        workId: string
+        attemptId: string
+        stage: string
+        kind: 'projectStage' | 'projectDevelopApply'
+      }
+    | undefined
   let masterSave:
     | {
         assetId: typeof AssetId.Type
@@ -331,6 +387,17 @@ export function executeProcessingProjectCommand(
         registrationAttemptId: typeof ProcessingStageAttemptId.Type
         checksum: string
         includedAssetIds: ReadonlyArray<typeof AssetId.Type>
+        savedAt: string
+      }
+    | undefined
+  let developSave:
+    | {
+        assetId: typeof AssetId.Type
+        checksum: string
+        outputId: typeof ProcessingOutputId.Type
+        checkpointId: typeof CheckpointId.Type
+        attemptId: typeof AttemptId.Type
+        operationIds: ReadonlyArray<string>
         savedAt: string
       }
     | undefined
@@ -351,6 +418,7 @@ export function executeProcessingProjectCommand(
       project = reviseProject(current, current.sources, {
         currentStage: command.stage,
         developMasterAssetId: selectedSavedMaster.assetId,
+        develop: current.develop ?? initialDevelopState(selectedSavedMaster),
       })
     } else
       project = reviseProject(current, current.sources, {
@@ -670,6 +738,7 @@ export function executeProcessingProjectCommand(
       workId: `project-stage-${attemptId}`,
       attemptId,
       stage: command.stage,
+      kind: 'projectStage',
     }
   } else if (Command.guards.SelectProcessingStageResult(command)) {
     if (current === undefined)
@@ -760,10 +829,262 @@ export function executeProcessingProjectCommand(
       )?.savedMaster
     if (saved === undefined)
       return { outcome: 'rejected' as const, reason: 'SavedMasterRequired' }
+    if (
+      current.develop !== undefined &&
+      current.develop.base.assetId !== saved.assetId
+    )
+      return { outcome: 'rejected' as const, reason: 'DevelopBaseConflict' }
     project = reviseProject(current, current.sources, {
       currentStage: 'Develop',
       developMasterAssetId: saved.assetId,
+      develop: current.develop ?? initialDevelopState(saved),
     })
+  } else if (
+    Command.guards.UpdateProcessingDevelopDraft(command) ||
+    Command.guards.UndoProcessingDevelopDraft(command) ||
+    Command.guards.RedoProcessingDevelopDraft(command)
+  ) {
+    if (current?.develop === undefined)
+      return { outcome: 'rejected' as const, reason: 'DevelopBaseRequired' }
+    if (developAttemptActive(current.develop))
+      return { outcome: 'rejected' as const, reason: 'DevelopApplyActive' }
+    const draft = current.develop.draft
+    const snapshot = { operation: draft.operation }
+    const nextDraft = Command.guards.UpdateProcessingDevelopDraft(command)
+      ? DevelopDraft.make({
+          revision: draft.revision + 1,
+          operation: command.operation,
+          undo: [...draft.undo, snapshot].slice(-10),
+          redo: [],
+        })
+      : Command.guards.UndoProcessingDevelopDraft(command)
+        ? draft.undo.length === 0
+          ? undefined
+          : DevelopDraft.make({
+              revision: draft.revision + 1,
+              operation: draft.undo.at(-1)?.operation ?? draft.operation,
+              undo: draft.undo.slice(0, -1),
+              redo: [snapshot, ...draft.redo].slice(0, 10),
+            })
+        : draft.redo.length === 0
+          ? undefined
+          : DevelopDraft.make({
+              revision: draft.revision + 1,
+              operation: draft.redo[0]?.operation ?? draft.operation,
+              undo: [...draft.undo, snapshot].slice(-10),
+              redo: draft.redo.slice(1),
+            })
+    if (nextDraft === undefined)
+      return { outcome: 'rejected' as const, reason: 'DraftHistoryUnavailable' }
+    project = reviseProject(current, current.sources, {
+      currentStage: 'Develop',
+      develop: DevelopState.make({
+        ...withoutDevelopPreview(current.develop),
+        draft: nextDraft,
+      }),
+    })
+  } else if (Command.guards.SyncProcessingDevelopPreview(command)) {
+    if (current?.develop === undefined)
+      return { outcome: 'rejected' as const, reason: 'DevelopBaseRequired' }
+    const develop = current.develop
+    if (developAttemptActive(develop))
+      return { outcome: 'rejected' as const, reason: 'DevelopApplyActive' }
+    if (command.expectedDevelopDraftRevision !== develop.draft.revision)
+      return {
+        outcome: 'rejected' as const,
+        reason: 'DevelopDraftRevisionConflict',
+      }
+    const checkpoint = currentDevelopCheckpoint(develop)
+    const now = new Date().toISOString()
+    const preview = DevelopPreview.make({
+      previewId: PreviewId.make(`develop-preview-${randomUUID()}`),
+      draftRevision: develop.draft.revision,
+      inputCheckpointId: checkpoint.checkpointId,
+      operation: develop.draft.operation,
+      toolIdentity: 'deterministic-develop-adapter-v1',
+      checksum: `sha256:${digestJson({
+        inputChecksum: checkpoint.checksum,
+        operation: develop.draft.operation,
+        tool: 'deterministic-develop-adapter-v1',
+      })}`,
+      synchronizedAt: now,
+    })
+    project = reviseProject(current, current.sources, {
+      currentStage: 'Develop',
+      develop: DevelopState.make({ ...develop, preview }),
+    })
+  } else if (Command.guards.ApplyProcessingDevelopPreview(command)) {
+    if (current?.develop === undefined)
+      return { outcome: 'rejected' as const, reason: 'DevelopBaseRequired' }
+    const develop = current.develop
+    if (developAttemptActive(develop))
+      return { outcome: 'rejected' as const, reason: 'DevelopApplyActive' }
+    const checkpoint = currentDevelopCheckpoint(develop)
+    const preview = develop.preview
+    if (
+      preview === undefined ||
+      preview.previewId !== command.previewId ||
+      preview.draftRevision !== develop.draft.revision ||
+      preview.inputCheckpointId !== checkpoint.checkpointId
+    )
+      return { outcome: 'rejected' as const, reason: 'DevelopPreviewRequired' }
+    const relatedInputOutputIds = developStarPair(develop)
+    if (
+      DevelopOperation.guards.AddStars(develop.draft.operation) &&
+      relatedInputOutputIds.length !== 2
+    )
+      return { outcome: 'rejected' as const, reason: 'DevelopStarPairRequired' }
+    const attemptId = AttemptId.make(`develop-attempt-${randomUUID()}`)
+    const attempt = DevelopAttempt.make({
+      attemptId,
+      state: 'queued',
+      inputCheckpointId: checkpoint.checkpointId,
+      previewId: preview.previewId,
+      draftRevision: develop.draft.revision,
+      operation: develop.draft.operation,
+      toolIdentity: 'deterministic-develop-adapter-v1',
+      inputChecksum: checkpoint.checksum,
+      relatedInputOutputIds,
+      outputs: [],
+      diagnostics: [],
+    })
+    project = reviseProject(current, current.sources, {
+      currentStage: 'Develop',
+      develop: DevelopState.make({
+        ...withoutDevelopFailure(develop),
+        attempts: [...develop.attempts, attempt],
+      }),
+    })
+    work = {
+      workId: `project-develop-${attemptId}`,
+      attemptId,
+      stage: 'Develop',
+      kind: 'projectDevelopApply',
+    }
+  } else if (
+    Command.guards.UndoProcessingDevelopStep(command) ||
+    Command.guards.RedoProcessingDevelopStep(command)
+  ) {
+    if (current?.develop === undefined)
+      return { outcome: 'rejected' as const, reason: 'DevelopBaseRequired' }
+    const develop = current.develop
+    if (developAttemptActive(develop))
+      return { outcome: 'rejected' as const, reason: 'DevelopApplyActive' }
+    const cursor = Command.guards.UndoProcessingDevelopStep(command)
+      ? develop.historyCursor - 1
+      : develop.historyCursor + 1
+    if (cursor < 0 || cursor > develop.history.length)
+      return {
+        outcome: 'rejected' as const,
+        reason: 'DevelopHistoryUnavailable',
+      }
+    project = reviseProject(current, current.sources, {
+      currentStage: 'Develop',
+      develop: DevelopState.make({
+        ...withoutDevelopPreview(develop),
+        historyCursor: cursor,
+      }),
+    })
+  } else if (Command.guards.RetryProcessingDevelopApply(command)) {
+    if (current?.develop === undefined)
+      return { outcome: 'rejected' as const, reason: 'DevelopBaseRequired' }
+    const develop = current.develop
+    if (developAttemptActive(develop))
+      return { outcome: 'rejected' as const, reason: 'DevelopApplyActive' }
+    const failed = develop.attempts.find(
+      (attempt) =>
+        attempt.attemptId === command.failedAttemptId &&
+        attempt.state === 'failed' &&
+        develop.failedAttemptId === attempt.attemptId,
+    )
+    if (failed === undefined)
+      return {
+        outcome: 'rejected' as const,
+        reason: 'DevelopFailedAttemptRequired',
+      }
+    const attemptId = AttemptId.make(`develop-attempt-${randomUUID()}`)
+    const {
+      startedAt: _startedAt,
+      completedAt: _completedAt,
+      ...retryBase
+    } = failed
+    const retry = DevelopAttempt.make({
+      ...retryBase,
+      attemptId,
+      state: 'queued',
+      outputs: [],
+      diagnostics: [],
+      retryOfAttemptId: failed.attemptId,
+    })
+    project = reviseProject(current, current.sources, {
+      currentStage: 'Develop',
+      develop: DevelopState.make({
+        ...develop,
+        attempts: [...develop.attempts, retry],
+      }),
+    })
+    work = {
+      workId: `project-develop-${attemptId}`,
+      attemptId,
+      stage: 'Develop',
+      kind: 'projectDevelopApply',
+    }
+  } else if (Command.guards.SaveProcessingDevelopResult(command)) {
+    if (current?.develop === undefined)
+      return { outcome: 'rejected' as const, reason: 'DevelopBaseRequired' }
+    const develop = current.develop
+    const entry = currentDevelopEntry(develop)
+    if (entry === undefined)
+      return {
+        outcome: 'rejected' as const,
+        reason: 'DevelopAppliedResultRequired',
+      }
+    const existingSave = develop.savedResults.find(
+      (saved) => saved.checkpointId === entry.checkpointId,
+    )
+    if (existingSave !== undefined) project = current
+    else {
+      const artifact = Schema.decodeUnknownSync(
+        Schema.optional(MasterArtifactRow),
+      )(
+        database
+          .prepare(
+            'SELECT checksum FROM processing_artifacts WHERE session_id=? AND output_id=?',
+          )
+          .get(current.projectId, entry.outputId),
+      )
+      if (artifact?.checksum !== entry.checksum)
+        return {
+          outcome: 'rejected' as const,
+          reason: 'DevelopAppliedResultRequired',
+        }
+      const savedAt = new Date().toISOString()
+      const saved = DevelopSavedResult.make({
+        assetId: AssetId.make(`asset-develop-${randomUUID()}`),
+        assetRevision: AssetRevision.make(1),
+        checksum: entry.checksum,
+        checkpointId: entry.checkpointId,
+        attemptId: entry.attemptId,
+        outputId: entry.outputId,
+        savedAt,
+      })
+      developSave = {
+        ...saved,
+        operationIds: [
+          develop.base.stackingAttemptId,
+          ...develop.history
+            .slice(0, develop.historyCursor)
+            .map((item) => item.attemptId),
+        ],
+      }
+      project = reviseProject(current, current.sources, {
+        currentStage: 'Develop',
+        develop: DevelopState.make({
+          ...develop,
+          savedResults: [...develop.savedResults, saved],
+        }),
+      })
+    }
   } else if (Command.guards.AssignProcessingSourceRole(command)) {
     if (current === undefined)
       return { outcome: 'rejected' as const, reason: 'ProjectNotFound' }
@@ -868,7 +1189,43 @@ export function executeProcessingProjectCommand(
                                   command,
                                 )
                               ? ('projectMasterSaved' as const)
-                              : ('projectDevelopOpened' as const)
+                              : Command.guards.OpenProcessingProjectDevelop(
+                                    command,
+                                  )
+                                ? ('projectDevelopOpened' as const)
+                                : Command.guards.UpdateProcessingDevelopDraft(
+                                      command,
+                                    )
+                                  ? ('projectDevelopDraftUpdated' as const)
+                                  : Command.guards.UndoProcessingDevelopDraft(
+                                        command,
+                                      )
+                                    ? ('projectDevelopDraftUndone' as const)
+                                    : Command.guards.RedoProcessingDevelopDraft(
+                                          command,
+                                        )
+                                      ? ('projectDevelopDraftRedone' as const)
+                                      : Command.guards.SyncProcessingDevelopPreview(
+                                            command,
+                                          )
+                                        ? ('projectDevelopPreviewSynchronized' as const)
+                                        : Command.guards.ApplyProcessingDevelopPreview(
+                                              command,
+                                            )
+                                          ? ('projectDevelopApplyQueued' as const)
+                                          : Command.guards.UndoProcessingDevelopStep(
+                                                command,
+                                              )
+                                            ? ('projectDevelopStepUndone' as const)
+                                            : Command.guards.RedoProcessingDevelopStep(
+                                                  command,
+                                                )
+                                              ? ('projectDevelopStepRedone' as const)
+                                              : Command.guards.RetryProcessingDevelopApply(
+                                                    command,
+                                                  )
+                                                ? ('projectDevelopRetryQueued' as const)
+                                                : ('projectDevelopResultSaved' as const)
   const response = {
     outcome: 'accepted' as const,
     replayed: false,
@@ -941,16 +1298,71 @@ export function executeProcessingProjectCommand(
         )
         .run(masterSave.assetId, 'ProcessSaved', masterSave.checksum)
     }
+    if (developSave !== undefined) {
+      const detail = {
+        assetId: developSave.assetId,
+        revision: 1,
+        role: 'final',
+        format: 'fits',
+        checksum: developSave.checksum,
+        availability: 'availableLocally',
+        capturedAt: developSave.savedAt,
+        comparisonGroupId: `processing-project-${project.projectId}`,
+        ...(project.targetName === undefined
+          ? {}
+          : { targetName: project.targetName }),
+        lineage: {
+          sourceAssetIds: [project.develop?.base.assetId],
+          processingSessionId: project.projectId,
+          processingOutputId: developSave.outputId,
+          operationIds: developSave.operationIds,
+        },
+        representations: [
+          {
+            label: 'Saved deterministic Develop result retained',
+            state: 'available',
+          },
+        ],
+      }
+      database
+        .prepare('INSERT INTO library_assets VALUES (?,?,?,?,?,?,?,?,?,?)')
+        .run(
+          developSave.assetId,
+          1,
+          'final',
+          'fits',
+          'availableLocally',
+          detail.comparisonGroupId,
+          developSave.savedAt,
+          developSave.savedAt,
+          0,
+          JSON.stringify(detail),
+        )
+      database
+        .prepare(
+          'UPDATE processing_artifacts SET saved=1 WHERE session_id=? AND output_id=?',
+        )
+        .run(project.projectId, developSave.outputId)
+      database
+        .prepare(
+          'INSERT INTO process_asset_events (asset_id,event_type,checksum) VALUES (?,?,?)',
+        )
+        .run(developSave.assetId, 'ProcessSaved', developSave.checksum)
+    }
     if (work !== undefined)
       database
         .prepare(
-          "INSERT INTO processing_work(work_id,session_id,kind,payload,state,stage,enqueued_at) VALUES(?,?, 'projectStage', ?, 'pending', ?, ?)",
+          "INSERT INTO processing_work(work_id,session_id,kind,payload,state,stage,enqueued_at) VALUES(?,?, ?, ?, 'pending', ?, ?)",
         )
         .run(
           work.workId,
           project.projectId,
+          work.kind,
           JSON.stringify({
-            _tag: 'RunProcessingProjectStage',
+            _tag:
+              work.kind === 'projectStage'
+                ? 'RunProcessingProjectStage'
+                : 'ApplyProcessingDevelopPreview',
             projectId: project.projectId,
             projectRevision: project.revision,
             attemptId: work.attemptId,
@@ -968,6 +1380,90 @@ export function executeProcessingProjectCommand(
       reason: 'ProjectPersistenceUnavailable',
     }
   }
+}
+
+function initialDevelopState(saved: {
+  readonly assetId: typeof AssetId.Type
+  readonly assetRevision: typeof AssetRevision.Type
+  readonly checksum: string
+  readonly stackingAttemptId: typeof ProcessingStageAttemptId.Type
+  readonly stackResultId: typeof ProcessingStageResultId.Type
+}) {
+  return DevelopState.make({
+    base: {
+      assetId: saved.assetId,
+      assetRevision: saved.assetRevision,
+      checksum: saved.checksum,
+      stackingAttemptId: saved.stackingAttemptId,
+      stackResultId: saved.stackResultId,
+    },
+    draft: {
+      revision: 0,
+      operation: DevelopOperation.cases.Stretch.make({
+        method: 'asinh',
+        amount: 0.25,
+      }),
+      undo: [],
+      redo: [],
+    },
+    attempts: [],
+    history: [],
+    historyCursor: 0,
+    savedResults: [],
+  })
+}
+
+function developAttemptActive(develop: typeof DevelopState.Type) {
+  return develop.attempts.some(
+    (attempt) => attempt.state === 'queued' || attempt.state === 'running',
+  )
+}
+
+function withoutDevelopPreview(develop: typeof DevelopState.Type) {
+  const { preview: _preview, ...rest } = develop
+  return rest
+}
+
+function withoutDevelopFailure(develop: typeof DevelopState.Type) {
+  const { failedAttemptId: _failedAttemptId, ...rest } = develop
+  return rest
+}
+
+function currentDevelopEntry(develop: typeof DevelopState.Type) {
+  return develop.historyCursor === 0
+    ? undefined
+    : develop.history[develop.historyCursor - 1]
+}
+
+function currentDevelopCheckpoint(develop: typeof DevelopState.Type) {
+  const entry = currentDevelopEntry(develop)
+  return (
+    entry ?? {
+      checkpointId: CheckpointId.make(`develop-base-${develop.base.assetId}`),
+      checksum: develop.base.checksum,
+    }
+  )
+}
+
+function developStarPair(develop: typeof DevelopState.Type) {
+  const entry = currentDevelopEntry(develop)
+  if (entry === undefined) return []
+  const attempt = develop.attempts.find(
+    (candidate) => candidate.attemptId === entry.attemptId,
+  )
+  const starless = attempt?.outputs.find(
+    (output) => output.relation === 'starless',
+  )
+  const companion = attempt?.outputs.find(
+    (output) => output.relation === 'starCompanion',
+  )
+  return starless === undefined || companion === undefined
+    ? []
+    : [starless.outputId, companion.outputId]
+}
+
+function digestJson(value: unknown) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
 function resolveSelection(
@@ -1402,6 +1898,282 @@ export function settleProcessingProjectStage(
     database.exec('ROLLBACK')
     return { outcome: 'stale' as const }
   }
+}
+
+export function settleProcessingProjectDevelop(
+  database: DatabaseSync,
+  workId: string,
+  claimToken: string,
+  evidencePath: string,
+) {
+  const row = Schema.decodeUnknownSync(Schema.optional(ProjectStageWorkRow))(
+    database
+      .prepare(
+        'SELECT session_id,payload,state,claim_token FROM processing_work WHERE work_id=?',
+      )
+      .get(workId),
+  )
+  if (
+    row === undefined ||
+    row.state !== 'claimed' ||
+    row.claim_token !== claimToken
+  )
+    return { outcome: 'stale' as const }
+  const payload = Schema.decodeUnknownSync(ProjectDevelopWorkPayload)(
+    JSON.parse(row.payload),
+  )
+  const project = processingProjects(database).find(
+    (candidate) => candidate.projectId === payload.projectId,
+  )
+  const develop = project?.develop
+  const attempt = develop?.attempts.find(
+    (candidate) => candidate.attemptId === payload.attemptId,
+  )
+  if (
+    project === undefined ||
+    develop === undefined ||
+    attempt === undefined ||
+    attempt.state !== 'queued'
+  )
+    return { outcome: 'stale' as const }
+  const inputOutputId =
+    attempt.inputCheckpointId ===
+    CheckpointId.make(`develop-base-${develop.base.assetId}`)
+      ? `stack-output-${develop.base.stackingAttemptId}`
+      : develop.history.find(
+          (entry) => entry.checkpointId === attempt.inputCheckpointId,
+        )?.outputId
+  const inputArtifact =
+    inputOutputId === undefined
+      ? undefined
+      : Schema.decodeUnknownSync(Schema.optional(DevelopArtifactRow))(
+          database
+            .prepare(
+              'SELECT path,checksum FROM processing_artifacts WHERE session_id=? AND output_id=?',
+            )
+            .get(project.projectId, inputOutputId),
+        )
+  const relatedArtifacts = attempt.relatedInputOutputIds.map((outputId) =>
+    Schema.decodeUnknownSync(Schema.optional(DevelopArtifactRow))(
+      database
+        .prepare(
+          'SELECT path,checksum FROM processing_artifacts WHERE session_id=? AND output_id=?',
+        )
+        .get(project.projectId, outputId),
+    ),
+  )
+  const inputAvailable =
+    inputArtifact !== undefined &&
+    inputArtifact.checksum === attempt.inputChecksum &&
+    existsSync(inputArtifact.path) &&
+    relatedArtifacts.every(
+      (artifact) => artifact !== undefined && existsSync(artifact.path),
+    )
+  const now = new Date().toISOString()
+  let outputs: ReadonlyArray<typeof DevelopOutput.Type> = []
+  const outputArtifacts: Array<{
+    readonly outputId: typeof ProcessingOutputId.Type
+    readonly path: string
+    readonly checksum: string
+  }> = []
+  if (inputAvailable) {
+    const relations = DevelopOperation.guards.RemoveStars(attempt.operation)
+      ? (['starless', 'starCompanion'] as const)
+      : (['developed'] as const)
+    outputs = relations.map((relation) => {
+      const outputId = ProcessingOutputId.make(
+        `develop-output-${attempt.attemptId}-${relation}`,
+      )
+      const frozen = {
+        kind: 'deterministicDevelopEvidence',
+        base: develop.base,
+        inputCheckpointId: attempt.inputCheckpointId,
+        inputChecksum: attempt.inputChecksum,
+        relatedInputOutputIds: attempt.relatedInputOutputIds,
+        operation: attempt.operation,
+        toolIdentity: attempt.toolIdentity,
+        relation,
+      }
+      const bytes = deterministicFitsBytes(frozen)
+      const checksum = `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+      const path = `${evidencePath}.develop.${relation}.fits`
+      retainAtomicBytes(path, bytes, claimToken, 'Develop output')
+      outputArtifacts.push({ outputId, path, checksum })
+      return DevelopOutput.make({
+        outputId,
+        checksum,
+        format: 'fits',
+        relation,
+        diagnostic:
+          'Deterministic 1 x 1 FITS evidence; not an astronomy-quality image.',
+      })
+    })
+  }
+  const completed = DevelopAttempt.make({
+    ...attempt,
+    state: inputAvailable ? 'succeeded' : 'failed',
+    outputs,
+    diagnostics: inputAvailable
+      ? [
+          'Deterministic Develop evidence only; astronomy processing quality is not claimed.',
+          ...(DevelopOperation.guards.RemoveStars(attempt.operation)
+            ? [
+                'Starless and star-companion outputs are retained as one related pair.',
+              ]
+            : DevelopOperation.guards.AddStars(attempt.operation)
+              ? [
+                  'The exact retained starless and star-companion pair was consumed.',
+                ]
+              : []),
+        ]
+      : [
+          'The exact input checkpoint bytes are unavailable or do not match the frozen checksum.',
+        ],
+    startedAt: now,
+    completedAt: now,
+  })
+  const primary = completed.outputs.find(
+    (output) => output.relation !== 'starCompanion',
+  )
+  const branch = develop.history.slice(0, develop.historyCursor)
+  const history =
+    completed.state === 'succeeded' && primary !== undefined
+      ? [
+          ...branch,
+          DevelopHistoryEntry.make({
+            checkpointId: CheckpointId.make(
+              `develop-checkpoint-${attempt.attemptId}`,
+            ),
+            attemptId: attempt.attemptId,
+            outputId: primary.outputId,
+            checksum: primary.checksum,
+            operation: attempt.operation,
+            relatedOutputIds: completed.outputs.map(
+              (output) => output.outputId,
+            ),
+          }),
+        ]
+      : develop.history
+  const nextDevelop = DevelopState.make({
+    ...(completed.state === 'succeeded'
+      ? withoutDevelopFailure(withoutDevelopPreview(develop))
+      : develop),
+    attempts: develop.attempts.map((candidate) =>
+      candidate.attemptId === attempt.attemptId ? completed : candidate,
+    ),
+    history,
+    historyCursor:
+      completed.state === 'succeeded' ? history.length : develop.historyCursor,
+    ...(completed.state === 'failed'
+      ? { failedAttemptId: completed.attemptId }
+      : {}),
+  })
+  const settledProject = reviseProject(project, project.sources, {
+    currentStage: 'Develop',
+    develop: nextDevelop,
+  })
+  database.exec('BEGIN IMMEDIATE')
+  try {
+    const changed = database
+      .prepare(
+        `UPDATE processing_work SET state=?,settled_at=?,checkpoint=? WHERE work_id=? AND state='claimed' AND claim_token=?`,
+      )
+      .run(
+        completed.state === 'succeeded' ? 'settled' : 'failed',
+        now,
+        completed.state === 'succeeded' ? 'complete' : 'failed',
+        workId,
+        claimToken,
+      )
+    if (changed.changes !== 1) throw new Error('stale Develop settlement')
+    const updated = database
+      .prepare(
+        'UPDATE processing_projects SET revision=?,project=?,updated_at=? WHERE project_id=? AND revision=?',
+      )
+      .run(
+        settledProject.revision,
+        JSON.stringify(settledProject),
+        settledProject.updatedAt,
+        settledProject.projectId,
+        project.revision,
+      )
+    if (updated.changes !== 1) throw new Error('stale Develop project')
+    database
+      .prepare(
+        'INSERT OR REPLACE INTO processing_artifacts VALUES (?,?,?,?,?,?,0)',
+      )
+      .run(
+        `${workId}:evidence`,
+        project.projectId,
+        workId,
+        `develop-evidence-${attempt.attemptId}`,
+        evidencePath,
+        `sha256:${createHash('sha256').update(readFileSync(evidencePath)).digest('hex')}`,
+      )
+    for (const artifact of outputArtifacts)
+      database
+        .prepare(
+          'INSERT OR REPLACE INTO processing_artifacts VALUES (?,?,?,?,?,?,0)',
+        )
+        .run(
+          `${workId}:${artifact.outputId}`,
+          project.projectId,
+          workId,
+          artifact.outputId,
+          artifact.path,
+          artifact.checksum,
+        )
+    database.exec('COMMIT')
+    return {
+      outcome: 'settled' as const,
+      successful: completed.state === 'succeeded',
+    }
+  } catch {
+    database.exec('ROLLBACK')
+    return { outcome: 'stale' as const }
+  }
+}
+
+function deterministicFitsBytes(value: unknown) {
+  const pixel = createHash('sha256')
+    .update(JSON.stringify(value))
+    .digest()
+    .readUInt16BE(0)
+  const card = (key: string, cardValue: string) =>
+    `${key.padEnd(8, ' ')}= ${cardValue}`.padEnd(80, ' ')
+  const header = [
+    card('SIMPLE', '                    T'),
+    card('BITPIX', '                   16'),
+    card('NAXIS', '                    2'),
+    card('NAXIS1', '                    1'),
+    card('NAXIS2', '                    1'),
+    card('BZERO', '                32768'),
+    card('BSCALE', '                    1'),
+    'END'.padEnd(80, ' '),
+  ]
+    .join('')
+    .padEnd(2880, ' ')
+  const data = Buffer.alloc(2880)
+  data.writeUInt16BE(pixel, 0)
+  return Buffer.concat([Buffer.from(header, 'ascii'), data])
+}
+
+function retainAtomicBytes(
+  path: string,
+  bytes: Buffer,
+  claimToken: string,
+  label: string,
+) {
+  if (!existsSync(path)) {
+    const temporaryPath = `${path}.${claimToken}.tmp`
+    if (existsSync(temporaryPath)) {
+      if (!readFileSync(temporaryPath).equals(bytes))
+        throw new Error(`temporary ${label} does not match frozen evidence`)
+    } else writeFileSync(temporaryPath, bytes, { flag: 'wx' })
+    renameSync(temporaryPath, path)
+  }
+  if (!readFileSync(path).equals(bytes))
+    throw new Error(`retained ${label} does not match frozen evidence`)
 }
 
 function calibrationAttemptEvidence(

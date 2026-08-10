@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–3 and Items 3.5.1–3.5.5 complete; Item 3.5.6 next**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–3 and Items 3.5.1–3.5.6 complete; Item 3.5.7 next**
 
 ## Current Position
 
@@ -234,6 +234,19 @@ compact, and 390 px phone widths. This proves deterministic local orchestration
 and evidence only, not astronomy-quality stacking or an external processing
 tool.
 
+Item 3.5.6 is complete as a focused astronomy Develop MVP. Develop opens one
+exact saved Library Master and projects a typed catalog for the accepted
+astronomy operation families. Settings synchronize a deterministic Preview;
+Apply remains explicit and worker-owned. Applied attempts form one linear
+history with undo, redo, branch replacement after undo, exact retry,
+temporary Master comparison, and idempotent Library save lineage. Star removal
+retains related starless and star-companion evidence, and adding stars back
+consumes that exact pair. Restart keeps the draft, preview, attempts, history,
+retry scope, and saved results without replay. Functional and Designer review
+passed at wide, compact, and 390 px phone widths. This proves deterministic
+local orchestration and evidence only, not astronomy-quality processing,
+Siril, RC Astro, or another external processing tool.
+
 After that simulator proof, an indoor GET-only readiness check reached ASCOM
 Remote at `192.168.4.104:11111`. Management and every device-property envelope
 returned `ErrorNumber: 0`. The configured identities were Telescope 0 `ASI
@@ -391,14 +404,14 @@ covered indoor frame.
 
 ## Next Accepted Item
 
-3.5.6. **Add the astronomy Develop workspace.** Open the exact saved Library
-Master, keep Preview and Apply explicit, and add the accepted astronomy
-operation families with durable history, retry, and save lineage.
+3.5.7. **Run the integrated operator review and closeout.** Exercise the full
+Library-to-Develop Processing Project path, retain every stage attempt and
+lineage boundary, complete responsive functional and Designer review, and
+leave beta route promotion as the next explicit owner decision.
 
 ## Later Accepted Items
 
-Item 3.5.7 adds the final integrated operator review and closeout. Follow the
-ordered scope and proof in the
+Follow the ordered scope and proof in the
 [Item 3.5 Process workflow plan](process-workflow-plan.md).
 
 4. **Audit and promote the beta.** Verify all four exact Nightbook workflows

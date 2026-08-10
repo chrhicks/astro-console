@@ -2,12 +2,133 @@ import { Schema } from 'effect'
 import {
   AssetId,
   AssetRevision,
+  AttemptId,
   CaptureSetId,
+  CheckpointId,
+  PreviewId,
+  ProcessingOutputId,
   ProcessingProjectId,
   ProcessingProjectRevision,
   ProcessingStageAttemptId,
   ProcessingStageResultId,
 } from './primitives.js'
+
+const UnitAmount = Schema.Finite.check(
+  Schema.isBetween({ minimum: 0, maximum: 1 }),
+)
+const SignedAmount = Schema.Finite.check(
+  Schema.isBetween({ minimum: -1, maximum: 1 }),
+)
+
+export const DevelopOperation = Schema.TaggedUnion({
+  AstrometryWcs: {
+    solverProfile: Schema.Literals(['balanced', 'wide-field']),
+  },
+  BackgroundExtraction: {
+    sampleDensity: Schema.Literals(['sparse', 'balanced']),
+  },
+  AstronomyColorCalibration: {
+    method: Schema.Literal('photometric'),
+  },
+  GreenNoiseReduction: { strength: UnitAmount },
+  Stretch: {
+    method: Schema.Literals(['asinh', 'generalized-hyperbolic']),
+    amount: UnitAmount,
+  },
+  ColorAdjustment: {
+    cyan: SignedAmount,
+    yellow: SignedAmount,
+    red: SignedAmount,
+    saturation: SignedAmount,
+  },
+  RemoveStars: { mode: Schema.Literal('balanced') },
+  AddStars: {},
+})
+export type DevelopOperation = typeof DevelopOperation.Type
+
+export const DevelopDraftSnapshot = Schema.Struct({
+  operation: DevelopOperation,
+})
+
+export const DevelopDraft = Schema.Struct({
+  revision: Schema.Int,
+  operation: DevelopOperation,
+  undo: Schema.Array(DevelopDraftSnapshot),
+  redo: Schema.Array(DevelopDraftSnapshot),
+})
+
+export const DevelopBase = Schema.Struct({
+  assetId: AssetId,
+  assetRevision: AssetRevision,
+  checksum: Schema.NonEmptyString,
+  stackingAttemptId: ProcessingStageAttemptId,
+  stackResultId: ProcessingStageResultId,
+})
+
+export const DevelopOutput = Schema.Struct({
+  outputId: ProcessingOutputId,
+  checksum: Schema.NonEmptyString,
+  format: Schema.Literal('fits'),
+  relation: Schema.Literals(['developed', 'starless', 'starCompanion']),
+  diagnostic: Schema.NonEmptyString,
+})
+
+export const DevelopPreview = Schema.Struct({
+  previewId: PreviewId,
+  draftRevision: Schema.Int,
+  inputCheckpointId: CheckpointId,
+  operation: DevelopOperation,
+  toolIdentity: Schema.Literal('deterministic-develop-adapter-v1'),
+  checksum: Schema.NonEmptyString,
+  synchronizedAt: Schema.NonEmptyString,
+})
+
+export const DevelopAttempt = Schema.Struct({
+  attemptId: AttemptId,
+  state: Schema.Literals(['queued', 'running', 'succeeded', 'failed']),
+  inputCheckpointId: CheckpointId,
+  previewId: PreviewId,
+  draftRevision: Schema.Int,
+  operation: DevelopOperation,
+  toolIdentity: Schema.Literal('deterministic-develop-adapter-v1'),
+  inputChecksum: Schema.NonEmptyString,
+  relatedInputOutputIds: Schema.Array(ProcessingOutputId),
+  outputs: Schema.Array(DevelopOutput),
+  diagnostics: Schema.Array(Schema.NonEmptyString),
+  retryOfAttemptId: Schema.optionalKey(AttemptId),
+  startedAt: Schema.optionalKey(Schema.NonEmptyString),
+  completedAt: Schema.optionalKey(Schema.NonEmptyString),
+})
+
+export const DevelopHistoryEntry = Schema.Struct({
+  checkpointId: CheckpointId,
+  attemptId: AttemptId,
+  outputId: ProcessingOutputId,
+  checksum: Schema.NonEmptyString,
+  operation: DevelopOperation,
+  relatedOutputIds: Schema.Array(ProcessingOutputId),
+})
+
+export const DevelopSavedResult = Schema.Struct({
+  assetId: AssetId,
+  assetRevision: AssetRevision,
+  checksum: Schema.NonEmptyString,
+  checkpointId: CheckpointId,
+  attemptId: AttemptId,
+  outputId: ProcessingOutputId,
+  savedAt: Schema.NonEmptyString,
+})
+
+export const DevelopState = Schema.Struct({
+  base: DevelopBase,
+  draft: DevelopDraft,
+  preview: Schema.optionalKey(DevelopPreview),
+  attempts: Schema.Array(DevelopAttempt),
+  history: Schema.Array(DevelopHistoryEntry),
+  historyCursor: Schema.Int,
+  failedAttemptId: Schema.optionalKey(AttemptId),
+  savedResults: Schema.Array(DevelopSavedResult),
+})
 
 export const ProcessingLibraryRole = Schema.Literals([
   'original',
@@ -264,6 +385,7 @@ export const ProcessingProject = Schema.Struct({
   currentStage: ProcessingProjectStage,
   stages: Schema.Array(ProcessingStageState),
   developMasterAssetId: Schema.optionalKey(AssetId),
+  develop: Schema.optionalKey(DevelopState),
   createdAt: Schema.NonEmptyString,
   updatedAt: Schema.NonEmptyString,
 })

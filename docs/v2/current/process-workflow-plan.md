@@ -1,6 +1,6 @@
 # Item 3.5 — Explicit Process Workflow
 
-Status: **Accepted epic; Items 3.5.1–3.5.5 complete; Item 3.5.6 next**
+Status: **Accepted epic; Items 3.5.1–3.5.6 complete; Item 3.5.7 next**
 
 Item 3 proved durable worker-owned execution. Item 3.5 reshapes that execution
 into the operator workflow: choose evidence, assign its role, run explicit
@@ -261,6 +261,8 @@ processing tool.
 
 ### Item 3.5.6 — Astronomy Develop Workspace
 
+**Status:** Complete.
+
 **Operator result:** Develop a saved Master with Preview, explicit Apply,
 undo/redo, comparison, retry, and saves. Initial operation families are:
 
@@ -286,6 +288,18 @@ save lineage.
 including paired star outputs, apply failure and retry, undo/redo, refresh,
 restart, and save. Production Siril and RC Astro quality remain separate
 adapter proof.
+
+The completed MVP opens one exact saved Library Master and provides a typed
+catalog for the accepted astronomy operation families. Settings synchronize a
+durable deterministic Preview while Apply remains explicit. Applied attempts
+form one linear history with undo, redo, branch replacement after undo, exact
+retry from the last valid checkpoint, temporary Master comparison, and
+idempotent Library save lineage. Star removal creates related starless and
+star-companion evidence; adding stars back consumes that exact pair. Restart
+keeps the current draft, preview, attempts, history, saved results, and retry
+scope without replay. Local contract, SQLite service, worker, browser, and
+Designer proof cover this deterministic flow only; they do not prove
+astronomy-quality operations, Siril, RC Astro, or an external processing tool.
 
 ### Item 3.5.7 — Integrated Operator Review And Closeout
 

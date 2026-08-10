@@ -310,6 +310,13 @@ const processDenialMessages: Record<ProcessDenialReason, string> = {
   stackingInputUnavailable: 'Include at least one technically usable Light.',
   stackResultRequired: 'Select a completed Stack result first.',
   savedMasterRequired: 'Save the selected Stack result before opening Develop.',
+  developBaseRequired: 'Open an exact saved Master before using Develop.',
+  developPreviewRequired:
+    'Wait for the current settings preview to synchronize.',
+  developApplyActive: 'Wait for the current Develop operation.',
+  developFailedAttemptRequired:
+    'No failed Develop operation is available to retry.',
+  developAppliedResultRequired: 'Apply at least one Develop operation first.',
 }
 
 const processAction = (
@@ -431,6 +438,11 @@ export function ProcessPhone({
     (stage) => stage.stage === 'Registration',
   )
   const stacking = project?.stages.find((stage) => stage.stage === 'Stacking')
+  const currentProjectStage = project?.stages.find(
+    (stage) => stage.stage === project.currentStage,
+  )
+  const currentDevelop =
+    project?.currentStage === 'Develop' ? project.develop : undefined
   const selectedStackingAttempt = stacking?.attempts.find(
     (attempt) => attempt.attemptId === stacking.selectedAttemptId,
   )
@@ -529,26 +541,25 @@ export function ProcessPhone({
                 <DataListItem
                   label="Stage draft"
                   value={
-                    project.stages.find(
-                      (stage) => stage.stage === project.currentStage,
-                    )?.draft.revision === undefined
+                    (currentDevelop?.draft.revision ??
+                      currentProjectStage?.draft.revision) === undefined
                       ? 'Not editable in this stage'
-                      : `Revision ${project.stages.find((stage) => stage.stage === project.currentStage)?.draft.revision}`
+                      : `Revision ${currentDevelop?.draft.revision ?? currentProjectStage?.draft.revision}`
                   }
                 />
                 <DataListItem
                   label="Stage attempts"
                   value={String(
-                    project.stages.find(
-                      (stage) => stage.stage === project.currentStage,
-                    )?.attempts.length ?? 0,
+                    currentDevelop?.attempts.length ??
+                      currentProjectStage?.attempts.length ??
+                      0,
                   )}
                   detail={
-                    project.stages.find(
-                      (stage) => stage.stage === project.currentStage,
-                    )?.selectedAttemptId
-                      ? `Selected ${project.stages.find((stage) => stage.stage === project.currentStage)?.selectedAttemptId}`
-                      : 'No selected result'
+                    currentDevelop
+                      ? `Applied history ${currentDevelop.historyCursor} / ${currentDevelop.history.length}`
+                      : currentProjectStage?.selectedAttemptId
+                        ? `Selected ${currentProjectStage.selectedAttemptId}`
+                        : 'No selected result'
                   }
                 />
                 <DataListItem
@@ -819,6 +830,96 @@ export function ProcessPhone({
           </PanelBody>
         </Panel>
       ) : null}
+      {project?.develop ? (
+        <Panel>
+          <PanelHeader
+            title="Astronomy Develop evidence"
+            meta={`${project.develop.attempts.length} retained attempt${project.develop.attempts.length === 1 ? '' : 's'}`}
+          />
+          <PanelBody>
+            <Stack>
+              <DataList>
+                <DataListItem
+                  label="Exact saved Master"
+                  value={`${project.develop.base.assetId} · revision ${project.develop.base.assetRevision}`}
+                  detail={project.develop.base.checksum}
+                />
+                <DataListItem
+                  label="Current operation"
+                  value={developOperationLabel(project.develop.draft.operation)}
+                  detail={`Draft revision ${project.develop.draft.revision}`}
+                />
+                <DataListItem
+                  label="Preview"
+                  value={
+                    project.develop.preview
+                      ? `Synchronized draft ${project.develop.preview.draftRevision}`
+                      : 'Not synchronized'
+                  }
+                  detail={project.develop.preview?.checksum}
+                />
+                <DataListItem
+                  label="Applied history"
+                  value={`${project.develop.historyCursor} / ${project.develop.history.length}`}
+                />
+                <DataListItem
+                  label="Saved Library results"
+                  value={String(project.develop.savedResults.length)}
+                />
+              </DataList>
+              <p>
+                Comparison uses the original saved Master and creates no
+                history. Evidence is deterministic; astronomy-quality processing
+                is not claimed.
+              </p>
+              <div className="beta-process-phone-sources">
+                {project.develop.attempts.map((attempt) => (
+                  <article
+                    className="beta-process-phone-source"
+                    key={attempt.attemptId}
+                  >
+                    <b>
+                      {developOperationLabel(attempt.operation)} ·{' '}
+                      {attempt.attemptId}
+                    </b>
+                    <span>
+                      {titleCase(attempt.state)} · input{' '}
+                      {attempt.inputCheckpointId} · {attempt.toolIdentity}
+                    </span>
+                    {attempt.retryOfAttemptId ? (
+                      <span>Exact retry of {attempt.retryOfAttemptId}</span>
+                    ) : null}
+                    {attempt.outputs.map((output) => (
+                      <span key={output.outputId}>
+                        {titleCase(output.relation)} FITS evidence ·{' '}
+                        {output.outputId} · {output.checksum} ·{' '}
+                        {output.diagnostic}
+                      </span>
+                    ))}
+                    {attempt.diagnostics.map((diagnostic) => (
+                      <span key={diagnostic}>{diagnostic}</span>
+                    ))}
+                  </article>
+                ))}
+                {project.develop.savedResults.map((saved) => (
+                  <article
+                    className="beta-process-phone-source"
+                    key={saved.assetId}
+                  >
+                    <b>Saved Library Develop result</b>
+                    <span>
+                      {saved.assetId} · revision {saved.assetRevision}
+                    </span>
+                    <span>
+                      Checkpoint {saved.checkpointId} · {saved.checksum}
+                    </span>
+                  </article>
+                ))}
+              </div>
+            </Stack>
+          </PanelBody>
+        </Panel>
+      ) : null}
       {project ? (
         <Panel>
           <PanelHeader title="All stage evidence" meta="Read only" />
@@ -1076,6 +1177,552 @@ function ProjectSourcesDesktop({
         </Panel>
       </div>
     </main>
+  )
+}
+
+type ProjectDevelop = NonNullable<
+  ProcessWorkspace['projects'][number]['develop']
+>
+type DevelopOperation = ProjectDevelop['draft']['operation']
+
+const developOperationLabel = (operation: DevelopOperation) =>
+  operation._tag === 'AstrometryWcs'
+    ? 'Astrometry / WCS'
+    : operation._tag === 'BackgroundExtraction'
+      ? 'Background extraction'
+      : operation._tag === 'AstronomyColorCalibration'
+        ? 'Astronomy color calibration'
+        : operation._tag === 'GreenNoiseReduction'
+          ? 'Green-noise reduction'
+          : operation._tag === 'Stretch'
+            ? 'Stretch'
+            : operation._tag === 'ColorAdjustment'
+              ? 'Color controls'
+              : operation._tag === 'RemoveStars'
+                ? 'Remove stars'
+                : 'Add stars back'
+
+const initialDevelopOperation = (
+  tag: DevelopOperation['_tag'],
+): DevelopOperation =>
+  tag === 'AstrometryWcs'
+    ? { _tag: tag, solverProfile: 'balanced' }
+    : tag === 'BackgroundExtraction'
+      ? { _tag: tag, sampleDensity: 'balanced' }
+      : tag === 'AstronomyColorCalibration'
+        ? { _tag: tag, method: 'photometric' }
+        : tag === 'GreenNoiseReduction'
+          ? { _tag: tag, strength: 0.5 }
+          : tag === 'Stretch'
+            ? { _tag: tag, method: 'asinh', amount: 0.25 }
+            : tag === 'ColorAdjustment'
+              ? {
+                  _tag: tag,
+                  cyan: 0,
+                  yellow: 0,
+                  red: 0,
+                  saturation: 0,
+                }
+              : tag === 'RemoveStars'
+                ? { _tag: tag, mode: 'balanced' }
+                : { _tag: tag }
+
+function ProjectDevelopDesktop({
+  project,
+  actions,
+  pending,
+  command,
+}: {
+  project: ProcessWorkspace['projects'][number]
+  actions: ReadonlyArray<ProcessAction> | undefined
+  pending: string | undefined
+  command: (command: object, label: string) => void
+}) {
+  const develop = project.develop
+  const [showOriginal, setShowOriginal] = useState(false)
+  const updateReason = processActionReason(
+    actions,
+    'UpdateProcessingDevelopDraft',
+  )
+  const syncReason = processActionReason(
+    actions,
+    'SyncProcessingDevelopPreview',
+  )
+  const applyReason = processActionReason(
+    actions,
+    'ApplyProcessingDevelopPreview',
+  )
+  const undoDraftReason = processActionReason(
+    actions,
+    'UndoProcessingDevelopDraft',
+  )
+  const redoDraftReason = processActionReason(
+    actions,
+    'RedoProcessingDevelopDraft',
+  )
+  const undoStepReason = processActionReason(
+    actions,
+    'UndoProcessingDevelopStep',
+  )
+  const redoStepReason = processActionReason(
+    actions,
+    'RedoProcessingDevelopStep',
+  )
+  const retryReason = processActionReason(
+    actions,
+    'RetryProcessingDevelopApply',
+  )
+  const saveReason = processActionReason(actions, 'SaveProcessingDevelopResult')
+
+  useEffect(() => {
+    if (
+      develop === undefined ||
+      pending !== undefined ||
+      syncReason !== undefined ||
+      develop.preview?.draftRevision === develop.draft.revision
+    )
+      return
+    const timeout = window.setTimeout(
+      () =>
+        command(
+          {
+            _tag: 'SyncProcessingDevelopPreview',
+            projectId: project.projectId,
+            expectedProjectRevision: project.revision,
+            expectedDevelopDraftRevision: develop.draft.revision,
+            idempotencyKey: crypto.randomUUID(),
+          },
+          'Synchronizing Develop preview',
+        ),
+      250,
+    )
+    return () => window.clearTimeout(timeout)
+  }, [
+    command,
+    develop,
+    pending,
+    project.projectId,
+    project.revision,
+    syncReason,
+  ])
+
+  if (develop === undefined)
+    return (
+      <AttentionCard
+        tone="warning"
+        statusLabel="Develop unavailable"
+        title="Exact saved Master required"
+        description="Save and open a selected Master before using Astronomy Develop."
+      />
+    )
+
+  const operation = develop.draft.operation
+  const currentEntry =
+    develop.historyCursor > 0
+      ? develop.history[develop.historyCursor - 1]
+      : undefined
+  const latestAttempt = develop.attempts.at(-1)
+  const changeOperation = (next: DevelopOperation) =>
+    command(
+      {
+        _tag: 'UpdateProcessingDevelopDraft',
+        projectId: project.projectId,
+        expectedProjectRevision: project.revision,
+        operation: next,
+        idempotencyKey: crypto.randomUUID(),
+      },
+      `Updating ${developOperationLabel(next)}`,
+    )
+  const controlsDisabled = pending !== undefined || updateReason !== undefined
+
+  return (
+    <div className="beta-process-develop">
+      <AttentionCard
+        tone="neutral"
+        statusLabel="Deterministic Develop evidence"
+        title="Exact saved Master stays unchanged"
+        description="Preview does not change applied history. Apply creates deterministic FITS evidence and does not claim astronomy-quality processing."
+      />
+      <div className="beta-process-develop-grid">
+        <Stack>
+          <EvidenceViewport
+            label={
+              showOriginal ? 'Original saved Master' : 'Current Develop image'
+            }
+            fallback={
+              showOriginal
+                ? `Original saved Master ${develop.base.assetId} · revision ${develop.base.assetRevision}`
+                : develop.preview
+                  ? `${developOperationLabel(develop.preview.operation)} preview synchronized for draft ${develop.preview.draftRevision}`
+                  : currentEntry
+                    ? `Applied checkpoint ${currentEntry.checkpointId}`
+                    : 'The exact saved Master is the current checkpoint.'
+            }
+            caption={
+              showOriginal
+                ? `Reference checksum ${develop.base.checksum}`
+                : `Current checkpoint ${currentEntry?.checkpointId ?? 'saved Master base'}`
+            }
+          />
+          <Cluster>
+            <Button
+              onPointerDown={() => setShowOriginal(true)}
+              onPointerUp={() => setShowOriginal(false)}
+              onPointerCancel={() => setShowOriginal(false)}
+              onPointerLeave={() => setShowOriginal(false)}
+            >
+              Hold to compare original
+            </Button>
+            <span className="beta-process-calibration-intro">
+              {develop.preview
+                ? `Preview ${develop.preview.previewId} · ${develop.preview.toolIdentity}`
+                : 'Preview synchronizes after a short pause.'}
+            </span>
+          </Cluster>
+        </Stack>
+        <Stack>
+          <Field label="Astronomy operation" hint="One current bounded draft">
+            <Select
+              value={operation._tag}
+              disabled={controlsDisabled}
+              onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                changeOperation(
+                  initialDevelopOperation(
+                    event.target.value as DevelopOperation['_tag'],
+                  ),
+                )
+              }
+            >
+              <option value="AstrometryWcs">Astrometry / WCS</option>
+              <option value="BackgroundExtraction">
+                Background extraction
+              </option>
+              <option value="AstronomyColorCalibration">
+                Astronomy color calibration
+              </option>
+              <option value="GreenNoiseReduction">Green-noise reduction</option>
+              <option value="Stretch">Stretch</option>
+              <option value="ColorAdjustment">Color controls</option>
+              <option value="RemoveStars">Remove stars</option>
+              <option value="AddStars">Add stars back</option>
+            </Select>
+          </Field>
+          {operation._tag === 'AstrometryWcs' ? (
+            <Field label="Solver profile" hint="Retained WCS draft choice">
+              <Select
+                value={operation.solverProfile}
+                disabled={controlsDisabled}
+                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                  changeOperation({
+                    ...operation,
+                    solverProfile: event.target.value as
+                      | 'balanced'
+                      | 'wide-field',
+                  })
+                }
+              >
+                <option value="balanced">Balanced</option>
+                <option value="wide-field">Wide field</option>
+              </Select>
+            </Field>
+          ) : operation._tag === 'BackgroundExtraction' ? (
+            <Field label="Sample density" hint="Small background model choice">
+              <Select
+                value={operation.sampleDensity}
+                disabled={controlsDisabled}
+                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                  changeOperation({
+                    ...operation,
+                    sampleDensity: event.target.value as 'sparse' | 'balanced',
+                  })
+                }
+              >
+                <option value="sparse">Sparse</option>
+                <option value="balanced">Balanced</option>
+              </Select>
+            </Field>
+          ) : operation._tag === 'GreenNoiseReduction' ? (
+            <Field label="Reduction strength" hint="0 to 1">
+              <NumberField
+                min={0}
+                max={1}
+                step={0.05}
+                value={operation.strength}
+                disabled={controlsDisabled}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  changeOperation({
+                    ...operation,
+                    strength: Number(event.target.value),
+                  })
+                }
+              />
+            </Field>
+          ) : operation._tag === 'Stretch' ? (
+            <>
+              <Field label="Stretch method" hint="Retained with this draft">
+                <Select
+                  value={operation.method}
+                  disabled={controlsDisabled}
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                    changeOperation({
+                      ...operation,
+                      method: event.target.value as
+                        | 'asinh'
+                        | 'generalized-hyperbolic',
+                    })
+                  }
+                >
+                  <option value="asinh">Asinh</option>
+                  <option value="generalized-hyperbolic">
+                    Generalized hyperbolic
+                  </option>
+                </Select>
+              </Field>
+              <Field label="Stretch amount" hint="0 to 1">
+                <NumberField
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={operation.amount}
+                  disabled={controlsDisabled}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    changeOperation({
+                      ...operation,
+                      amount: Number(event.target.value),
+                    })
+                  }
+                />
+              </Field>
+            </>
+          ) : operation._tag === 'ColorAdjustment' ? (
+            <div className="beta-process-develop-color">
+              {(['cyan', 'yellow', 'red', 'saturation'] as const).map((key) => (
+                <Field key={key} label={titleCase(key)} hint="-1 to 1">
+                  <NumberField
+                    min={-1}
+                    max={1}
+                    step={0.05}
+                    value={operation[key]}
+                    disabled={controlsDisabled}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                      changeOperation({
+                        ...operation,
+                        [key]: Number(event.target.value),
+                      })
+                    }
+                  />
+                </Field>
+              ))}
+            </div>
+          ) : (
+            <p className="beta-process-calibration-intro">
+              {operation._tag === 'AstronomyColorCalibration'
+                ? 'Photometric color calibration uses the retained WCS evidence.'
+                : operation._tag === 'RemoveStars'
+                  ? 'Apply creates one related starless image and star companion.'
+                  : 'Add stars back consumes the exact current starless and companion pair.'}
+            </p>
+          )}
+          <Cluster>
+            <Button
+              disabled={pending !== undefined || undoDraftReason !== undefined}
+              title={undoDraftReason}
+              onClick={() =>
+                command(
+                  {
+                    _tag: 'UndoProcessingDevelopDraft',
+                    projectId: project.projectId,
+                    expectedProjectRevision: project.revision,
+                    idempotencyKey: crypto.randomUUID(),
+                  },
+                  'Undoing Develop settings',
+                )
+              }
+            >
+              Undo settings
+            </Button>
+            <Button
+              disabled={pending !== undefined || redoDraftReason !== undefined}
+              title={redoDraftReason}
+              onClick={() =>
+                command(
+                  {
+                    _tag: 'RedoProcessingDevelopDraft',
+                    projectId: project.projectId,
+                    expectedProjectRevision: project.revision,
+                    idempotencyKey: crypto.randomUUID(),
+                  },
+                  'Redoing Develop settings',
+                )
+              }
+            >
+              Redo settings
+            </Button>
+            <Button
+              tone="primary"
+              disabled={pending !== undefined || applyReason !== undefined}
+              title={applyReason}
+              onClick={() => {
+                if (develop.preview === undefined) return
+                command(
+                  {
+                    _tag: 'ApplyProcessingDevelopPreview',
+                    projectId: project.projectId,
+                    expectedProjectRevision: project.revision,
+                    previewId: develop.preview.previewId,
+                    idempotencyKey: crypto.randomUUID(),
+                  },
+                  `Applying ${developOperationLabel(operation)}`,
+                )
+              }}
+            >
+              Apply exact preview
+            </Button>
+          </Cluster>
+          <ProcessActionDenial reason={applyReason} />
+        </Stack>
+      </div>
+      <Cluster>
+        <Button
+          disabled={pending !== undefined || undoStepReason !== undefined}
+          title={undoStepReason}
+          onClick={() =>
+            command(
+              {
+                _tag: 'UndoProcessingDevelopStep',
+                projectId: project.projectId,
+                expectedProjectRevision: project.revision,
+                idempotencyKey: crypto.randomUUID(),
+              },
+              'Undoing applied Develop step',
+            )
+          }
+        >
+          Undo applied step
+        </Button>
+        <Button
+          disabled={pending !== undefined || redoStepReason !== undefined}
+          title={redoStepReason}
+          onClick={() =>
+            command(
+              {
+                _tag: 'RedoProcessingDevelopStep',
+                projectId: project.projectId,
+                expectedProjectRevision: project.revision,
+                idempotencyKey: crypto.randomUUID(),
+              },
+              'Redoing applied Develop step',
+            )
+          }
+        >
+          Redo applied step
+        </Button>
+        {develop.failedAttemptId ? (
+          <Button
+            disabled={pending !== undefined || retryReason !== undefined}
+            title={retryReason}
+            onClick={() =>
+              command(
+                {
+                  _tag: 'RetryProcessingDevelopApply',
+                  projectId: project.projectId,
+                  expectedProjectRevision: project.revision,
+                  failedAttemptId: develop.failedAttemptId,
+                  idempotencyKey: crypto.randomUUID(),
+                },
+                'Retrying exact failed Develop operation',
+              )
+            }
+          >
+            Retry exact failed operation
+          </Button>
+        ) : null}
+        <Button
+          tone="primary"
+          disabled={pending !== undefined || saveReason !== undefined}
+          title={saveReason}
+          onClick={() =>
+            command(
+              {
+                _tag: 'SaveProcessingDevelopResult',
+                projectId: project.projectId,
+                expectedProjectRevision: project.revision,
+                idempotencyKey: crypto.randomUUID(),
+              },
+              'Saving current Develop result to Library',
+            )
+          }
+        >
+          Save current result to Library
+        </Button>
+      </Cluster>
+      <DataList>
+        <DataListItem
+          label="Saved Master base"
+          value={`${develop.base.assetId} · revision ${develop.base.assetRevision}`}
+          detail={develop.base.checksum}
+        />
+        <DataListItem
+          label="Applied history"
+          value={`${develop.historyCursor} / ${develop.history.length}`}
+          detail="Undo and redo move only the project cursor."
+        />
+        <DataListItem
+          label="Saved Library results"
+          value={String(develop.savedResults.length)}
+          detail="Earlier saved results stay independent of later edits."
+        />
+      </DataList>
+      <div className="beta-process-attempts">
+        {develop.attempts.length === 0 ? (
+          <p>No Develop attempts yet. Apply starts explicit worker work.</p>
+        ) : (
+          develop.attempts
+            .slice()
+            .reverse()
+            .map((attempt) => (
+              <article key={attempt.attemptId}>
+                <b>
+                  {developOperationLabel(attempt.operation)} ·{' '}
+                  {attempt.attemptId}
+                </b>
+                <span>
+                  {titleCase(attempt.state)} · input {attempt.inputCheckpointId}{' '}
+                  · {attempt.toolIdentity}
+                </span>
+                {attempt.retryOfAttemptId ? (
+                  <span>Exact retry of {attempt.retryOfAttemptId}</span>
+                ) : null}
+                {attempt.outputs.map((output) => (
+                  <span key={output.outputId}>
+                    {titleCase(output.relation)} FITS evidence ·{' '}
+                    {output.outputId} · {output.checksum} · {output.diagnostic}
+                  </span>
+                ))}
+                {attempt.diagnostics.map((diagnostic) => (
+                  <span key={diagnostic}>{diagnostic}</span>
+                ))}
+              </article>
+            ))
+        )}
+      </div>
+      {latestAttempt?.state === 'failed' ? (
+        <AttentionCard
+          tone="danger"
+          statusLabel="Apply failed"
+          title="Last valid checkpoint retained"
+          description={latestAttempt.diagnostics.join(' · ')}
+        />
+      ) : null}
+      {develop.savedResults.map((saved) => (
+        <a
+          key={saved.assetId}
+          href={`/library/assets/${encodeURIComponent(saved.assetId)}?ui=beta`}
+        >
+          Saved Library Develop result · {saved.assetId} · {saved.checksum}
+        </a>
+      ))}
+    </div>
   )
 }
 
@@ -2082,15 +2729,11 @@ function ProjectStageDesktop({
                   </Cluster>
                 </>
               ) : (
-                <AttentionCard
-                  tone={project.developMasterAssetId ? 'positive' : 'warning'}
-                  statusLabel="Develop handoff"
-                  title="Exact saved Master"
-                  description={
-                    project.developMasterAssetId
-                      ? `${project.developMasterAssetId} is open. Astronomy Develop operations arrive in Item 3.5.6.`
-                      : 'Save a selected Master before opening Develop.'
-                  }
+                <ProjectDevelopDesktop
+                  project={project}
+                  actions={actions}
+                  pending={pending}
+                  command={command}
                 />
               )}
               {message ? (

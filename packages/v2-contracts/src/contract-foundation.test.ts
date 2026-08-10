@@ -276,6 +276,64 @@ const commandFixtures: ReadonlyArray<unknown> = [
     idempotencyKey: 'i-project-develop-open',
   },
   {
+    _tag: 'UpdateProcessingDevelopDraft',
+    projectId: 'project-1',
+    expectedProjectRevision: 10,
+    operation: { _tag: 'Stretch', method: 'asinh', amount: 0.4 },
+    idempotencyKey: 'i-project-develop-draft',
+  },
+  {
+    _tag: 'UndoProcessingDevelopDraft',
+    projectId: 'project-1',
+    expectedProjectRevision: 11,
+    idempotencyKey: 'i-project-develop-draft-undo',
+  },
+  {
+    _tag: 'RedoProcessingDevelopDraft',
+    projectId: 'project-1',
+    expectedProjectRevision: 12,
+    idempotencyKey: 'i-project-develop-draft-redo',
+  },
+  {
+    _tag: 'SyncProcessingDevelopPreview',
+    projectId: 'project-1',
+    expectedProjectRevision: 13,
+    expectedDevelopDraftRevision: 2,
+    idempotencyKey: 'i-project-develop-preview',
+  },
+  {
+    _tag: 'ApplyProcessingDevelopPreview',
+    projectId: 'project-1',
+    expectedProjectRevision: 14,
+    previewId: 'develop-preview-1',
+    idempotencyKey: 'i-project-develop-apply',
+  },
+  {
+    _tag: 'UndoProcessingDevelopStep',
+    projectId: 'project-1',
+    expectedProjectRevision: 15,
+    idempotencyKey: 'i-project-develop-undo',
+  },
+  {
+    _tag: 'RedoProcessingDevelopStep',
+    projectId: 'project-1',
+    expectedProjectRevision: 16,
+    idempotencyKey: 'i-project-develop-redo',
+  },
+  {
+    _tag: 'RetryProcessingDevelopApply',
+    projectId: 'project-1',
+    expectedProjectRevision: 17,
+    failedAttemptId: 'develop-attempt-1',
+    idempotencyKey: 'i-project-develop-retry',
+  },
+  {
+    _tag: 'SaveProcessingDevelopResult',
+    projectId: 'project-1',
+    expectedProjectRevision: 18,
+    idempotencyKey: 'i-project-develop-save',
+  },
+  {
     _tag: 'ResumeProcessingSession',
     sessionId: 'process-1',
     expectedProcessingRevision: 5,
@@ -367,7 +425,7 @@ const commandFixtures: ReadonlyArray<unknown> = [
 
 describe('Gate 5 contract foundation', () => {
   it('keeps the accepted command vocabulary closed', () => {
-    assert.equal(commandTags.length, 56)
+    assert.equal(commandTags.length, 65)
     assert.deepEqual(commandTags, acceptedCommandTags)
     assert.deepEqual(
       commandTags,
