@@ -40,10 +40,15 @@ class OriginRequestIdentity extends Context.Service<
   LocalIdentity
 >()('@astro-console/server/OriginRequestIdentity') {}
 
+class OriginRequestAdmission extends Context.Service<
+  OriginRequestAdmission,
+  RequestAdmission
+>()('@astro-console/server/OriginRequestAdmission') {}
+
 export type OriginHttpApplication = Effect.Effect<
   HttpServerResponse.HttpServerResponse,
   unknown,
-  OriginRequestIdentity | Scope.Scope | HttpServerRequest.HttpServerRequest
+  OriginRequestAdmission | Scope.Scope | HttpServerRequest.HttpServerRequest
 >
 
 export type OriginHttpBinding = {
@@ -249,7 +254,7 @@ export const makeOriginHttpApplication = (webRoot: string) =>
       }),
     )
 
-    return yield* HttpRouter.toHttpEffect(
+    const routes = yield* HttpRouter.toHttpEffect(
       Layer.mergeAll(
         live,
         snapshot,
@@ -260,36 +265,35 @@ export const makeOriginHttpApplication = (webRoot: string) =>
         webAndNotFound,
       ),
     )
-  })
 
-const withAdmission = (
-  application: OriginHttpApplication,
-  admission: RequestAdmission,
-) =>
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest
-    const requestPath = pathname(request)
-    if (request.method === 'GET' && requestPath === '/health/live')
-      return yield* application.pipe(
-        Effect.provideService(OriginRequestIdentity, {
-          personId: 'health',
-          clientId: 'health',
-          capability: 'readOnly',
-        }),
-      )
-    const admissionRequest: AdmissionRequest = {
-      method: request.method,
-      path: requestPath,
-      headers: request.headers,
-    }
-    const identity = yield* Effect.promise(async () =>
-      admission(admissionRequest),
-    )
-    return identity === undefined
-      ? yield* unauthenticated(request.method, requestPath)
-      : yield* application.pipe(
-          Effect.provideService(OriginRequestIdentity, identity),
+    return Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const requestPath = pathname(request)
+      if (request.method === 'GET' && requestPath === '/health/live')
+        return yield* routes.pipe(
+          Effect.provideService(OriginRequestIdentity, {
+            personId: 'health',
+            clientId: 'health',
+            capability: 'readOnly',
+          }),
         )
+
+      repository.expireReconnectGrace()
+      const admission = yield* OriginRequestAdmission
+      const admissionRequest: AdmissionRequest = {
+        method: request.method,
+        path: requestPath,
+        headers: request.headers,
+      }
+      const identity = yield* Effect.promise(async () =>
+        admission(admissionRequest),
+      )
+      return identity === undefined
+        ? yield* unauthenticated(request.method, requestPath)
+        : yield* routes.pipe(
+            Effect.provideService(OriginRequestIdentity, identity),
+          )
+    })
   })
 
 const tcpPort = (address: HttpServer.Address) => {
@@ -322,7 +326,11 @@ export const listenOriginHttp = Effect.fn('OriginHttp.listen')(function* (
         listenerScope,
       )
       yield* Scope.provide(
-        server.serve(withAdmission(application, binding.admission)),
+        server.serve(
+          application.pipe(
+            Effect.provideService(OriginRequestAdmission, binding.admission),
+          ),
+        ),
         listenerScope,
       )
       bound[binding.name] = { port: tcpPort(server.address) }

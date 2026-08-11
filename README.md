@@ -10,7 +10,7 @@ the version-matched interface it serves.
 - `apps/web/` — browser workspace
 - `packages/protocol/` — shared HTTP and SSE wire schemas
 
-Use Node 22.13 or later. On a first checkout, install and prepare the
+Use Node 22.19 or later. On a first checkout, install and prepare the
 workspaces from the repository root:
 
 ```sh
