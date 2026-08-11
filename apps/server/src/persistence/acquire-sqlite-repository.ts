@@ -1,8 +1,10 @@
 import { DatabaseSync } from 'node:sqlite'
-import { Schema } from 'effect'
+import { Option, Schema } from 'effect'
 import {
   AcquireRevision,
+  AcquireCommandResponse,
   AttemptId,
+  CameraCommandResponse,
   PositiveInt,
   RunId,
 } from '@astro-console/protocol'
@@ -11,6 +13,7 @@ import {
   AcquireSession,
   RecoverySeriesId,
 } from '../services/acquire-domain.ts'
+import { AcquireCommandOutcome } from '../services/acquire-command-outcome.ts'
 
 const StoredSession = Schema.Struct({ session: Schema.String })
 const StoredStateValue = Schema.Struct({ value: Schema.String })
@@ -19,6 +22,58 @@ const StoredReceiptResponse = Schema.Struct({
   status: Schema.Int,
   body: Schema.Unknown,
 })
+
+type ApplicationReceiptKind = 'acquire' | 'camera'
+
+const commandOutcome = (outcome: typeof AcquireCommandOutcome.Type) => outcome
+
+const legacyApplicationReceipt = (
+  kind: ApplicationReceiptKind,
+  status: number,
+  raw: unknown,
+): typeof AcquireCommandOutcome.Type => {
+  if (kind === 'acquire') {
+    const response = Schema.decodeUnknownSync(AcquireCommandResponse)(raw)
+    return AcquireCommandResponse.match(response, {
+      Accepted: (response) =>
+        commandOutcome(
+          AcquireCommandOutcome.cases.AcquireAccepted.make({ response }),
+        ),
+      Rejected: (response) =>
+        commandOutcome(
+          AcquireCommandOutcome.cases.AcquireRejected.make({ response }),
+        ),
+      Unavailable: (response) =>
+        commandOutcome(
+          AcquireCommandOutcome.cases.AcquireUnavailable.make({ response }),
+        ),
+    })
+  }
+
+  const response = Schema.decodeUnknownSync(CameraCommandResponse)(raw)
+  return CameraCommandResponse.match(response, {
+    Accepted: (response) =>
+      commandOutcome(
+        AcquireCommandOutcome.cases.CameraAccepted.make({ response }),
+      ),
+    Completed: (response) =>
+      commandOutcome(
+        AcquireCommandOutcome.cases.CameraAccepted.make({ response }),
+      ),
+    Rejected: (response) =>
+      status === 409
+        ? commandOutcome(
+            AcquireCommandOutcome.cases.CameraRejected.make({ response }),
+          )
+        : commandOutcome(
+            AcquireCommandOutcome.cases.CameraUnavailable.make({ response }),
+          ),
+    Unavailable: (response) =>
+      commandOutcome(
+        AcquireCommandOutcome.cases.CameraUnavailable.make({ response }),
+      ),
+  })
+}
 
 export const polarSession = (runId: string) =>
   AcquireSession.make({
@@ -183,7 +238,11 @@ export const acquireSqliteRepository = (database: DatabaseSync) => ({
         'INSERT OR REPLACE INTO acquire_receipts (idempotency_key,actor_client_id,response) VALUES (?,?,?)',
       )
       .run(key, clientId, JSON.stringify(response)),
-  applicationReceipt: (key: string, clientId: string) => {
+  applicationReceipt: (
+    kind: ApplicationReceiptKind,
+    key: string,
+    clientId: string,
+  ) => {
     const row = Schema.decodeUnknownSync(Schema.optional(StoredReceipt))(
       database
         .prepare(
@@ -191,11 +250,16 @@ export const acquireSqliteRepository = (database: DatabaseSync) => ({
         )
         .get(key, clientId),
     )
-    return row === undefined
-      ? undefined
-      : Schema.decodeUnknownSync(StoredReceiptResponse)(
-          JSON.parse(row.response),
-        ).body
+    if (row === undefined) return undefined
+    const stored = Schema.decodeUnknownSync(StoredReceiptResponse)(
+      JSON.parse(row.response),
+    )
+    const outcome = Schema.decodeUnknownOption(AcquireCommandOutcome)(
+      stored.body,
+    )
+    return Option.isSome(outcome)
+      ? outcome.value
+      : legacyApplicationReceipt(kind, stored.status, stored.body)
   },
   saveApplicationReceipt: (key: string, clientId: string, outcome: unknown) =>
     database

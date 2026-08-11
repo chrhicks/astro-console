@@ -28,6 +28,7 @@ import {
   ObserveLiveFrameReview,
   RefreshPreflightResponse,
   AcquireCommandResponse,
+  CameraCommandResponse,
 } from '@astro-console/protocol'
 import {
   makeOriginHttpApplication,
@@ -65,31 +66,28 @@ import type { DevelopmentSimulationConfig } from '../http/development-simulation
 import { createAlpacaSimulator } from '../simulator/alpaca-simulator.ts'
 import {
   acquireSqliteRepository,
+  polarSession,
   targetAcquisitionSession,
 } from '../persistence/acquire-sqlite-repository.ts'
 import {
   AcquireCommandService,
   acquireCommandServiceLayer,
+  absentCameraProviderSelectionLayer,
+  absentPolarMeasurementProviderSelectionLayer,
+  absentTargetAcquisitionProviderSelectionLayer,
   boundedSimulationAcquireOuterTransitionPolicyLayer,
+  configuredTargetAcquisitionProviderSelectionLayer,
   standardAcquireOuterTransitionPolicyLayer,
   unavailableCameraExposureMaterializationLayer,
-  unavailableCameraProviderLayer,
-  unavailablePolarMeasurementProviderLayer,
-  unavailableTargetAcquisitionProviderLayer,
 } from '../services/acquire-command-service.ts'
 import {
   PreflightCommandService,
+  absentReadOnlyPreflightProviderSelectionLayer,
+  configuredReadOnlyPreflightProviderSelectionLayer,
   preflightCommandServiceLayer,
-  unavailableReadOnlyPreflightProviderLayer,
 } from '../services/preflight-command-service.ts'
-import {
-  ReadOnlyPreflightProvider,
-  type ReadOnlyPreflightProviderShape,
-} from '../services/preflight-service.ts'
-import {
-  TargetAcquisitionProvider,
-  type TargetAcquisitionProviderShape,
-} from '../services/target-acquisition-service.ts'
+import type { ReadOnlyPreflightProviderShape } from '../services/preflight-service.ts'
+import type { TargetAcquisitionProviderShape } from '../services/target-acquisition-service.ts'
 
 const owner: LocalIdentity = {
   personId: 'owner-person',
@@ -123,36 +121,33 @@ const acquireDependenciesLayer = (
     | typeof boundedSimulationAcquireOuterTransitionPolicyLayer,
 ) =>
   Layer.mergeAll(
-    unavailableCameraProviderLayer,
-    unavailablePolarMeasurementProviderLayer,
-    unavailableTargetAcquisitionProviderLayer,
+    absentCameraProviderSelectionLayer,
+    absentPolarMeasurementProviderSelectionLayer,
+    absentTargetAcquisitionProviderSelectionLayer,
     unavailableCameraExposureMaterializationLayer,
     policy,
   )
 
 const defaultRouteDependenciesLayer = Layer.merge(
   acquireDependenciesLayer(standardAcquireOuterTransitionPolicyLayer),
-  unavailableReadOnlyPreflightProviderLayer,
+  absentReadOnlyPreflightProviderSelectionLayer,
 )
 
 const boundedSimulationRouteDependenciesLayer = Layer.merge(
   acquireDependenciesLayer(boundedSimulationAcquireOuterTransitionPolicyLayer),
-  unavailableReadOnlyPreflightProviderLayer,
+  absentReadOnlyPreflightProviderSelectionLayer,
 )
 
 const targetRouteDependenciesLayer = (
   provider: TargetAcquisitionProviderShape,
 ) =>
   Layer.mergeAll(
-    unavailableCameraProviderLayer,
-    unavailablePolarMeasurementProviderLayer,
-    Layer.succeed(
-      TargetAcquisitionProvider,
-      TargetAcquisitionProvider.of(provider),
-    ),
+    absentCameraProviderSelectionLayer,
+    absentPolarMeasurementProviderSelectionLayer,
+    configuredTargetAcquisitionProviderSelectionLayer(provider),
     unavailableCameraExposureMaterializationLayer,
     standardAcquireOuterTransitionPolicyLayer,
-    unavailableReadOnlyPreflightProviderLayer,
+    absentReadOnlyPreflightProviderSelectionLayer,
   )
 
 const preflightRouteDependenciesLayer = (
@@ -160,10 +155,7 @@ const preflightRouteDependenciesLayer = (
 ) =>
   Layer.merge(
     acquireDependenciesLayer(standardAcquireOuterTransitionPolicyLayer),
-    Layer.succeed(
-      ReadOnlyPreflightProvider,
-      ReadOnlyPreflightProvider.of(provider),
-    ),
+    configuredReadOnlyPreflightProviderSelectionLayer(provider),
   )
 
 type RouteDependenciesLayer = typeof defaultRouteDependenciesLayer
@@ -882,6 +874,45 @@ test('Observe preflight publishes configured provider truth for its owner', () =
     'fake',
   ))
 
+test('Observe preflight preserves the no-configured-provider response', () =>
+  ownerOrigin(
+    ({ graph, bases }) =>
+      Effect.gen(function* () {
+        const started = yield* startEffectRun(
+          graph,
+          bases.owner,
+          'effect-preflight-absent-start-001',
+        )
+        if (started.activeRun._tag !== 'Active')
+          return yield* Effect.die('Expected active fixture Run')
+        const response = yield* fetchEffect(
+          `${bases.owner}/api/observe/preflight`,
+          {
+            method: 'POST',
+            headers: ownerHeaders,
+            body: JSON.stringify({
+              runId: started.activeRun.run.runId,
+              expectedRunRevision: started.activeRun.run.revision,
+            }),
+          },
+        )
+        const body = yield* responseJson(response).pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(RefreshPreflightResponse)),
+        )
+        assert.equal(response.status, 503)
+        assert.deepEqual(
+          body,
+          RefreshPreflightResponse.cases.Unavailable.make({
+            summary:
+              'No read-only rig provider is configured. Preflight cannot report a safe verdict.',
+          }),
+        )
+      }),
+    undefined,
+    undefined,
+    'fake',
+  ))
+
 test('Observe live-frame review returns typed current identity projection truth', () =>
   ownerOrigin(({ bases }) =>
     Effect.gen(function* () {
@@ -943,6 +974,163 @@ test('Acquire preserves the read-only polar evidence denial', () =>
           'This client is read-only and cannot record polar evidence.',
         )
     }),
+  ))
+
+test('Acquire preserves the no-configured target provider response', () =>
+  ownerOrigin(({ graph, bases }) =>
+    Effect.gen(function* () {
+      const started = yield* startEffectRun(
+        graph,
+        bases.owner,
+        'effect-target-absent-start-001',
+      )
+      if (started.activeRun._tag !== 'Active')
+        return yield* Effect.die('Expected active fixture Run')
+      acquireSqliteRepository(graph.database).install(
+        targetAcquisitionSession(
+          started.activeRun.run.runId,
+          'deepSkyPlateSolve',
+        ),
+      )
+      const response = yield* fetchEffect(
+        `${bases.owner}/api/acquire/commands`,
+        {
+          method: 'POST',
+          headers: ownerHeaders,
+          body: JSON.stringify({
+            intent: {
+              _tag: 'CaptureTargetAcquisitionEvidence',
+              expectedLeaseRevision: started.control.revision,
+              expectedRunRevision: started.activeRun.run.revision,
+              expectedAcquireRevision: 0,
+              idempotencyKey: 'effect-target-absent-001',
+            },
+          }),
+        },
+      )
+      const body = yield* responseJson(response).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(AcquireCommandResponse)),
+      )
+      assert.equal(response.status, 503)
+      assert.deepEqual(
+        body,
+        AcquireCommandResponse.cases.Unavailable.make({
+          summary: 'No target acquisition provider is configured.',
+        }),
+      )
+    }),
+  ))
+
+test('Acquire preserves the no-configured polar provider response', () =>
+  ownerOrigin(({ graph, bases }) =>
+    Effect.gen(function* () {
+      const started = yield* startEffectRun(
+        graph,
+        bases.owner,
+        'effect-polar-absent-start-001',
+      )
+      if (started.activeRun._tag !== 'Active')
+        return yield* Effect.die('Expected active fixture Run')
+      acquireSqliteRepository(graph.database).install(
+        polarSession(started.activeRun.run.runId),
+      )
+      const response = yield* fetchEffect(
+        `${bases.owner}/api/acquire/commands`,
+        {
+          method: 'POST',
+          headers: ownerHeaders,
+          body: JSON.stringify({
+            intent: {
+              _tag: 'CapturePolarAlignmentMeasurement',
+              expectedLeaseRevision: started.control.revision,
+              expectedRunRevision: started.activeRun.run.revision,
+              expectedAcquireRevision: 0,
+              idempotencyKey: 'effect-polar-absent-001',
+            },
+          }),
+        },
+      )
+      const body = yield* responseJson(response).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(AcquireCommandResponse)),
+      )
+      assert.equal(response.status, 503)
+      assert.deepEqual(
+        body,
+        AcquireCommandResponse.cases.Unavailable.make({
+          summary: 'No polar measurement provider is configured.',
+        }),
+      )
+    }),
+  ))
+
+test('Acquire preserves the no-configured camera provider response', () =>
+  ownerOrigin(
+    ({ graph, bases }) =>
+      Effect.gen(function* () {
+        const started = yield* startEffectRun(
+          graph,
+          bases.owner,
+          'effect-camera-absent-start-001',
+        )
+        if (started.activeRun._tag !== 'Active')
+          return yield* Effect.die('Expected active fixture Run')
+        const preflightResponse = yield* fetchEffect(
+          `${bases.owner}/api/observe/preflight`,
+          {
+            method: 'POST',
+            headers: ownerHeaders,
+            body: JSON.stringify({
+              runId: started.activeRun.run.runId,
+              expectedRunRevision: started.activeRun.run.revision,
+            }),
+          },
+        )
+        assert.equal(preflightResponse.status, 200)
+        const response = yield* fetchEffect(
+          `${bases.owner}/api/acquire/commands`,
+          {
+            method: 'POST',
+            headers: ownerHeaders,
+            body: JSON.stringify({
+              intent: {
+                _tag: 'StartCameraExposure',
+                expectedLeaseRevision: started.control.revision,
+                expectedRunRevision: started.activeRun.run.revision,
+                durationSeconds: 2,
+                idempotencyKey: 'effect-camera-absent-001',
+              },
+            }),
+          },
+        )
+        const body = yield* responseJson(response).pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(CameraCommandResponse)),
+        )
+        assert.equal(response.status, 503)
+        assert.deepEqual(
+          body,
+          CameraCommandResponse.cases.Unavailable.make({
+            summary: 'No configured camera provider is available.',
+          }),
+        )
+      }),
+    undefined,
+    preflightRouteDependenciesLayer({
+      observe: () =>
+        Effect.succeed({
+          observedAt: '2026-08-11T00:00:00.000Z',
+          verdict: 'ready',
+          nextAction: 'Camera command eligibility is current.',
+          checks: [
+            {
+              key: 'camera-connected',
+              state: 'ready',
+              observedAt: '2026-08-11T00:00:00.000Z',
+              reason: 'The configured camera is connected.',
+            },
+          ],
+        }),
+    }),
+    'fake',
   ))
 
 test('Acquire accepts target evidence once and returns its durable receipt without provider replay', () => {
@@ -1029,6 +1217,66 @@ test('Acquire accepts target evidence once and returns its durable receipt witho
               },
             },
           }
+        }),
+      correct: () => Effect.die('Correction was not expected'),
+    }),
+  )
+})
+
+test('Acquire replays a legacy durable receipt without provider work', () => {
+  let providerCalls = 0
+  return ownerOrigin(
+    ({ graph, bases }) =>
+      Effect.gen(function* () {
+        const started = yield* startEffectRun(
+          graph,
+          bases.owner,
+          'effect-acquire-legacy-receipt-start-001',
+        )
+        if (started.activeRun._tag !== 'Active')
+          return yield* Effect.die('Expected active fixture Run')
+        acquireSqliteRepository(graph.database).install(
+          targetAcquisitionSession(
+            started.activeRun.run.runId,
+            'deepSkyPlateSolve',
+          ),
+        )
+        const intent = {
+          _tag: 'CaptureTargetAcquisitionEvidence',
+          expectedLeaseRevision: started.control.revision,
+          expectedRunRevision: started.activeRun.run.revision,
+          expectedAcquireRevision: 0,
+          idempotencyKey: 'effect-acquire-legacy-receipt-001',
+        } as const
+        const legacyResponse = AcquireCommandResponse.cases.Unavailable.make({
+          summary: 'The legacy provider outcome remains unknown.',
+        })
+        acquireSqliteRepository(graph.database).saveReceipt(
+          intent.idempotencyKey,
+          owner.clientId,
+          { status: 503, body: legacyResponse },
+        )
+        const response = yield* fetchEffect(
+          `${bases.owner}/api/acquire/commands`,
+          {
+            method: 'POST',
+            headers: ownerHeaders,
+            body: JSON.stringify({ intent }),
+          },
+        )
+        const body = yield* responseJson(response).pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(AcquireCommandResponse)),
+        )
+        assert.equal(response.status, 503)
+        assert.deepEqual(body, legacyResponse)
+        assert.equal(providerCalls, 0)
+      }),
+    undefined,
+    targetRouteDependenciesLayer({
+      capture: () =>
+        Effect.sync(() => {
+          providerCalls += 1
+          return { _tag: 'Aborted' as const, summary: 'Not expected.' }
         }),
       correct: () => Effect.die('Correction was not expected'),
     }),

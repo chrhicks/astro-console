@@ -35,6 +35,7 @@ import {
   type TargetAcquisitionProviderShape,
 } from './target-acquisition-service.ts'
 import { AcquireActiveWork } from './acquire-domain.ts'
+import { AcquireCommandOutcome } from './acquire-command-outcome.ts'
 import { RunDefinition } from './run-domain.ts'
 
 const AcceptedDefinitionRow = Schema.Struct({ definition: Schema.String })
@@ -60,32 +61,80 @@ export class AcquireOuterTransitionPolicy extends Context.Service<
   { readonly denyOuterTargetTransitions: boolean }
 >()('@astro-console/server/AcquireOuterTransitionPolicy') {}
 
-const unavailableProvider = 'No configured Acquire provider is available.'
+export type CameraProviderSelectionShape =
+  | { readonly _tag: 'Absent' }
+  | { readonly _tag: 'Configured'; readonly provider: CameraProviderShape }
 
-export const unavailableCameraProviderLayer = Layer.succeed(
-  CameraProvider,
-  CameraProvider.of({
-    startExposure: () => Effect.fail(unavailableProvider),
-    abortExposure: () => Effect.fail(unavailableProvider),
-    readState: () => Effect.fail(unavailableProvider),
-  }),
+export class CameraProviderSelection extends Context.Service<
+  CameraProviderSelection,
+  CameraProviderSelectionShape
+>()('@astro-console/server/CameraProviderSelection') {}
+
+export type PolarMeasurementProviderSelectionShape =
+  | { readonly _tag: 'Absent' }
+  | {
+      readonly _tag: 'Configured'
+      readonly provider: PolarMeasurementProviderShape
+    }
+
+export class PolarMeasurementProviderSelection extends Context.Service<
+  PolarMeasurementProviderSelection,
+  PolarMeasurementProviderSelectionShape
+>()('@astro-console/server/PolarMeasurementProviderSelection') {}
+
+export type TargetAcquisitionProviderSelectionShape =
+  | { readonly _tag: 'Absent' }
+  | {
+      readonly _tag: 'Configured'
+      readonly provider: TargetAcquisitionProviderShape
+    }
+
+export class TargetAcquisitionProviderSelection extends Context.Service<
+  TargetAcquisitionProviderSelection,
+  TargetAcquisitionProviderSelectionShape
+>()('@astro-console/server/TargetAcquisitionProviderSelection') {}
+
+export const absentCameraProviderSelectionLayer = Layer.succeed(
+  CameraProviderSelection,
+  CameraProviderSelection.of({ _tag: 'Absent' }),
 )
 
-export const unavailablePolarMeasurementProviderLayer = Layer.succeed(
-  PolarMeasurementProvider,
-  PolarMeasurementProvider.of({
-    measure: () => Effect.fail(unavailableProvider),
-  }),
+export const configuredCameraProviderSelectionLayer = (
+  provider: CameraProviderShape,
+) =>
+  Layer.succeed(
+    CameraProviderSelection,
+    CameraProviderSelection.of({ _tag: 'Configured', provider }),
+  )
+
+export const absentPolarMeasurementProviderSelectionLayer = Layer.succeed(
+  PolarMeasurementProviderSelection,
+  PolarMeasurementProviderSelection.of({ _tag: 'Absent' }),
 )
 
-export const unavailableTargetAcquisitionProviderLayer = Layer.succeed(
-  TargetAcquisitionProvider,
-  TargetAcquisitionProvider.of({
-    capture: () => Effect.fail(unavailableProvider),
-    correct: () => Effect.fail(unavailableProvider),
-    frame: () => Effect.fail(unavailableProvider),
-  }),
+export const configuredPolarMeasurementProviderSelectionLayer = (
+  provider: PolarMeasurementProviderShape,
+) =>
+  Layer.succeed(
+    PolarMeasurementProviderSelection,
+    PolarMeasurementProviderSelection.of({ _tag: 'Configured', provider }),
+  )
+
+export const absentTargetAcquisitionProviderSelectionLayer = Layer.succeed(
+  TargetAcquisitionProviderSelection,
+  TargetAcquisitionProviderSelection.of({ _tag: 'Absent' }),
 )
+
+export const configuredTargetAcquisitionProviderSelectionLayer = (
+  provider: TargetAcquisitionProviderShape,
+) =>
+  Layer.succeed(
+    TargetAcquisitionProviderSelection,
+    TargetAcquisitionProviderSelection.of({
+      _tag: 'Configured',
+      provider,
+    }),
+  )
 
 export const unavailableCameraExposureMaterializationLayer = Layer.succeed(
   CameraExposureMaterialization,
@@ -108,25 +157,7 @@ export const boundedSimulationAcquireOuterTransitionPolicyLayer = Layer.succeed(
   AcquireOuterTransitionPolicy.of({ denyOuterTargetTransitions: true }),
 )
 
-export const AcquireCommandOutcome = Schema.TaggedUnion({
-  ReadOnly: { response: AcquireCommandResponse.cases.Unavailable },
-  AcquireAccepted: { response: AcquireCommandResponse.cases.Accepted },
-  AcquireRejected: { response: AcquireCommandResponse.cases.Rejected },
-  AcquireUnavailable: { response: AcquireCommandResponse.cases.Unavailable },
-  CameraAccepted: {
-    response: Schema.Union([
-      CameraCommandResponse.cases.Accepted,
-      CameraCommandResponse.cases.Completed,
-    ]),
-  },
-  CameraRejected: { response: CameraCommandResponse.cases.Rejected },
-  CameraUnavailable: {
-    response: Schema.Union([
-      CameraCommandResponse.cases.Rejected,
-      CameraCommandResponse.cases.Unavailable,
-    ]),
-  },
-})
+export { AcquireCommandOutcome } from './acquire-command-outcome.ts'
 
 export interface AcquireCommandServiceShape {
   readonly execute: (
@@ -146,9 +177,9 @@ export const acquireCommandServiceLayer = Layer.effect(
     const { database } = yield* OriginDatabase
     const repository = yield* StateSqliteRepository
     const publication = yield* ProjectionPublication
-    const cameraProvider = yield* CameraProvider
-    const polarMeasurementProvider = yield* PolarMeasurementProvider
-    const targetAcquisitionProvider = yield* TargetAcquisitionProvider
+    const cameraProvider = yield* CameraProviderSelection
+    const polarMeasurementProvider = yield* PolarMeasurementProviderSelection
+    const targetAcquisitionProvider = yield* TargetAcquisitionProviderSelection
     const materialization = yield* CameraExposureMaterialization
     const policy = yield* AcquireOuterTransitionPolicy
     const acquireRepository = acquireSqliteRepository(database)
@@ -208,10 +239,11 @@ const executeCamera = Effect.fn('AcquireCommandService.executeCamera')(
     repository: StateSqliteRepositoryShape,
     acquireRepository: AcquireRepository,
     publish: Publish,
-    cameraProvider: CameraProviderShape,
+    cameraProvider: CameraProviderSelectionShape,
     materialization: CameraExposureMaterializationShape,
   ) {
     const prior = acquireRepository.applicationReceipt(
+      'camera',
       camera.intent.idempotencyKey,
       identity.clientId,
     )
@@ -318,8 +350,12 @@ const executeCamera = Effect.fn('AcquireCommandService.executeCamera')(
       identity.clientId,
       pending,
     )
-    const result = yield* executeCameraCommand(raw).pipe(
-      Effect.provideService(CameraProvider, cameraProvider),
+    const cameraCommand = executeCameraCommand(raw)
+    const result = yield* Match.value(cameraProvider).pipe(
+      Match.when({ _tag: 'Configured' }, ({ provider }) =>
+        cameraCommand.pipe(Effect.provideService(CameraProvider, provider)),
+      ),
+      Match.orElse(() => cameraCommand),
     )
     const command = Match.value(result).pipe(
       Match.when({ _tag: 'Observed' }, (observed) => ({
@@ -403,12 +439,13 @@ const executeAcquire = Effect.fn('AcquireCommandService.executeAcquire')(
     repository: StateSqliteRepositoryShape,
     acquireRepository: AcquireRepository,
     publish: Publish,
-    polarMeasurementProvider: PolarMeasurementProviderShape,
-    targetAcquisitionProvider: TargetAcquisitionProviderShape,
+    polarMeasurementProvider: PolarMeasurementProviderSelectionShape,
+    targetAcquisitionProvider: TargetAcquisitionProviderSelectionShape,
     policy: { readonly denyOuterTargetTransitions: boolean },
   ) {
     if (Option.isSome(decoded)) {
       const prior = acquireRepository.applicationReceipt(
+        'acquire',
         decoded.value.intent.idempotencyKey,
         identity.clientId,
       )
@@ -493,18 +530,27 @@ const executeAcquire = Effect.fn('AcquireCommandService.executeAcquire')(
     const program = targetIntent
       ? executeTargetAcquisitionCommand(raw)
       : executePolarCommand(raw)
+    const persistedProgram = program.pipe(
+      Effect.provideService(AcquirePersistence, persistence),
+    )
+    const polarProgram = Match.value(polarMeasurementProvider).pipe(
+      Match.when({ _tag: 'Configured' }, ({ provider }) =>
+        persistedProgram.pipe(
+          Effect.provideService(PolarMeasurementProvider, provider),
+        ),
+      ),
+      Match.orElse(() => persistedProgram),
+    )
+    const configuredProgram = Match.value(targetAcquisitionProvider).pipe(
+      Match.when({ _tag: 'Configured' }, ({ provider }) =>
+        polarProgram.pipe(
+          Effect.provideService(TargetAcquisitionProvider, provider),
+        ),
+      ),
+      Match.orElse(() => polarProgram),
+    )
     const result: PolarCommandResult | TargetAcquisitionCommandResult =
-      yield* program.pipe(
-        Effect.provideService(AcquirePersistence, persistence),
-        Effect.provideService(
-          PolarMeasurementProvider,
-          polarMeasurementProvider,
-        ),
-        Effect.provideService(
-          TargetAcquisitionProvider,
-          targetAcquisitionProvider,
-        ),
-      )
+      yield* configuredProgram
     return yield* Match.value(result).pipe(
       Match.tag('Committed', (committed) =>
         Effect.gen(function* () {

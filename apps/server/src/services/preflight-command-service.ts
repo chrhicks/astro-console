@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Schema } from 'effect'
+import { Context, Effect, Layer, Match, Schema } from 'effect'
 import { RefreshPreflightResponse } from '@astro-console/protocol'
 import type { LocalIdentity } from '../auth/identity.ts'
 import { StateSqliteRepository } from '../persistence/state-sqlite-repository.ts'
@@ -6,6 +6,7 @@ import {
   ReadOnlyPreflightProvider,
   preflightPersistenceLayer,
   refreshPreflight,
+  type ReadOnlyPreflightProviderShape,
 } from './preflight-service.ts'
 import { ProjectionPublication } from './projection-publication.ts'
 
@@ -30,12 +31,40 @@ export class PreflightCommandService extends Context.Service<
   PreflightCommandServiceShape
 >()('@astro-console/server/PreflightCommandService') {}
 
+export type ReadOnlyPreflightProviderSelectionShape =
+  | { readonly _tag: 'Absent' }
+  | {
+      readonly _tag: 'Configured'
+      readonly provider: ReadOnlyPreflightProviderShape
+    }
+
+export class ReadOnlyPreflightProviderSelection extends Context.Service<
+  ReadOnlyPreflightProviderSelection,
+  ReadOnlyPreflightProviderSelectionShape
+>()('@astro-console/server/ReadOnlyPreflightProviderSelection') {}
+
+export const absentReadOnlyPreflightProviderSelectionLayer = Layer.succeed(
+  ReadOnlyPreflightProviderSelection,
+  ReadOnlyPreflightProviderSelection.of({ _tag: 'Absent' }),
+)
+
+export const configuredReadOnlyPreflightProviderSelectionLayer = (
+  provider: ReadOnlyPreflightProviderShape,
+) =>
+  Layer.succeed(
+    ReadOnlyPreflightProviderSelection,
+    ReadOnlyPreflightProviderSelection.of({
+      _tag: 'Configured',
+      provider,
+    }),
+  )
+
 export const preflightCommandServiceLayer = Layer.effect(
   PreflightCommandService,
   Effect.gen(function* () {
     const repository = yield* StateSqliteRepository
     const publication = yield* ProjectionPublication
-    const provider = yield* ReadOnlyPreflightProvider
+    const provider = yield* ReadOnlyPreflightProviderSelection
     const persistence = preflightPersistenceLayer({
       activeRun: () => repository.state().run,
       persist: (snapshot) =>
@@ -57,9 +86,16 @@ export const preflightCommandServiceLayer = Layer.effect(
                 }),
               }),
             )
-          const result = yield* refreshPreflight(raw).pipe(
+          const refresh = refreshPreflight(raw).pipe(
             Effect.provide(persistence),
-            Effect.provideService(ReadOnlyPreflightProvider, provider),
+          )
+          const result = yield* Match.value(provider).pipe(
+            Match.when({ _tag: 'Configured' }, ({ provider }) =>
+              refresh.pipe(
+                Effect.provideService(ReadOnlyPreflightProvider, provider),
+              ),
+            ),
+            Match.orElse(() => refresh),
           )
           const response = 'response' in result ? result.response : result
           if ('response' in result) yield* publication.publish(result.cursor)
@@ -80,13 +116,5 @@ export const preflightCommandServiceLayer = Layer.effect(
         },
       ),
     })
-  }),
-)
-
-export const unavailableReadOnlyPreflightProviderLayer = Layer.succeed(
-  ReadOnlyPreflightProvider,
-  ReadOnlyPreflightProvider.of({
-    observe: () =>
-      Effect.fail('No read-only rig provider is configured for this origin.'),
   }),
 )
