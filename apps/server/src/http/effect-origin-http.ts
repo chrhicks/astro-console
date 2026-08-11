@@ -134,6 +134,26 @@ const requestJson = (request: HttpServerRequest.HttpServerRequest) =>
     Effect.catch(() => Effect.succeed(undefined)),
   )
 
+const readSimulation = Effect.fn('OriginHttp.readSimulation')(function* (
+  config: DevelopmentSimulationConfig,
+) {
+  return yield* Effect.tryPromise({
+    try: () => readDevelopmentSimulation(config),
+    catch: (cause) => cause,
+  })
+})
+
+const controlSimulation = Effect.fn('OriginHttp.controlSimulation')(function* (
+  config: DevelopmentSimulationConfig,
+  identity: LocalIdentity,
+  raw: unknown,
+) {
+  return yield* Effect.tryPromise({
+    try: () => controlDevelopmentSimulation(config, identity, raw),
+    catch: (cause) => cause,
+  })
+})
+
 const webRoute = (value: string) =>
   value === '/' ||
   /^\/(?:plan|observe|library|process)$/.test(value) ||
@@ -344,10 +364,7 @@ export const makeOriginHttpApplication = (
             HttpRouter.add(
               'GET',
               '/api/simulation',
-              Effect.tryPromise({
-                try: () => readDevelopmentSimulation(developmentSimulation),
-                catch: (cause) => cause,
-              }).pipe(
+              readSimulation(developmentSimulation).pipe(
                 Effect.match({
                   onFailure: () =>
                     json(
@@ -377,15 +394,11 @@ export const makeOriginHttpApplication = (
                 const request = yield* HttpServerRequest.HttpServerRequest
                 const identity = yield* OriginRequestIdentity
                 const raw = yield* requestJson(request)
-                const result = yield* Effect.tryPromise({
-                  try: () =>
-                    controlDevelopmentSimulation(
-                      developmentSimulation,
-                      identity,
-                      raw,
-                    ),
-                  catch: (cause) => cause,
-                }).pipe(
+                const result = yield* controlSimulation(
+                  developmentSimulation,
+                  identity,
+                  raw,
+                ).pipe(
                   Effect.match({
                     onFailure: (cause) => {
                       const rejected =
