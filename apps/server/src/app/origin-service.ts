@@ -17,7 +17,7 @@ import {
   BootstrapHttpSuccessEnvelope,
   CommandHttpFailureEnvelope,
   RefreshPreflightResponse,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 import {
   ProcessingProjectLifecycle,
   processingProjectLifecycleLayer,
@@ -187,21 +187,22 @@ import {
 import {
   AcquireCommandRequest,
   AcquireCommandResponse,
-  AcquireActiveWork,
   AcquireIntent,
   CameraCommandRequest,
   CameraCommandResponse,
   PreflightSnapshot,
   AssetId,
   AttemptId,
+} from '@astro-console/protocol'
+import { RunDefinition, RunExecutionContext } from '../services/run-domain.ts'
+import {
+  AcquireActiveWork,
   RecoverySeriesId,
-  RunDefinition,
-  RunExecutionContext,
   recordCorrectionAcknowledgement,
   recordManagedCapture,
   recordLiveFrameEvidence,
   recordSolveCompletion,
-} from '@astro-console/v2-contracts'
+} from '../services/acquire-domain.ts'
 export type DownloadGrantConfig = {
   readonly issuer: DownloadGrantIssuer
   readonly now?: () => Date

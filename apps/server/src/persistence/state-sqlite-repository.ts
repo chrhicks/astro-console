@@ -5,7 +5,7 @@ import {
   BootstrapSseEventEnvelope,
   PlanWorkspaceProjection,
   PreflightSnapshot,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 import type { Evidence, Snapshot } from '../services/domain-state.ts'
 import type { LocalIdentity } from '../auth/identity.ts'
 

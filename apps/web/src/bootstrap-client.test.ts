@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import {
-  bootstrapFixtures,
-  BootstrapSnapshot,
-} from '@astro-console/v2-contracts'
+import { BootstrapSnapshot } from '@astro-console/protocol'
+import { bootstrapFixtures } from './testing/bootstrap-fixtures'
 import { Effect, Fiber, Layer, Queue, Schema, Stream } from 'effect'
 import {
   BootstrapClient,

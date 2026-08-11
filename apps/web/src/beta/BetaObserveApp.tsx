@@ -21,7 +21,7 @@ import {
   CommandId,
   IdempotencyKey,
   type ObserveWorkspaceProjection,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   ObserveCommandSubmission,

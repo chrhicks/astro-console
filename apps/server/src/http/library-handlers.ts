@@ -3,11 +3,8 @@ import { join } from 'node:path'
 import type { ServerResponse } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { Effect, Schema } from 'effect'
-import {
-  LibraryQuery,
-  ObserveLiveFrameReview,
-} from '@astro-console/v2-contracts'
-import { ReviewAssetRequest } from '@astro-console/v2-contracts'
+import { LibraryQuery, ObserveLiveFrameReview } from '@astro-console/protocol'
+import { ReviewAssetRequest } from '@astro-console/protocol'
 import type { LocalIdentity } from '../auth/identity.ts'
 import { body } from './request-body.ts'
 import type { DownloadGrantIssuer } from '../storage/r2-download-grant.ts'

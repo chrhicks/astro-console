@@ -1,10 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
-import {
-  PlanWorkspaceProjection,
-  RunDefinition,
-  planSequencePresentation,
-  planSequenceWindow,
-} from '@astro-console/v2-contracts'
+import { PlanWorkspaceProjection } from '@astro-console/protocol'
+import { RunDefinition } from '../../services/run-domain.ts'
 import {
   type AcceptedRunDefinitionRecord,
   type SavePlanDraftResult,
@@ -12,6 +8,8 @@ import {
 } from '../../services/domain-state.ts'
 import {
   evaluatePlan,
+  planSequencePresentation,
+  planSequenceWindow,
   planWorkspaceProjection,
 } from '../../services/runtime-bootstrap.ts'
 import {

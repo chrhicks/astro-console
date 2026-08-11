@@ -1,5 +1,5 @@
 {
-  "name": "@astro-console/v2-contracts",
+  "name": "@astro-console/protocol",
   "version": "0.0.1",
   "private": true,
   "type": "module",

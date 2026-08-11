@@ -2,10 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { createElement } from 'react'
-import {
-  BootstrapSnapshot,
-  bootstrapFixtures,
-} from '@astro-console/v2-contracts'
+import { BootstrapSnapshot } from '@astro-console/protocol'
+import { bootstrapFixtures } from '../testing/bootstrap-fixtures'
 import { Schema } from 'effect'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { BootstrapClientState } from '../bootstrap-client'

@@ -1,12 +1,15 @@
 import { Context, Effect, Layer, Option, Schema } from 'effect'
 import {
-  AcquireActiveWork,
-  AcquireEvidence,
   AcquireCommandRequest,
   AcquireIntent,
-  CaptureMetric,
   AssetId,
   AttemptId,
+} from '@astro-console/protocol'
+import {
+  AcquireActiveWork,
+  AcquireEvidence,
+  CaptureMetric,
+  LiveFrameEvidence,
   PointingSolveResult,
   RecoverySeriesId,
   RecoverySeriesDecision,
@@ -17,7 +20,6 @@ import {
   recordCorrectionAcknowledgement,
   reviseCorrectionProposal,
   recordLunarDiskLimbCompletion,
-  LiveFrameEvidence,
   recordManagedCapture,
   recordLiveFrameEvidence,
   recordSolveCompletion,
@@ -25,7 +27,7 @@ import {
   openRecoverySeries,
   skipAcquireTarget,
   abortAcquire,
-} from '@astro-console/v2-contracts'
+} from './acquire-domain.ts'
 import { AcquirePersistence } from './polar-service.ts'
 
 export interface TargetAcquisitionProviderShape {
@@ -356,7 +358,7 @@ export const executeTargetAcquisitionCommand = Effect.fn(
 const managedCaptureCommand = Effect.fn(
   'TargetAcquisitionService.managedCaptureCommand',
 )(function* (
-  session: typeof import('@astro-console/v2-contracts').AcquireSession.Type,
+  session: typeof import('./acquire-domain.ts').AcquireSession.Type,
   intent: typeof AcquireIntent.Type,
   persistence: import('./polar-service.ts').AcquirePersistenceShape,
 ) {
@@ -463,7 +465,7 @@ const managedCaptureCommand = Effect.fn(
 const acknowledgeCorrection = Effect.fn(
   'TargetAcquisitionService.acknowledgeCorrection',
 )(function* (
-  session: typeof import('@astro-console/v2-contracts').AcquireSession.Type,
+  session: typeof import('./acquire-domain.ts').AcquireSession.Type,
   persistence: import('./polar-service.ts').AcquirePersistenceShape,
 ) {
   if (!AcquireActiveWork.guards.CorrectionRequested(session.activeWork))

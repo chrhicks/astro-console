@@ -18,12 +18,13 @@ This document states **what V2 currently is**. It is updated when:
 - an interaction gate closes;
 - an accepted decision changes a workspace or cross-workspace handoff;
 - infrastructure creates user-visible behavior or availability semantics; or
-- contract work exposes a conflict in the current product model.
+- shared protocol work exposes a conflict in the current product model.
 
 It does not accumulate prototype experiments, rejected alternatives,
 walkthrough history, implementation plans, schema details, or copy polish.
 Those belong in accepted [gate records](../gates/README.md), the
-[documentation archive](../archive/README.md), the contract harness, or the
+[documentation archive](../archive/README.md), the
+[shared protocol module](../../../packages/protocol/README.md), or the
 [delivery plan](delivery-plan.md). The [UI and UX direction](ui-ux.md) defines
 the current presentation source and working method. This specification supplies
 domain truth, ownership, and product behavior; its layout examples do not

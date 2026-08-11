@@ -3,7 +3,7 @@ import {
   RefreshPreflightRequest,
   RefreshPreflightResponse,
   type BootstrapSnapshot,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 import { BootstrapClient, BootstrapClientState } from './bootstrap-client'
 
 export type PreflightRefreshSubmission = Data.TaggedEnum<{

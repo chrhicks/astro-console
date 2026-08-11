@@ -1,36 +1,20 @@
 import { Schema } from 'effect'
 import { CommandTag } from './commands.js'
 import { CaptureMetric, PointingVector } from './acquire.js'
-import {
-  DeliveryRepresentation,
-  FrameInspection,
-  AssetReview,
-  LibraryAsset,
-} from './asset-domain.js'
+import { FrameInspection, AssetReview } from './asset-domain.js'
 import {
   AcquireRevision,
   AttemptId,
   AssetId,
   AssetRevision,
   CaptureSetId,
-  ClientCapability,
-  ClientId,
   ExpiresAt,
-  EventCursor,
-  GeneratedAt,
-  LeaseId,
-  LeaseRevision,
   LibraryCursor,
   LibraryQueryId,
-  MembershipRole,
   NonNegativeInt,
   NonNegativeNumber,
   ObservedAt,
-  ObservatoryId,
   OperationId,
-  PersonId,
-  PlanId,
-  PlanRevision,
   PositiveInt,
   PositiveNumber,
   ProcessingProjectId,
@@ -39,12 +23,10 @@ import {
   ProcessingOutputId,
   ProposalId,
   RepresentationId,
-  RunId,
-  RunRevision,
   SnapshotVersion,
 } from './primitives.js'
 
-export const ActionAvailabilityReason = Schema.Literals([
+const ActionAvailabilityReason = Schema.Literals([
   'ApprovalRequired',
   'ClientReadOnly',
   'ConnectionStale',
@@ -73,45 +55,10 @@ const ActionAvailabilityDetails = {
   refreshRequired: Schema.optionalKey(Schema.Boolean),
 }
 
-export const ActionAvailability = Schema.TaggedUnion({
+const ActionAvailability = Schema.TaggedUnion({
   Available: { action: CommandTag },
   Unavailable: { action: CommandTag, ...ActionAvailabilityDetails },
   RequiresApproval: { action: CommandTag, ...ActionAvailabilityDetails },
-})
-
-export const MembershipSnapshot = Schema.Struct({
-  personId: PersonId,
-  role: MembershipRole,
-  clientId: ClientId,
-  capability: ClientCapability,
-})
-
-export const PlanSnapshot = Schema.Struct({
-  planId: PlanId,
-  revision: PlanRevision,
-  sequenceCount: NonNegativeInt,
-  validation: Schema.Literals([
-    'unvalidated',
-    'ready',
-    'readyWithLimitations',
-    'blocked',
-  ]),
-  sequences: Schema.Array(
-    Schema.Struct({
-      sequenceId: Schema.NonEmptyString,
-      targetName: Schema.NonEmptyString,
-      state: Schema.Literals([
-        'pending',
-        'active',
-        'completed',
-        'skipped',
-        'blocked',
-      ]),
-    }),
-  ),
-  limitations: Schema.Array(Schema.NonEmptyString),
-  startConditions: Schema.Array(Schema.NonEmptyString),
-  actions: Schema.Array(ActionAvailability),
 })
 
 export const AcquireSnapshot = Schema.Struct({
@@ -235,66 +182,7 @@ export const AcquireSnapshot = Schema.Struct({
   actions: Schema.Array(ActionAvailability),
 })
 
-export const RunSnapshot = Schema.Struct({
-  runId: RunId,
-  revision: RunRevision,
-  sourcePlanId: PlanId,
-  phase: Schema.Literals([
-    'preflight',
-    'acquire',
-    'capture',
-    'verify',
-    'recover',
-    'paused',
-    'completed',
-    'failed',
-    'stopped',
-  ]),
-  currentTarget: Schema.optionalKey(Schema.NonEmptyString),
-  completedSequenceCount: NonNegativeInt,
-  estimatedCompletionAt: Schema.optionalKey(ExpiresAt),
-  acceptedMutations: Schema.Array(
-    Schema.Struct({
-      mutationId: Schema.NonEmptyString,
-      summary: Schema.NonEmptyString,
-    }),
-  ),
-  warnings: Schema.Array(Schema.NonEmptyString),
-  lastConfirmedAt: ObservedAt,
-  acquire: Schema.optionalKey(AcquireSnapshot),
-  actions: Schema.Array(ActionAvailability),
-})
-
-export const ControlSnapshot = Schema.Struct({
-  leaseId: LeaseId,
-  revision: LeaseRevision,
-  state: Schema.Literals(['available', 'held', 'reconnecting']),
-  holderClientId: Schema.optionalKey(ClientId),
-  holderPersonId: Schema.optionalKey(PersonId),
-  holderDeviceLabel: Schema.optionalKey(Schema.NonEmptyString),
-  reconnectGraceDeadline: Schema.optionalKey(ExpiresAt),
-  pendingRequestCount: NonNegativeInt,
-  pendingRequests: Schema.Array(
-    Schema.Struct({
-      requestId: Schema.NonEmptyString,
-      personId: PersonId,
-      clientId: ClientId,
-      deviceLabel: Schema.NonEmptyString,
-      requestedAt: ObservedAt,
-    }),
-  ),
-  presence: Schema.Array(
-    Schema.Struct({
-      personId: PersonId,
-      clientId: ClientId,
-      deviceLabel: Schema.NonEmptyString,
-      observedAt: ObservedAt,
-    }),
-  ),
-  actions: Schema.Array(ActionAvailability),
-})
-
-export const AssetRepresentationSnapshot = Schema.Struct({
+const AssetRepresentationSnapshot = Schema.Struct({
   representationId: RepresentationId,
   storage: Schema.Literals(['local', 'r2']),
   state: Schema.Literals([
@@ -313,7 +201,7 @@ export const AssetRepresentationSnapshot = Schema.Struct({
   diagnosticRef: Schema.optionalKey(Schema.NonEmptyString),
 })
 
-export const AssetSnapshot = Schema.Struct({
+const AssetSnapshot = Schema.Struct({
   assetId: AssetId,
   revision: AssetRevision,
   role: Schema.Literals([
@@ -557,164 +445,3 @@ export const LibraryPage = Schema.Struct({
   nextCursor: Schema.optionalKey(LibraryCursor),
   catalogChanged: Schema.Boolean,
 })
-
-export const AssetDetail = AssetSnapshot
-
-export const SubsystemHealth = Schema.Struct({
-  subsystem: Schema.Literals([
-    'service',
-    'rig',
-    'tunnel',
-    'processing',
-    'publication',
-    'storage',
-  ]),
-  state: Schema.Literals(['healthy', 'degraded', 'unavailable', 'stale']),
-  observedAt: ObservedAt,
-  reason: Schema.optionalKey(Schema.NonEmptyString),
-})
-
-export const AppSnapshot = Schema.Struct({
-  observatoryId: ObservatoryId,
-  snapshotVersion: SnapshotVersion,
-  eventCursor: EventCursor,
-  generatedAt: GeneratedAt,
-  membership: MembershipSnapshot,
-  control: ControlSnapshot,
-  plan: Schema.optionalKey(PlanSnapshot),
-  run: Schema.optionalKey(RunSnapshot),
-  library: Schema.Struct({
-    assetCount: NonNegativeInt,
-    selectedAssetIds: Schema.Array(AssetId),
-    activeOperationIds: Schema.Array(OperationId),
-  }),
-  selectedAssets: Schema.Array(AssetSnapshot),
-  health: Schema.Array(SubsystemHealth),
-})
-
-export interface AppSnapshot extends Schema.Schema.Type<typeof AppSnapshot> {}
-
-export function projectAssetSnapshot(
-  asset: LibraryAsset,
-  nowEpochMs: number,
-  expiringWindowMs: number,
-  actions: ReadonlyArray<typeof ActionAvailability.Type> = [],
-): typeof AssetSnapshot.Type {
-  const representationSnapshots: ReadonlyArray<
-    typeof AssetRepresentationSnapshot.Type
-  > = asset.representations.map((representation) =>
-    DeliveryRepresentation.match(representation, {
-      Preparing: ({
-        representationId,
-        operationId,
-        format,
-        purpose,
-      }): typeof AssetRepresentationSnapshot.Type => ({
-        representationId,
-        storage: 'r2' as const,
-        state: 'preparing' as const,
-        format,
-        operationId,
-        purpose,
-      }),
-      Published: ({
-        representationId,
-        operationId,
-        format,
-        expiresAtEpochMs,
-      }): typeof AssetRepresentationSnapshot.Type => ({
-        representationId,
-        storage: 'r2' as const,
-        state:
-          expiresAtEpochMs <= nowEpochMs
-            ? ('expired' as const)
-            : ('published' as const),
-        format,
-        ...(operationId === undefined ? {} : { operationId }),
-        expiresAt: new Date(expiresAtEpochMs).toISOString(),
-      }),
-      Expired: ({
-        representationId,
-        format,
-      }): typeof AssetRepresentationSnapshot.Type => ({
-        representationId,
-        storage: 'r2' as const,
-        state: 'expired' as const,
-        format,
-      }),
-      Failed: ({
-        representationId,
-        operationId,
-        format,
-        diagnosticRef,
-      }): typeof AssetRepresentationSnapshot.Type => ({
-        representationId,
-        storage: 'r2' as const,
-        state: 'failed' as const,
-        format,
-        ...(operationId === undefined ? {} : { operationId }),
-        diagnosticRef,
-      }),
-    }),
-  )
-  const availability = asset.representations.some(
-    (representation) =>
-      DeliveryRepresentation.guards.Preparing(representation) &&
-      representation.purpose === 'republication',
-  )
-    ? ('republishing' as const)
-    : asset.representations.some(DeliveryRepresentation.guards.Preparing)
-      ? ('preparing' as const)
-      : asset.representations.some(DeliveryRepresentation.guards.Failed)
-        ? ('failedPublication' as const)
-        : asset.representations.some(
-              (representation) =>
-                DeliveryRepresentation.guards.Published(representation) &&
-                representation.expiresAtEpochMs > nowEpochMs,
-            )
-          ? asset.representations.some(
-              (representation) =>
-                DeliveryRepresentation.guards.Published(representation) &&
-                representation.expiresAtEpochMs > nowEpochMs &&
-                representation.expiresAtEpochMs - nowEpochMs <=
-                  expiringWindowMs,
-            )
-            ? ('expiring' as const)
-            : ('published' as const)
-          : asset.representations.some(
-                (representation) =>
-                  DeliveryRepresentation.guards.Expired(representation) ||
-                  (DeliveryRepresentation.guards.Published(representation) &&
-                    representation.expiresAtEpochMs <= nowEpochMs),
-              )
-            ? ('expired' as const)
-            : asset.localAvailable
-              ? ('availableLocally' as const)
-              : ('temporarilyUnavailable' as const)
-
-  return AssetSnapshot.make({
-    assetId: asset.assetId,
-    revision: asset.revision,
-    role: asset.role,
-    format: asset.format,
-    checksum: asset.checksum,
-    localAvailable: asset.localAvailable,
-    comparisonGroupId: asset.lineage.comparisonGroupId,
-    sourceAssetIds: asset.lineage.sourceAssetIds,
-    ...(asset.lineage.processingProjectId === undefined
-      ? {}
-      : { processingProjectId: asset.lineage.processingProjectId }),
-    processingAttemptIds: asset.lineage.processingAttemptIds ?? [],
-    ...(asset.lineage.processingResultId === undefined
-      ? {}
-      : { processingResultId: asset.lineage.processingResultId }),
-    ...(asset.lineage.processingOutputId === undefined
-      ? {}
-      : { processingOutputId: asset.lineage.processingOutputId }),
-    operationIds: asset.lineage.operationIds,
-    availability,
-    representationCount: NonNegativeInt.make(asset.representations.length),
-    representations: representationSnapshots,
-    actions,
-  })
-}

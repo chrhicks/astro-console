@@ -12,11 +12,8 @@ import {
 } from './frame-inspection.ts'
 import type { TargetAcquisitionProviderShape } from './target-acquisition-service.ts'
 import type { CameraProviderShape } from './camera-command-service.ts'
-import {
-  AcquireActiveWork,
-  AcquireSession,
-  CameraExposureObservation,
-} from '@astro-console/v2-contracts'
+import { CameraExposureObservation } from '@astro-console/protocol'
+import { AcquireActiveWork, AcquireSession } from './acquire-domain.ts'
 
 type RecordedFrame = {
   readonly filename: string

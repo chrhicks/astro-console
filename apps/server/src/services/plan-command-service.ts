@@ -4,7 +4,7 @@ import {
   PlanCommandResponse,
   PlanIntent,
   type BootstrapSnapshot,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 import type { LocalIdentity } from '../auth/identity.ts'
 import {
   tracedPlanCommand,

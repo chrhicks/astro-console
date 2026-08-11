@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
-import { PlanWorkspaceProjection } from '@astro-console/v2-contracts'
+import { PlanWorkspaceProjection } from '@astro-console/protocol'
 import type { LocalIdentity } from '../auth/identity.ts'
 import {
   type ControlEvent,

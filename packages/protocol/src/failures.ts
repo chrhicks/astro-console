@@ -146,5 +146,3 @@ export const OperationFailure = Schema.Struct({
 export interface OperationFailure extends Schema.Schema.Type<
   typeof OperationFailure
 > {}
-
-export const commandFailureFamilies = Object.keys(CommandFailure.cases)

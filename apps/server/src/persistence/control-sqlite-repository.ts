@@ -5,8 +5,7 @@ import {
   Command,
   CommandFailure,
   CommandHttpSuccessEnvelope,
-  DomainEvent,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 import {
   CommandRejected,
   controlEnvelopeCommand,
@@ -22,6 +21,20 @@ const ControlRequestRow = Schema.Struct({
   request_id: Schema.String,
   client_id: Schema.String,
   target_control_capable: Schema.Int,
+})
+export const ControlDomainEvent = Schema.TaggedUnion({
+  ControlRequested: {
+    requestId: Schema.NonEmptyString,
+    requesterClientId: Schema.NonEmptyString,
+  },
+  ControlGranted: {
+    requestId: Schema.NonEmptyString,
+    holderClientId: Schema.NonEmptyString,
+  },
+  ControlDeclined: { requestId: Schema.NonEmptyString },
+  ControlReleased: { previousHolderClientId: Schema.NonEmptyString },
+  OwnerTookControl: { holderClientId: Schema.NonEmptyString },
+  ControlLeaseExpired: { previousHolderClientId: Schema.NonEmptyString },
 })
 const operatorMessages: Partial<Record<FailureReason, string>> = {
   ClientReadOnly: 'Monitoring is read-only on this client.',
@@ -235,7 +248,7 @@ function acceptControl(
   try {
     let holder = current.control.holderClientId
     let revision = current.control.revision
-    let event: typeof DomainEvent.Type
+    let event: typeof ControlDomainEvent.Type
     if (Command.guards.RequestControl(command)) {
       const createdAt = new Date().toISOString()
       const expiresAt = new Date(Date.now() + 60_000).toISOString()
@@ -248,7 +261,7 @@ function acceptControl(
         expiresAt,
         1,
       )
-      event = Schema.decodeUnknownSync(DomainEvent)({
+      event = Schema.decodeUnknownSync(ControlDomainEvent)({
         _tag: 'ControlRequested',
         requestId,
         requesterClientId: identity.clientId,
@@ -268,7 +281,7 @@ function acceptControl(
       }
       holder = request.client_id
       revision += 1
-      event = Schema.decodeUnknownSync(DomainEvent)({
+      event = Schema.decodeUnknownSync(ControlDomainEvent)({
         _tag: 'ControlGranted',
         requestId: request.request_id,
         holderClientId: request.client_id,
@@ -290,14 +303,14 @@ function acceptControl(
       db.prepare('DELETE FROM control_requests WHERE request_id=?').run(
         request.request_id,
       )
-      event = Schema.decodeUnknownSync(DomainEvent)({
+      event = Schema.decodeUnknownSync(ControlDomainEvent)({
         _tag: 'ControlDeclined',
         requestId: request.request_id,
       })
     } else if (Command.guards.ReleaseControl(command)) {
       holder = null
       revision += 1
-      event = Schema.decodeUnknownSync(DomainEvent)({
+      event = Schema.decodeUnknownSync(ControlDomainEvent)({
         _tag: 'ControlReleased',
         previousHolderClientId: identity.clientId,
       })
@@ -305,7 +318,7 @@ function acceptControl(
     } else {
       holder = identity.clientId
       revision += 1
-      event = Schema.decodeUnknownSync(DomainEvent)({
+      event = Schema.decodeUnknownSync(ControlDomainEvent)({
         _tag: 'OwnerTookControl',
         holderClientId: identity.clientId,
       })

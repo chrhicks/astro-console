@@ -13,13 +13,13 @@
   "workspaces": [
     "apps/server",
     "apps/web",
-    "packages/v2-contracts"
+    "packages/protocol"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
-    "check": "npm run check --workspaces",
-    "test": "npm run test --workspaces",
-    "setup": "npm run build --workspace @astro-console/v2-contracts",
+    "build": "npm run build --workspace @astro-console/protocol && npm run build --workspace @astro-console/server && npm run build --workspace @astro-console/web",
+    "check": "npm run check --workspace @astro-console/protocol && npm run check --workspace @astro-console/server && npm run check --workspace @astro-console/web",
+    "test": "npm run build --workspace @astro-console/protocol && npm run test --workspace @astro-console/protocol && npm run test --workspace @astro-console/server && npm run test --workspace @astro-console/web",
+    "setup": "npm run build --workspace @astro-console/protocol",
     "dev:inspect": "npm run setup && npm run dev:inspect --workspace @astro-console/server --"
   }
 }

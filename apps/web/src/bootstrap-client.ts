@@ -11,10 +11,32 @@ import {
 import {
   BootstrapHttpSuccessEnvelope,
   BootstrapSseEventEnvelope,
-  decideEventCursor,
-  EventCursorDecision,
   type BootstrapSnapshot,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
+
+type EventCursorDecision = Data.TaggedEnum<{
+  Apply: { readonly _never?: never }
+  IgnoreAlreadyApplied: { readonly _never?: never }
+  RefreshSnapshot: {
+    readonly expectedNextCursor: number
+    readonly receivedCursor: number
+  }
+}>
+
+const EventCursorDecision = Data.taggedEnum<EventCursorDecision>()
+
+const decideEventCursor = (
+  currentCursor: number,
+  receivedCursor: number,
+): EventCursorDecision => {
+  if (receivedCursor <= currentCursor)
+    return EventCursorDecision.IgnoreAlreadyApplied({})
+  if (receivedCursor === currentCursor + 1) return EventCursorDecision.Apply({})
+  return EventCursorDecision.RefreshSnapshot({
+    expectedNextCursor: currentCursor + 1,
+    receivedCursor,
+  })
+}
 
 export type BootstrapClientState = Data.TaggedEnum<{
   Current: { readonly snapshot: BootstrapSnapshot }

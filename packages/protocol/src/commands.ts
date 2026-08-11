@@ -1,25 +1,42 @@
 import { Schema } from 'effect'
 import {
-  AcquireFreshness,
-  AssetFreshness,
+  AcquireRevision,
   AssetId,
+  AssetRevision,
   AttemptId,
   ClientId,
   CommandId,
-  DurableMutation,
-  LeaseFreshness,
+  IdempotencyKey,
+  LeaseRevision,
   NonNegativeInt,
   PlanId,
   PlanRevision,
   PreviewId,
   ProposalId,
   RepresentationId,
-  RunFreshness,
+  RunId,
+  RunRevision,
 } from './primitives.js'
 import {
   CreateProcessingProjectRequest,
   ProcessingProjectChangeRequest,
 } from './processing-project-domain.js'
+
+const RunFreshness = {
+  runId: RunId,
+  expectedRunRevision: RunRevision,
+}
+
+const LeaseFreshness = { expectedLeaseRevision: LeaseRevision }
+
+const AcquireFreshness = { expectedAcquireRevision: AcquireRevision }
+
+const AssetFreshness = {
+  assetId: AssetId,
+  expectedAssetRevision: AssetRevision,
+}
+
+const DurableMutation = { idempotencyKey: IdempotencyKey }
 
 const RunAndLeaseFreshness = {
   ...RunFreshness,
@@ -101,7 +118,7 @@ export const CorrectionRevision = Schema.Struct({
   declinationArcsec: Schema.Finite,
 })
 
-export const acceptedCommandTags = [
+const acceptedCommandTags = [
   'StartRunFromPlan',
   'PreviewRunMutation',
   'ApplyRunMutation',
@@ -279,8 +296,3 @@ export const CommandEnvelope = Schema.Struct({
 export interface CommandEnvelope extends Schema.Schema.Type<
   typeof CommandEnvelope
 > {}
-
-export const commandRequiresIdempotency = (command: Command) =>
-  'idempotencyKey' in command
-
-export const commandTags = Object.keys(Command.cases)

@@ -5,13 +5,12 @@ import { tmpdir } from 'node:os'
 import { basename, join, relative, resolve } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
+import { AssetId, AttemptId } from '@astro-console/protocol'
 import {
   AcquireActiveWork,
-  AssetId,
-  AttemptId,
   PointingSolveResult,
   recordSolveCompletion,
-} from '@astro-console/v2-contracts'
+} from '../services/acquire-domain.ts'
 import { acquireSqliteRepository } from '../persistence/acquire-sqlite-repository.ts'
 
 const maxSourceBytes = 320 * 1024 * 1024

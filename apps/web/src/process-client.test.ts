@@ -5,7 +5,7 @@ import {
   IntentId,
   ProcessingProjectId,
   ProcessingProjectRevision,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 import { processClient } from './process-client'
 
 test('uses explicit Processing Project routes and does not replay changes', async () => {

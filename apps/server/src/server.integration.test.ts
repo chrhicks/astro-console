@@ -17,25 +17,24 @@ import { generateKeyPairSync, sign } from 'node:crypto'
 import { Cause, ConfigProvider, Effect, Exit, Schema } from 'effect'
 import {
   AcquireSnapshot,
-  AcquireSession,
   AcquireCommandResponse,
   BootstrapHttpSuccessEnvelope,
   BootstrapSseEventEnvelope,
   CommandHttpFailureEnvelope,
   CommandHttpSuccessEnvelope,
-  DomainEvent,
   LibraryPage,
   ObserveCommandResponse,
   PlanCommandResponse,
-  planSequencePresentation,
   ProcessSourceHandoff,
   OpenedProcessingProject,
   ProcessingProjectChanged,
   ProcessingProjectEvidence,
   PreflightSnapshot,
   RefreshPreflightResponse,
-  RunSnapshot,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
+import { AcquireSession } from './services/acquire-domain.ts'
+import { planSequencePresentation } from './services/runtime-bootstrap.ts'
+import { ControlDomainEvent } from './persistence/control-sqlite-repository.ts'
 
 const revisePlanSequence = <
   Sequence extends {
@@ -3498,7 +3497,8 @@ test('canonical control commands persist exact requests, actor-scoped receipts, 
   assert.deepEqual(
     controlEvents.map(
       (row) =>
-        Schema.decodeUnknownSync(DomainEvent)(JSON.parse(row.snapshot))._tag,
+        Schema.decodeUnknownSync(ControlDomainEvent)(JSON.parse(row.snapshot))
+          ._tag,
     ),
     controlEvents.map((row) => row.type),
   )
@@ -3556,7 +3556,7 @@ test('reconnect lease expiry records the canonical control event once', async (t
   )
   assert.equal(event.type, 'ControlLeaseExpired')
   assert.deepEqual(
-    Schema.decodeUnknownSync(DomainEvent)(JSON.parse(event.snapshot)),
+    Schema.decodeUnknownSync(ControlDomainEvent)(JSON.parse(event.snapshot)),
     {
       _tag: 'ControlLeaseExpired',
       previousHolderClientId: 'desktop-member',
@@ -4637,38 +4637,6 @@ test('local solved-frame evidence faithfully decodes as the V2 AcquireSnapshot c
   service.close()
 })
 
-test('accepted paused local run faithfully decodes as the V2 RunSnapshot contract', () => {
-  const contract = Schema.decodeUnknownSync(RunSnapshot)({
-    runId: 'run-m27-001',
-    revision: 2,
-    sourcePlanId: 'plan-m27',
-    phase: 'paused',
-    completedSequenceCount: 0,
-    acceptedMutations: [],
-    warnings: [],
-    lastConfirmedAt: '2026-07-24T02:00:00.000Z',
-    actions: [],
-  })
-  assert.equal(contract.phase, 'paused')
-  assert.equal(contract.revision, 2)
-})
-
-test('accepted terminal local run faithfully decodes as the V2 RunSnapshot contract', () => {
-  const contract = Schema.decodeUnknownSync(RunSnapshot)({
-    runId: 'run-m27-001',
-    revision: 3,
-    sourcePlanId: 'plan-m27',
-    phase: 'stopped',
-    completedSequenceCount: 0,
-    acceptedMutations: [],
-    warnings: [],
-    lastConfirmedAt: '2026-07-24T02:00:00.000Z',
-    actions: [],
-  })
-  assert.equal(contract.phase, 'stopped')
-  assert.equal(contract.revision, 3)
-})
-
 test('Library queries enforce bounded pages, cursor order, role filters, and allowed sorts', async (t) => {
   const service = createFixtureService()
   const listener = await service.listen()
@@ -5559,6 +5527,12 @@ test('canonical Plan commands persist draft readiness, immutable acceptance, ide
           latestEnd: '2026-07-25T05:30:00.000Z',
           horizonClearanceDegrees: 20,
         }),
+        target: 'Caller-supplied display value',
+        capture: 'Caller-supplied display value',
+        acquisition: 'Caller-supplied display value',
+        stopCondition: 'Caller-supplied display value',
+        estimatedMinutes: 1,
+        storageForecastMb: 0,
         window: {
           startsAt: '1999-01-01T00:00:00.000Z',
           endsAt: '1999-01-01T00:01:00.000Z',
@@ -5621,6 +5595,21 @@ test('canonical Plan commands persist draft readiness, immutable acceptance, ide
   assert.equal(draft.sequences[0]?.window.peakAltitudeDeg, 62)
   assert.equal(draft.sequences[0]?.window.horizonClearanceDeg, 28)
   assert.equal(draft.sequences[0]?.definition.horizonClearanceDegrees, 20)
+  assert.equal(
+    draft.sequences[0]?.target,
+    draft.sequences[0]?.definition.targetName,
+  )
+  assert.notEqual(draft.sequences[0]?.capture, 'Caller-supplied display value')
+  assert.notEqual(
+    draft.sequences[0]?.acquisition,
+    'Caller-supplied display value',
+  )
+  assert.notEqual(
+    draft.sequences[0]?.stopCondition,
+    'Caller-supplied display value',
+  )
+  assert.notEqual(draft.sequences[0]?.estimatedMinutes, 1)
+  assert.notEqual(draft.sequences[0]?.storageForecastMb, 0)
   assert.equal(draft.sequences[0]?.horizon, 'clear')
   assert.equal(draft.sequences[0]?.viability, 'viable')
   const accepted = await submitPlan(base, {

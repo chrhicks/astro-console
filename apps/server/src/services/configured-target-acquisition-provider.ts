@@ -3,11 +3,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { Effect, Schema } from 'effect'
-import {
-  AcquireActiveWork,
-  AcquireSession,
-  CameraExposureObservation,
-} from '@astro-console/v2-contracts'
+import { CameraExposureObservation } from '@astro-console/protocol'
+import { AcquireActiveWork, AcquireSession } from './acquire-domain.ts'
 import type { PreflightProviderConfig } from '../config/environment-config.ts'
 import type { CameraProviderShape } from './camera-command-service.ts'
 import {

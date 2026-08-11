@@ -1,14 +1,16 @@
 import { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
 import {
-  AcquireActiveWork,
   AcquireRevision,
-  AcquireSession,
   AttemptId,
   PositiveInt,
-  RecoverySeriesId,
   RunId,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
+import {
+  AcquireActiveWork,
+  AcquireSession,
+  RecoverySeriesId,
+} from '../services/acquire-domain.ts'
 
 const StoredSession = Schema.Struct({ session: Schema.String })
 const StoredStateValue = Schema.Struct({ value: Schema.String })

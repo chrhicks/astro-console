@@ -8,7 +8,7 @@ the version-matched interface it serves.
 
 - `apps/server/` — rig-local HTTP, SQLite, SSE, admission, and deployment code
 - `apps/web/` — browser workspace
-- `packages/v2-contracts/` — shared Effect Schema contracts
+- `packages/protocol/` — shared HTTP and SSE wire schemas
 
 Use Node 22.13 or later. On a first checkout, install and prepare the
 workspaces from the repository root:

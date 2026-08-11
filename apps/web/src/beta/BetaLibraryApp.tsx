@@ -20,7 +20,7 @@ import {
   type ActionDescriptor,
   type Tone,
 } from '@nightbook/ui'
-import { AssetId, CaptureSetId, IntentId } from '@astro-console/v2-contracts'
+import { AssetId, CaptureSetId, IntentId } from '@astro-console/protocol'
 import {
   useEffect,
   useMemo,

@@ -6,7 +6,7 @@ import {
   LibraryQueryId,
   ReviewAssetRequest,
   AssetRevision,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 import { Effect, Layer } from 'effect'
 import {
   LibraryClient,

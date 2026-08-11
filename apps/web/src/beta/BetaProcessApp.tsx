@@ -19,7 +19,7 @@ import {
   type ExecutableProcessingStage,
   type ProcessingProjectIntent,
   type ProcessingStageDraftValue,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 import {
   useCallback,
   useEffect,

@@ -1,10 +1,8 @@
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { Effect, Exit, Schema } from 'effect'
-import {
-  CameraExposureObservation,
-  RunDefinition,
-} from '@astro-console/v2-contracts'
+import { CameraExposureObservation } from '@astro-console/protocol'
+import { RunDefinition } from '../services/run-domain.ts'
 import type { StateSqliteRepositoryShape } from '../persistence/state-sqlite-repository.ts'
 import type {
   CameraProviderCommandOutcome,

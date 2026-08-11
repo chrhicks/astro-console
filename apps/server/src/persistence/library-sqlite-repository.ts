@@ -6,7 +6,7 @@ import {
   LibraryAssetDetail,
   LibraryPage,
   ProcessSourceHandoff,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 import {
   LibraryAssetNotFound,
   LibraryAssetUnavailable,

@@ -1,7 +1,50 @@
 import type {
   ObserveWorkspaceProjection,
   PlanWorkspaceProjection,
-} from '@astro-console/v2-contracts'
+  RunSequenceDefinition,
+} from '@astro-console/protocol'
+
+export const planSequencePresentation = (
+  definition: typeof RunSequenceDefinition.Type,
+) => ({
+  target: definition.targetName,
+  capture: `${definition.frameCount} × ${definition.exposureSeconds}s · ${definition.filterName ?? 'No filter'}`,
+  acquisition:
+    definition.acquisitionMode === 'cameraOnly'
+      ? 'Camera only; no pointing acquisition.'
+      : 'Solve, center, focus, then start capture.',
+  stopCondition: `Stop after ${definition.frameCount} verified frame${definition.frameCount === 1 ? '' : 's'}.`,
+  estimatedMinutes: Math.max(
+    1,
+    Math.ceil(definition.estimatedDurationSeconds / 60),
+  ),
+  storageForecastMb: Math.ceil(definition.estimatedStorageBytes / 1_000_000),
+})
+
+export const planSequenceWindow = (
+  definition: typeof RunSequenceDefinition.Type,
+  observed: {
+    readonly startsAt: string
+    readonly endsAt: string
+    readonly usableMinutes: number
+    readonly peakAltitudeDeg: number
+    readonly horizonClearanceDeg: number
+  },
+) => {
+  const startsAt = definition.earliestStart ?? observed.startsAt
+  const endsAt = definition.latestEnd ?? observed.endsAt
+  const start = Date.parse(startsAt)
+  const end = Date.parse(endsAt)
+  return {
+    ...observed,
+    startsAt,
+    endsAt,
+    usableMinutes:
+      Number.isFinite(start) && Number.isFinite(end) && end > start
+        ? Math.min(observed.usableMinutes, Math.floor((end - start) / 60_000))
+        : observed.usableMinutes,
+  }
+}
 
 export type Workspace = 'plan' | 'observe' | 'library' | 'process'
 export type StatusTone = 'safe' | 'attention' | 'danger' | 'neutral'

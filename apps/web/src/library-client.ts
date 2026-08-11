@@ -6,7 +6,7 @@ import {
   ProcessSourceHandoff as ProcessSourceHandoffSchema,
   AssetReview,
   ReviewAssetRequest,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 
 export type LibraryAssetDetail = Schema.Schema.Type<
   typeof LibraryAssetDetailSchema

@@ -2,7 +2,7 @@ import type {
   BootstrapSnapshot,
   BootstrapSubsystemHealth,
   PlanWorkspaceProjection,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 import {
   BootstrapClientState,
   type BootstrapClientState as ClientState,

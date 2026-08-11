@@ -16,10 +16,10 @@ import {
   ObserveIntent,
   PlanWorkspaceProjection,
   PreflightSnapshot,
-  RunExecutionContext,
   BootstrapHttpSuccessEnvelope,
-  planSequencePresentation,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
+import { RunExecutionContext } from '../services/run-domain.ts'
+import { planSequencePresentation } from '../services/runtime-bootstrap.ts'
 import { createLocalWebService } from '../app/origin-service.ts'
 import { openOriginDatabase } from '../persistence/database.ts'
 import {

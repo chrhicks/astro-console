@@ -2,7 +2,7 @@ import { Cause, Context, Effect, Exit, Option, Schema } from 'effect'
 import {
   CameraCommandRequest,
   CameraExposureObservation,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 
 export interface CameraProviderShape {
   readonly startExposure: (

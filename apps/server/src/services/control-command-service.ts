@@ -4,7 +4,7 @@ import {
   CommandEnvelope,
   CommandFailure,
   CommandHttpSuccessEnvelope,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 import type { LocalIdentity } from '../auth/identity.ts'
 
 export class CommandRejected extends Schema.TaggedErrorClass<CommandRejected>()(

@@ -7,12 +7,11 @@ import { join } from 'node:path'
 import test, { type TestContext } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
-  AcquireEvidence,
-  AcquireSession,
   BootstrapHttpSuccessEnvelope,
   LibraryAssetDetail,
-  RunExecutionContext,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
+import { AcquireEvidence, AcquireSession } from '../services/acquire-domain.ts'
+import { RunExecutionContext } from '../services/run-domain.ts'
 import { Schema } from 'effect'
 import { createLocalWebService } from '../app/origin-service.ts'
 import { alpacaCameraProvider } from '../providers/alpaca-camera-provider.ts'

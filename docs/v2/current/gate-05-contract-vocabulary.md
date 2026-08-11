@@ -358,24 +358,15 @@ without fabricating success.
 12. The normal UI uses semantic states and actions. Revisions, cursors, raw
     events, and diagnostics remain secondary implementation/Inspector detail.
 
-## Boundary For The Next Deliverable
+## Current Implementation Boundary
 
-The next Gate 5 step translates this vocabulary into Effect Schema candidates
-and fixtures in the
-[V2 contracts package](../../../packages/v2-contracts/README.md). It must not
-yet choose database tables, transport topology, adapter-specific payloads, or
-UI component state.
-
-Schema work should prove:
-
-- closed tagged unions for command and event variants, plus the compact failure
-  families and their typed reasons;
-- branded IDs and aggregate-specific revisions;
-- decoding at ingress, adapter, worker, and storage boundaries;
-- deterministic transition fixtures for all 43 accepted scenarios;
-- snapshot-first reconnect and event-gap recovery; and
-- compile-time/executable rejection of raw paths, caller-supplied authority,
-  generic untyped failure, and automatic command replay.
+The [shared protocol module](../../../packages/protocol/README.md) owns only the
+Effect Schema definitions for HTTP requests, responses, snapshots, and SSE
+events. Server lifecycle modules own aggregate state, authority, eligibility,
+transitions, receipts, work, and settlement. The web client owns event cursors
+and presentation. Production integration tests exercise these rules through
+the lifecycle interfaces and actual browser clients; the former Gate fixtures
+are not implementation authority.
 
 ## Expected Implementation Models
 

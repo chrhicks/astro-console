@@ -1,9 +1,9 @@
 import type { LocalIdentity } from '../auth/identity.ts'
 import type {
   PreflightSnapshot,
-  RunDefinition,
   RunSequenceDefinition,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
+import type { RunDefinition } from './run-domain.ts'
 
 export type RunPhase =
   | 'preflight'

@@ -1,5 +1,5 @@
 import { Effect, Option, Schema } from 'effect'
-import { PreflightSnapshot } from '@astro-console/v2-contracts'
+import { PreflightSnapshot } from '@astro-console/protocol'
 import { type PreflightProviderConfig } from '../config/environment-config.ts'
 import { type ReadOnlyPreflightProviderShape } from '../services/preflight-service.ts'
 import {

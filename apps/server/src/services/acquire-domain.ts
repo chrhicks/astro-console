@@ -8,8 +8,8 @@ import {
   PositiveInt,
   PositiveNumber,
   RunId,
-} from './primitives.js'
-import { SolveRecoveryParameters } from './commands.js'
+  SolveRecoveryParameters,
+} from '@astro-console/protocol'
 
 export const RecoverySeriesId = Schema.NonEmptyString.pipe(
   Schema.brand('RecoverySeriesId'),
@@ -21,18 +21,14 @@ export const PointingVector = Schema.Struct({
   convention: Schema.Literals(['mountRaDec', 'imageAxis']),
 })
 
-export interface PointingVector extends Schema.Schema.Type<
-  typeof PointingVector
-> {}
+export type PointingVector = typeof PointingVector.Type
 
 export const CelestialCoordinate = Schema.Struct({
   rightAscensionDegrees: Schema.Finite,
   declinationDegrees: Schema.Finite,
 })
 
-export interface CelestialCoordinate extends Schema.Schema.Type<
-  typeof CelestialCoordinate
-> {}
+export type CelestialCoordinate = typeof CelestialCoordinate.Type
 
 export const AcquireEvidencePolicy = Schema.Struct({
   centeringToleranceArcsec: NonNegativeNumber,
@@ -65,9 +61,7 @@ export const AcquireEvidencePolicy = Schema.Struct({
   }),
 )
 
-export interface AcquireEvidencePolicy extends Schema.Schema.Type<
-  typeof AcquireEvidencePolicy
-> {}
+export type AcquireEvidencePolicy = typeof AcquireEvidencePolicy.Type
 
 export const SolveSeries = Schema.Struct({
   seriesId: RecoverySeriesId,
@@ -82,7 +76,7 @@ export const SolveSeries = Schema.Struct({
   completedAttemptIds: Schema.Array(AttemptId),
 })
 
-export interface SolveSeries extends Schema.Schema.Type<typeof SolveSeries> {}
+export type SolveSeries = typeof SolveSeries.Type
 
 export const PointingSolveResult = Schema.TaggedUnion({
   Solved: {
@@ -120,9 +114,7 @@ export const ManagedCapture = Schema.Struct({
   quality: Schema.Literals(['good', 'attention', 'unknown']),
 })
 
-export interface ManagedCapture extends Schema.Schema.Type<
-  typeof ManagedCapture
-> {}
+export type ManagedCapture = typeof ManagedCapture.Type
 
 export const LiveFrameEvidence = Schema.Struct({
   sourceFrameAssetId: AssetId,
@@ -144,9 +136,7 @@ export const LiveFrameEvidence = Schema.Struct({
   storageForecastMb: CaptureMetric,
 })
 
-export interface LiveFrameEvidence extends Schema.Schema.Type<
-  typeof LiveFrameEvidence
-> {}
+export type LiveFrameEvidence = typeof LiveFrameEvidence.Type
 
 export const AcquireEvidence = Schema.TaggedUnion({
   TargetSlewAcknowledged: {
@@ -256,9 +246,7 @@ export const CorrectionProposal = Schema.Struct({
   expiresAtEpochMs: NonNegativeInt,
 })
 
-export interface CorrectionProposal extends Schema.Schema.Type<
-  typeof CorrectionProposal
-> {}
+export type CorrectionProposal = typeof CorrectionProposal.Type
 
 export const AcquireSession = Schema.Struct({
   runId: RunId,
@@ -289,9 +277,7 @@ export const AcquireSession = Schema.Struct({
   managedCapture: Schema.optionalKey(ManagedCapture),
 }).check(Schema.makeFilter((session) => validateAcquireSession(session)))
 
-export interface AcquireSession extends Schema.Schema.Type<
-  typeof AcquireSession
-> {}
+export type AcquireSession = typeof AcquireSession.Type
 
 export const recordManagedCapture = (
   session: AcquireSession,
@@ -316,9 +302,7 @@ export const SolveCompletion = Schema.Struct({
   proposalExpiresAtEpochMs: NonNegativeInt,
 })
 
-export interface SolveCompletion extends Schema.Schema.Type<
-  typeof SolveCompletion
-> {}
+export type SolveCompletion = typeof SolveCompletion.Type
 
 export const LunarDiskLimbCompletion = Schema.Struct({
   attemptId: AttemptId,
@@ -332,9 +316,7 @@ export const LunarDiskLimbCompletion = Schema.Struct({
   uncertaintyArcsec: NonNegativeNumber,
 })
 
-export interface LunarDiskLimbCompletion extends Schema.Schema.Type<
-  typeof LunarDiskLimbCompletion
-> {}
+export type LunarDiskLimbCompletion = typeof LunarDiskLimbCompletion.Type
 
 export type SolveCompletionDecision = Data.TaggedEnum<{
   Centered: {

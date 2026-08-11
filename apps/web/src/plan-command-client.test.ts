@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  bootstrapFixtures,
   BootstrapSnapshot,
   IdempotencyKey,
   PlanCommandRequest,
@@ -9,7 +8,8 @@ import {
   PlanRevision,
   PreviewId,
   type PlanWorkspaceProjection,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
+import { bootstrapFixtures } from './testing/bootstrap-fixtures'
 import { Effect, Schema, Stream } from 'effect'
 import { BootstrapClient, BootstrapClientState } from './bootstrap-client'
 import {

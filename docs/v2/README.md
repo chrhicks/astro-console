@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; Nightbook routes promoted locally; Processing Project lifecycle refactor complete locally**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; Nightbook routes promoted locally; Processing Project lifecycle refactor and shared protocol refocus complete locally**
 
 Keep normal working context small. Do not read the complete V2 tree.
 
@@ -27,7 +27,7 @@ specific detail.
 | Accepted Gate 5 scenarios and ownership                   | [Gate 5 baseline](current/gate-05-scenarios.md)                                                               |
 | Accepted non-Process consequential actions                | [Gate 5 action map](current/gate-05-action-map.md); its Process rows are a superseded historical baseline     |
 | Accepted non-Process contract language                    | [Gate 5 contract vocabulary](current/gate-05-contract-vocabulary.md); use the current Process documents above |
-| Executable schemas and fixtures                           | [V2 contracts package](../../packages/v2-contracts/README.md)                                                 |
+| HTTP and SSE wire schemas                                 | [Shared protocol module](../../packages/protocol/README.md)                                                   |
 | Accepted interaction or ownership evidence                | One relevant document under [accepted gates](gates/README.md); gate layouts are not current visual authority  |
 | Deployment, Cloudflare, storage, security, or operations  | [Infrastructure plan](infra/README.md), then only its relevant section                                        |
 | Completed plans, former UI authority, or rejected options | [Documentation archive](archive/README.md) or Git history                                                     |

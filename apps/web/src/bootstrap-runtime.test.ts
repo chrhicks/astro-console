@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { bootstrapFixtures } from '@astro-console/v2-contracts'
+import { bootstrapFixtures } from './testing/bootstrap-fixtures'
 import { Effect, Layer, Queue, Stream } from 'effect'
 import {
   BootstrapClient,

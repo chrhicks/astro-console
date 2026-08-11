@@ -4,7 +4,7 @@ import {
   LibraryPage,
   LibraryQuery,
   ProcessSourceHandoff,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 
 export class LibraryInputInvalid extends Schema.TaggedErrorClass<LibraryInputInvalid>()(
   'Server.LibraryInputInvalid',

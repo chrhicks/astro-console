@@ -24,7 +24,7 @@ import {
   IdempotencyKey,
   LibraryQuery as LibraryQuerySchema,
   LibraryQueryId,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 import { projectBootstrapState } from './bootstrap-projection'
 import { createBootstrapRuntime } from './bootstrap-runtime'
 import { unavailableProjection } from './future-adapter'

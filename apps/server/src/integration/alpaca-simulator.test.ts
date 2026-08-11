@@ -11,8 +11,8 @@ import {
   CameraExposureObservation,
   LibraryAssetDetail,
   PreflightSnapshot,
-  RunExecutionContext,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
+import { RunExecutionContext } from '../services/run-domain.ts'
 import { Effect, Schema } from 'effect'
 import { createLocalWebService } from '../app/origin-service.ts'
 import { alpacaCameraProvider } from '../providers/alpaca-camera-provider.ts'

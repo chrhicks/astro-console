@@ -56,25 +56,3 @@ export const AssetRevision = revision('AssetRevision')
 
 export const MembershipRole = Schema.Literals(['owner', 'viewer'])
 export const ClientCapability = Schema.Literals(['readOnly', 'controlCapable'])
-
-export const RunFreshness = {
-  runId: RunId,
-  expectedRunRevision: RunRevision,
-}
-
-export const LeaseFreshness = {
-  expectedLeaseRevision: LeaseRevision,
-}
-
-export const AcquireFreshness = {
-  expectedAcquireRevision: AcquireRevision,
-}
-
-export const AssetFreshness = {
-  assetId: AssetId,
-  expectedAssetRevision: AssetRevision,
-}
-
-export const DurableMutation = {
-  idempotencyKey: IdempotencyKey,
-}

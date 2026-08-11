@@ -3,7 +3,7 @@ import { Effect, Schema } from 'effect'
 import {
   BootstrapHttpFailureEnvelope,
   CommandHttpFailureEnvelope,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 
 export function responseHeaders(
   contentType: string,

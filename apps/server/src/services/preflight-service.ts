@@ -3,7 +3,7 @@ import {
   PreflightSnapshot,
   RefreshPreflightRequest,
   RefreshPreflightResponse,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 
 export interface ReadOnlyPreflightProviderShape {
   readonly observe: () => Effect.Effect<unknown, unknown>

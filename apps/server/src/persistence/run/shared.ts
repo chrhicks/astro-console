@@ -4,10 +4,12 @@ import { Schema } from 'effect'
 import {
   PlanIntent,
   PlanWorkspaceProjection,
+  type ObserveIntent,
+} from '@astro-console/protocol'
+import {
   RunDefinition,
   RunExecutionContext,
-  type ObserveIntent,
-} from '@astro-console/v2-contracts'
+} from '../../services/run-domain.ts'
 import type { LocalIdentity } from '../../auth/identity.ts'
 import type { FailureReason } from '../../services/domain-state.ts'
 import type { StateSqliteRepositoryShape } from '../state-sqlite-repository.ts'

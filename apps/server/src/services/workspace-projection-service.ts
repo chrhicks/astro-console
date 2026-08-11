@@ -4,13 +4,15 @@ import { Schema } from 'effect'
 import {
   ObserveWorkspaceProjection,
   PlanWorkspaceProjection,
-  AcquireSession,
-  AcquireEvidence,
-  AcquireActiveWork,
-  PointingSolveResult,
   AcquireSnapshot,
-  RunDefinition,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
+import {
+  AcquireActiveWork,
+  AcquireEvidence,
+  AcquireSession,
+  PointingSolveResult,
+} from './acquire-domain.ts'
+import { RunDefinition } from './run-domain.ts'
 import type { Snapshot } from './domain-state.ts'
 import type { LocalIdentity } from '../auth/identity.ts'
 import { planWorkspaceProjection } from './runtime-bootstrap.ts'

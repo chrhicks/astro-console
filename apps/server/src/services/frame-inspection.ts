@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { Effect, Schema } from 'effect'
-import { FrameInspection } from '@astro-console/v2-contracts'
+import { FrameInspection } from '@astro-console/protocol'
 import { createPixelPreview } from './image-pixel-preview.ts'
 
 const AssetRow = Schema.Struct({

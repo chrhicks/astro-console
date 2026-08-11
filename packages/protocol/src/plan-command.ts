@@ -7,7 +7,7 @@ import {
   PreviewId,
   RunRevision,
 } from './primitives.js'
-import { BootstrapSnapshot, planSequencePresentation } from './bootstrap.js'
+import { BootstrapSnapshot } from './bootstrap.js'
 import { RunSequenceDefinition } from './commands.js'
 
 const PlanDraftSequence = Schema.Struct({
@@ -35,21 +35,6 @@ const PlanDraftSequence = Schema.Struct({
         path: ['definition', 'sequenceId'],
         issue: 'definition sequence identity must match the Plan sequence',
       }
-    const presentation = planSequencePresentation(sequence.definition)
-    for (const key of [
-      'target',
-      'capture',
-      'acquisition',
-      'stopCondition',
-      'estimatedMinutes',
-      'storageForecastMb',
-    ] as const)
-      if (sequence[key] !== presentation[key])
-        return {
-          path: [key],
-          issue: `${key} must be derived from the structured executor definition`,
-        }
-    return undefined
   }),
 )
 

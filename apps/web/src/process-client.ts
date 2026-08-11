@@ -6,7 +6,7 @@ import {
   ProcessingProjectChanged as ProcessingProjectChangedSchema,
   ProcessingProjectEvidence as ProcessingProjectEvidenceSchema,
   ProcessingProjectList as ProcessingProjectListSchema,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 
 export type ProcessingProjectList = typeof ProcessingProjectListSchema.Type
 export type OpenedProcessingProject = typeof OpenedProcessingProjectSchema.Type

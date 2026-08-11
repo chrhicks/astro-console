@@ -10,7 +10,38 @@ import {
 import { relative, resolve } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
-import { CapturedFrameIntake } from '@astro-console/v2-contracts'
+import {
+  AssetId,
+  NonNegativeInt,
+  PositiveNumber,
+  RunId,
+} from '@astro-console/protocol'
+
+const CapturedFrameIntake = Schema.Struct({
+  assetId: AssetId,
+  frameId: Schema.NonEmptyString,
+  capturedAt: Schema.NonEmptyString,
+  targetName: Schema.optionalKey(Schema.NonEmptyString),
+  format: Schema.Literals(['cameraRaw', 'fits', 'tiff']),
+  equipment: Schema.Struct({
+    rigId: Schema.NonEmptyString,
+    cameraDeviceId: Schema.NonEmptyString,
+  }),
+  capture: Schema.Struct({
+    exposureSeconds: PositiveNumber,
+    filter: Schema.NonEmptyString,
+    binning: NonNegativeInt,
+    frameType: Schema.Literals(['light', 'dark', 'flat', 'bias']),
+  }),
+  lineage: Schema.Struct({
+    runId: RunId,
+    sequenceId: Schema.NonEmptyString,
+    acquisitionId: Schema.NonEmptyString,
+  }),
+  idempotencyKey: Schema.NonEmptyString,
+})
+
+type CapturedFrameIntake = typeof CapturedFrameIntake.Type
 
 const Existing = Schema.Struct({
   semantic_key: Schema.String,

@@ -9,7 +9,7 @@ import {
   CaptureSetId,
   IntentId,
   ProcessingProjectIntent,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
 import { openOriginDatabase } from '../persistence/database.ts'
 import { seedLibrary } from '../persistence/library-sqlite-repository.ts'
 import {

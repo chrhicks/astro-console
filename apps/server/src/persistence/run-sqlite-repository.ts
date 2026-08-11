@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { Context, Layer } from 'effect'
-import { PlanIntent, type ObserveIntent } from '@astro-console/v2-contracts'
+import { PlanIntent, type ObserveIntent } from '@astro-console/protocol'
 import type { LocalIdentity } from '../auth/identity.ts'
 import type { FailureReason } from '../services/domain-state.ts'
 import type { StateSqliteRepositoryShape } from './state-sqlite-repository.ts'

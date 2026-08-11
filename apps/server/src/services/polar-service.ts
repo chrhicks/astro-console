@@ -1,15 +1,17 @@
 import { Context, Effect, Layer, Option, Schema } from 'effect'
 import {
   AcquireCommandRequest,
-  AcquireSession,
   AcquireIntent,
   AssetId,
   AttemptId,
+} from '@astro-console/protocol'
+import {
+  AcquireSession,
   PolarDecision,
   acceptLatestPolarMeasurement,
   recordPolarMeasurementEvidence,
   requestPolarMeasurement,
-} from '@astro-console/v2-contracts'
+} from './acquire-domain.ts'
 
 export interface PolarMeasurementProviderShape {
   readonly measure: (attemptId: string) => Effect.Effect<unknown, unknown>

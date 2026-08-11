@@ -24,7 +24,6 @@ import {
   ProcessingLibraryFormat,
   ProcessingLibraryRole,
   ProcessingOutputId,
-  ProcessingProject,
   ProcessingProjectAuthority,
   ProcessingProjectChangeRequest,
   ProcessingProjectChanged,
@@ -41,16 +40,19 @@ import {
   ProcessingRecommendation,
   ProcessingStageDraft,
   ProcessingStageDraftValue,
-  ProcessingStageResult,
   ProcessingStageResultId,
-  ProcessingStageState,
   ProcessingStageView,
   ProcessingStageAttemptId,
-  decideProcessingProjectAuthority,
-  currentProcessingStageResult,
-  sameProcessingResult,
   type ProcessingSourceRole,
-} from '@astro-console/v2-contracts'
+} from '@astro-console/protocol'
+import {
+  ProcessingProject,
+  ProcessingStageResult,
+  ProcessingStageState,
+  currentProcessingStageResult,
+  decideProcessingProjectAuthority,
+  sameProcessingResult,
+} from './processing-project-domain.ts'
 import type { LocalIdentity } from '../auth/identity.ts'
 
 const ProjectRow = Schema.Struct({ project: Schema.String })
