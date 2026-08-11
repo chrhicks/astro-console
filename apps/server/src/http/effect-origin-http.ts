@@ -45,6 +45,10 @@ import {
 import { makePlanRoutes } from './routes/plan-routes.ts'
 import { makeSimulationRoutes } from './routes/simulation-routes.ts'
 import {
+  makeProcessingProjectRoutes,
+  processingProjectRouteCompatibilityResponse,
+} from './routes/processing-project-routes.ts'
+import {
   makeLibraryRouteCompatibility,
   makeLibraryRoutes,
 } from './routes/library-routes.ts'
@@ -211,6 +215,7 @@ export const makeOriginHttpApplication = (
     const simulationRoutes = makeSimulationRoutes(developmentSimulation)
     const libraryRoutes = yield* makeLibraryRoutes()
     const libraryRouteCompatibility = yield* makeLibraryRouteCompatibility()
+    const processingProjectRoutes = yield* makeProcessingProjectRoutes()
 
     const live = HttpRouter.add(
       'GET',
@@ -279,6 +284,7 @@ export const makeOriginHttpApplication = (
         acquireRoutes,
         ...simulationRoutes,
         libraryRoutes,
+        processingProjectRoutes,
         events,
         apiNotFound,
         webAndNotFound,
@@ -313,6 +319,8 @@ export const makeOriginHttpApplication = (
         request.method,
         requestPath,
       )
+      const processingProjectCompatibility =
+        processingProjectRouteCompatibilityResponse(request.method, requestPath)
       const libraryCompatibility = yield* libraryRouteCompatibility(
         request.method,
         requestPath,
@@ -320,6 +328,7 @@ export const makeOriginHttpApplication = (
       )
       return (
         observeCompatibility ??
+        processingProjectCompatibility ??
         libraryCompatibility ??
         (yield* routes.pipe(
           Effect.provideService(OriginRequestIdentity, identity),

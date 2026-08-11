@@ -26,6 +26,11 @@ import {
   LibraryPage,
   PlanWorkspaceProjection,
   PlanCommandResponse,
+  ProcessingProjectList,
+  ProcessingProjectChanged,
+  ProcessingProjectHttpFailure,
+  OpenedProcessingProject,
+  ProcessingProjectEvidence,
   ObserveCommandResponse,
   ObserveLiveFrameReview,
   ProcessSourceHandoff,
@@ -105,6 +110,10 @@ import {
   libraryRepresentationServiceLayer,
 } from '../services/library-representation-service.ts'
 import { LibraryService } from '../services/library-service.ts'
+import {
+  ProcessingProjectLifecycle,
+  processingProjectLifecycleLayer,
+} from '../services/processing-project-service.ts'
 
 const owner: LocalIdentity = {
   personId: 'owner-person',
@@ -308,6 +317,10 @@ const makeGraph = (
       ),
       LibraryRepresentationService,
     )
+    const processingProjectLifecycle = Context.get(
+      yield* Layer.build(processingProjectLifecycleLayer(database)),
+      ProcessingProjectLifecycle,
+    )
     const applicationLayer = Layer.mergeAll(
       graphLayer,
       Layer.succeed(LibraryService, libraryService),
@@ -315,6 +328,7 @@ const makeGraph = (
       Layer.succeed(PreflightCommandService, preflightService),
       Layer.succeed(LibraryReviewService, libraryReviewService),
       Layer.succeed(LibraryRepresentationService, libraryRepresentationService),
+      Layer.succeed(ProcessingProjectLifecycle, processingProjectLifecycle),
     )
     const application = yield* makeOriginHttpApplication(
       webRoot,
@@ -667,14 +681,16 @@ test('fixed routes preserve system, static, CSP, SSE, and not-found behavior', a
         )
         assert.equal(asset.headers.get('x-content-type-options'), 'nosniff')
 
-        const deferredRoute = yield* fetchEffect(
+        const processProjects = yield* fetchEffect(
           `${base}/api/process/projects`,
           admitted,
         )
-        assert.equal(deferredRoute.status, 404)
+        assert.equal(processProjects.status, 200)
         assert.deepEqual(
-          yield* Effect.promise(() => deferredRoute.json()),
-          invalidInput,
+          yield* Effect.promise(() => processProjects.json()).pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(ProcessingProjectList)),
+          ),
+          [],
         )
         assert.equal(
           (yield* fetchEffect(`${base}/api/simulation`, admitted)).status,
@@ -1045,6 +1061,362 @@ test('Library reads preserve catalog, detail, and Process-source truth through t
       assert.equal(handoff.sourceAssetId, 'asset-m27-001')
       assert.equal(handoff.lineage.runId, 'run-m27-001')
       assert.equal(handoff.recommendedSet?.candidateCount, 2)
+    }),
+  ))
+
+test('Processing Project collection preserves bounded create and Project-owned authority', () =>
+  ownerViewerOrigin(({ bases }) =>
+    Effect.gen(function* () {
+      const malformed = yield* fetchEffect(
+        `${bases.owner}/api/process/projects`,
+        {
+          method: 'POST',
+          headers: ownerHeaders,
+          body: '{}',
+        },
+      )
+      assert.equal(malformed.status, 400)
+      assert.deepEqual(
+        yield* responseJson(malformed).pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(ProcessingProjectHttpFailure),
+          ),
+        ),
+        {
+          _tag: 'InvalidInput',
+          message: 'The service could not read the Processing Project request.',
+        },
+      )
+
+      const oversized = yield* fetchEffect(
+        `${bases.owner}/api/process/projects`,
+        {
+          method: 'POST',
+          headers: ownerHeaders,
+          body: JSON.stringify({ payload: 'x'.repeat(16_385) }),
+        },
+      )
+      assert.equal(oversized.status, 413)
+      assert.equal(
+        (yield* responseJson(oversized).pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(ProcessingProjectHttpFailure),
+          ),
+        ))._tag,
+        'RequestTooLarge',
+      )
+
+      const request = {
+        name: 'Effect lifecycle proof',
+        selection: { assetIds: [], captureSetIds: ['m27-stack-1'] },
+        intentId: 'effect-project-create',
+      }
+      const denied = yield* fetchEffect(
+        `${bases.viewer}/api/process/projects`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-listener-key': 'viewer',
+          },
+          body: JSON.stringify(request),
+        },
+      )
+      assert.equal(denied.status, 403)
+      const deniedBody = yield* responseJson(denied).pipe(
+        Effect.flatMap(
+          Schema.decodeUnknownEffect(ProcessingProjectHttpFailure),
+        ),
+      )
+      assert.equal(deniedBody._tag, 'DomainRejected')
+      if (deniedBody._tag === 'DomainRejected')
+        assert.equal(deniedBody.error._tag, 'ProcessAuthorityDenied')
+
+      const createdResponse = yield* fetchEffect(
+        `${bases.owner}/api/process/projects`,
+        {
+          method: 'POST',
+          headers: ownerHeaders,
+          body: JSON.stringify(request),
+        },
+      )
+      assert.equal(createdResponse.status, 201)
+      const created = yield* responseJson(createdResponse).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(ProcessingProjectChanged)),
+      )
+      assert.equal(created.outcome, 'Accepted')
+      assert.equal(created.project.name, request.name)
+      assert.equal(created.project.authority._tag, 'Allowed')
+
+      const listed = yield* fetchEffect(`${bases.owner}/api/process/projects`, {
+        headers: { 'x-listener-key': 'owner' },
+      }).pipe(
+        Effect.flatMap(responseJson),
+        Effect.flatMap(Schema.decodeUnknownEffect(ProcessingProjectList)),
+      )
+      assert.equal(listed.length, 1)
+      assert.equal(listed[0]?.projectId, created.project.projectId)
+    }),
+  ))
+
+test('Processing Project detail, evidence, and change preserve lifecycle truth', () =>
+  ownerViewerOrigin(({ bases }) =>
+    Effect.gen(function* () {
+      const request = {
+        name: 'Effect project routes',
+        selection: { assetIds: [], captureSetIds: ['m27-stack-1'] },
+        intentId: 'effect-project-routes-create',
+      }
+      const created = yield* fetchEffect(
+        `${bases.owner}/api/process/projects`,
+        {
+          method: 'POST',
+          headers: ownerHeaders,
+          body: JSON.stringify(request),
+        },
+      ).pipe(
+        Effect.flatMap(responseJson),
+        Effect.flatMap(Schema.decodeUnknownEffect(ProcessingProjectChanged)),
+      )
+      const projectPath = `/api/process/projects/${created.project.projectId}`
+
+      const openedResponse = yield* fetchEffect(
+        `${bases.owner}${projectPath}`,
+        { headers: { 'x-listener-key': 'owner' } },
+      )
+      assert.equal(openedResponse.status, 200)
+      const opened = yield* responseJson(openedResponse).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(OpenedProcessingProject)),
+      )
+      assert.equal(opened.projectId, created.project.projectId)
+
+      const evidenceResponse = yield* fetchEffect(
+        `${bases.owner}${projectPath}/evidence?stage=Calibration&limit=1`,
+        { headers: { 'x-listener-key': 'owner' } },
+      )
+      assert.equal(evidenceResponse.status, 200)
+      const evidence = yield* responseJson(evidenceResponse).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(ProcessingProjectEvidence)),
+      )
+      assert.equal(evidence.projectId, created.project.projectId)
+      assert.deepEqual(evidence.attempts, [])
+
+      const invalidEvidence = yield* fetchEffect(
+        `${bases.owner}${projectPath}/evidence?limit=0`,
+        { headers: { 'x-listener-key': 'owner' } },
+      )
+      assert.equal(invalidEvidence.status, 400)
+      assert.equal(
+        (yield* responseJson(invalidEvidence).pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(ProcessingProjectHttpFailure),
+          ),
+        ))._tag,
+        'InvalidInput',
+      )
+
+      const change = {
+        projectId: created.project.projectId,
+        expectedProjectRevision: created.project.revision,
+        intentId: 'effect-project-calibration-run',
+        intent: {
+          _tag: 'RunStage',
+          stage: 'Calibration',
+          from: { _tag: 'CurrentDraft' },
+        },
+      }
+      const denied = yield* fetchEffect(`${bases.viewer}${projectPath}`, {
+        method: 'PATCH',
+        headers: {
+          'content-type': 'application/json',
+          'x-listener-key': 'viewer',
+        },
+        body: JSON.stringify(change),
+      })
+      assert.equal(denied.status, 403)
+
+      const acceptedResponse = yield* fetchEffect(
+        `${bases.owner}${projectPath}`,
+        {
+          method: 'PATCH',
+          headers: ownerHeaders,
+          body: JSON.stringify(change),
+        },
+      )
+      assert.equal(acceptedResponse.status, 200)
+      const accepted = yield* responseJson(acceptedResponse).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(ProcessingProjectChanged)),
+      )
+      assert.equal(accepted.project.activeAttempt?.state, 'Queued')
+
+      const staleResponse = yield* fetchEffect(`${bases.owner}${projectPath}`, {
+        method: 'PATCH',
+        headers: ownerHeaders,
+        body: JSON.stringify({
+          ...change,
+          intentId: 'effect-project-stale-run',
+        }),
+      })
+      assert.equal(staleResponse.status, 409)
+      const stale = yield* responseJson(staleResponse).pipe(
+        Effect.flatMap(
+          Schema.decodeUnknownEffect(ProcessingProjectHttpFailure),
+        ),
+      )
+      assert.equal(stale._tag, 'DomainRejected')
+      if (stale._tag === 'DomainRejected')
+        assert.equal(stale.error._tag, 'ProjectRevisionConflict')
+
+      const missing = yield* fetchEffect(
+        `${bases.owner}/api/process/projects/missing-project`,
+        { headers: { 'x-listener-key': 'owner' } },
+      )
+      assert.equal(missing.status, 404)
+      const missingBody = yield* responseJson(missing).pipe(
+        Effect.flatMap(
+          Schema.decodeUnknownEffect(ProcessingProjectHttpFailure),
+        ),
+      )
+      assert.equal(missingBody._tag, 'DomainRejected')
+      if (missingBody._tag === 'DomainRejected')
+        assert.equal(missingBody.error._tag, 'ProjectNotFound')
+    }),
+  ))
+
+test('Processing Project routes preserve method, path, and change-body compatibility', () =>
+  ownerOrigin(({ bases }) =>
+    Effect.gen(function* () {
+      const headers = { 'x-listener-key': 'owner' }
+      for (const path of [
+        '/api/process/projects',
+        '/api/process/projects/project-head',
+        '/api/process/projects/project-head/evidence',
+      ]) {
+        const response = yield* fetchEffect(`${bases.owner}${path}`, {
+          method: 'HEAD',
+          headers,
+        })
+        assert.equal(response.status, 404, path)
+        assert.equal(
+          response.headers.get('content-type'),
+          'application/json; charset=utf-8',
+        )
+      }
+
+      const unmatched = yield* fetchEffect(
+        `${bases.owner}/api/process/projects/project-id/extra`,
+        { headers },
+      )
+      assert.equal(unmatched.status, 404)
+      assert.deepEqual(
+        yield* responseJson(unmatched).pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(ProcessingProjectHttpFailure),
+          ),
+        ),
+        {
+          _tag: 'ProjectRouteNotFound',
+          message: 'The Processing Project route does not exist.',
+        },
+      )
+
+      const malformedPath = yield* fetchEffect(
+        `${bases.owner}/api/process/projects/%`,
+        { headers },
+      )
+      assert.equal(malformedPath.status, 400)
+      assert.equal(
+        (yield* responseJson(malformedPath).pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(ProcessingProjectHttpFailure),
+          ),
+        ))._tag,
+        'InvalidInput',
+      )
+
+      const encodedProjectId = yield* fetchEffect(
+        `${bases.owner}/api/process/projects/%2F`,
+        { headers },
+      )
+      assert.equal(encodedProjectId.status, 404)
+      const encodedProjectIdBody = yield* responseJson(encodedProjectId).pipe(
+        Effect.flatMap(
+          Schema.decodeUnknownEffect(ProcessingProjectHttpFailure),
+        ),
+      )
+      assert.equal(encodedProjectIdBody._tag, 'DomainRejected')
+      if (encodedProjectIdBody._tag === 'DomainRejected')
+        assert.equal(encodedProjectIdBody.error._tag, 'ProjectNotFound')
+
+      const oversizedChange = yield* fetchEffect(
+        `${bases.owner}/api/process/projects/project-body-limit`,
+        {
+          method: 'PATCH',
+          headers: ownerHeaders,
+          body: JSON.stringify({ payload: 'x'.repeat(16_385) }),
+        },
+      )
+      assert.equal(oversizedChange.status, 413)
+      assert.equal(
+        (yield* responseJson(oversizedChange).pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(ProcessingProjectHttpFailure),
+          ),
+        ))._tag,
+        'RequestTooLarge',
+      )
+
+      const malformedChange = yield* fetchEffect(
+        `${bases.owner}/api/process/projects/project-body-invalid`,
+        {
+          method: 'PATCH',
+          headers: ownerHeaders,
+          body: '{}',
+        },
+      )
+      assert.equal(malformedChange.status, 400)
+
+      const mismatchedChange = yield* fetchEffect(
+        `${bases.owner}/api/process/projects/project-path-id`,
+        {
+          method: 'PATCH',
+          headers: ownerHeaders,
+          body: JSON.stringify({
+            projectId: 'project-body-id',
+            expectedProjectRevision: 0,
+            intentId: 'effect-project-mismatched-id',
+            intent: {
+              _tag: 'RunStage',
+              stage: 'Calibration',
+              from: { _tag: 'CurrentDraft' },
+            },
+          }),
+        },
+      )
+      assert.equal(mismatchedChange.status, 400)
+    }),
+  ))
+
+test('Processing Project routes preserve truthful persistence failure', () =>
+  ownerOrigin(({ graph, bases }) =>
+    Effect.gen(function* () {
+      graph.database.exec('DROP TABLE processing_projects')
+      const response = yield* fetchEffect(
+        `${bases.owner}/api/process/projects`,
+        { headers: { 'x-listener-key': 'owner' } },
+      )
+      assert.equal(response.status, 503)
+      assert.deepEqual(
+        yield* responseJson(response).pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(ProcessingProjectHttpFailure),
+          ),
+        ),
+        {
+          _tag: 'ServiceUnavailable',
+          message: 'Processing Project persistence is unavailable.',
+        },
+      )
     }),
   ))
 
@@ -2122,12 +2494,6 @@ test('development simulation advances through an admitted Effect route', () =>
       assert.equal(body.clock.nowMs, 1_000)
     }),
   ))
-
-const invalidInput = {
-  outcome: 'rejected',
-  reason: 'InvalidInput',
-  message: 'The service could not read that action.',
-}
 
 const availablePort = () =>
   new Promise<number>((resolve, reject) => {
