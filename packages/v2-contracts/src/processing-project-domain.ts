@@ -654,31 +654,6 @@ export const ProcessingProjectNotice = Schema.Struct({
   revision: ProcessingProjectRevision,
 })
 
-export interface ProcessingProjects {
-  readonly list: (
-    caller: typeof ProcessingProjectCaller.Type,
-  ) => Promise<ReadonlyArray<typeof ProcessingProjectSummary.Type>>
-  readonly create: (
-    caller: typeof ProcessingProjectCaller.Type,
-    request: typeof CreateProcessingProjectRequest.Type,
-  ) => Promise<typeof ProcessingProjectChanged.Type>
-  readonly open: (
-    caller: typeof ProcessingProjectCaller.Type,
-    projectId: typeof ProcessingProjectId.Type,
-  ) => Promise<typeof OpenedProcessingProject.Type>
-  readonly evidence: (
-    caller: typeof ProcessingProjectCaller.Type,
-    query: typeof ProcessingProjectEvidenceQuery.Type,
-  ) => Promise<typeof ProcessingProjectEvidence.Type>
-  readonly change: (
-    caller: typeof ProcessingProjectCaller.Type,
-    request: typeof ProcessingProjectChangeRequest.Type,
-  ) => Promise<typeof ProcessingProjectChanged.Type>
-  readonly changes: (
-    caller: typeof ProcessingProjectCaller.Type,
-  ) => AsyncIterable<typeof ProcessingProjectNotice.Type>
-}
-
 export const currentProcessingStageResult = (
   state: typeof ProcessingStageState.Type,
 ): typeof ProcessingStageResult.Type | undefined =>

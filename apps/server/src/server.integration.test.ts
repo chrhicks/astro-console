@@ -3938,6 +3938,26 @@ test('Processing Project HTTP accepts explicit Project changes and exposes settl
     service.close()
   })
   const base = `http://127.0.0.1:${listener.port}`
+  const malformedResponse = await fetch(`${base}/api/process/projects`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: '{}',
+  })
+  assert.equal(malformedResponse.status, 400)
+  assert.deepEqual(await malformedResponse.json(), {
+    _tag: 'InvalidInput',
+    message: 'The service could not read the Processing Project request.',
+  })
+  const oversizedResponse = await fetch(`${base}/api/process/projects`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ payload: 'x'.repeat(16_385) }),
+  })
+  assert.equal(oversizedResponse.status, 413)
+  assert.deepEqual(await oversizedResponse.json(), {
+    _tag: 'RequestTooLarge',
+    message: 'The Processing Project request is too large.',
+  })
   const createdResponse = await fetch(`${base}/api/process/projects`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

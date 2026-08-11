@@ -7,9 +7,9 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
-import type { DatabaseSync } from 'node:sqlite'
+import { Effect } from 'effect'
 import {
-  createProcessingProjectWorkModule,
+  ProcessingProjectWork,
   type ProcessingProjectMaterialization,
   type ProcessingProjectMaterializedEvidence,
 } from '../services/processing-project-service.ts'
@@ -46,28 +46,26 @@ export type ProcessPressureObserver = (
 ) => void
 
 export function createProcessWorkWorker(options: {
-  readonly database: DatabaseSync
   readonly outputRoot: string
   readonly traceWork?: ProcessWorkTrace
   readonly observeBacklog?: ProcessBacklogObserver
   readonly observePressure?: ProcessPressureObserver
-  readonly now?: () => Date
 }) {
   mkdirSync(options.outputRoot, { recursive: true })
-  const work = createProcessingProjectWorkModule(options.database, options.now)
 
   const materialize = (
     request: ProcessingProjectMaterialization,
   ): ProcessingProjectMaterializedEvidence | undefined =>
     materializeEvidence(options.outputRoot, request)
 
-  const pass = (): ProcessWorkPassResult => {
+  const pass = Effect.fn('ProcessWorkWorker.pass')(function* () {
+    const work = yield* ProcessingProjectWork
     // Host pressure belongs to execution policy, not Project state. The first
     // Processing Project worker is local and serial, so it reports normal and
     // advances at most one durable attempt per pass.
     options.observePressure?.('normal')
     let selected: ProcessingProjectMaterialization | undefined
-    const result = work.advance((request) => {
+    const result = yield* work.advanceWork((request) => {
       selected = request
       return materialize(request)
     })
@@ -82,7 +80,7 @@ export function createProcessWorkWorker(options: {
     return selected === undefined || options.traceWork === undefined
       ? projected
       : options.traceWork('projectStage', selected.stage, () => projected)
-  }
+  })
 
   return { pass }
 }

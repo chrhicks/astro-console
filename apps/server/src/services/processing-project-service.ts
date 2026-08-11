@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import { Schema } from 'effect'
+import { Context, Effect, Layer, PubSub, Schema, Stream } from 'effect'
 import {
   AssetId,
   AssetRevision,
@@ -126,12 +126,6 @@ type Stage = typeof ExecutableProcessingStage.Type
 type Intent = typeof ProcessingProjectIntent.Type
 type ChangeRequest = typeof ProcessingProjectChangeRequest.Type
 type Caller = LocalIdentity
-type NoticeSubscriber = {
-  readonly values: Array<typeof ProcessingProjectNotice.Type>
-  readonly waiters: Array<() => void>
-}
-
-const noticeSubscribers = new WeakMap<DatabaseSync, Set<NoticeSubscriber>>()
 
 export type ProcessingProjectMaterialization = {
   readonly workId: string
@@ -156,7 +150,206 @@ export type ProcessingProjectWorkResult =
 
 type ProjectError = typeof ProcessingProjectError.Type
 
-export function createProcessingProjectLifecycle(database: DatabaseSync) {
+export class ProcessingProjectPersistenceUnavailable extends Schema.TaggedErrorClass<ProcessingProjectPersistenceUnavailable>()(
+  'Server.ProcessingProjectPersistenceUnavailable',
+  { operation: Schema.String, cause: Schema.Defect() },
+) {}
+
+export class ProcessingProjectRejected extends Schema.TaggedErrorClass<ProcessingProjectRejected>()(
+  'Server.ProcessingProjectRejected',
+  { error: ProcessingProjectError },
+) {}
+
+export type ProcessingProjectLifecycleShape = {
+  readonly list: (
+    caller: Caller,
+  ) => Effect.Effect<
+    ReadonlyArray<typeof ProcessingProjectSummary.Type>,
+    ProcessingProjectPersistenceUnavailable
+  >
+  readonly create: (
+    caller: Caller,
+    request: typeof CreateProcessingProjectRequest.Type,
+  ) => Effect.Effect<
+    typeof ProcessingProjectChanged.Type,
+    ProcessingProjectRejected | ProcessingProjectPersistenceUnavailable
+  >
+  readonly open: (
+    caller: Caller,
+    projectId: typeof ProcessingProjectId.Type,
+  ) => Effect.Effect<
+    typeof OpenedProcessingProject.Type,
+    ProcessingProjectRejected | ProcessingProjectPersistenceUnavailable
+  >
+  readonly evidence: (
+    caller: Caller,
+    query: typeof ProcessingProjectEvidenceQuery.Type,
+  ) => Effect.Effect<
+    typeof ProcessingProjectEvidence.Type,
+    ProcessingProjectRejected | ProcessingProjectPersistenceUnavailable
+  >
+  readonly change: (
+    caller: Caller,
+    request: ChangeRequest,
+  ) => Effect.Effect<
+    typeof ProcessingProjectChanged.Type,
+    ProcessingProjectRejected | ProcessingProjectPersistenceUnavailable
+  >
+  readonly changes: (
+    caller: Caller,
+  ) => Stream.Stream<typeof ProcessingProjectNotice.Type>
+}
+
+/** @internal Durable claim and settlement belong to the Process worker only. */
+export type ProcessingProjectWorkShape = {
+  readonly advanceWork: (
+    materialize: (
+      work: ProcessingProjectMaterialization,
+    ) => ProcessingProjectMaterializedEvidence | undefined,
+  ) => Effect.Effect<
+    ProcessingProjectWorkResult,
+    ProcessingProjectPersistenceUnavailable
+  >
+}
+
+export class ProcessingProjectLifecycle extends Context.Service<
+  ProcessingProjectLifecycle,
+  ProcessingProjectLifecycleShape
+>()('@astro-console/server/ProcessingProjectLifecycle') {}
+
+/** @internal This service is not part of the Processing Project caller API. */
+export class ProcessingProjectWork extends Context.Service<
+  ProcessingProjectWork,
+  ProcessingProjectWorkShape
+>()('@astro-console/server/ProcessingProjectWork') {}
+
+export const processingProjectLifecycleLayer = (
+  database: DatabaseSync,
+  now: () => Date = () => new Date(),
+) =>
+  Layer.effectContext(
+    Effect.gen(function* () {
+      // A notice only invalidates a read. Replaying the latest invalidation
+      // closes the startup gap between building the runtime and subscribing.
+      const notices = yield* PubSub.unbounded<
+        typeof ProcessingProjectNotice.Type
+      >({ replay: 1 })
+      const lifecycle = makeProcessingProjectLifecycle(database)
+      const work = makeProcessingProjectWorkModule(database, now)
+      const persistence = <A>(operation: string, evaluate: () => A) =>
+        Effect.try({
+          try: evaluate,
+          catch: (cause) =>
+            new ProcessingProjectPersistenceUnavailable({ operation, cause }),
+        })
+      const publish = (project: Project) =>
+        PubSub.publish(
+          notices,
+          ProcessingProjectNotice.make({
+            projectId: project.projectId,
+            revision: project.revision,
+          }),
+        ).pipe(Effect.asVoid)
+      const accepted = <A>(
+        result: A | ProjectError,
+      ): Effect.Effect<A, ProcessingProjectRejected> =>
+        Schema.is(ProcessingProjectError)(result)
+          ? Effect.fail(new ProcessingProjectRejected({ error: result }))
+          : Effect.succeed(result)
+
+      const lifecycleService = ProcessingProjectLifecycle.of({
+        list: Effect.fn('ProcessingProjectLifecycle.list')((caller) =>
+          persistence('list', () => lifecycle.list(caller)),
+        ),
+        create: Effect.fn('ProcessingProjectLifecycle.create')(
+          function* (caller, request) {
+            const result = yield* persistence('create', () =>
+              lifecycle.create(caller, request),
+            )
+            const response =
+              yield* accepted<typeof ProcessingProjectChanged.Type>(result)
+            if (!response.replayed) yield* publishProjectView(response.project)
+            return response
+          },
+        ),
+        open: Effect.fn('ProcessingProjectLifecycle.open')(
+          function* (caller, projectId) {
+            const result = yield* persistence('open', () =>
+              lifecycle.open(caller, projectId),
+            )
+            return result === undefined
+              ? yield* Effect.fail(
+                  new ProcessingProjectRejected({
+                    error: ProcessingProjectError.cases.ProjectNotFound.make({
+                      projectId,
+                    }),
+                  }),
+                )
+              : result
+          },
+        ),
+        evidence: Effect.fn('ProcessingProjectLifecycle.evidence')(
+          function* (caller, query) {
+            const result = yield* persistence('evidence', () =>
+              lifecycle.evidence(caller, query),
+            )
+            return result === undefined
+              ? yield* Effect.fail(
+                  new ProcessingProjectRejected({
+                    error: ProcessingProjectError.cases.ProjectNotFound.make({
+                      projectId: query.projectId,
+                    }),
+                  }),
+                )
+              : result
+          },
+        ),
+        change: Effect.fn('ProcessingProjectLifecycle.change')(
+          function* (caller, request) {
+            const result = yield* persistence('change', () =>
+              lifecycle.change(caller, request),
+            )
+            const response =
+              yield* accepted<typeof ProcessingProjectChanged.Type>(result)
+            if (!response.replayed) yield* publishProjectView(response.project)
+            return response
+          },
+        ),
+        changes: (caller) => {
+          void caller
+          return Stream.fromPubSub(notices)
+        },
+      })
+      const workService = ProcessingProjectWork.of({
+        advanceWork: Effect.fn('ProcessingProjectWork.advance')(
+          function* (materialize) {
+            const advanced = yield* persistence('advanceWork', () =>
+              work.advance(materialize),
+            )
+            for (const project of advanced.changedProjects)
+              yield* publish(project)
+            return advanced.result
+          },
+        ),
+      })
+
+      return Context.make(ProcessingProjectLifecycle, lifecycleService).pipe(
+        Context.add(ProcessingProjectWork, workService),
+      )
+
+      function publishProjectView(view: typeof OpenedProcessingProject.Type) {
+        return PubSub.publish(
+          notices,
+          ProcessingProjectNotice.make({
+            projectId: view.projectId,
+            revision: view.revision,
+          }),
+        ).pipe(Effect.asVoid)
+      }
+    }),
+  )
+
+function makeProcessingProjectLifecycle(database: DatabaseSync) {
   const list = (caller: Caller) => {
     void caller
     return readProjects(database).map((project) => projectSummary(project))
@@ -238,11 +431,10 @@ export function createProcessingProjectLifecycle(database: DatabaseSync) {
       persistNewProject(database, project)
       writeReceipt(database, request.intentId, caller, request, response)
       database.exec('COMMIT')
-      publishNotice(database, project)
       return response
-    } catch {
+    } catch (cause) {
       database.exec('ROLLBACK')
-      throw new Error('Processing Project persistence is unavailable.')
+      throw cause
     }
   }
 
@@ -298,39 +490,17 @@ export function createProcessingProjectLifecycle(database: DatabaseSync) {
         saveLibraryAsset(database, decision.project, decision.save)
       writeReceipt(database, request.intentId, caller, request, response)
       database.exec('COMMIT')
-      publishNotice(database, decision.project)
       return response
-    } catch {
+    } catch (cause) {
       database.exec('ROLLBACK')
-      throw new Error('Processing Project persistence is unavailable.')
+      throw cause
     }
   }
 
-  const changes = async function* (
-    caller: Caller,
-  ): AsyncIterable<typeof ProcessingProjectNotice.Type> {
-    void caller
-    const subscriber: NoticeSubscriber = { values: [], waiters: [] }
-    const subscribers = noticeSubscribers.get(database) ?? new Set()
-    noticeSubscribers.set(database, subscribers)
-    subscribers.add(subscriber)
-    try {
-      while (true) {
-        if (subscriber.values.length === 0)
-          await new Promise<void>((resolve) => subscriber.waiters.push(resolve))
-        const notice = subscriber.values.shift()
-        if (notice !== undefined) yield notice
-      }
-    } finally {
-      subscribers.delete(subscriber)
-    }
-  }
-
-  return { list, create, open, evidence, change, changes }
+  return { list, create, open, evidence, change }
 }
 
-/** Internal seam used only by the deterministic Process worker adapter. */
-export function createProcessingProjectWorkModule(
+function makeProcessingProjectWorkModule(
   database: DatabaseSync,
   now: () => Date = () => new Date(),
 ) {
@@ -338,7 +508,11 @@ export function createProcessingProjectWorkModule(
     materialize: (
       work: ProcessingProjectMaterialization,
     ) => ProcessingProjectMaterializedEvidence | undefined,
-  ): ProcessingProjectWorkResult => {
+  ): {
+    readonly result: ProcessingProjectWorkResult
+    readonly changedProjects: ReadonlyArray<Project>
+  } => {
+    const changedProjects: Array<Project> = []
     const backlog = Schema.decodeUnknownSync(ProjectBacklogRow)(
       database
         .prepare(
@@ -346,7 +520,8 @@ export function createProcessingProjectWorkModule(
         )
         .get(),
     )
-    if (backlog.count === 0) return { outcome: 'idle', backlog: 0 }
+    if (backlog.count === 0)
+      return { result: { outcome: 'idle', backlog: 0 }, changedProjects }
     const oldestAgeSeconds =
       backlog.oldest === null
         ? 0
@@ -358,10 +533,16 @@ export function createProcessingProjectWorkModule(
         )
         .get(),
     )
-    if (row === undefined) return { outcome: 'idle', backlog: 0 }
-    const claimed = claim(database, row, now)
+    if (row === undefined)
+      return { result: { outcome: 'idle', backlog: 0 }, changedProjects }
+    const claimed = claim(database, row, now, (project) =>
+      changedProjects.push(project),
+    )
     if (claimed === undefined)
-      return workResult('stale', row.stage, backlog.count, oldestAgeSeconds)
+      return {
+        result: workResult('stale', row.stage, backlog.count, oldestAgeSeconds),
+        changedProjects,
+      }
     let materialized: ProcessingProjectMaterializedEvidence | undefined
     try {
       materialized = materialize({
@@ -373,14 +554,27 @@ export function createProcessingProjectWorkModule(
       materialized = undefined
     }
     if (materialized === undefined)
-      return workResult(
-        'claimedUnresolved',
-        row.stage,
-        backlog.count,
-        oldestAgeSeconds,
-      )
-    const settled = settle(database, row, claimed, materialized, now)
-    return workResult(settled, row.stage, backlog.count, oldestAgeSeconds)
+      return {
+        result: workResult(
+          'claimedUnresolved',
+          row.stage,
+          backlog.count,
+          oldestAgeSeconds,
+        ),
+        changedProjects,
+      }
+    const settled = settle(
+      database,
+      row,
+      claimed,
+      materialized,
+      now,
+      (project) => changedProjects.push(project),
+    )
+    return {
+      result: workResult(settled, row.stage, backlog.count, oldestAgeSeconds),
+      changedProjects,
+    }
   }
   return { advance }
 }
@@ -762,6 +956,7 @@ function claim(
   database: DatabaseSync,
   row: typeof ProjectWorkRow.Type,
   now: () => Date,
+  notifyChanged: (project: Project) => void,
 ) {
   if (row.state === 'claimed') return row.claim_token ?? undefined
   const token = randomUUID()
@@ -799,14 +994,16 @@ function claim(
         running.projectId,
         project.revision,
       )
-    if (work.changes !== 1 || changed.changes !== 1)
-      throw new Error('stale claim')
+    if (work.changes !== 1 || changed.changes !== 1) {
+      database.exec('ROLLBACK')
+      return undefined
+    }
     database.exec('COMMIT')
-    publishNotice(database, running)
+    notifyChanged(running)
     return token
-  } catch {
+  } catch (cause) {
     database.exec('ROLLBACK')
-    return undefined
+    throw cause
   }
 }
 
@@ -816,6 +1013,7 @@ function settle(
   claimToken: string,
   materialized: ProcessingProjectMaterializedEvidence,
   now: () => Date,
+  notifyChanged: (project: Project) => void,
 ): 'completed' | 'failed' | 'stale' {
   const payload = Schema.decodeUnknownSync(ProjectWorkPayload)(
     JSON.parse(row.payload),
@@ -908,8 +1106,10 @@ function settle(
         settledProject.projectId,
         project.revision,
       )
-    if (work.changes !== 1 || changed.changes !== 1)
-      throw new Error('stale settlement')
+    if (work.changes !== 1 || changed.changes !== 1) {
+      database.exec('ROLLBACK')
+      return 'stale'
+    }
     database
       .prepare(
         'INSERT OR REPLACE INTO processing_artifacts VALUES (?,?,?,?,?,?,0)',
@@ -923,11 +1123,11 @@ function settle(
         materialized.checksum,
       )
     database.exec('COMMIT')
-    publishNotice(database, settledProject)
+    notifyChanged(settledProject)
     return successful ? 'completed' : 'failed'
-  } catch {
+  } catch (cause) {
     database.exec('ROLLBACK')
-    return 'stale'
+    throw cause
   }
 }
 
@@ -1741,17 +1941,6 @@ function authorityError(caller: Caller): ProjectError | undefined {
     : ProcessingProjectError.cases.ProcessAuthorityDenied.make({
         reason: decision.reason,
       })
-}
-
-function publishNotice(database: DatabaseSync, project: Project) {
-  const notice = ProcessingProjectNotice.make({
-    projectId: project.projectId,
-    revision: project.revision,
-  })
-  for (const subscriber of noticeSubscribers.get(database) ?? []) {
-    subscriber.values.push(notice)
-    subscriber.waiters.shift()?.()
-  }
 }
 
 function workResult(

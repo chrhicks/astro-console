@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
-import { Schema } from 'effect'
+import { Effect, Fiber, ManagedRuntime, Result, Schema, Stream } from 'effect'
 import {
   CaptureSetId,
   IntentId,
@@ -12,7 +12,12 @@ import {
 } from '@astro-console/v2-contracts'
 import { openOriginDatabase } from '../persistence/database.ts'
 import { seedLibrary } from '../persistence/library-sqlite-repository.ts'
-import { createProcessingProjectLifecycle } from '../services/processing-project-service.ts'
+import {
+  ProcessingProjectLifecycle,
+  ProcessingProjectPersistenceUnavailable,
+  ProcessingProjectRejected,
+  processingProjectLifecycleLayer,
+} from '../services/processing-project-service.ts'
 import { createProcessWorkWorker } from '../workers/process-work-worker.ts'
 
 const owner = {
@@ -55,26 +60,97 @@ test('startup drops retired Process data and installs only the Project schema', 
   database.close()
 })
 
-test('Processing Project callers use one interface while work ownership and settlement stay hidden', async () => {
+test('SQLite defects stay typed at the Processing Project Effect boundary', async (t) => {
+  const database = openOriginDatabase(':memory:')
+  const runtime = ManagedRuntime.make(processingProjectLifecycleLayer(database))
+  t.after(() => runtime.dispose())
+  const service = await runtime.runPromise(ProcessingProjectLifecycle)
+  database.close()
+
+  const result = runtime.runSync(Effect.result(service.list(owner)))
+  assert.ok(Result.isFailure(result))
+  assert.ok(Schema.is(ProcessingProjectPersistenceUnavailable)(result.failure))
+  assert.equal(result.failure.operation, 'list')
+  assert.ok(result.failure.cause instanceof Error)
+})
+
+test('Processing Project callers use one interface while work ownership and settlement stay hidden', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'astro-project-lifecycle-'))
   const database = openOriginDatabase(':memory:')
   seedLibrary(database)
-  const lifecycle = createProcessingProjectLifecycle(database)
-  const notices = lifecycle.changes(owner)[Symbol.asyncIterator]()
-  const createdNotice = notices.next()
+  const runtime = ManagedRuntime.make(processingProjectLifecycleLayer(database))
+  t.after(async () => {
+    await runtime.dispose()
+    database.close()
+  })
+  const service = await runtime.runPromise(ProcessingProjectLifecycle)
+  assert.deepEqual(Object.keys(service).sort(), [
+    'change',
+    'changes',
+    'create',
+    'evidence',
+    'list',
+    'open',
+  ])
+  const projectResult = <A>(
+    effect: Effect.Effect<
+      A,
+      ProcessingProjectRejected | ProcessingProjectPersistenceUnavailable
+    >,
+  ) => {
+    const result = runtime.runSync(Effect.result(effect))
+    if (Result.isSuccess(result)) return result.success
+    return Schema.is(ProcessingProjectRejected)(result.failure)
+      ? result.failure.error
+      : (() => {
+          throw result.failure
+        })()
+  }
+  const lifecycle = {
+    list: (caller: typeof owner) => runtime.runSync(service.list(caller)),
+    create: (
+      caller: typeof owner,
+      request: Parameters<typeof service.create>[1],
+    ) => projectResult(service.create(caller, request)),
+    open: (
+      caller: typeof owner,
+      projectId: Parameters<typeof service.open>[1],
+    ) => runtime.runSync(service.open(caller, projectId)),
+    evidence: (
+      caller: typeof owner,
+      query: Parameters<typeof service.evidence>[1],
+    ) => runtime.runSync(service.evidence(caller, query)),
+    change: (
+      caller: Parameters<typeof service.change>[0],
+      request: Parameters<typeof service.change>[1],
+    ) => projectResult(service.change(caller, request)),
+  }
 
-  const created = lifecycle.create(owner, {
+  const createRequest = {
     name: 'M27 lifecycle',
     selection: {
       assetIds: [],
       captureSetIds: [CaptureSetId.make('m27-stack-1')],
     },
     intentId: IntentId.make('lifecycle-create'),
-  })
+  }
+  const synchronizedCreate = await runtime.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const pull = yield* Stream.toPull(service.changes(owner))
+        const noticeFiber = yield* pull.pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        const created = yield* service.create(owner, createRequest)
+        const notices = yield* Fiber.join(noticeFiber)
+        return { created, notice: notices[0] }
+      }),
+    ),
+  )
+  const created = synchronizedCreate.created
   assert.equal('outcome' in created && created.outcome, 'Accepted')
   if (!('outcome' in created)) return
   const projectId = created.project.projectId
-  assert.deepEqual((await createdNotice).value, {
+  assert.deepEqual(synchronizedCreate.notice, {
     projectId,
     revision: created.project.revision,
   })
@@ -112,8 +188,7 @@ test('Processing Project callers use one interface while work ownership and sett
   assert.equal(opened.sources.length, 2)
   assert.equal(opened.stages[0]?.currentResult, undefined)
 
-  const changedNotice = notices.next()
-  const queued = lifecycle.change(owner, {
+  const queuedRequest = {
     projectId,
     expectedProjectRevision: opened.revision,
     intentId: IntentId.make('lifecycle-run-calibration'),
@@ -123,10 +198,27 @@ test('Processing Project callers use one interface while work ownership and sett
         {},
       ),
     }),
-  })
+  }
+  const synchronizedChange = await runtime.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const pull = yield* Stream.toPull(
+          service
+            .changes(owner)
+            .pipe(Stream.filter((notice) => notice.revision > opened.revision)),
+        )
+        const noticeFiber = yield* pull.pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        const queued = yield* service.change(owner, queuedRequest)
+        const notices = yield* Fiber.join(noticeFiber)
+        return { queued, notice: notices[0] }
+      }),
+    ),
+  )
+  const queued = synchronizedChange.queued
   assert.ok('outcome' in queued, JSON.stringify(queued))
   assert.equal(queued.outcome, 'Accepted')
-  assert.deepEqual((await changedNotice).value, {
+  assert.deepEqual(synchronizedChange.notice, {
     projectId,
     revision: queued.project.revision,
   })
@@ -151,7 +243,10 @@ test('Processing Project callers use one interface while work ownership and sett
     'queued',
   )
 
-  const worker = createProcessWorkWorker({ database, outputRoot: root })
+  const processWorker = createProcessWorkWorker({ outputRoot: root })
+  const worker = {
+    pass: () => runtime.runSync(processWorker.pass()),
+  }
   assert.deepEqual(worker.pass(), {
     outcome: 'completed',
     kind: 'projectStage',
@@ -308,6 +403,4 @@ test('Processing Project callers use one interface while work ownership and sett
     _tag: 'ProcessAuthorityDenied',
     reason: 'OwnerRequired',
   })
-  await notices.return?.()
-  database.close()
 })

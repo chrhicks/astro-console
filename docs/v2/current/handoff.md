@@ -269,6 +269,13 @@ immutable attempts, linear Current Result undo and redo, exact upstream
 lineage restoration, durable work claims and settlement, secondary evidence,
 and saved Library lineage. Stage viewing is client-only navigation.
 
+The server interface now follows the project Effect standards. The lifecycle is
+a `Context.Service` supplied by one SQLite `Layer`; named `Effect.fn` operations
+carry typed domain rejection and persistence failures. Project invalidations use
+`PubSub` and `Stream`. Durable claim and settlement remain behind a separate
+internal worker service, and the HTTP seam decodes unknown input through Effect
+Schema before mapping input, size, domain, and persistence failures truthfully.
+
 The old Processing Session domain, global projection, command surface,
 workspace tables, save tables, worker API, processor executable, and test data
 are removed. Startup performs one destructive reset only when it detects the
@@ -380,7 +387,7 @@ snapshot-gap recovery. Simulation and Library review controls follow the fresh
 held desktop lease, not whether Plan or Observe happens to have another eligible
 action, so moving between workspaces does not make the controller read-only.
 
-Current automated proof is green: contracts 147/147, server 173/173, and web
+Current automated proof is green: contracts 147/147, server 174/174, and web
 109/109. Functional browser proof covered the normal Plan-to-Verify workflow,
 fresh acceptance projection, restart/no-replay, abort and reconciliation
 states. It also covered explicit Project intake and routing, client-only stage
@@ -437,12 +444,15 @@ covered indoor frame.
 
 ## Next Owner Action
 
-Review and commit the completed Processing Project lifecycle work. Select and
-integrate a real processing library only in a later accepted item; the current
-deterministic materializer proves orchestration and evidence, not astronomy
-processing quality. The remaining accepted delivery list continues with the
-host backup repair and owner-observed outdoor Acquire proof when its operating
-window is available.
+The next architecture frontier is GitHub issue `#2`, which reduces
+`v2-contracts` to the shared wire protocol. Origin runtime depth is tracked in
+`#3`, Nightbook workspace runtime depth in `#4`, durable work-claim re-audit in
+`#5`, and the origin integration-test harness in `#6`. Select and integrate a
+real processing library only in a later accepted item; the current deterministic
+materializer proves orchestration and evidence, not astronomy processing
+quality. The remaining accepted delivery list continues with the host backup
+repair and owner-observed outdoor Acquire proof when its operating window is
+available.
 
 ## Later Accepted Items
 

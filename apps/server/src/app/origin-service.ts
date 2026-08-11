@@ -1,4 +1,14 @@
-import { Effect, Exit, Fiber, Match, Schedule, Schema, Scope } from 'effect'
+import {
+  Effect,
+  Exit,
+  Fiber,
+  ManagedRuntime,
+  Match,
+  Schedule,
+  Schema,
+  Scope,
+  Stream,
+} from 'effect'
 import { randomUUID } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -8,7 +18,10 @@ import {
   CommandHttpFailureEnvelope,
   RefreshPreflightResponse,
 } from '@astro-console/v2-contracts'
-import { createProcessingProjectLifecycle } from '../services/processing-project-service.ts'
+import {
+  ProcessingProjectLifecycle,
+  processingProjectLifecycleLayer,
+} from '../services/processing-project-service.ts'
 import {
   materializeCapturedFrame,
   type CapturedFrameStorage,
@@ -48,7 +61,7 @@ import {
 import { controlCommandFromEnvelope } from '../persistence/control-sqlite-repository.ts'
 import { installPublishedLibraryFixture } from '../persistence/library-sqlite-repository.ts'
 import { createOriginRouter } from '../http/origin-router.ts'
-import { createProcessingProjectsHttpHandler } from '../http/processing-project-handlers.ts'
+import { handleProcessingProjectsHttp } from '../http/processing-project-handlers.ts'
 import {
   initializeRuntimeState,
   installDevelopmentSimulationPlan,
@@ -261,9 +274,18 @@ export function createLocalWebService(
       database,
       options.simulation.launchScenario,
     )
-  const processingProjects = createProcessingProjectLifecycle(database)
-  const processingProjectsHttp =
-    createProcessingProjectsHttpHandler(processingProjects)
+  const processingProjects = ManagedRuntime.make(
+    processingProjectLifecycleLayer(database),
+  )
+  const processingProjectsHttp = (
+    response: ServerResponse,
+    identity: LocalIdentity,
+    request: IncomingMessage,
+    url: URL,
+  ) =>
+    processingProjects.runPromise(
+      handleProcessingProjectsHttp(response, identity, request, url),
+    )
   const acquireRepository = acquireSqliteRepository(database)
   const stateRepository: StateSqliteRepositoryShape = Effect.runSync(
     StateSqliteRepository.pipe(
@@ -581,21 +603,20 @@ export function createLocalWebService(
     const cursor = stateRepository.advanceProjectionCursor()
     publish('ProcessingProjected', cursor)
   }
-  const processingProjectNotices = processingProjects
-    .changes({
-      personId: 'system',
-      clientId: 'processing-project-notices',
-      role: 'owner',
-      capability: 'controlCapable',
-    })
-    [Symbol.asyncIterator]()
-  void (async () => {
-    while (true) {
-      const next = await processingProjectNotices.next()
-      if (next.done) return
-      publishProcessingProjection()
-    }
-  })()
+  const processingProjectNoticeFiber = processingProjects.runFork(
+    Effect.flatMap(ProcessingProjectLifecycle, (lifecycle) =>
+      lifecycle
+        .changes({
+          personId: 'system',
+          clientId: 'processing-project-notices',
+          role: 'owner',
+          capability: 'controlCapable',
+        })
+        .pipe(
+          Stream.runForEach(() => Effect.sync(publishProcessingProjection)),
+        ),
+    ),
+  )
   const runExecutor =
     options.cameraProvider === undefined ||
     options.runExecutionContext === undefined ||
@@ -658,7 +679,6 @@ export function createLocalWebService(
           ),
         )
   const processWorkWorker = createProcessWorkWorker({
-    database,
     outputRoot:
       options.processWorkRoot ??
       (databasePath === ':memory:'
@@ -686,7 +706,7 @@ export function createLocalWebService(
         }),
   })
   const processWorkPass = () => {
-    const result = processWorkWorker.pass()
+    const result = processingProjects.runSync(processWorkWorker.pass())
     if (processWorkResultChangesProjection(result))
       publishProcessingProjection()
     return result
@@ -1600,7 +1620,8 @@ export function createLocalWebService(
       Effect.runSync(Fiber.interrupt(runExecutorFiber))
     if (processWorkFiber !== undefined)
       Effect.runSync(Fiber.interrupt(processWorkFiber))
-    void processingProjectNotices.return?.()
+    Effect.runSync(Fiber.interrupt(processingProjectNoticeFiber))
+    Effect.runSync(processingProjects.disposeEffect)
     Effect.runSync(projectionPublication.close())
     database.close()
   }
