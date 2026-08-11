@@ -41,6 +41,10 @@ import { json, OriginRequestIdentity } from './routes/origin-route-shared.ts'
 import { makeObserveRoutes } from './routes/observe-routes.ts'
 import { makePlanRoutes } from './routes/plan-routes.ts'
 import { makeSimulationRoutes } from './routes/simulation-routes.ts'
+import {
+  makeLibraryRoutes,
+  malformedLibraryAssetPathResponse,
+} from './routes/library-routes.ts'
 
 class OriginRequestAdmission extends Context.Service<
   OriginRequestAdmission,
@@ -202,6 +206,7 @@ export const makeOriginHttpApplication = (
     const observeRoutes = yield* makeObserveRoutes()
     const acquireRoutes = yield* makeAcquireRoutes()
     const simulationRoutes = makeSimulationRoutes(developmentSimulation)
+    const libraryRoutes = yield* makeLibraryRoutes()
 
     const live = HttpRouter.add(
       'GET',
@@ -269,6 +274,7 @@ export const makeOriginHttpApplication = (
         observeRoutes,
         acquireRoutes,
         ...simulationRoutes,
+        libraryRoutes,
         events,
         apiNotFound,
         webAndNotFound,
@@ -297,11 +303,16 @@ export const makeOriginHttpApplication = (
       const identity = yield* Effect.promise(async () =>
         admission(admissionRequest),
       )
+      const malformedLibraryPath = malformedLibraryAssetPathResponse(
+        request.method,
+        requestPath,
+      )
       return identity === undefined
         ? yield* unauthenticated(request.method, requestPath)
-        : yield* routes.pipe(
-            Effect.provideService(OriginRequestIdentity, identity),
-          )
+        : (malformedLibraryPath ??
+            (yield* routes.pipe(
+              Effect.provideService(OriginRequestIdentity, identity),
+            )))
     })
   })
 

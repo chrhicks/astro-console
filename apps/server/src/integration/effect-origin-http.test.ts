@@ -22,11 +22,15 @@ import {
   CommandHttpSuccessEnvelope,
   DevelopmentSimulationControlFailure,
   DevelopmentSimulationProjection,
+  LibraryAssetDetail,
+  LibraryPage,
   PlanWorkspaceProjection,
   PlanCommandResponse,
   ObserveCommandResponse,
   ObserveLiveFrameReview,
+  ProcessSourceHandoff,
   RefreshPreflightResponse,
+  ReviewAssetResponse,
   AcquireCommandResponse,
   CameraCommandResponse,
 } from '@astro-console/protocol'
@@ -88,6 +92,19 @@ import {
 } from '../services/preflight-command-service.ts'
 import type { ReadOnlyPreflightProviderShape } from '../services/preflight-service.ts'
 import type { TargetAcquisitionProviderShape } from '../services/target-acquisition-service.ts'
+import { sqliteLibraryServiceLayer } from '../persistence/library-sqlite-repository.ts'
+import {
+  LibraryReviewService,
+  libraryReviewServiceLayer,
+} from '../services/library-review-service.ts'
+import {
+  absentLibraryDownloadGrantLayer,
+  configuredLibraryDownloadGrantLayer,
+  configuredLibraryRepresentationStorageLayer,
+  LibraryRepresentationService,
+  libraryRepresentationServiceLayer,
+} from '../services/library-representation-service.ts'
+import { LibraryService } from '../services/library-service.ts'
 
 const owner: LocalIdentity = {
   personId: 'owner-person',
@@ -169,12 +186,23 @@ const makeGraph = (
   developmentSimulation?: DevelopmentSimulationConfig,
   routeDependenciesLayer?: RouteDependenciesLayer,
   fixtureDefinitionKind: 'fixture' | 'fake' = 'fixture',
+  downloadGrant?: {
+    readonly issue: (request: {
+      readonly objectKey: string
+      readonly expiresAt: string
+    }) => Promise<string>
+    readonly now: () => Date
+  },
 ) =>
   Effect.gen(function* () {
     observe?.('acquired')
     const database = openOriginDatabase(':memory:')
     initializeRuntimeState(database)
     installM27Fixture(database, fixtureDefinitionKind)
+    const originalsRoot = join(webRoot, 'library-originals')
+    const previewsRoot = join(webRoot, 'library-previews')
+    mkdirSync(originalsRoot)
+    mkdirSync(previewsRoot)
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         database.close()
@@ -243,10 +271,50 @@ const makeGraph = (
       ),
       PreflightCommandService,
     )
+    const libraryReviewService = Context.get(
+      yield* Layer.build(
+        libraryReviewServiceLayer.pipe(Layer.provide(graphLayer)),
+      ),
+      LibraryReviewService,
+    )
+    const libraryService = Context.get(
+      yield* Layer.build(
+        sqliteLibraryServiceLayer(
+          database,
+          () => repository.state().snapshotVersion,
+        ),
+      ),
+      LibraryService,
+    )
+    const libraryRepresentationService = Context.get(
+      yield* Layer.build(
+        libraryRepresentationServiceLayer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.succeed(LibraryService, libraryService),
+              configuredLibraryRepresentationStorageLayer({
+                originalsRoot,
+                previewsRoot,
+              }),
+              downloadGrant === undefined
+                ? absentLibraryDownloadGrantLayer
+                : configuredLibraryDownloadGrantLayer(
+                    { issue: downloadGrant.issue },
+                    downloadGrant.now,
+                  ),
+            ),
+          ),
+        ),
+      ),
+      LibraryRepresentationService,
+    )
     const applicationLayer = Layer.mergeAll(
       graphLayer,
+      Layer.succeed(LibraryService, libraryService),
       Layer.succeed(AcquireCommandService, acquireService),
       Layer.succeed(PreflightCommandService, preflightService),
+      Layer.succeed(LibraryReviewService, libraryReviewService),
+      Layer.succeed(LibraryRepresentationService, libraryRepresentationService),
     )
     const application = yield* makeOriginHttpApplication(
       webRoot,
@@ -262,6 +330,8 @@ const makeGraph = (
       publication,
       publicationEvents,
       repository,
+      originalsRoot,
+      previewsRoot,
     }
   })
 
@@ -279,6 +349,7 @@ const withOrigin = (
   developmentSimulation?: DevelopmentSimulationConfig,
   routeDependenciesLayer?: RouteDependenciesLayer,
   fixtureDefinitionKind: 'fixture' | 'fake' = 'fixture',
+  downloadGrant?: Parameters<typeof makeGraph>[6],
 ) =>
   Effect.runPromise(
     Effect.scoped(
@@ -290,6 +361,7 @@ const withOrigin = (
           developmentSimulation,
           routeDependenciesLayer,
           fixtureDefinitionKind,
+          downloadGrant,
         )
         const bound = yield* listenOriginHttp(
           graph.application,
@@ -322,6 +394,7 @@ const ownerOrigin = (
   developmentSimulation?: DevelopmentSimulationConfig,
   routeDependenciesLayer?: RouteDependenciesLayer,
   fixtureDefinitionKind: 'fixture' | 'fake' = 'fixture',
+  downloadGrant?: Parameters<typeof makeGraph>[6],
 ) =>
   withOrigin(
     [{ name: 'owner', identity: owner }],
@@ -329,6 +402,7 @@ const ownerOrigin = (
     developmentSimulation,
     routeDependenciesLayer,
     fixtureDefinitionKind,
+    downloadGrant,
   )
 
 const ownerViewerOrigin = (
@@ -336,6 +410,7 @@ const ownerViewerOrigin = (
   developmentSimulation?: DevelopmentSimulationConfig,
   routeDependenciesLayer?: RouteDependenciesLayer,
   fixtureDefinitionKind: 'fixture' | 'fake' = 'fixture',
+  downloadGrant?: Parameters<typeof makeGraph>[6],
 ) =>
   withOrigin(
     [
@@ -346,6 +421,7 @@ const ownerViewerOrigin = (
     developmentSimulation,
     routeDependenciesLayer,
     fixtureDefinitionKind,
+    downloadGrant,
   )
 
 const fetchEffect = (url: string, init?: RequestInit) =>
@@ -927,6 +1003,383 @@ test('Observe live-frame review returns typed current identity projection truth'
       assert.equal(review._tag, 'Unavailable')
       if (review._tag === 'Unavailable')
         assert.equal(review.reason, 'NoCurrentFrame')
+    }),
+  ))
+
+test('Library reads preserve catalog, detail, and Process-source truth through the Effect listener', () =>
+  ownerOrigin(({ bases }) =>
+    Effect.gen(function* () {
+      const pageResponse = yield* fetchEffect(
+        `${bases.owner}/api/library?queryId=effect-library&pageSize=3&sort=sharpestFirst`,
+        { headers: { 'x-listener-key': 'owner' } },
+      )
+      const page = yield* responseJson(pageResponse).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(LibraryPage)),
+      )
+      assert.equal(pageResponse.status, 200)
+      assert.equal(page.results.length, 3)
+      assert.equal(page.results[0]?.assetId, 'asset-m27-001')
+
+      const detailResponse = yield* fetchEffect(
+        `${bases.owner}/api/library/assets/asset-m27-001`,
+        { headers: { 'x-listener-key': 'owner' } },
+      )
+      const detail = yield* responseJson(detailResponse).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(LibraryAssetDetail)),
+      )
+      assert.equal(detailResponse.status, 200)
+      assert.equal(detail.lineage.runId, 'run-m27-001')
+      assert.deepEqual(detail.actions, [
+        { _tag: 'Eligible', action: 'download' },
+        { _tag: 'Eligible', action: 'openInProcess' },
+      ])
+
+      const handoffResponse = yield* fetchEffect(
+        `${bases.owner}/api/library/assets/asset-m27-001/process-source`,
+        { headers: { 'x-listener-key': 'owner' } },
+      )
+      const handoff = yield* responseJson(handoffResponse).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(ProcessSourceHandoff)),
+      )
+      assert.equal(handoffResponse.status, 200)
+      assert.equal(handoff.sourceAssetId, 'asset-m27-001')
+      assert.equal(handoff.lineage.runId, 'run-m27-001')
+      assert.equal(handoff.recommendedSet?.candidateCount, 2)
+    }),
+  ))
+
+test('Library review preserves owner authority, revisions, idempotency, and projection publication', () =>
+  ownerViewerOrigin(({ graph, bases }) =>
+    Effect.gen(function* () {
+      const request = {
+        expectedAssetRevision: 1,
+        expectedReviewRevision: 0,
+        decision: 'accepted',
+        rating: 5,
+        annotation: 'Keep this frame.',
+        idempotencyKey: 'effect-library-review-001',
+      }
+      const submit = (base: string | undefined, body: unknown) =>
+        fetchEffect(`${base}/api/library/assets/asset-m27-001/review`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-listener-key': base === bases.owner ? 'owner' : 'viewer',
+          },
+          body: JSON.stringify(body),
+        })
+
+      const deniedResponse = yield* submit(bases.viewer, request)
+      const denied = yield* responseJson(deniedResponse).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(ReviewAssetResponse)),
+      )
+      assert.equal(deniedResponse.status, 403)
+      assert.equal(denied._tag, 'Rejected')
+      if (denied._tag === 'Rejected')
+        assert.equal(denied.failure._tag, 'ClientReadOnly')
+
+      const acceptedResponse = yield* submit(bases.owner, request)
+      const accepted = yield* responseJson(acceptedResponse).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(ReviewAssetResponse)),
+      )
+      assert.equal(acceptedResponse.status, 200)
+      assert.equal(accepted._tag, 'Accepted')
+      if (accepted._tag !== 'Accepted')
+        return yield* Effect.die('Expected accepted review')
+      assert.equal(accepted.review.revision, 1)
+      assert.ok(graph.publicationEvents.includes('publish'))
+
+      const replayResponse = yield* submit(bases.owner, request)
+      assert.equal(replayResponse.status, 200)
+      assert.deepEqual(yield* responseJson(replayResponse), accepted)
+
+      const staleResponse = yield* submit(bases.owner, {
+        ...request,
+        decision: 'rejected',
+        idempotencyKey: 'effect-library-review-stale',
+      })
+      const stale = yield* responseJson(staleResponse).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(ReviewAssetResponse)),
+      )
+      assert.equal(staleResponse.status, 409)
+      assert.equal(stale._tag, 'Rejected')
+      if (stale._tag === 'Rejected')
+        assert.equal(stale.failure._tag, 'RevisionConflict')
+    }),
+  ))
+
+test('Library preview and local download preserve bounded immutable representations', () =>
+  ownerOrigin(({ graph, bases }) =>
+    Effect.gen(function* () {
+      const stored = Schema.decodeUnknownSync(
+        Schema.Struct({ detail: Schema.String }),
+      )(
+        graph.database
+          .prepare(
+            "SELECT detail FROM library_assets WHERE asset_id='asset-m27-001'",
+          )
+          .get(),
+      )
+      graph.database
+        .prepare(
+          "UPDATE library_assets SET detail=? WHERE asset_id='asset-m27-001'",
+        )
+        .run(
+          JSON.stringify({
+            ...JSON.parse(stored.detail),
+            inspection: {
+              _tag: 'Available',
+              preview: {
+                format: 'png',
+                checksum: 'effect-preview-checksum',
+                provenance: {
+                  algorithm: 'bounded-pixel-preview-v1',
+                  sourceChecksum: 'effect-original-checksum',
+                },
+              },
+              metrics: {
+                clippingPercent: 0,
+                framing: 'inFrame',
+                sharpness: 90,
+                shape: 90,
+                driftArcsec: 0,
+              },
+              rationale: {
+                decision: 'accepted',
+                summary: 'The retained pixels support a bounded preview.',
+              },
+            },
+          }),
+        )
+      const previewBytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10])
+      const originalBytes = new TextEncoder().encode('immutable-fits-bytes')
+      writeFileSync(join(graph.previewsRoot, 'asset-m27-001.png'), previewBytes)
+      writeFileSync(
+        join(graph.originalsRoot, 'asset-m27-001.fits'),
+        originalBytes,
+      )
+
+      const preview = yield* fetchEffect(
+        `${bases.owner}/api/library/assets/asset-m27-001/preview`,
+        { headers: { 'x-listener-key': 'owner' } },
+      )
+      assert.equal(preview.status, 200)
+      assert.equal(preview.headers.get('content-type'), 'image/png')
+      assert.equal(preview.headers.get('cache-control'), 'private, no-store')
+      assert.equal(preview.headers.get('content-length'), '8')
+      assert.equal(preview.headers.get('x-astro-preview-max-bytes'), '65536')
+      assert.equal(preview.headers.get('x-astro-preview-refresh-ms'), '1000')
+      assert.equal(preview.headers.get('x-astro-preview-concurrent-limit'), '2')
+      assert.deepEqual(
+        new Uint8Array(yield* Effect.promise(() => preview.arrayBuffer())),
+        previewBytes,
+      )
+
+      const repeated = yield* fetchEffect(
+        `${bases.owner}/api/library/assets/asset-m27-001/preview`,
+        { headers: { 'x-listener-key': 'owner' } },
+      )
+      assert.equal(repeated.status, 429)
+      assert.deepEqual(yield* responseJson(repeated), {
+        outcome: 'rejected',
+        reason: 'PreviewRefreshLimited',
+      })
+
+      const download = yield* fetchEffect(
+        `${bases.owner}/api/library/assets/asset-m27-001/download`,
+        { headers: { 'x-listener-key': 'owner' } },
+      )
+      assert.equal(download.status, 200)
+      assert.equal(download.headers.get('content-type'), 'application/fits')
+      assert.equal(download.headers.get('cache-control'), 'private, no-store')
+      assert.equal(
+        download.headers.get('content-disposition'),
+        'attachment; filename="asset-m27-001.fits"',
+      )
+      assert.deepEqual(
+        new Uint8Array(yield* Effect.promise(() => download.arrayBuffer())),
+        originalBytes,
+      )
+    }),
+  ))
+
+test('Library published download preserves the bounded grant redirect', () => {
+  const issued: Array<{
+    readonly objectKey: string
+    readonly expiresAt: string
+  }> = []
+  return ownerOrigin(
+    ({ graph, bases }) =>
+      Effect.gen(function* () {
+        const stored = Schema.decodeUnknownSync(
+          Schema.Struct({ detail: Schema.String }),
+        )(
+          graph.database
+            .prepare(
+              "SELECT detail FROM library_assets WHERE asset_id='asset-m27-001'",
+            )
+            .get(),
+        )
+        graph.database
+          .prepare(
+            "UPDATE library_assets SET availability='published',detail=? WHERE asset_id='asset-m27-001'",
+          )
+          .run(
+            JSON.stringify({
+              ...JSON.parse(stored.detail),
+              availability: 'published',
+            }),
+          )
+        graph.database
+          .prepare(
+            'INSERT INTO asset_publications (asset_id,checksum,state,updated_at,object_key) VALUES (?,?,?,?,?)',
+          )
+          .run(
+            'asset-m27-001',
+            'effect-published-checksum',
+            'published',
+            '2026-08-11T00:00:00.000Z',
+            'published/run-m27-001/finals/asset-m27-001.fits',
+          )
+        const response = yield* fetchEffect(
+          `${bases.owner}/api/library/assets/asset-m27-001/download`,
+          {
+            headers: { 'x-listener-key': 'owner' },
+            redirect: 'manual',
+          },
+        )
+        assert.equal(response.status, 303)
+        assert.equal(response.headers.get('cache-control'), 'private, no-store')
+        assert.equal(response.headers.get('referrer-policy'), 'no-referrer')
+        assert.equal(
+          response.headers.get('location'),
+          'https://download.example/asset-m27-001',
+        )
+        assert.equal(yield* Effect.promise(() => response.text()), '')
+        assert.deepEqual(issued, [
+          {
+            objectKey: 'published/run-m27-001/finals/asset-m27-001.fits',
+            expiresAt: '2026-08-11T00:05:00.000Z',
+          },
+        ])
+      }),
+    undefined,
+    undefined,
+    'fixture',
+    {
+      issue: (request) => {
+        issued.push(request)
+        return Promise.resolve('https://download.example/asset-m27-001')
+      },
+      now: () => new Date('2026-08-11T00:00:00.000Z'),
+    },
+  )
+})
+
+test('Library routes preserve bounded input and truthful failure envelopes', () =>
+  ownerOrigin(({ bases }) =>
+    Effect.gen(function* () {
+      const headers = { 'x-listener-key': 'owner' }
+      const invalidPage = yield* fetchEffect(
+        `${bases.owner}/api/library?pageSize=101&sort=capturedAtDescending`,
+        { headers },
+      )
+      assert.equal(invalidPage.status, 400)
+      assert.deepEqual(yield* responseJson(invalidPage), {
+        _tag: 'InvalidInput',
+        message: 'The service could not read that action.',
+      })
+
+      const invalidDetail = yield* fetchEffect(
+        `${bases.owner}/api/library/assets/malformed`,
+        { headers },
+      )
+      assert.equal(invalidDetail.status, 400)
+      const malformedPath = yield* fetchEffect(
+        `${bases.owner}/api/library/assets/%`,
+        { headers },
+      )
+      assert.equal(malformedPath.status, 400)
+      assert.deepEqual(yield* responseJson(malformedPath), {
+        _tag: 'InvalidInput',
+        message: 'The service could not read that action.',
+      })
+      const missingDetail = yield* fetchEffect(
+        `${bases.owner}/api/library/assets/asset-m27-999`,
+        { headers },
+      )
+      assert.equal(missingDetail.status, 404)
+      assert.deepEqual(yield* responseJson(missingDetail), {
+        _tag: 'AssetNotFound',
+      })
+
+      const unavailableSource = yield* fetchEffect(
+        `${bases.owner}/api/library/assets/asset-m27-013/process-source`,
+        { headers },
+      )
+      assert.equal(unavailableSource.status, 409)
+      assert.deepEqual(yield* responseJson(unavailableSource), {
+        _tag: 'AssetUnavailable',
+        message:
+          'This asset is temporarily unavailable and cannot open in Process.',
+      })
+
+      const invalidReview = yield* fetchEffect(
+        `${bases.owner}/api/library/assets/asset-m27-001/review`,
+        {
+          method: 'POST',
+          headers: { ...headers, 'content-type': 'application/json' },
+          body: JSON.stringify({ decision: 'accepted' }),
+        },
+      )
+      assert.equal(invalidReview.status, 400)
+      const invalidReviewBody = yield* responseJson(invalidReview).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(ReviewAssetResponse)),
+      )
+      assert.equal(invalidReviewBody._tag, 'Rejected')
+      if (invalidReviewBody._tag === 'Rejected')
+        assert.equal(invalidReviewBody.failure._tag, 'InvalidInput')
+      const malformedReviewPath = yield* fetchEffect(
+        `${bases.owner}/api/library/assets/%/review`,
+        {
+          method: 'POST',
+          headers: { ...headers, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            expectedAssetRevision: 1,
+            expectedReviewRevision: 0,
+            decision: 'accepted',
+            idempotencyKey: 'effect-malformed-review-path',
+          }),
+        },
+      )
+      assert.equal(malformedReviewPath.status, 404)
+      const malformedReviewBody = yield* responseJson(malformedReviewPath).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(ReviewAssetResponse)),
+      )
+      assert.equal(malformedReviewBody._tag, 'Rejected')
+      if (malformedReviewBody._tag === 'Rejected')
+        assert.equal(malformedReviewBody.failure._tag, 'AssetNotFound')
+
+      const unavailablePreview = yield* fetchEffect(
+        `${bases.owner}/api/library/assets/asset-m27-001/preview`,
+        { headers },
+      )
+      assert.equal(unavailablePreview.status, 409)
+      assert.deepEqual(yield* responseJson(unavailablePreview), {
+        outcome: 'rejected',
+        reason: 'PreviewUnavailable',
+      })
+
+      const missingDownload = yield* fetchEffect(
+        `${bases.owner}/api/library/assets/asset-m27-999/download`,
+        { headers },
+      )
+      assert.equal(missingDownload.status, 404)
+      const invalidDownload = yield* fetchEffect(
+        `${bases.owner}/api/library/assets/not-an-asset/download`,
+        { headers },
+      )
+      assert.equal(invalidDownload.status, 400)
     }),
   ))
 
