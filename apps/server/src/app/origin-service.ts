@@ -929,7 +929,8 @@ function constructLocalWebService(
             database,
             stateRepository,
             identity,
-            publishDomainProjection,
+            (type, cursor) =>
+              Effect.sync(() => publishDomainProjection(type, cursor)),
           ).pipe(
             Effect.catchTags({
               'Server.CommandInputInvalid': () =>
@@ -1191,7 +1192,8 @@ function constructLocalWebService(
             runRepository,
             stateRepository,
             identity,
-            publishDomainProjection,
+            (type, cursor) =>
+              Effect.sync(() => publishDomainProjection(type, cursor)),
           ).pipe(
             Effect.catchTags({
               'Server.PlanCommandInputInvalid': () =>

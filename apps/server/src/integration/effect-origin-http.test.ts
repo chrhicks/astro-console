@@ -16,18 +16,33 @@ import {
   Stream,
 } from 'effect'
 import { NodeFileSystem, NodePath } from '@effect/platform-node'
-import { BootstrapHttpSuccessEnvelope } from '@astro-console/protocol'
+import {
+  BootstrapHttpSuccessEnvelope,
+  CommandHttpFailureEnvelope,
+  CommandHttpSuccessEnvelope,
+  DevelopmentSimulationControlFailure,
+  DevelopmentSimulationProjection,
+  PlanWorkspaceProjection,
+  PlanCommandResponse,
+} from '@astro-console/protocol'
 import {
   makeOriginHttpApplication,
   listenOriginHttp,
 } from '../http/effect-origin-http.ts'
 import type { LocalIdentity, RequestAdmission } from '../auth/identity.ts'
-import { openOriginDatabase } from '../persistence/database.ts'
+import {
+  openOriginDatabase,
+  originDatabaseLayer,
+} from '../persistence/database.ts'
 import {
   StateSqliteRepository,
   stateSqliteRepositoryLayer,
   type StateSqliteRepositoryShape,
 } from '../persistence/state-sqlite-repository.ts'
+import {
+  RunSqliteRepository,
+  runSqliteRepositoryLayer,
+} from '../persistence/run-sqlite-repository.ts'
 import {
   ProjectionPublication,
   projectionPublicationLayer,
@@ -41,10 +56,13 @@ import {
   initializeRuntimeState,
   installM27Fixture,
 } from '../services/runtime-bootstrap.ts'
+import { reject } from '../http/origin-handlers.ts'
+import type { DevelopmentSimulationConfig } from '../http/development-simulation.ts'
+import { createAlpacaSimulator } from '../simulator/alpaca-simulator.ts'
 
 const owner: LocalIdentity = {
   personId: 'owner-person',
-  clientId: 'owner-client',
+  clientId: 'desktop-owner',
   capability: 'controlCapable',
   role: 'owner',
 }
@@ -74,6 +92,7 @@ const makeGraph = (
   publicationFor?: (
     repository: StateSqliteRepositoryShape,
   ) => ProjectionPublicationShape,
+  developmentSimulation?: DevelopmentSimulationConfig,
 ) =>
   Effect.gen(function* () {
     observe?.('acquired')
@@ -94,6 +113,12 @@ const makeGraph = (
       }),
     )
     const repository = Context.get(repositoryContext, StateSqliteRepository)
+    const runRepository = Context.get(
+      yield* Layer.build(
+        runSqliteRepositoryLayer(database, repository, reject),
+      ),
+      RunSqliteRepository,
+    )
     const publicationEvents: Array<'connect' | 'disconnect' | 'publish'> = []
     const publication =
       publicationFor === undefined
@@ -112,10 +137,19 @@ const makeGraph = (
           )
         : publicationFor(repository)
     const graphLayer = Layer.merge(
-      Layer.succeed(StateSqliteRepository, repository),
-      Layer.succeed(ProjectionPublication, publication),
+      originDatabaseLayer(database),
+      Layer.merge(
+        Layer.succeed(StateSqliteRepository, repository),
+        Layer.merge(
+          Layer.succeed(RunSqliteRepository, runRepository),
+          Layer.succeed(ProjectionPublication, publication),
+        ),
+      ),
     )
-    const application = yield* makeOriginHttpApplication(webRoot).pipe(
+    const application = yield* makeOriginHttpApplication(
+      webRoot,
+      developmentSimulation,
+    ).pipe(
       Effect.provide(graphLayer),
       Effect.provide(NodeFileSystem.layer),
       Effect.provide(NodePath.layer),
@@ -291,6 +325,13 @@ test('fixed routes preserve system, static, CSP, SSE, and not-found behavior', a
         )
         assert.equal(operations.status, 200)
 
+        const plan = yield* fetchEffect(`${base}/api/workspaces/plan`, admitted)
+        assert.equal(plan.status, 200)
+        const planBody = yield* Effect.promise(() => plan.json()).pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(PlanWorkspaceProjection)),
+        )
+        assert.equal(planBody.planId, 'plan-m27')
+
         const page = yield* fetchEffect(`${base}/plan`, admitted)
         assert.equal(page.status, 200)
         assert.equal(
@@ -323,6 +364,10 @@ test('fixed routes preserve system, static, CSP, SSE, and not-found behavior', a
           yield* Effect.promise(() => deferredRoute.json()),
           invalidInput,
         )
+        assert.equal(
+          (yield* fetchEffect(`${base}/api/simulation`, admitted)).status,
+          404,
+        )
         const missing = yield* fetchEffect(`${base}/missing`, admitted)
         assert.equal(missing.status, 404)
         assert.equal(yield* Effect.promise(() => missing.text()), '')
@@ -343,6 +388,310 @@ test('fixed routes preserve system, static, CSP, SSE, and not-found behavior', a
       }),
     ),
   )
+})
+
+test('Plan commands cross the Effect listener and preserve revision-bound state', async () => {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const graph = yield* makeGraph(webFixture())
+        graph.repository.commit({
+          leaseRevision: 1,
+          leaseHolder: owner.clientId,
+          leaseState: 'held',
+          reconnectGraceUntil: null,
+        })
+        const bound = yield* listenOriginHttp(graph.application, [
+          {
+            name: 'owner',
+            host: '127.0.0.1',
+            port: 0,
+            admission: keyedAdmission('owner', owner),
+          },
+        ])
+        const listener = bound.owner
+        if (listener === undefined)
+          return yield* Effect.die('Expected owner listener to bind')
+        const base = `http://127.0.0.1:${listener.port}`
+        const headers = {
+          'content-type': 'application/json',
+          'x-listener-key': 'owner',
+        }
+
+        const malformed = yield* fetchEffect(`${base}/api/plan/commands`, {
+          method: 'POST',
+          headers,
+          body: '{}',
+        })
+        assert.equal(malformed.status, 400)
+        const malformedBody = yield* Effect.promise(() =>
+          malformed.json(),
+        ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(PlanCommandResponse)))
+        assert.equal(malformedBody._tag, 'Rejected')
+
+        const oversized = yield* fetchEffect(`${base}/api/plan/commands`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ padding: 'x'.repeat(16_384) }),
+        })
+        assert.equal(oversized.status, 400)
+
+        const snapshot = yield* fetchEffect(`${base}/api/snapshot`, {
+          headers: { 'x-listener-key': 'owner' },
+        }).pipe(
+          Effect.flatMap(responseJson),
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(BootstrapHttpSuccessEnvelope),
+          ),
+        )
+        if (snapshot.data.plan === undefined)
+          return yield* Effect.die('Expected fixture Plan')
+        const started = yield* fetchEffect(`${base}/api/plan/commands`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            intent: {
+              _tag: 'StartAcceptedRun',
+              planId: snapshot.data.plan.planId,
+              expectedPlanRevision: snapshot.data.plan.revision,
+              expectedLeaseRevision: snapshot.data.control.revision,
+              idempotencyKey: 'effect-plan-start-001',
+            },
+          }),
+        })
+        const startedBody = yield* Effect.promise(() => started.json()).pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(PlanCommandResponse)),
+        )
+        assert.equal(started.status, 202, JSON.stringify(startedBody))
+        assert.equal(startedBody._tag, 'Accepted')
+        assert.equal(startedBody.snapshot.activeRun._tag, 'Active')
+      }),
+    ),
+  )
+})
+
+test('control commands use request identity and preserve lease revision rules', async () => {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const graph = yield* makeGraph(webFixture())
+        const bound = yield* listenOriginHttp(graph.application, [
+          {
+            name: 'owner',
+            host: '127.0.0.1',
+            port: 0,
+            admission: keyedAdmission('owner', owner),
+          },
+          {
+            name: 'viewer',
+            host: '127.0.0.1',
+            port: 0,
+            admission: keyedAdmission('viewer', viewer),
+          },
+        ])
+        const ownerListener = bound.owner
+        const viewerListener = bound.viewer
+        if (ownerListener === undefined || viewerListener === undefined)
+          return yield* Effect.die('Expected both listeners to bind')
+        const command = (commandId: string, expectedLeaseRevision: number) =>
+          JSON.stringify({
+            commandId,
+            command: {
+              _tag: 'RequestControl',
+              expectedLeaseRevision,
+              idempotencyKey: commandId,
+            },
+          })
+
+        const denied = yield* fetchEffect(
+          `http://127.0.0.1:${viewerListener.port}/api/commands/control`,
+          {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-listener-key': 'viewer',
+            },
+            body: command('viewer-control-request', 0),
+          },
+        )
+        assert.equal(denied.status, 403)
+        const deniedBody = yield* Effect.promise(() => denied.json()).pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(CommandHttpFailureEnvelope),
+          ),
+        )
+        assert.equal(deniedBody.failure._tag, 'CommandRejected')
+
+        const malformed = yield* fetchEffect(
+          `http://127.0.0.1:${ownerListener.port}/api/commands/control`,
+          {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-listener-key': 'owner',
+            },
+            body: '{}',
+          },
+        )
+        assert.equal(malformed.status, 400)
+        const malformedBody = yield* Effect.promise(() =>
+          malformed.json(),
+        ).pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(CommandHttpFailureEnvelope),
+          ),
+        )
+        assert.equal(malformedBody.failure._tag, 'InvalidInput')
+
+        const accepted = yield* fetchEffect(
+          `http://127.0.0.1:${ownerListener.port}/api/commands/control`,
+          {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-listener-key': 'owner',
+            },
+            body: command('owner-control-request', 0),
+          },
+        )
+        assert.equal(accepted.status, 202)
+        const acceptedBody = yield* Effect.promise(() => accepted.json()).pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(CommandHttpSuccessEnvelope),
+          ),
+        )
+        assert.equal(acceptedBody.data.control.pendingRequests?.length, 1)
+
+        const stale = yield* fetchEffect(
+          `http://127.0.0.1:${ownerListener.port}/api/commands/control`,
+          {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-listener-key': 'owner',
+            },
+            body: command('stale-control-request', 99),
+          },
+        )
+        assert.equal(stale.status, 409)
+        const staleBody = yield* Effect.promise(() => stale.json()).pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(CommandHttpFailureEnvelope),
+          ),
+        )
+        assert.equal(staleBody.failure._tag, 'CommandRejected')
+        if (staleBody.failure._tag === 'CommandRejected')
+          assert.equal(staleBody.failure.failure._tag, 'FreshnessConflict')
+      }),
+    ),
+  )
+})
+
+test('development simulation routes are conditional and keep control admission', async () => {
+  const simulator = createAlpacaSimulator({
+    corpusRoot: '/unused',
+    initialScenario: 'exposure-success',
+  })
+  const simulatorListener = await simulator.listen()
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const graph = yield* makeGraph(webFixture(), undefined, undefined, {
+            origin: simulatorListener.origin,
+            launchScenario: 'exposure-success',
+          })
+          const bound = yield* listenOriginHttp(graph.application, [
+            {
+              name: 'owner',
+              host: '127.0.0.1',
+              port: 0,
+              admission: keyedAdmission('owner', owner),
+            },
+            {
+              name: 'viewer',
+              host: '127.0.0.1',
+              port: 0,
+              admission: keyedAdmission('viewer', viewer),
+            },
+          ])
+          const ownerListener = bound.owner
+          const viewerListener = bound.viewer
+          if (ownerListener === undefined || viewerListener === undefined)
+            return yield* Effect.die('Expected both listeners to bind')
+          const ownerBase = `http://127.0.0.1:${ownerListener.port}`
+          const viewerBase = `http://127.0.0.1:${viewerListener.port}`
+
+          const projection = yield* fetchEffect(`${ownerBase}/api/simulation`, {
+            headers: { 'x-listener-key': 'owner' },
+          })
+          assert.equal(projection.status, 200)
+          const projectionBody = yield* Effect.promise(() =>
+            projection.json(),
+          ).pipe(
+            Effect.flatMap(
+              Schema.decodeUnknownEffect(DevelopmentSimulationProjection),
+            ),
+          )
+          assert.equal(projectionBody.scenario, 'exposure-success')
+
+          const denied = yield* fetchEffect(`${viewerBase}/api/simulation`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-listener-key': 'viewer',
+            },
+            body: JSON.stringify({ action: 'advance', milliseconds: 1_000 }),
+          })
+          assert.equal(denied.status, 403)
+          const deniedBody = yield* Effect.promise(() => denied.json()).pipe(
+            Effect.flatMap(
+              Schema.decodeUnknownEffect(DevelopmentSimulationControlFailure),
+            ),
+          )
+          assert.equal(deniedBody.reason, 'ControlRequired')
+
+          const malformed = yield* fetchEffect(`${ownerBase}/api/simulation`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-listener-key': 'owner',
+            },
+            body: '{}',
+          })
+          assert.equal(malformed.status, 400)
+          const malformedBody = yield* Effect.promise(() =>
+            malformed.json(),
+          ).pipe(
+            Effect.flatMap(
+              Schema.decodeUnknownEffect(DevelopmentSimulationControlFailure),
+            ),
+          )
+          assert.equal(malformedBody.reason, 'InvalidInput')
+
+          const advanced = yield* fetchEffect(`${ownerBase}/api/simulation`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-listener-key': 'owner',
+            },
+            body: JSON.stringify({ action: 'advance', milliseconds: 1_000 }),
+          })
+          assert.equal(advanced.status, 200)
+          const advancedBody = yield* Effect.promise(() =>
+            advanced.json(),
+          ).pipe(
+            Effect.flatMap(
+              Schema.decodeUnknownEffect(DevelopmentSimulationProjection),
+            ),
+          )
+          assert.equal(advancedBody.clock.nowMs, 1_000)
+        }),
+      ),
+    )
+  } finally {
+    await simulatorListener.close()
+  }
 })
 
 const invalidInput = {

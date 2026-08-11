@@ -135,7 +135,7 @@ const sqliteControlOperation = (
 const sqliteControlPersistenceLayer = (
   db: DatabaseSync,
   stateRepository: StateSqliteRepositoryShape,
-  publish: (type: string, cursor: number) => void,
+  publish: (type: string, cursor: number) => Effect.Effect<void>,
 ) =>
   controlPersistenceLayer({
     request: (commandId, command, identity) =>
@@ -148,7 +148,7 @@ const sqliteControlPersistenceLayer = (
       sqliteControlOperation(db, stateRepository, commandId, command, identity),
     take: (commandId, command, identity) =>
       sqliteControlOperation(db, stateRepository, commandId, command, identity),
-    publish: (type, cursor) => Effect.sync(() => publish(type, cursor)),
+    publish,
   })
 
 export const controlCommandFromEnvelope = Effect.fn(
@@ -160,7 +160,7 @@ export const controlCommandFromEnvelope = Effect.fn(
     db: DatabaseSync,
     stateRepository: StateSqliteRepositoryShape,
     identity: LocalIdentity,
-    publish: (type: string, cursor: number) => void,
+    publish: (type: string, cursor: number) => Effect.Effect<void>,
   ) {
     void db
     void stateRepository

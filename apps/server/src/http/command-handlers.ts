@@ -34,7 +34,7 @@ export const commandFailureStatuses = {
 const sqlitePlanPersistenceLayer = (
   runRepository: RunSqliteRepositoryShape,
   stateRepository: StateSqliteRepositoryShape,
-  publish: (type: string, cursor: number) => void,
+  publish: (type: string, cursor: number) => Effect.Effect<void, unknown>,
 ) =>
   planPersistenceLayer({
     saveDraft: (intent, identity) =>
@@ -73,11 +73,7 @@ const sqlitePlanPersistenceLayer = (
         }),
       ),
     snapshot: (identity) => stateRepository.bootstrapSnapshot(identity),
-    publish: (type, cursor) =>
-      Effect.try({
-        try: () => publish(type, cursor),
-        catch: (cause) => cause,
-      }),
+    publish,
   })
 export const planCommandFromRequest = Effect.fnUntraced(
   function* (
@@ -85,7 +81,7 @@ export const planCommandFromRequest = Effect.fnUntraced(
     runRepository: RunSqliteRepositoryShape,
     stateRepository: StateSqliteRepositoryShape,
     identity: LocalIdentity,
-    publish: (type: string, cursor: number) => void,
+    publish: (type: string, cursor: number) => Effect.Effect<void, unknown>,
   ) {
     void runRepository
     void stateRepository
