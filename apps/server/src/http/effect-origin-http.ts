@@ -66,7 +66,7 @@ export type OriginHttpApplication = Effect.Effect<
 
 export type OriginHttpBinding = {
   readonly name: string
-  readonly host: '127.0.0.1' | '0.0.0.0'
+  readonly host: string
   readonly port: number
   readonly admission: RequestAdmission
 }
