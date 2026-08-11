@@ -16,10 +16,6 @@ import {
 import {
   BootstrapHttpFailureEnvelope,
   BootstrapHttpSuccessEnvelope,
-  CommandHttpFailureEnvelope,
-  DevelopmentSimulationControlFailure,
-  DevelopmentSimulationProjection,
-  DevelopmentSimulationUnavailable,
 } from '@astro-console/protocol'
 import {
   HttpRouter,
@@ -33,33 +29,16 @@ import type {
   RequestAdmission,
 } from '../auth/identity.ts'
 import { StateSqliteRepository } from '../persistence/state-sqlite-repository.ts'
-import { OriginDatabase } from '../persistence/database.ts'
-import { RunSqliteRepository } from '../persistence/run-sqlite-repository.ts'
-import { controlCommandFromEnvelope } from '../persistence/control-sqlite-repository.ts'
 import {
   ProjectionPublication,
   type ProjectionPublicationShape,
 } from '../services/projection-publication.ts'
 import { responseHeaders } from './response.ts'
-import { planWorkspaceProjection } from '../services/runtime-bootstrap.ts'
-import {
-  planCommandFromRequest,
-  commandFailureStatuses,
-  planInvalidResponse,
-  planServiceResponse,
-} from './command-handlers.ts'
-import { BodyTooLarge } from './request-body.ts'
-import {
-  controlDevelopmentSimulation,
-  DevelopmentSimulationControlRejected,
-  readDevelopmentSimulation,
-  type DevelopmentSimulationConfig,
-} from './development-simulation.ts'
-
-class OriginRequestIdentity extends Context.Service<
-  OriginRequestIdentity,
-  LocalIdentity
->()('@astro-console/server/OriginRequestIdentity') {}
+import type { DevelopmentSimulationConfig } from './development-simulation.ts'
+import { makeControlRoutes } from './routes/control-routes.ts'
+import { json, OriginRequestIdentity } from './routes/origin-route-shared.ts'
+import { makePlanRoutes } from './routes/plan-routes.ts'
+import { makeSimulationRoutes } from './routes/simulation-routes.ts'
 
 class OriginRequestAdmission extends Context.Service<
   OriginRequestAdmission,
@@ -97,12 +76,6 @@ const ownerRequired = {
 
 const encoder = new TextEncoder()
 
-const json = (status: number, value: unknown) =>
-  HttpServerResponse.jsonUnsafe(value, {
-    status,
-    headers: responseHeaders('application/json; charset=utf-8'),
-  })
-
 const unauthenticated = (method: string, pathname: string) => {
   if (method === 'GET' && pathname === '/api/snapshot')
     return Schema.decodeUnknownEffect(BootstrapHttpFailureEnvelope)({
@@ -124,35 +97,6 @@ const unauthenticated = (method: string, pathname: string) => {
 
 const pathname = (request: HttpServerRequest.HttpServerRequest) =>
   new URL(request.url, 'http://local').pathname
-
-const requestJson = (request: HttpServerRequest.HttpServerRequest) =>
-  request.json.pipe(
-    Effect.provideService(
-      HttpServerRequest.MaxBodySize,
-      FileSystem.Size(16_384),
-    ),
-    Effect.catch(() => Effect.succeed(undefined)),
-  )
-
-const readSimulation = Effect.fn('OriginHttp.readSimulation')(function* (
-  config: DevelopmentSimulationConfig,
-) {
-  return yield* Effect.tryPromise({
-    try: () => readDevelopmentSimulation(config),
-    catch: (cause) => cause,
-  })
-})
-
-const controlSimulation = Effect.fn('OriginHttp.controlSimulation')(function* (
-  config: DevelopmentSimulationConfig,
-  identity: LocalIdentity,
-  raw: unknown,
-) {
-  return yield* Effect.tryPromise({
-    try: () => controlDevelopmentSimulation(config, identity, raw),
-    catch: (cause) => cause,
-  })
-})
 
 const webRoute = (value: string) =>
   value === '/' ||
@@ -249,10 +193,11 @@ export const makeOriginHttpApplication = (
 ) =>
   Effect.gen(function* () {
     const repository = yield* StateSqliteRepository
-    const { database } = yield* OriginDatabase
-    const runRepository = yield* RunSqliteRepository
     const publication = yield* ProjectionPublication
     const web = yield* makeWebResponse(webRoot)
+    const planRoutes = yield* makePlanRoutes()
+    const controlRoutes = yield* makeControlRoutes()
+    const simulationRoutes = makeSimulationRoutes(developmentSimulation)
 
     const live = HttpRouter.add(
       'GET',
@@ -286,153 +231,6 @@ export const makeOriginHttpApplication = (
           : json(403, ownerRequired)
       }),
     )
-    const planWorkspace = HttpRouter.add(
-      'GET',
-      '/api/workspaces/plan',
-      Effect.sync(() => json(200, planWorkspaceProjection(database))),
-    )
-    const planCommands = HttpRouter.add(
-      'POST',
-      '/api/plan/commands',
-      Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest
-        const identity = yield* OriginRequestIdentity
-        const raw = yield* requestJson(request)
-        const result = yield* planCommandFromRequest(
-          Promise.resolve(raw),
-          runRepository,
-          repository,
-          identity,
-          (_type, cursor) => publication.publish(cursor),
-        ).pipe(
-          Effect.catchTags({
-            'Server.PlanCommandInputInvalid': () =>
-              planInvalidResponse(repository, identity),
-            'Server.PlanServiceUnavailable': () =>
-              planServiceResponse(
-                'PlanServiceUnavailable',
-                'The Plan service is temporarily unavailable.',
-              ),
-          }),
-        )
-        return json(result.status, result.body)
-      }),
-    )
-    const controlCommands = HttpRouter.add(
-      'POST',
-      '/api/commands/control',
-      Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest
-        const identity = yield* OriginRequestIdentity
-        const raw = yield* requestJson(request)
-        const result = yield* controlCommandFromEnvelope(
-          Promise.resolve(raw),
-          BodyTooLarge,
-          database,
-          repository,
-          identity,
-          (_type, cursor) => publication.publish(cursor),
-        ).pipe(
-          Effect.catchTags({
-            'Server.CommandInputInvalid': () =>
-              Schema.decodeUnknownEffect(CommandHttpFailureEnvelope)({
-                ok: false,
-                failure: {
-                  _tag: 'InvalidInput',
-                  summary: 'The service could not read that action.',
-                },
-              }).pipe(Effect.map((body) => ({ status: 400, body }))),
-            'Server.CommandRejected': ({ failure }) =>
-              Schema.decodeUnknownEffect(CommandHttpFailureEnvelope)({
-                ok: false,
-                failure: { _tag: 'CommandRejected', failure },
-              }).pipe(
-                Effect.map((body) => ({
-                  status: commandFailureStatuses[failure._tag],
-                  body,
-                })),
-              ),
-          }),
-        )
-        return json(result.status, result.body)
-      }),
-    )
-    const simulationRoutes =
-      developmentSimulation === undefined
-        ? []
-        : [
-            HttpRouter.add(
-              'GET',
-              '/api/simulation',
-              readSimulation(developmentSimulation).pipe(
-                Effect.match({
-                  onFailure: () =>
-                    json(
-                      503,
-                      DevelopmentSimulationUnavailable.make({
-                        mode: 'alpaca',
-                        notice: 'SIMULATION · NOT LIVE HARDWARE',
-                        state: 'unavailable',
-                        launchScenario: developmentSimulation.launchScenario,
-                        message: 'The development simulator is unavailable.',
-                      }),
-                    ),
-                  onSuccess: (projection) =>
-                    json(
-                      200,
-                      Schema.encodeSync(DevelopmentSimulationProjection)(
-                        projection,
-                      ),
-                    ),
-                }),
-              ),
-            ),
-            HttpRouter.add(
-              'POST',
-              '/api/simulation',
-              Effect.gen(function* () {
-                const request = yield* HttpServerRequest.HttpServerRequest
-                const identity = yield* OriginRequestIdentity
-                const raw = yield* requestJson(request)
-                const result = yield* controlSimulation(
-                  developmentSimulation,
-                  identity,
-                  raw,
-                ).pipe(
-                  Effect.match({
-                    onFailure: (cause) => {
-                      const rejected =
-                        cause instanceof DevelopmentSimulationControlRejected
-                          ? cause
-                          : undefined
-                      return {
-                        status: rejected?.status ?? 503,
-                        body: DevelopmentSimulationControlFailure.make({
-                          outcome: 'rejected',
-                          reason:
-                            rejected?.status === 403
-                              ? 'ControlRequired'
-                              : rejected?.status === 400
-                                ? 'InvalidInput'
-                                : 'SimulatorUnavailable',
-                          message:
-                            rejected?.message ??
-                            'The development simulator is unavailable.',
-                        }),
-                      }
-                    },
-                    onSuccess: (projection) => ({
-                      status: 200,
-                      body: Schema.encodeSync(DevelopmentSimulationProjection)(
-                        projection,
-                      ),
-                    }),
-                  }),
-                )
-                return json(result.status, result.body)
-              }),
-            ),
-          ]
     const events = HttpRouter.add(
       'GET',
       '/api/events',
@@ -462,9 +260,8 @@ export const makeOriginHttpApplication = (
         snapshot,
         ready,
         operations,
-        planWorkspace,
-        planCommands,
-        controlCommands,
+        planRoutes,
+        controlRoutes,
         ...simulationRoutes,
         events,
         apiNotFound,
