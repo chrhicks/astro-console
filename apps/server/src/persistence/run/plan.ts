@@ -8,8 +8,6 @@ import {
 } from '../../services/domain-state.ts'
 import {
   evaluatePlan,
-  planSequencePresentation,
-  planSequenceWindow,
   planWorkspaceProjection,
 } from '../../services/runtime-bootstrap.ts'
 import {
@@ -104,6 +102,8 @@ export function acceptPlanDraft(
         sequence.definition.earliestStart ?? currentSequence.window.startsAt
       const endsAt =
         sequence.definition.latestEnd ?? currentSequence.window.endsAt
+      const start = Date.parse(startsAt)
+      const end = Date.parse(endsAt)
       const definition = {
         ...sequence.definition,
         earliestStart: startsAt,
@@ -116,8 +116,18 @@ export function acceptPlanDraft(
           definition.horizonClearanceDegrees
       return {
         sequenceId: sequence.sequenceId,
-        ...planSequencePresentation(definition),
-        window: planSequenceWindow(definition, currentSequence.window),
+        window: {
+          ...currentSequence.window,
+          startsAt,
+          endsAt,
+          usableMinutes:
+            Number.isFinite(start) && Number.isFinite(end) && end > start
+              ? Math.min(
+                  currentSequence.window.usableMinutes,
+                  Math.floor((end - start) / 60_000),
+                )
+              : currentSequence.window.usableMinutes,
+        },
         horizon:
           currentSequence.horizon === 'missing' ||
           currentSequence.horizon === 'blocked'

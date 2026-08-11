@@ -4,7 +4,9 @@ import {
   LibraryQuery as LibraryQuerySchema,
   LibraryCursor,
   LibraryQueryId,
+  ReviewAssetFailure,
   ReviewAssetRequest,
+  ReviewAssetResponse,
   AssetRevision,
 } from '@astro-console/protocol'
 import { Effect, Layer } from 'effect'
@@ -171,14 +173,15 @@ test('decodes a durable typed review result for Process source review', async ()
             loadDetail: () => Effect.die('unused'),
             loadProcessSourceHandoff: () => Effect.die('unused'),
             reviewAsset: () =>
-              Effect.succeed({
-                outcome: 'accepted',
-                review: {
-                  revision: 1,
-                  decision: 'accepted',
-                  updatedAt: '2026-08-09T00:00:00.000Z',
-                },
-              }),
+              Effect.succeed(
+                ReviewAssetResponse.cases.Accepted.make({
+                  review: {
+                    revision: AssetRevision.make(1),
+                    decision: 'accepted',
+                    updatedAt: '2026-08-09T00:00:00.000Z',
+                  },
+                }),
+              ),
           }),
         ),
       ),
@@ -186,6 +189,51 @@ test('decodes a durable typed review result for Process source review', async ()
   )
   assert.equal(review.decision, 'accepted')
   assert.equal(review.revision, 1)
+})
+
+test('decodes typed review failures and rejects malformed responses', async () => {
+  for (const [response, expected] of [
+    [
+      ReviewAssetResponse.cases.Rejected.make({
+        failure: ReviewAssetFailure.cases.RevisionConflict.make({}),
+      }),
+      'The Library review changed. Reload and retry.',
+    ],
+    [{ _tag: 'Accepted' }, 'Review was not accepted.'],
+  ] as const) {
+    await assert.rejects(
+      () =>
+        Effect.runPromise(
+          Effect.gen(function* () {
+            const client = yield* LibraryClient
+            return yield* client.reviewAsset(
+              'asset-1',
+              ReviewAssetRequest.make({
+                expectedAssetRevision: AssetRevision.make(1),
+                expectedReviewRevision: AssetRevision.make(0),
+                decision: 'accepted',
+                idempotencyKey: 'review-process-source',
+              }),
+            )
+          }).pipe(
+            Effect.provide(layer),
+            Effect.provide(
+              Layer.succeed(
+                LibraryTransport,
+                LibraryTransport.of({
+                  loadPage: () => Effect.die('unused'),
+                  loadDetail: () => Effect.die('unused'),
+                  loadProcessSourceHandoff: () => Effect.die('unused'),
+                  reviewAsset: () => Effect.succeed(response),
+                }),
+              ),
+            ),
+          ),
+        ),
+      (error: unknown) =>
+        error instanceof LibraryUnavailable && error.reason === expected,
+    )
+  }
 })
 
 test('keeps Process source route failures unavailable', async () => {

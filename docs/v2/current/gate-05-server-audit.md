@@ -1,12 +1,14 @@
 # Gate 5 Server-Perspective Audit
 
-Status: **complete — Gate 5 closed after hardening July 22, 2026**
+Status: **historical accepted Gate 5 evidence — not current implementation authority**
 
-> **Current Process authority:** Processing Session material in this closed
-> audit is historical evidence. Use the current
+> **Current authority:** This closed audit preserves accepted product and
+> ownership evidence. Its former harness layout, filenames, and test counts are
+> retired. Use the current
 > [product specification](product-spec.md) and
 > [Process workflow](process-workflow-plan.md) for the implemented Processing
-> Project lifecycle.
+> Project lifecycle, and use the production server modules and shared protocol
+> module for current implementation ownership.
 
 This audit asks a stricter question than “does the fixture pass?”:
 
@@ -27,15 +29,14 @@ choices must preserve.
 - **Shape only** — proves that data can be constructed or decoded, not that the
   server behavior is correct.
 
-These evidence grades are tracked independently from test filenames. The
-repository reserves `[domain].proof.test.ts` for deterministic server
-simulations; ordinary `*.test.ts` files remain schema, pure-decision, invariant,
-and regression tests.
+These evidence grades described the Gate 5 hardening review. Current production
+proof is organized at the owning server lifecycle interfaces and actual HTTP
+clients; it does not preserve the former harness filename convention.
 
-## Proof-Test Contract
+## Historical Proof Contract
 
-A server-impacting scenario earns proof coverage only when a
-`*.proof.test.ts` exercises the relevant composition:
+During Gate 5, a server-impacting scenario earned proof coverage only when a
+deterministic production-shaped test exercised the relevant composition:
 
 ```text
 unknown request + trusted request context
@@ -46,58 +47,48 @@ unknown request + trusted request context
   -> authoritative projection
 ```
 
-The proof asserts both positive and negative evidence. Rejection must leave no
-aggregate change, durable event, accepted receipt, or queued external work.
-Acceptance must not execute the adapter inside the transaction. Races use
-`Deferred`, `Latch`, `Queue`, `Ref`, or explicit transaction hooks rather than
-timing sleeps.
-
-Not every scenario requires its own file. Proofs should be organized by domain
-and race boundary—for example:
-
-- `run-start.proof.test.ts`
-- `run-mutation.proof.test.ts`
-- `control-authority.proof.test.ts`
-- `acquire-evidence.proof.test.ts`
-- `processing-session.proof.test.ts`
-- `asset-delivery.proof.test.ts`
+The proof asserted both positive and negative evidence. Rejection had to leave
+no aggregate change, durable event, accepted receipt, or queued external work.
+Acceptance could not execute the adapter inside the transaction. Races used
+deterministic release gates or explicit transaction hooks rather than timing
+sleeps.
 
 Every server-impacting accepted scenario must map to at least one proof. A
 presentation-only scenario may remain a focused unit test when the audit states
 why no server composition is involved. Real SQLite, filesystem, CLI, worker, or
-R2 behavior uses `*.integration.test.ts` and does not replace the deterministic
-proof.
+R2 behavior requires production-interface evidence and does not become proven
+by schema construction alone.
 
-## Reopened Baseline
+## Historical Reopened Baseline
 
-| Grade | Scenarios | What it means now |
-| --- | --- | --- |
-| Transition proof | `SHELL-01..02`, `PROC-09` | The narrow claim exercised by the fixture is actually decided and asserted; later integration does not own the missing product meaning |
-| Partial proof | `CLIENT-01..03`, `PHONE-01`, `RUN-01..06`, `LEASE-01..06`, `ACQ-01..07`, `PROC-03..08`, `PROC-10..14`, `LIB-02..04` | A real rule or function is present, but the fixture omits consequential state, evidence, work, rejection, projection, or atomicity from the accepted scenario |
-| Shape only | `PROC-01..02`, `LIB-01` | The fixture currently constructs state or checks identity without executing the named handoff or review behavior |
+| Grade            | Scenarios                                                                                                           | What it meant                                                                                                                                                 |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Transition proof | `SHELL-01..02`, `PROC-09`                                                                                           | The narrow claim exercised by the fixture is actually decided and asserted; later integration does not own the missing product meaning                        |
+| Partial proof    | `CLIENT-01..03`, `PHONE-01`, `RUN-01..06`, `LEASE-01..06`, `ACQ-01..07`, `PROC-03..08`, `PROC-10..14`, `LIB-02..04` | A real rule or function is present, but the fixture omits consequential state, evidence, work, rejection, projection, or atomicity from the accepted scenario |
+| Shape only       | `PROC-01..02`, `LIB-01`                                                                                             | The fixture currently constructs state or checks identity without executing the named handoff or review behavior                                              |
 
 `RUN-01` improved from shape-only to partial proof after the audit added
 `RunDefinition`, readiness evaluation, active-run exclusion, precondition-token
 validation, initial `ActiveRun` state, and an explicit `BeginRun` work item. It
-does not yet freeze enough plan content to execute independently or prove that
+did not yet freeze enough plan content to execute independently or prove that
 state, event, idempotency result, and outbox work commit atomically.
 
-## Final Regrade
+## Historical Final Regrade
 
-| Evidence | Scenarios | Result |
-| --- | --- | --- |
-| Presentation-state proof | `SHELL-01..02` | Workspace selection and attention routing have no server mutation; focused tests prove they preserve domain authority |
-| Client composition proof | `CLIENT-01..03`, `PHONE-01` | Snapshot-first reconnect, cursor gaps, disconnected commands, last-confirmed truth, and per-action phone eligibility share one canonical projection |
-| Run composition proof | `RUN-01..06` | Executable frozen definitions, exact limitation acceptance, server-derived mutation impact, named interventions, atomic outbox acceptance, replay, and races |
-| Control composition proof | `LEASE-01..06` | Exclusive ownership, requests, presence/grace, takeover, expiry, stale rejection, and independent ownership revision |
-| Acquire composition proof | `ACQ-01..07` | Append-only solve evidence, bounded and changed-parameter recovery, exact correction acknowledgement and verification, proposal binding, and explicit polar acceptance |
-| Process composition proof | `PROC-01..14` | Source handoff, synchronized preview, full-resolution Apply, linear history, assistance, retry, reconnect, multi-asset Save, discard, and switching |
-| Asset composition proof | `LIB-01..04` | Stable identity, atomic multi-artifact creation, projection/comparison, local versus remote delivery, expiry, republication, and Process handoff |
+| Evidence                  | Scenarios                   | Result                                                                                                                                                                 |
+| ------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Presentation-state proof  | `SHELL-01..02`              | Workspace selection and attention routing have no server mutation; focused tests prove they preserve domain authority                                                  |
+| Client composition proof  | `CLIENT-01..03`, `PHONE-01` | Snapshot-first reconnect, cursor gaps, disconnected commands, last-confirmed truth, and per-action phone eligibility share one canonical projection                    |
+| Run composition proof     | `RUN-01..06`                | Executable frozen definitions, exact limitation acceptance, server-derived mutation impact, named interventions, atomic outbox acceptance, replay, and races           |
+| Control composition proof | `LEASE-01..06`              | Exclusive ownership, requests, presence/grace, takeover, expiry, stale rejection, and independent ownership revision                                                   |
+| Acquire composition proof | `ACQ-01..07`                | Append-only solve evidence, bounded and changed-parameter recovery, exact correction acknowledgement and verification, proposal binding, and explicit polar acceptance |
+| Process composition proof | `PROC-01..14`               | Source handoff, synchronized preview, full-resolution Apply, linear history, assistance, retry, reconnect, multi-asset Save, discard, and switching                    |
+| Asset composition proof   | `LIB-01..04`                | Stable identity, atomic multi-artifact creation, projection/comparison, local versus remote delivery, expiry, republication, and Process handoff                       |
 
-All 43 baseline scenarios now have evidence proportional to their claim. The
-full package passes 176 tests across 21 suites. The scenario catalog remains a
-readable trace index; the proof files, rather than a filename change to that
-catalog, establish the server-facing claims.
+The 43-scenario regrade records the accepted Gate 5 product evidence. It does
+not claim that the retired harness catalog or its historical test count proves
+the current implementation. Current server-facing proof lives with the
+production lifecycle interfaces, persistence boundaries, and HTTP clients.
 
 ## Correctness Defects Found
 

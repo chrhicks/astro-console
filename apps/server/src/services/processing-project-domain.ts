@@ -4,11 +4,12 @@ import {
   CheckpointId,
   ClientCapability,
   ClientId,
+  DevelopOperation,
   MembershipRole,
   PersonId,
+  PreviewId,
   ProcessingAttempt,
   ProcessingDevelopBase,
-  ProcessingDevelopPreview,
   ProcessingFrozenSource,
   ProcessingOutputId,
   ProcessingProjectAuthority,
@@ -17,12 +18,36 @@ import {
   ProcessingProjectSource,
   ProcessingProjectWarning,
   ProcessingStageAttemptId,
-  ProcessingStageDraft,
   ProcessingStageDraftValue,
   ProcessingStageResultId,
   ProcessingUpstreamResult,
   ExecutableProcessingStage,
 } from '@astro-console/protocol'
+
+export const ProcessingStageDraft = Schema.Struct({
+  revision: Schema.Int,
+  value: ProcessingStageDraftValue,
+  undo: Schema.Array(ProcessingStageDraftValue),
+  redo: Schema.Array(ProcessingStageDraftValue),
+})
+
+export interface ProcessingStageDraft extends Schema.Schema.Type<
+  typeof ProcessingStageDraft
+> {}
+
+export const ProcessingDevelopPreview = Schema.Struct({
+  previewId: PreviewId,
+  draftRevision: Schema.Int,
+  inputCheckpointId: CheckpointId,
+  operation: DevelopOperation,
+  state: Schema.Literals(['queued', 'computing', 'ready', 'failed']),
+  checksum: Schema.optionalKey(Schema.NonEmptyString),
+  synchronizedAt: Schema.optionalKey(Schema.NonEmptyString),
+})
+
+export interface ProcessingDevelopPreview extends Schema.Schema.Type<
+  typeof ProcessingDevelopPreview
+> {}
 
 export const ProcessingStageResult = Schema.Struct({
   resultId: ProcessingStageResultId,
@@ -37,6 +62,10 @@ export const ProcessingStageResult = Schema.Struct({
   summary: Schema.NonEmptyString,
   completedAt: Schema.NonEmptyString,
 })
+
+export interface ProcessingStageResult extends Schema.Schema.Type<
+  typeof ProcessingStageResult
+> {}
 
 export const ProcessingStageState = Schema.Struct({
   stage: ExecutableProcessingStage,
@@ -73,6 +102,10 @@ export const ProcessingStageState = Schema.Struct({
     }
   }),
 )
+
+export interface ProcessingStageState extends Schema.Schema.Type<
+  typeof ProcessingStageState
+> {}
 
 const processingDraftStage = (
   value: typeof ProcessingStageDraftValue.Type,
@@ -118,7 +151,9 @@ export const ProcessingProject = Schema.Struct({
   }),
 )
 
-export type ProcessingProject = typeof ProcessingProject.Type
+export interface ProcessingProject extends Schema.Schema.Type<
+  typeof ProcessingProject
+> {}
 
 type ProcessingProjectCaller = {
   readonly personId: typeof PersonId.Type

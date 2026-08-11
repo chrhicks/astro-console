@@ -580,7 +580,7 @@ export function acceptFakePolicy(
             ...run,
             revision: run.revision + 1,
             phase: 'preflight',
-            target: nextSequence.target,
+            target: nextSequence.definition.targetName,
             progress: Math.floor(
               ((completedSequenceCount + 1) / sequences.length) * 100,
             ),

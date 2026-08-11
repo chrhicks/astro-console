@@ -9,7 +9,6 @@ import {
   type PlanWorkspaceProjection,
 } from '@astro-console/protocol'
 import { BootstrapClient, BootstrapClientState } from './bootstrap-client'
-import { planSequencePresentation, planSequenceWindow } from './presentation'
 
 type IdempotencyKeyValue = typeof IdempotencyKey.Type
 type PreviewIdValue = typeof PreviewId.Type
@@ -270,10 +269,6 @@ function requestFor(
           idempotencyKey,
           sequences: action.sequences.map((sequence) => ({
             sequenceId: sequence.sequenceId,
-            ...planSequencePresentation(sequence.definition),
-            window: planSequenceWindow(sequence.definition, sequence.window),
-            horizon: sequence.horizon,
-            storage: sequence.storage,
             definition: sequence.definition,
           })),
         },

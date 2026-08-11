@@ -88,6 +88,19 @@ export default tseslint.config(
     },
   },
   {
+    files: [
+      'src/services/acquire-domain.ts',
+      'src/services/processing-project-domain.ts',
+      'src/services/run-domain.ts',
+    ],
+    rules: {
+      '@typescript-eslint/no-empty-object-type': [
+        'error',
+        { allowInterfaces: 'with-single-extends' },
+      ],
+    },
+  },
+  {
     files: ['src/**/*.ts'],
     ignores: ['src/**/*.test.ts'],
     rules: {

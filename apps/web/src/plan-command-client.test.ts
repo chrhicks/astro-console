@@ -34,10 +34,6 @@ const plan: PlanWorkspaceProjection = {
   sequences: [
     {
       sequenceId: 'seq-1',
-      target: 'M27',
-      capture: '24 × 180s · L',
-      acquisition: 'Solve and center',
-      stopCondition: '24 frames',
       window: {
         startsAt: '2026-08-02T20:00:00Z',
         endsAt: '2026-08-02T21:00:00Z',
@@ -45,8 +41,6 @@ const plan: PlanWorkspaceProjection = {
         peakAltitudeDeg: 60,
         horizonClearanceDeg: 20,
       },
-      estimatedMinutes: 60,
-      storageForecastMb: 1200,
       horizon: 'clear',
       storage: 'available',
       viability: 'viable',
@@ -160,8 +154,10 @@ test('submits the displayed deterministic draft once with a fresh edge key and n
   assert.equal(calls, 1)
   const request = Schema.decodeUnknownSync(PlanCommandRequest)(body)
   assert.equal(request.intent._tag, 'SaveDraft')
-  if (request.intent._tag === 'SaveDraft')
-    assert.equal(request.intent.sequences[0]?.target, 'M27')
+  if (request.intent._tag === 'SaveDraft') {
+    assert.equal(request.intent.sequences[0]?.definition.targetName, 'M27')
+    assert.equal('target' in (request.intent.sequences[0] ?? {}), false)
+  }
   assert.equal(state.snapshot.eventCursor, 40)
 })
 

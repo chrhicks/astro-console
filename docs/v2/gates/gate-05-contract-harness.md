@@ -1,6 +1,6 @@
-# Gate 5 — Contract Harness
+# Gate 5 — Contract Evidence
 
-Status: **complete July 22, 2026**
+Status: **historical accepted Gate 5 product/domain evidence; executable harness retired**
 
 The vocabulary, product decisions, and executable contract evidence below are
 accepted. An initial closure claim was reopened after a future-server
@@ -59,7 +59,11 @@ or tool-specific adapter payloads.
 - [Accepted scenarios and state ownership](../current/gate-05-scenarios.md)
 - [Consequential action map](../current/gate-05-action-map.md)
 - [Canonical contract vocabulary](../current/gate-05-contract-vocabulary.md)
-- [Executable contract harness](../../../packages/v2-contracts/README.md)
+
+The former executable harness package was retired when current wire schemas
+moved to `@astro-console/protocol` and lifecycle proof moved to the owning
+production server and web modules. The links above remain accepted product and
+ownership evidence; they are not current code-structure authority.
 
 Validation at the initial closure attempt:
 

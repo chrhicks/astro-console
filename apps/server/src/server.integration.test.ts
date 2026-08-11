@@ -31,14 +31,15 @@ import {
   ProcessingProjectEvidence,
   PreflightSnapshot,
   RefreshPreflightResponse,
+  ReviewAssetResponse,
+  type RunSequenceDefinition,
 } from '@astro-console/protocol'
 import { AcquireSession } from './services/acquire-domain.ts'
-import { planSequencePresentation } from './services/runtime-bootstrap.ts'
 import { ControlDomainEvent } from './persistence/control-sqlite-repository.ts'
 
 const revisePlanSequence = <
   Sequence extends {
-    readonly definition: Parameters<typeof planSequencePresentation>[0]
+    readonly definition: RunSequenceDefinition
   },
 >(
   sequence: Sequence,
@@ -47,7 +48,6 @@ const revisePlanSequence = <
   const definition = { ...sequence.definition, ...changes }
   return {
     ...sequence,
-    ...planSequencePresentation(definition),
     definition,
   }
 }
@@ -697,9 +697,8 @@ test('Phase 4 deterministic chain carries one current captured frame through Lib
   assert.equal(asset.inspection._tag, 'Available')
   assert.equal(asset.inspection.rationale.decision, 'unreviewed')
   assert.match(asset.inspection.rationale.summary, /retained original pixels/i)
-  const review = await fetch(
-    `${base}/api/library/assets/asset-capture-live-001/review`,
-    {
+  const review = Schema.decodeUnknownSync(ReviewAssetResponse)(
+    await fetch(`${base}/api/library/assets/asset-capture-live-001/review`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -708,9 +707,10 @@ test('Phase 4 deterministic chain carries one current captured frame through Lib
         decision: 'accepted',
         idempotencyKey: 'phase-4-review-live',
       }),
-    },
-  ).then((response) => response.json())
-  assert.equal(review.outcome, 'accepted')
+    }).then((response) => response.json()),
+  )
+  assert.equal(review._tag, 'Accepted')
+  if (review._tag !== 'Accepted') throw new Error('review was not accepted')
   assert.equal(review.review.decision, 'accepted')
   const second = service.ingestCapturedFrame(
     {
@@ -943,15 +943,15 @@ test('Library review is owner-only, revision-guarded, idempotent, durable, and p
     annotation: 'Keep this frame.',
     idempotencyKey: 'review-m27-001',
   }
-  const accepted = await fetch(
-    `${base}/api/library/assets/asset-m27-001/review`,
-    {
+  const accepted = Schema.decodeUnknownSync(ReviewAssetResponse)(
+    await fetch(`${base}/api/library/assets/asset-m27-001/review`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(request),
-    },
-  ).then((response) => response.json())
-  assert.equal(accepted.outcome, 'accepted')
+    }).then((response) => response.json()),
+  )
+  assert.equal(accepted._tag, 'Accepted')
+  if (accepted._tag !== 'Accepted') throw new Error('review was not accepted')
   const reviewEvent = new TextDecoder().decode((await reader.read()).value)
   assert.match(reviewEvent, /"eventCursor":1/)
   assert.deepEqual(
@@ -962,21 +962,26 @@ test('Library review is owner-only, revision-guarded, idempotent, durable, and p
     }).then((response) => response.json()),
     accepted,
   )
-  assert.equal(
-    (
-      await fetch(`${base}/api/library/assets/asset-m27-001/review`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          ...request,
-          idempotencyKey: 'review-stale',
-          expectedReviewRevision: 0,
-          decision: 'rejected',
-        }),
-      })
-    ).status,
-    409,
+  const staleResponse = await fetch(
+    `${base}/api/library/assets/asset-m27-001/review`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...request,
+        idempotencyKey: 'review-stale',
+        expectedReviewRevision: 0,
+        decision: 'rejected',
+      }),
+    },
   )
+  assert.equal(staleResponse.status, 409)
+  const stale = Schema.decodeUnknownSync(ReviewAssetResponse)(
+    await staleResponse.json(),
+  )
+  assert.equal(stale._tag, 'Rejected')
+  if (stale._tag !== 'Rejected') throw new Error('stale review was accepted')
+  assert.equal(stale.failure._tag, 'RevisionConflict')
   const detail = await fetch(`${base}/api/library/assets/asset-m27-001`).then(
     (response) => response.json(),
   )
@@ -1005,19 +1010,38 @@ test('Library review is owner-only, revision-guarded, idempotent, durable, and p
     await viewerListener.close()
     viewer.close()
   })
-  assert.equal(
-    (
-      await fetch(
-        `http://127.0.0.1:${viewerListener.port}/api/library/assets/asset-m27-001/review`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(request),
-        },
-      )
-    ).status,
-    403,
+  const viewerResponse = await fetch(
+    `http://127.0.0.1:${viewerListener.port}/api/library/assets/asset-m27-001/review`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+    },
   )
+  assert.equal(viewerResponse.status, 403)
+  const denied = Schema.decodeUnknownSync(ReviewAssetResponse)(
+    await viewerResponse.json(),
+  )
+  assert.equal(denied._tag, 'Rejected')
+  if (denied._tag !== 'Rejected') throw new Error('viewer review was accepted')
+  assert.equal(denied.failure._tag, 'ClientReadOnly')
+
+  const invalidResponse = await fetch(
+    `${base}/api/library/assets/asset-m27-001/review`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ decision: 'accepted' }),
+    },
+  )
+  assert.equal(invalidResponse.status, 400)
+  const invalid = Schema.decodeUnknownSync(ReviewAssetResponse)(
+    await invalidResponse.json(),
+  )
+  assert.equal(invalid._tag, 'Rejected')
+  if (invalid._tag !== 'Rejected')
+    throw new Error('invalid review was accepted')
+  assert.equal(invalid.failure._tag, 'InvalidInput')
   await reader.cancel()
   await listener.close()
   service.close()
@@ -4765,7 +4789,9 @@ test('authenticated workspace projections preserve future intent, bounded Librar
   assert.equal(plan.planId, 'plan-m27')
   assert.equal(plan.readiness, 'ready')
   assert.equal(plan.sequences.length, 2)
-  assert.equal(plan.sequences[0].capture, '24 × 180s · L')
+  assert.equal(plan.sequences[0].definition.frameCount, 24)
+  assert.equal(plan.sequences[0].definition.exposureSeconds, 180)
+  assert.equal(plan.sequences[0].definition.filterName, 'L')
   assert.equal(plan.sequences[0].window.horizonClearanceDeg, 28)
   assert.equal(
     new Intl.DateTimeFormat('en-US', {
@@ -5489,6 +5515,297 @@ async function startFixtureRun(base: string, idempotencyKey: string) {
   return bootstrapSnapshot(`${base}/api/snapshot`)
 }
 
+async function runSimultaneously<Result>(
+  operations: ReadonlyArray<() => Promise<Result>>,
+) {
+  let release: (() => void) | undefined
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const pending = operations.map((operation) => gate.then(operation))
+  if (release === undefined) throw new Error('Concurrent request gate failed')
+  release()
+  return Promise.all(pending)
+}
+
+test('simultaneous Control acquisition accepts exactly one owner transition', async (t) => {
+  const service = createFixtureService(':memory:', (request) => {
+    const token = request?.headers.authorization
+    if (token !== 'Bearer alpha' && token !== 'Bearer beta') return undefined
+    const clientId = token === 'Bearer alpha' ? 'desktop-alpha' : 'desktop-beta'
+    return {
+      personId: clientId,
+      clientId,
+      role: 'owner' as const,
+      capability: 'controlCapable' as const,
+    }
+  })
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+
+  const responses = await runSimultaneously([
+    () =>
+      fetch(`${base}/api/commands/control`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer alpha' },
+        body: JSON.stringify({
+          commandId: 'simultaneous-control-alpha',
+          command: {
+            _tag: 'TakeControl',
+            expectedLeaseRevision: 1,
+            idempotencyKey: 'simultaneous-control-alpha',
+          },
+        }),
+      }),
+    () =>
+      fetch(`${base}/api/commands/control`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer beta' },
+        body: JSON.stringify({
+          commandId: 'simultaneous-control-beta',
+          command: {
+            _tag: 'TakeControl',
+            expectedLeaseRevision: 1,
+            idempotencyKey: 'simultaneous-control-beta',
+          },
+        }),
+      }),
+  ])
+  assert.deepEqual(
+    responses.map((response) => response.status).sort(),
+    [202, 409],
+  )
+  for (const response of responses) {
+    const responseBody: unknown = await response.json()
+    Schema.decodeUnknownSync(
+      response.status === 202
+        ? CommandHttpSuccessEnvelope
+        : CommandHttpFailureEnvelope,
+    )(responseBody)
+  }
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database
+        .prepare(
+          "SELECT count(*) AS count FROM events WHERE type='OwnerTookControl'",
+        )
+        .get(),
+    ).count,
+    1,
+  )
+  const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`, {
+    headers: { authorization: 'Bearer alpha' },
+  })
+  assert.equal(snapshot.control.revision, 2)
+  assert.equal(
+    ['desktop-alpha', 'desktop-beta'].includes(
+      snapshot.control.holderClientId ?? '',
+    ),
+    true,
+  )
+})
+
+test('simultaneous conflicting Run starts accept exactly one lifecycle transition', async (t) => {
+  const service = createFixtureService()
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (initial.plan === undefined) throw new Error('Fixture Plan is unavailable')
+
+  const intent = {
+    _tag: 'StartAcceptedRun' as const,
+    planId: initial.plan.planId,
+    expectedPlanRevision: initial.plan.revision,
+    expectedLeaseRevision: initial.control.revision,
+  }
+  const responses = await runSimultaneously([
+    () =>
+      submitPlan(base, {
+        ...intent,
+        idempotencyKey: 'simultaneous-run-start-alpha',
+      }),
+    () =>
+      submitPlan(base, {
+        ...intent,
+        idempotencyKey: 'simultaneous-run-start-beta',
+      }),
+  ])
+  assert.deepEqual(
+    responses.map(({ response }) => response.status).sort(),
+    [202, 409],
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database
+        .prepare("SELECT count(*) AS count FROM events WHERE type='RunStarted'")
+        .get(),
+    ).count,
+    1,
+  )
+  assert.equal(
+    (await bootstrapSnapshot(`${base}/api/snapshot`)).activeRun._tag,
+    'Active',
+  )
+})
+
+test('simultaneous pause and stop accept exactly one Run transition', async (t) => {
+  const service = createFixtureService()
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const started = await startFixtureRun(base, 'simultaneous-pause-stop-start')
+  if (started.observe === undefined)
+    throw new Error('Observe run is unavailable')
+  const expectedRunRevision = started.observe.revision
+  const expectedLeaseRevision = started.control.revision
+
+  const responses = await runSimultaneously([
+    () =>
+      submitObserve(base, {
+        _tag: 'PauseRun',
+        expectedLeaseRevision,
+        expectedRunRevision,
+        idempotencyKey: 'simultaneous-run-pause',
+      }),
+    () =>
+      submitObserve(base, {
+        _tag: 'StopRun',
+        expectedLeaseRevision,
+        expectedRunRevision,
+        idempotencyKey: 'simultaneous-run-stop',
+      }),
+  ])
+  assert.deepEqual(
+    responses.map(({ response }) => response.status).sort(),
+    [202, 409],
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database
+        .prepare(
+          "SELECT count(*) AS count FROM events WHERE type IN ('RunPaused','RunStopped')",
+        )
+        .get(),
+    ).count,
+    1,
+  )
+  const settled = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(settled.observe?.revision, expectedRunRevision + 1)
+  assert.equal(
+    settled.observe?.phase === 'paused' || settled.observe?.phase === 'stopped',
+    true,
+  )
+})
+
+test('simultaneous Run mutation apply requests accept exactly one preview settlement', async (t) => {
+  const service = createLocalWebService(
+    ':memory:',
+    undefined,
+    undefined,
+    undefined,
+    { fixture: 'plan-draft' },
+  )
+  const listener = await service.listen()
+  const base = `http://127.0.0.1:${listener.port}`
+  t.after(async () => {
+    await listener.close()
+    service.close()
+  })
+  const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
+  if (initial.plan === undefined) throw new Error('Fixture Plan is unavailable')
+  const saved = await submitPlan(base, {
+    _tag: 'SaveDraft',
+    planId: initial.plan.planId,
+    expectedPlanRevision: initial.plan.revision,
+    idempotencyKey: 'simultaneous-mutation-save',
+    sequences: initial.plan.sequences.map(({ viability, ...sequence }) =>
+      revisePlanSequence(sequence, {
+        targetName: `${sequence.definition.targetName} concurrent`,
+      }),
+    ),
+  })
+  if (saved.body._tag !== 'Accepted' || saved.body.snapshot.plan === undefined)
+    throw new Error('Fixture Plan draft could not be saved')
+  const accepted = await submitPlan(base, {
+    _tag: 'AcceptRunDefinition',
+    planId: saved.body.snapshot.plan.planId,
+    expectedPlanRevision: saved.body.snapshot.plan.revision,
+    expectedLeaseRevision: saved.body.snapshot.control.revision,
+    idempotencyKey: 'simultaneous-mutation-accept',
+  })
+  if (accepted.body._tag !== 'Accepted')
+    throw new Error('Fixture Run definition could not be accepted')
+  const started = await startFixtureRun(base, 'simultaneous-mutation-start')
+  if (started.activeRun._tag !== 'Active')
+    throw new Error('Active Run is unavailable')
+  const preview = await submitPlan(base, {
+    _tag: 'PreviewRunMutation',
+    mutation: 'shortenSecond',
+    expectedLeaseRevision: started.control.revision,
+    expectedRunRevision: started.activeRun.run.revision,
+    idempotencyKey: 'simultaneous-mutation-preview',
+  })
+  if (
+    preview.body._tag !== 'Accepted' ||
+    preview.body.result._tag !== 'RunMutationPreviewed'
+  )
+    throw new Error('Run mutation preview is unavailable')
+  const apply = {
+    _tag: 'ApplyRunMutation' as const,
+    previewId: preview.body.result.previewId,
+    expectedLeaseRevision: started.control.revision,
+    expectedRunRevision: started.activeRun.run.revision,
+  }
+  const responses = await runSimultaneously([
+    () =>
+      submitPlan(base, {
+        ...apply,
+        idempotencyKey: 'simultaneous-mutation-apply-alpha',
+      }),
+    () =>
+      submitPlan(base, {
+        ...apply,
+        idempotencyKey: 'simultaneous-mutation-apply-beta',
+      }),
+  ])
+  assert.deepEqual(
+    responses.map(({ response }) => response.status).sort(),
+    [202, 409],
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database
+        .prepare(
+          "SELECT count(*) AS count FROM events WHERE type='RunMutationApplied'",
+        )
+        .get(),
+    ).count,
+    1,
+  )
+  const settled = await bootstrapSnapshot(`${base}/api/snapshot`)
+  assert.equal(
+    settled.activeRun._tag === 'Active'
+      ? settled.activeRun.run.revision
+      : undefined,
+    started.activeRun.run.revision + 1,
+  )
+})
+
 test('canonical Plan commands persist draft readiness, immutable acceptance, idempotency, restart, and SSE truth', async (t) => {
   const databasePath = join(
     mkdtempSync(join(tmpdir(), 'astro-canonical-plan-')),
@@ -5527,12 +5844,6 @@ test('canonical Plan commands persist draft readiness, immutable acceptance, ide
           latestEnd: '2026-07-25T05:30:00.000Z',
           horizonClearanceDegrees: 20,
         }),
-        target: 'Caller-supplied display value',
-        capture: 'Caller-supplied display value',
-        acquisition: 'Caller-supplied display value',
-        stopCondition: 'Caller-supplied display value',
-        estimatedMinutes: 1,
-        storageForecastMb: 0,
         window: {
           startsAt: '1999-01-01T00:00:00.000Z',
           endsAt: '1999-01-01T00:01:00.000Z',
@@ -5595,21 +5906,6 @@ test('canonical Plan commands persist draft readiness, immutable acceptance, ide
   assert.equal(draft.sequences[0]?.window.peakAltitudeDeg, 62)
   assert.equal(draft.sequences[0]?.window.horizonClearanceDeg, 28)
   assert.equal(draft.sequences[0]?.definition.horizonClearanceDegrees, 20)
-  assert.equal(
-    draft.sequences[0]?.target,
-    draft.sequences[0]?.definition.targetName,
-  )
-  assert.notEqual(draft.sequences[0]?.capture, 'Caller-supplied display value')
-  assert.notEqual(
-    draft.sequences[0]?.acquisition,
-    'Caller-supplied display value',
-  )
-  assert.notEqual(
-    draft.sequences[0]?.stopCondition,
-    'Caller-supplied display value',
-  )
-  assert.notEqual(draft.sequences[0]?.estimatedMinutes, 1)
-  assert.notEqual(draft.sequences[0]?.storageForecastMb, 0)
   assert.equal(draft.sequences[0]?.horizon, 'clear')
   assert.equal(draft.sequences[0]?.viability, 'viable')
   const accepted = await submitPlan(base, {
@@ -5652,7 +5948,7 @@ test('canonical Plan commands persist draft readiness, immutable acceptance, ide
     service.database.prepare('SELECT definition FROM run_definitions').get(),
   )
   assert.notEqual(
-    JSON.parse(definition.definition).plan.sequences[0].target,
+    JSON.parse(definition.definition).plan.sequences[0].definition.targetName,
     `${firstSequence.definition.targetName} later`,
   )
   await reader?.cancel()

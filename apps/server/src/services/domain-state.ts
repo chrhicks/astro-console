@@ -73,10 +73,6 @@ export type Evidence = {
 export type PlanReadiness = 'ready' | 'readyWithLimitations' | 'blocked'
 export type DraftSequence = {
   readonly sequenceId: string
-  readonly target: string
-  readonly capture: string
-  readonly acquisition: string
-  readonly stopCondition: string
   readonly window: {
     readonly startsAt: string
     readonly endsAt: string
@@ -84,8 +80,6 @@ export type DraftSequence = {
     readonly peakAltitudeDeg: number
     readonly horizonClearanceDeg: number
   }
-  readonly estimatedMinutes: number
-  readonly storageForecastMb: number
   readonly horizon: 'clear' | 'limited' | 'blocked' | 'missing'
   readonly storage: 'available' | 'limited' | 'blocked' | 'missing'
   readonly definition: RunSequenceDefinition

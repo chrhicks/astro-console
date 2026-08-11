@@ -23,10 +23,6 @@ import { RunSequenceDefinition } from './commands.js'
 
 export const PlanSequenceDetail = Schema.Struct({
   sequenceId: Schema.NonEmptyString,
-  target: Schema.NonEmptyString,
-  capture: Schema.NonEmptyString,
-  acquisition: Schema.NonEmptyString,
-  stopCondition: Schema.NonEmptyString,
   window: Schema.Struct({
     startsAt: Schema.NonEmptyString,
     endsAt: Schema.NonEmptyString,
@@ -34,8 +30,6 @@ export const PlanSequenceDetail = Schema.Struct({
     peakAltitudeDeg: Schema.Finite,
     horizonClearanceDeg: Schema.Finite,
   }),
-  estimatedMinutes: NonNegativeInt,
-  storageForecastMb: NonNegativeInt,
   horizon: Schema.Literals(['clear', 'limited', 'blocked', 'missing']),
   storage: Schema.Literals(['available', 'limited', 'blocked', 'missing']),
   viability: Schema.Literals(['viable', 'limited', 'blocked']),
@@ -52,6 +46,10 @@ export const AcceptedRunDefinitionSummary = Schema.Struct({
   acceptedAt: Schema.NonEmptyString,
   executor: Schema.Literals(['fake', 'fixture', 'real']),
 })
+
+export interface AcceptedRunDefinitionSummary extends Schema.Schema.Type<
+  typeof AcceptedRunDefinitionSummary
+> {}
 
 export const PlanActionEligibility = Schema.TaggedUnion({
   Eligible: {},

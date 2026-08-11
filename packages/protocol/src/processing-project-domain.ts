@@ -184,24 +184,6 @@ export const ProcessingStageDraftValue = Schema.TaggedUnion({
 })
 export type ProcessingStageDraftValue = typeof ProcessingStageDraftValue.Type
 
-export const ProcessingStageDraft = Schema.Struct({
-  revision: Schema.Int,
-  value: ProcessingStageDraftValue,
-  undo: Schema.Array(ProcessingStageDraftValue),
-  redo: Schema.Array(ProcessingStageDraftValue),
-})
-
-/** Durable Develop preview synchronized to one exact draft and checkpoint. */
-export const ProcessingDevelopPreview = Schema.Struct({
-  previewId: PreviewId,
-  draftRevision: Schema.Int,
-  inputCheckpointId: CheckpointId,
-  operation: DevelopOperation,
-  state: Schema.Literals(['queued', 'computing', 'ready', 'failed']),
-  checksum: Schema.optionalKey(Schema.NonEmptyString),
-  synchronizedAt: Schema.optionalKey(Schema.NonEmptyString),
-})
-
 export const ProcessingFrozenSource = Schema.Struct({
   assetId: AssetId,
   assetRevision: AssetRevision,

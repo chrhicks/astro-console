@@ -21,9 +21,11 @@ import {
   type PreflightRefreshSubmission,
 } from './preflight-refresh-client'
 import {
+  AssetRevision,
   IdempotencyKey,
   LibraryQuery as LibraryQuerySchema,
   LibraryQueryId,
+  ReviewAssetRequest,
 } from '@astro-console/protocol'
 import { projectBootstrapState } from './bootstrap-projection'
 import { createBootstrapRuntime } from './bootstrap-runtime'
@@ -41,6 +43,7 @@ import {
   type LibraryPage,
   type LibraryQuery,
   type ProcessSourceHandoff,
+  type ReviewRequest,
 } from './library-client'
 
 const currentRoute = () => parseRoute(location.pathname, location.search)
@@ -56,6 +59,23 @@ const loadLibraryAssetDetail = async (assetId: string) => {
       Effect.gen(function* () {
         const client = yield* LibraryClient
         return yield* client.detail(assetId)
+      }),
+    )
+  } finally {
+    await runtime.dispose()
+  }
+}
+
+const reviewLibraryAssetDetail = async (
+  assetId: string,
+  request: ReviewRequest,
+) => {
+  const runtime = createLibraryRuntime()
+  try {
+    return await runtime.runPromise(
+      Effect.gen(function* () {
+        const client = yield* LibraryClient
+        return yield* client.reviewAsset(assetId, request)
       }),
     )
   } finally {
@@ -436,25 +456,19 @@ export function App() {
   }) => {
     const detail = libraryDetail.value
     if (!detail) throw new Error('Asset detail is unavailable.')
-    const response = await fetch(
-      `/api/library/assets/${encodeURIComponent(detail.assetId)}/review`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          expectedAssetRevision: detail.revision,
-          expectedReviewRevision: detail.review?.revision ?? 0,
-          ...review,
-          idempotencyKey: crypto.randomUUID(),
-        }),
-      },
+    const accepted = await reviewLibraryAssetDetail(
+      detail.assetId,
+      ReviewAssetRequest.make({
+        expectedAssetRevision: detail.revision,
+        expectedReviewRevision: AssetRevision.make(
+          detail.review?.revision ?? 0,
+        ),
+        ...review,
+        idempotencyKey: crypto.randomUUID(),
+      }),
     )
-    if (!response.ok) throw new Error('The review was not accepted.')
-    const result = await response.json()
-    if (result.outcome !== 'accepted')
-      throw new Error('The review was not accepted.')
     setLibraryDetail({
-      value: { ...detail, review: result.review },
+      value: { ...detail, review: accepted },
       state: undefined,
     })
   }

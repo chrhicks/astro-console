@@ -6,57 +6,12 @@ import type {
   PlanProjection,
   PlanReadiness,
 } from './domain-state.ts'
-import {
-  PlanWorkspaceProjection,
-  type RunSequenceDefinition,
-} from '@astro-console/protocol'
+import { PlanWorkspaceProjection } from '@astro-console/protocol'
 import { RunDefinition } from './run-domain.ts'
 import { seedLibrary } from '../persistence/library-sqlite-repository.ts'
 
 const StoredRow = Schema.Struct({ value: Schema.String })
 const LatestCursorRow = Schema.Struct({ cursor: Schema.Int })
-
-export const planSequencePresentation = (
-  definition: typeof RunSequenceDefinition.Type,
-) => ({
-  target: definition.targetName,
-  capture: `${definition.frameCount} × ${definition.exposureSeconds}s · ${definition.filterName ?? 'No filter'}`,
-  acquisition:
-    definition.acquisitionMode === 'cameraOnly'
-      ? 'Camera only; no pointing acquisition.'
-      : 'Solve, center, focus, then start capture.',
-  stopCondition: `Stop after ${definition.frameCount} verified frame${definition.frameCount === 1 ? '' : 's'}.`,
-  estimatedMinutes: Math.max(
-    1,
-    Math.ceil(definition.estimatedDurationSeconds / 60),
-  ),
-  storageForecastMb: Math.ceil(definition.estimatedStorageBytes / 1_000_000),
-})
-
-export const planSequenceWindow = (
-  definition: typeof RunSequenceDefinition.Type,
-  observed: {
-    readonly startsAt: string
-    readonly endsAt: string
-    readonly usableMinutes: number
-    readonly peakAltitudeDeg: number
-    readonly horizonClearanceDeg: number
-  },
-) => {
-  const startsAt = definition.earliestStart ?? observed.startsAt
-  const endsAt = definition.latestEnd ?? observed.endsAt
-  const start = Date.parse(startsAt)
-  const end = Date.parse(endsAt)
-  return {
-    ...observed,
-    startsAt,
-    endsAt,
-    usableMinutes:
-      Number.isFinite(start) && Number.isFinite(end) && end > start
-        ? Math.min(observed.usableMinutes, Math.floor((end - start) / 60_000))
-        : observed.usableMinutes,
-  }
-}
 
 export const evaluatePlan = (input: {
   readonly planId: string
@@ -66,6 +21,10 @@ export const evaluatePlan = (input: {
   const limitations: string[] = []
   const sequences = input.sequences.map((sequence) => {
     const prefix = `${sequence.sequenceId}: `
+    const estimatedMinutes = Math.max(
+      1,
+      Math.ceil(sequence.definition.estimatedDurationSeconds / 60),
+    )
     if (sequence.horizon === 'missing')
       limitations.push(`${prefix}horizon fact is missing.`)
     if (sequence.horizon === 'blocked')
@@ -74,7 +33,7 @@ export const evaluatePlan = (input: {
       limitations.push(`${prefix}storage forecast is missing.`)
     if (sequence.storage === 'blocked')
       limitations.push(`${prefix}storage forecast is blocked.`)
-    if (sequence.window.usableMinutes < sequence.estimatedMinutes)
+    if (sequence.window.usableMinutes < estimatedMinutes)
       limitations.push(
         `${prefix}usable window is shorter than the estimated capture.`,
       )
@@ -87,7 +46,7 @@ export const evaluatePlan = (input: {
       sequence.horizon === 'blocked' ||
       sequence.storage === 'missing' ||
       sequence.storage === 'blocked' ||
-      sequence.window.usableMinutes < sequence.estimatedMinutes
+      sequence.window.usableMinutes < estimatedMinutes
     return {
       ...sequence,
       viability: blocked
@@ -248,7 +207,6 @@ const fixtureSequenceDefinitions = [
 const fixtureSequences: ReadonlyArray<DraftSequence> =
   fixtureSequenceDefinitions.map((definition) => ({
     sequenceId: definition.sequenceId,
-    ...planSequencePresentation(definition),
     window: {
       startsAt: '2026-07-25T03:18:00.000Z',
       endsAt: '2026-07-25T05:02:00.000Z',
@@ -327,7 +285,6 @@ export const installDevelopmentSimulationPlan = (
         : cameraSimulationDefinition
   const sequence: DraftSequence = {
     sequenceId: developmentSimulationDefinition.sequenceId,
-    ...planSequencePresentation(developmentSimulationDefinition),
     window: {
       startsAt: '2026-08-08T00:00:00.000Z',
       endsAt: '2026-08-09T00:00:00.000Z',

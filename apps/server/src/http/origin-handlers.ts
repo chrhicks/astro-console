@@ -220,7 +220,9 @@ export function state(
       : {
           id: projection.planId,
           revision: projection.revision,
-          target: projection.sequences[0]?.target ?? 'Observation plan',
+          target:
+            projection.sequences[0]?.definition.targetName ??
+            'Observation plan',
           readiness: projection.readiness,
           runEligible: storedPlan.run_eligible === 1,
         }

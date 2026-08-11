@@ -260,7 +260,6 @@ function PlanEditor({
   const update = (next: RunSequenceDefinition) =>
     onChange({
       ...sequence,
-      ...planSequencePresentation(next),
       window: planSequenceWindow(next, sequence.window),
       definition: next,
     })

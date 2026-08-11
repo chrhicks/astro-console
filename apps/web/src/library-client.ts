@@ -5,7 +5,9 @@ import {
   LibraryQuery as LibraryQuerySchema,
   ProcessSourceHandoff as ProcessSourceHandoffSchema,
   AssetReview,
+  ReviewAssetFailure,
   ReviewAssetRequest,
+  ReviewAssetResponse,
 } from '@astro-console/protocol'
 
 export type LibraryAssetDetail = Schema.Schema.Type<
@@ -17,10 +19,6 @@ export type ProcessSourceHandoff = Schema.Schema.Type<
   typeof ProcessSourceHandoffSchema
 >
 export type ReviewRequest = Schema.Schema.Type<typeof ReviewAssetRequest>
-const ReviewResponse = Schema.Struct({
-  outcome: Schema.Literal('accepted'),
-  review: AssetReview,
-})
 
 export class LibraryNotFound extends Schema.TaggedErrorClass<LibraryNotFound>()(
   'Web.LibraryNotFound',
@@ -157,7 +155,7 @@ export const layer = Layer.effect(
             new LibraryUnavailable({ reason: 'Review is unavailable.' }),
           )
         const response = yield* transport.reviewAsset(assetId, input)
-        const decoded = yield* Schema.decodeUnknownEffect(ReviewResponse)(
+        const decoded = yield* Schema.decodeUnknownEffect(ReviewAssetResponse)(
           response,
         ).pipe(
           Effect.mapError(
@@ -165,7 +163,10 @@ export const layer = Layer.effect(
               new LibraryUnavailable({ reason: 'Review was not accepted.' }),
           ),
         )
-        return decoded.review
+        if (decoded._tag === 'Accepted') return decoded.review
+        return yield* Effect.fail(
+          new LibraryUnavailable({ reason: reviewFailure(decoded.failure) }),
+        )
       }),
     })
   }),
@@ -254,10 +255,6 @@ export const browserLibraryTransportLayer = Layer.succeed(
               signal,
             },
           )
-          if (!response.ok)
-            throw new LibraryUnavailable({
-              reason: 'The review was not accepted.',
-            })
           return response.json()
         },
         catch: (error) =>
@@ -272,3 +269,12 @@ export const browserLibraryTransportLayer = Layer.succeed(
 
 export const createLibraryRuntime = () =>
   ManagedRuntime.make(layer.pipe(Layer.provide(browserLibraryTransportLayer)))
+
+const reviewFailure = (failure: typeof ReviewAssetFailure.Type) =>
+  ReviewAssetFailure.match(failure, {
+    InvalidInput: ({ message }) => message,
+    ClientReadOnly: () => 'This client cannot review Library assets.',
+    AssetNotFound: () => 'The Library asset was not found.',
+    RevisionConflict: () => 'The Library review changed. Reload and retry.',
+    LibraryUnavailable: () => 'The Library review service is unavailable.',
+  })

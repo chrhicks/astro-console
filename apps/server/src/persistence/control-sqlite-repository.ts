@@ -261,8 +261,7 @@ function acceptControl(
         expiresAt,
         1,
       )
-      event = Schema.decodeUnknownSync(ControlDomainEvent)({
-        _tag: 'ControlRequested',
+      event = ControlDomainEvent.cases.ControlRequested.make({
         requestId,
         requesterClientId: identity.clientId,
       })
@@ -281,8 +280,7 @@ function acceptControl(
       }
       holder = request.client_id
       revision += 1
-      event = Schema.decodeUnknownSync(ControlDomainEvent)({
-        _tag: 'ControlGranted',
+      event = ControlDomainEvent.cases.ControlGranted.make({
         requestId: request.request_id,
         holderClientId: request.client_id,
       })
@@ -303,23 +301,20 @@ function acceptControl(
       db.prepare('DELETE FROM control_requests WHERE request_id=?').run(
         request.request_id,
       )
-      event = Schema.decodeUnknownSync(ControlDomainEvent)({
-        _tag: 'ControlDeclined',
+      event = ControlDomainEvent.cases.ControlDeclined.make({
         requestId: request.request_id,
       })
     } else if (Command.guards.ReleaseControl(command)) {
       holder = null
       revision += 1
-      event = Schema.decodeUnknownSync(ControlDomainEvent)({
-        _tag: 'ControlReleased',
+      event = ControlDomainEvent.cases.ControlReleased.make({
         previousHolderClientId: identity.clientId,
       })
       db.exec('DELETE FROM control_requests')
     } else {
       holder = identity.clientId
       revision += 1
-      event = Schema.decodeUnknownSync(ControlDomainEvent)({
-        _tag: 'OwnerTookControl',
+      event = ControlDomainEvent.cases.OwnerTookControl.make({
         holderClientId: identity.clientId,
       })
       db.exec('DELETE FROM control_requests')

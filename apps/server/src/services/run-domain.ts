@@ -23,6 +23,10 @@ export const RunExecutionContext = Schema.Struct({
   unsafeBehavior: Schema.Literals(['pauseAndPark', 'stopAndPark']),
 })
 
+export interface RunExecutionContext extends Schema.Schema.Type<
+  typeof RunExecutionContext
+> {}
+
 export const RunDefinition = Schema.Struct({
   runId: RunId,
   executor: Schema.Literals(['fake', 'fixture', 'real']),
@@ -62,7 +66,9 @@ export const RunDefinition = Schema.Struct({
   }),
 )
 
-export type RunDefinition = typeof RunDefinition.Type
+export interface RunDefinition extends Schema.Schema.Type<
+  typeof RunDefinition
+> {}
 
 function uniqueRunInputs(
   sequenceIds: ReadonlyArray<string>,

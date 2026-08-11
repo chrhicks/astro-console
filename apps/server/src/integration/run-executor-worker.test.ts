@@ -19,7 +19,6 @@ import {
   BootstrapHttpSuccessEnvelope,
 } from '@astro-console/protocol'
 import { RunExecutionContext } from '../services/run-domain.ts'
-import { planSequencePresentation } from '../services/runtime-bootstrap.ts'
 import { createLocalWebService } from '../app/origin-service.ts'
 import { openOriginDatabase } from '../persistence/database.ts'
 import {
@@ -1497,7 +1496,6 @@ test('origin owns the scheduled executor pass and stops it with the service life
             } as const
             return {
               ...sequence,
-              ...planSequencePresentation(definition),
               definition,
             }
           }),

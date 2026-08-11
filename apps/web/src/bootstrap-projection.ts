@@ -14,6 +14,7 @@ import type {
   ShellView,
   StatusTone,
 } from './presentation'
+import { planSequencePresentation } from './presentation'
 
 export function projectBootstrapState(state: ClientState): Projection {
   return BootstrapClientState.$match(state, {
@@ -131,23 +132,21 @@ function plan(
     detail: current
       ? snapshot.plan.readinessSummary
       : `Current plan truth is unavailable. ${snapshot.plan.readinessSummary}`,
-    sequences: snapshot.plan.sequences.map((sequence) => ({
-      id: sequence.sequenceId,
-      target: sequence.target,
-      capture: sequence.capture,
-      acquisition: sequence.acquisition,
-      stopCondition: sequence.stopCondition,
-      windowStart: sequence.window.startsAt,
-      windowEnd: sequence.window.endsAt,
-      usableMinutes: sequence.window.usableMinutes,
-      estimatedMinutes: sequence.estimatedMinutes,
-      storageForecastMb: sequence.storageForecastMb,
-      peakAltitudeDeg: sequence.window.peakAltitudeDeg,
-      horizonClearanceDeg: sequence.window.horizonClearanceDeg,
-      horizon: sequence.horizon,
-      storage: sequence.storage,
-      viability: sequence.viability,
-    })),
+    sequences: snapshot.plan.sequences.map((sequence) => {
+      const presentation = planSequencePresentation(sequence.definition)
+      return {
+        id: sequence.sequenceId,
+        ...presentation,
+        windowStart: sequence.window.startsAt,
+        windowEnd: sequence.window.endsAt,
+        usableMinutes: sequence.window.usableMinutes,
+        peakAltitudeDeg: sequence.window.peakAltitudeDeg,
+        horizonClearanceDeg: sequence.window.horizonClearanceDeg,
+        horizon: sequence.horizon,
+        storage: sequence.storage,
+        viability: sequence.viability,
+      }
+    }),
     source: snapshot.plan,
     snapshotVersion: snapshot.snapshotVersion,
     ...(snapshot.activeRun._tag === 'Active'

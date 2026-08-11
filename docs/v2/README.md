@@ -18,20 +18,20 @@ specific detail.
 
 ## Load On Demand
 
-| Need                                                      | Read                                                                                                          |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| UI or UX work, beta alignment, or route promotion         | [Current UI and UX direction](current/ui-ux.md), then the external Nightbook demo it names                    |
-| Accepted beta real-runtime delivery or Alpaca simulation  | [Nightbook beta real-runtime plan](current/beta-real-runtime-plan.md)                                         |
-| Explicit Process workflow and Item 3.5 delivery           | [Item 3.5 Process workflow plan](current/process-workflow-plan.md)                                            |
-| Workspace behavior or product entities                    | [Current product specification](current/product-spec.md); use it for domain truth, not visual composition     |
-| Accepted Gate 5 scenarios and ownership                   | [Gate 5 baseline](current/gate-05-scenarios.md)                                                               |
-| Accepted non-Process consequential actions                | [Gate 5 action map](current/gate-05-action-map.md); its Process rows are a superseded historical baseline     |
-| Accepted non-Process contract language                    | [Gate 5 contract vocabulary](current/gate-05-contract-vocabulary.md); use the current Process documents above |
-| HTTP and SSE wire schemas                                 | [Shared protocol module](../../packages/protocol/README.md)                                                   |
-| Accepted interaction or ownership evidence                | One relevant document under [accepted gates](gates/README.md); gate layouts are not current visual authority  |
-| Deployment, Cloudflare, storage, security, or operations  | [Infrastructure plan](infra/README.md), then only its relevant section                                        |
-| Completed plans, former UI authority, or rejected options | [Documentation archive](archive/README.md) or Git history                                                     |
-| Ideas outside current delivery                            | [Post-V2.0 notes](current/v2-post-v2.0-notes.md)                                                              |
+| Need                                                      | Read                                                                                                                                                      |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| UI or UX work, beta alignment, or route promotion         | [Current UI and UX direction](current/ui-ux.md), then the external Nightbook demo it names                                                                |
+| Accepted beta real-runtime delivery or Alpaca simulation  | [Nightbook beta real-runtime plan](current/beta-real-runtime-plan.md)                                                                                     |
+| Explicit Process workflow and Item 3.5 delivery           | [Item 3.5 Process workflow plan](current/process-workflow-plan.md)                                                                                        |
+| Workspace behavior or product entities                    | [Current product specification](current/product-spec.md); use it for domain truth, not visual composition                                                 |
+| Accepted Gate 5 scenarios and ownership                   | [Gate 5 baseline](current/gate-05-scenarios.md)                                                                                                           |
+| Accepted non-Process consequential actions                | [Gate 5 action map](current/gate-05-action-map.md); its Process rows are a superseded historical baseline                                                 |
+| Accepted non-Process contract language                    | [Gate 5 contract vocabulary](current/gate-05-contract-vocabulary.md); use the current Process documents above                                             |
+| HTTP and SSE wire schemas                                 | [Shared protocol module](../../packages/protocol/README.md)                                                                                               |
+| Accepted interaction or ownership evidence                | One relevant document under [accepted gates](gates/README.md); gate documents are product/domain evidence, not current implementation or visual authority |
+| Deployment, Cloudflare, storage, security, or operations  | [Infrastructure plan](infra/README.md), then only its relevant section                                                                                    |
+| Completed plans, former UI authority, or rejected options | [Documentation archive](archive/README.md) or Git history                                                                                                 |
+| Ideas outside current delivery                            | [Post-V2.0 notes](current/v2-post-v2.0-notes.md)                                                                                                          |
 
 ## Current Position
 
@@ -63,7 +63,8 @@ processing library adapter remains intentionally deferred.
 - `current/` contains only live product, delivery, handoff, contract, and UI
   direction.
 - `gates/` contains accepted product and ownership evidence. Consult one gate
-  at a time; do not use its prototype composition as visual authority.
+  at a time; do not use its former harness structure as current implementation
+  authority or its prototype composition as visual authority.
 - `infra/` is loaded only for work that crosses that boundary.
 - `archive/` preserves superseded plans, handoffs, visual systems, UX catalogs,
   and explorations. It is historical and non-authoritative.

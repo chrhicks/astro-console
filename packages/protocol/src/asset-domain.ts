@@ -43,6 +43,8 @@ export const AssetReview = Schema.Struct({
   updatedAt: Schema.NonEmptyString,
 })
 
+export interface AssetReview extends Schema.Schema.Type<typeof AssetReview> {}
+
 export const ReviewAssetRequest = Schema.Struct({
   expectedAssetRevision: AssetRevision,
   expectedReviewRevision: AssetRevision,
@@ -51,3 +53,24 @@ export const ReviewAssetRequest = Schema.Struct({
   annotation: Schema.optionalKey(Schema.NonEmptyString),
   idempotencyKey: Schema.NonEmptyString,
 })
+
+export interface ReviewAssetRequest extends Schema.Schema.Type<
+  typeof ReviewAssetRequest
+> {}
+
+export const ReviewAssetFailure = Schema.TaggedUnion({
+  InvalidInput: { message: Schema.NonEmptyString },
+  ClientReadOnly: {},
+  AssetNotFound: {},
+  RevisionConflict: {},
+  LibraryUnavailable: {},
+})
+
+export type ReviewAssetFailure = typeof ReviewAssetFailure.Type
+
+export const ReviewAssetResponse = Schema.TaggedUnion({
+  Accepted: { review: AssetReview },
+  Rejected: { failure: ReviewAssetFailure },
+})
+
+export type ReviewAssetResponse = typeof ReviewAssetResponse.Type

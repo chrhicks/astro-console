@@ -88,6 +88,8 @@ test('does not export server, browser, fixture, or simulation behavior', async (
     'CapturedFrameIntake',
     'ControlDomainEvent',
     'ProcessingProject',
+    'ProcessingStageDraft',
+    'ProcessingDevelopPreview',
     'ProcessingStageResult',
     'ProcessingStageState',
     'RunDefinition',

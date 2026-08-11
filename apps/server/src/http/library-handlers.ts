@@ -3,8 +3,15 @@ import { join } from 'node:path'
 import type { ServerResponse } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { Effect, Schema } from 'effect'
-import { LibraryQuery, ObserveLiveFrameReview } from '@astro-console/protocol'
-import { ReviewAssetRequest } from '@astro-console/protocol'
+import {
+  AssetReview,
+  AssetRevision,
+  LibraryQuery,
+  ObserveLiveFrameReview,
+  ReviewAssetFailure,
+  ReviewAssetRequest,
+  ReviewAssetResponse,
+} from '@astro-console/protocol'
 import type { LocalIdentity } from '../auth/identity.ts'
 import { body } from './request-body.ts'
 import type { DownloadGrantIssuer } from '../storage/r2-download-grant.ts'
@@ -281,23 +288,43 @@ export async function libraryReview(
   encodedAssetId: string,
 ) {
   if (identity.role !== 'owner' || identity.capability !== 'controlCapable')
-    return json(response, 403, {
-      outcome: 'rejected',
-      reason: 'ClientReadOnly',
-    })
+    return json(
+      response,
+      403,
+      ReviewAssetResponse.cases.Rejected.make({
+        failure: ReviewAssetFailure.cases.ClientReadOnly.make({}),
+      }),
+    )
   let input: typeof ReviewAssetRequest.Type
   const assetId = decodedAssetId(encodedAssetId)
   try {
-    input = Schema.decodeUnknownSync(ReviewAssetRequest)(await body(request))
+    input = await Effect.runPromise(
+      Schema.decodeUnknownEffect(ReviewAssetRequest)(await body(request)),
+    )
   } catch {
-    return json(response, 400, libraryInvalidBody)
+    return json(
+      response,
+      400,
+      ReviewAssetResponse.cases.Rejected.make({
+        failure: ReviewAssetFailure.cases.InvalidInput.make({
+          message: 'The service could not read that review action.',
+        }),
+      }),
+    )
   }
   const row = Schema.decodeUnknownSync(Schema.optional(ReviewAssetRow))(
     db
       .prepare('SELECT revision,detail FROM library_assets WHERE asset_id=?')
       .get(assetId),
   )
-  if (!row) return json(response, 404, libraryNotFoundBody)
+  if (!row)
+    return json(
+      response,
+      404,
+      ReviewAssetResponse.cases.Rejected.make({
+        failure: ReviewAssetFailure.cases.AssetNotFound.make({}),
+      }),
+    )
   const prior = Schema.decodeUnknownSync(Schema.optional(ReviewReceiptRow))(
     db
       .prepare(
@@ -305,7 +332,14 @@ export async function libraryReview(
       )
       .get(assetId, input.idempotencyKey),
   )
-  if (prior) return json(response, 200, JSON.parse(prior.response))
+  if (prior) {
+    const replay = await Effect.runPromise(
+      Schema.decodeUnknownEffect(ReviewAssetResponse)(
+        JSON.parse(prior.response),
+      ),
+    )
+    return json(response, 200, replay)
+  }
   const existing = Schema.decodeUnknownSync(Schema.optional(ReviewRow))(
     db
       .prepare('SELECT revision,review FROM asset_reviews WHERE asset_id=?')
@@ -316,18 +350,21 @@ export async function libraryReview(
     row.revision !== input.expectedAssetRevision ||
     reviewRevision !== input.expectedReviewRevision
   )
-    return json(response, 409, {
-      outcome: 'rejected',
-      reason: 'RevisionConflict',
-    })
-  const review = {
-    revision: reviewRevision + 1,
+    return json(
+      response,
+      409,
+      ReviewAssetResponse.cases.Rejected.make({
+        failure: ReviewAssetFailure.cases.RevisionConflict.make({}),
+      }),
+    )
+  const review = AssetReview.make({
+    revision: AssetRevision.make(reviewRevision + 1),
     decision: input.decision,
     ...(input.rating === undefined ? {} : { rating: input.rating }),
     ...(input.annotation === undefined ? {} : { annotation: input.annotation }),
     updatedAt: new Date().toISOString(),
-  }
-  const result = { outcome: 'accepted', review }
+  })
+  const result = ReviewAssetResponse.cases.Accepted.make({ review })
   const detail = { ...JSON.parse(row.detail), review }
   db.exec('BEGIN IMMEDIATE')
   try {
@@ -375,7 +412,13 @@ export async function libraryReview(
     return json(response, 200, result)
   } catch {
     db.exec('ROLLBACK')
-    return json(response, 503, libraryUnavailableBody)
+    return json(
+      response,
+      503,
+      ReviewAssetResponse.cases.Rejected.make({
+        failure: ReviewAssetFailure.cases.LibraryUnavailable.make({}),
+      }),
+    )
   }
 }
 function decodedAssetId(value: string) {

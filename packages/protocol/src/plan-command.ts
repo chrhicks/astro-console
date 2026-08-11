@@ -12,21 +12,6 @@ import { RunSequenceDefinition } from './commands.js'
 
 const PlanDraftSequence = Schema.Struct({
   sequenceId: Schema.NonEmptyString,
-  target: Schema.NonEmptyString,
-  capture: Schema.NonEmptyString,
-  acquisition: Schema.NonEmptyString,
-  stopCondition: Schema.NonEmptyString,
-  window: Schema.Struct({
-    startsAt: Schema.NonEmptyString,
-    endsAt: Schema.NonEmptyString,
-    usableMinutes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-    peakAltitudeDeg: Schema.Finite,
-    horizonClearanceDeg: Schema.Finite,
-  }),
-  estimatedMinutes: Schema.Int.check(Schema.isGreaterThan(0)),
-  storageForecastMb: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  horizon: Schema.Literals(['clear', 'limited', 'blocked', 'missing']),
-  storage: Schema.Literals(['available', 'limited', 'blocked', 'missing']),
   definition: RunSequenceDefinition,
 }).check(
   Schema.makeFilter((sequence) => {

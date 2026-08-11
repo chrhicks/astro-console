@@ -104,10 +104,10 @@ export function previewRunMutation(
         : ('disruptive' as const)
   const consequences =
     input.mutation === 'reprioritizeSecond'
-      ? `The unstarted second fake sequence (${second.target}) remains after the current sequence.`
+      ? `The unstarted second fake sequence (${second.definition.targetName}) remains after the current sequence.`
       : input.mutation === 'shortenSecond'
-        ? `The unstarted second fake sequence (${second.target}) is shortened in this fake run.`
-        : `Current fake sequence progress is discarded and ${second.target} starts at preflight.`
+        ? `The unstarted second fake sequence (${second.definition.targetName}) is shortened in this fake run.`
+        : `Current fake sequence progress is discarded and ${second.definition.targetName} starts at preflight.`
   const preview = {
     previewId: `run-mutation-${randomUUID()}`,
     runId: run.id,
@@ -334,6 +334,6 @@ function mutationNextTarget(db: DatabaseSync, run: Run) {
     ? run.target
     : (Schema.decodeUnknownSync(StoredRunDefinition)(
         JSON.parse(definition.definition),
-      ).plan.sequences[(run.activeSequenceIndex ?? 0) + 1]?.target ??
-        run.target)
+      ).plan.sequences[(run.activeSequenceIndex ?? 0) + 1]?.definition
+        .targetName ?? run.target)
 }

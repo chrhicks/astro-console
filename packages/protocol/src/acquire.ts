@@ -7,6 +7,10 @@ export const PointingVector = Schema.Struct({
   convention: Schema.Literals(['mountRaDec', 'imageAxis']),
 })
 
+export interface PointingVector extends Schema.Schema.Type<
+  typeof PointingVector
+> {}
+
 export const CaptureMetric = Schema.TaggedUnion({
   Known: { value: NonNegativeNumber },
   Unknown: { reason: Schema.NonEmptyString },
