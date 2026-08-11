@@ -110,7 +110,7 @@ export const defaultOriginTelemetry: OriginTelemetry = {
 export function tracedHttpRequest<A, E>(
   response: { readonly statusCode: number; readonly headersSent?: boolean },
   input: {
-    readonly method: 'GET' | 'POST'
+    readonly method: 'GET' | 'POST' | 'PATCH'
     readonly route: string
     readonly workspace:
       | 'acquire'

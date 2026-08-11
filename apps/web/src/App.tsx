@@ -41,7 +41,6 @@ import {
   type LibraryPage,
   type LibraryQuery,
   type ProcessSourceHandoff,
-  type ReviewRequest,
 } from './library-client'
 
 const currentRoute = () => parseRoute(location.pathname, location.search)
@@ -127,7 +126,6 @@ export function App() {
   const libraryPageGeneration = useRef(0)
   const libraryDetailGeneration = useRef(0)
   const processSourceGeneration = useRef(0)
-  const [processSourceRefresh, setProcessSourceRefresh] = useState(0)
   const [processSource, setProcessSource] = useState<{
     value: ProcessSourceHandoff | undefined
     state: 'loading' | 'not-found' | 'not-local' | 'unavailable' | undefined
@@ -249,7 +247,7 @@ export function App() {
       processSourceGeneration.current += 1
       void runtime.dispose()
     }
-  }, [route, processSourceRefresh])
+  }, [route])
   useEffect(() => {
     const runtime = createBootstrapRuntime()
     setSubmitPlan(
@@ -460,24 +458,6 @@ export function App() {
       state: undefined,
     })
   }
-  const reviewProcessCandidate = async (
-    assetId: string,
-    request: ReviewRequest,
-  ) => {
-    const runtime = createLibraryRuntime()
-    try {
-      await runtime.runPromise(
-        Effect.gen(function* () {
-          const client = yield* LibraryClient
-          return yield* client.reviewAsset(assetId, request)
-        }),
-      )
-      setProcessSourceRefresh((revision) => revision + 1)
-    } finally {
-      await runtime.dispose()
-    }
-  }
-
   if (route.kind === 'not-found') return <NotFound />
 
   if (workspace === 'observe')
@@ -590,17 +570,18 @@ export function App() {
         <BetaProcessApp
           projection={projection}
           loading={!projectionReceived}
-          {...(submitControl === undefined ? {} : { submitControl })}
-          sourceAssetId={
-            route.kind === 'process-source' ? route.sourceAssetId : undefined
-          }
+          {...(route.kind === 'process-project'
+            ? { projectId: route.projectId }
+            : {})}
+          {...(route.kind === 'process-source'
+            ? { sourceAssetId: route.sourceAssetId }
+            : {})}
           {...(processSource.value === undefined
             ? {}
             : { sourceHandoff: processSource.value })}
           {...(processSource.state === undefined
             ? {}
             : { sourceHandoffState: processSource.state })}
-          onReviewCandidate={reviewProcessCandidate}
         />
       </Suspense>
     )

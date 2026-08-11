@@ -40,14 +40,14 @@ export function workspace(
   return json(response, 200, planWorkspaceProjection(db, name))
 }
 
-export function processWorkspace(
+export function processSourceHandoff(
   response: ServerResponse,
   db: DatabaseSync,
-  url: URL,
+  encodedAssetId: string,
   snapshotVersion: () => number,
 ) {
-  const sourceAssetId = url.searchParams.get('sourceAssetId')
-  if (sourceAssetId !== null) {
+  try {
+    const sourceAssetId = decodeURIComponent(encodedAssetId)
     return LibraryService.pipe(
       Effect.flatMap((library) => library.processSource(sourceAssetId)),
       Effect.map((body) => ({ status: 200, body })),
@@ -77,10 +77,11 @@ export function processWorkspace(
         return json(response, result.status, result.body)
       }),
     )
+  } catch {
+    return Effect.sync(() =>
+      json(response, 400, { outcome: 'rejected', reason: 'InvalidInput' }),
+    )
   }
-  return Effect.sync(() =>
-    json(response, 400, { outcome: 'rejected', reason: 'InvalidInput' }),
-  )
 }
 export function libraryPage(
   response: ServerResponse,

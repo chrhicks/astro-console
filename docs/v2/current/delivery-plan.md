@@ -246,9 +246,13 @@ with a target-owned Processing Project and explicit, inspectable stages:
    the normal routes. The follow-up cleanup removed the temporary legacy
    fallback; old presentation query parameters resolve to Nightbook.
 
-**Next ad-hoc item —** Run a separate architecture audit of the promoted
-system. Report and prioritize findings before authorizing refactors; do not mix
-the audit into route promotion.
+**Ad-hoc architecture item — Complete.** The audit selected the Processing
+Project lifecycle as the highest-leverage seam. The implementation now has one
+deep Project module, explicit Project routes, one closed intent surface,
+Project-owned authority and revisions, immutable attempts, linear Current
+Result history, internal work ownership, and a Project-only Nightbook UI. The
+retired Processing Session data and models are deleted. A production processor
+adapter remains deferred until a real library is selected.
 
 5. Repair the scheduled host backup container-name mismatch.
 6. Remove only the unused failed-build and index-download staging copies after

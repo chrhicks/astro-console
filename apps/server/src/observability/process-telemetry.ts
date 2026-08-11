@@ -1,17 +1,11 @@
-import { Effect, Exit, Metric, Schema } from 'effect'
-import {
-  Command,
-  CommandEnvelope,
-  ProcessingAction,
-} from '@astro-console/v2-contracts'
+import { Effect, Exit, Metric } from 'effect'
 import type {
   ProcessWorkPassResult,
   ProcessWorkKind,
   ProcessWorkStage,
 } from '../workers/process-work-worker.ts'
 
-type ProcessOperation = 'workspace.open' | 'command.execute'
-type ProcessCommandIntent = typeof ProcessingAction.Type
+type ProcessOperation = 'project.read' | 'project.change'
 const workCount = Metric.counter('astro.process.work.count', {
   incremental: true,
   description: 'Settled Process worker passes',
@@ -33,8 +27,8 @@ const pressureGauge = Metric.gauge('astro.process.pressure', {
 })
 
 const operationSpanNames: Record<ProcessOperation, string> = {
-  'workspace.open': 'Process.workspace.open',
-  'command.execute': 'Process.command.execute',
+  'project.read': 'Process.project.read',
+  'project.change': 'Process.project.change',
 }
 
 export function tracedProcessOperation<A, E, R>(
@@ -69,44 +63,15 @@ export function tracedProcessOperation<A, E, R>(
   )
 }
 
-export function annotateProcessCommandIntent(
-  intent: ProcessCommandIntent,
-  selection: 'recommended' | 'direct' | 'notApplicable' = 'notApplicable',
-) {
-  return Effect.annotateCurrentSpan({
-    'astro.command.intent': intent,
-    'astro.process.selection': selection,
-  })
-}
-
-export function processCommandSelection(raw: unknown) {
-  try {
-    const envelope = Schema.decodeUnknownSync(CommandEnvelope)(raw)
-    return Command.guards.StartProcessingSession(envelope.command)
-      ? envelope.command.selection === 'recommended'
-        ? ('recommended' as const)
-        : ('direct' as const)
-      : ('notApplicable' as const)
-  } catch {
-    return 'notApplicable' as const
-  }
-}
-
 export function tracedProcessWorker<E, R>(
   kind: ProcessWorkKind,
   stage: ProcessWorkStage,
   effect: Effect.Effect<ProcessWorkPassResult, E, R>,
 ) {
   const attributes = {
-    'astro.process.phase':
-      kind === 'build'
-        ? 'build'
-        : kind === 'save' || kind === 'cleanup'
-          ? 'session'
-          : 'develop',
+    'astro.process.phase': stage.toLowerCase(),
     'astro.process.work': kind,
     'astro.process.stage': stage,
-    'astro.process.retry': kind === 'retry' ? 'retry' : 'initial',
     'astro.process.adapter': 'deterministic-file-v1',
     'astro.process.pressure': 'normal',
   }
@@ -118,21 +83,12 @@ export function tracedProcessWorker<E, R>(
         ? 'unavailable'
         : result.value.outcome
       : 'unavailable'
-    const checkpointState =
-      Exit.isSuccess(result) && result.value.outcome === 'checkpointed'
-        ? 'created'
-        : kind === 'retry' &&
-            Exit.isSuccess(result) &&
-            result.value.outcome === 'completed'
-          ? 'reused'
-          : 'unavailable'
     const measured = {
       ...attributes,
       'astro.process.outcome': outcome,
     }
     yield* Effect.annotateCurrentSpan({
       'astro.process.outcome': outcome,
-      'astro.process.checkpoint.state': checkpointState,
     })
     yield* Effect.all([
       Metric.update(Metric.withAttributes(workCount, measured), 1),
@@ -170,15 +126,6 @@ export function recordProcessPressureMetric(
     }),
     1,
   )
-}
-
-export function processCommandIntent(raw: unknown) {
-  try {
-    const envelope = Schema.decodeUnknownSync(CommandEnvelope)(raw)
-    return Schema.decodeUnknownSync(ProcessingAction)(envelope.command._tag)
-  } catch {
-    return undefined
-  }
 }
 
 function outcomeFor(response: {

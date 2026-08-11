@@ -1,0 +1,146 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import {
+  AssetId,
+  IntentId,
+  ProcessingProjectId,
+  ProcessingProjectRevision,
+} from '@astro-console/v2-contracts'
+import { processClient } from './process-client'
+
+test('uses explicit Processing Project routes and does not replay changes', async () => {
+  const originalFetch = globalThis.fetch
+  const requests: Array<{ url: string; method: string; body?: unknown }> = []
+  globalThis.fetch = async (input, init) => {
+    const url = String(input)
+    requests.push({
+      url,
+      method: init?.method ?? 'GET',
+      ...(init?.body === undefined
+        ? {}
+        : { body: JSON.parse(String(init.body)) }),
+    })
+    if (url === '/api/process/projects')
+      return Response.json(
+        init?.method === 'POST'
+          ? {
+              outcome: 'Accepted',
+              replayed: false,
+              project: openedProject,
+            }
+          : [
+              {
+                projectId: 'project-1',
+                revision: 1,
+                name: 'M27',
+                sourceCount: 1,
+                state: 'Ready',
+                updatedAt: now,
+              },
+            ],
+        { status: init?.method === 'POST' ? 201 : 200 },
+      )
+    if (url === '/api/process/projects/project-1/evidence')
+      return Response.json({ projectId: 'project-1', attempts: [] })
+    if (url === '/api/process/projects/project-1')
+      return Response.json(
+        init?.method === 'PATCH'
+          ? { outcome: 'Accepted', replayed: false, project: openedProject }
+          : openedProject,
+      )
+    return Response.json({}, { status: 404 })
+  }
+  try {
+    await processClient.list()
+    await processClient.open('project-1')
+    await processClient.evidence('project-1')
+    await processClient.create({
+      name: 'M27',
+      selection: { assetIds: [AssetId.make('asset-1')], captureSetIds: [] },
+      intentId: IntentId.make('intent-create'),
+    })
+    await processClient.change({
+      projectId: ProcessingProjectId.make('project-1'),
+      expectedProjectRevision: ProcessingProjectRevision.make(1),
+      intentId: IntentId.make('intent-change'),
+      intent: { _tag: 'UndoDraft', stage: 'Calibration' },
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+
+  assert.deepEqual(
+    requests.map(({ url, method }) => ({ url, method })),
+    [
+      { url: '/api/process/projects', method: 'GET' },
+      { url: '/api/process/projects/project-1', method: 'GET' },
+      { url: '/api/process/projects/project-1/evidence', method: 'GET' },
+      { url: '/api/process/projects', method: 'POST' },
+      { url: '/api/process/projects/project-1', method: 'PATCH' },
+    ],
+  )
+  assert.equal(
+    requests.filter((request) => request.method === 'PATCH').length,
+    1,
+  )
+})
+
+const now = '2026-08-10T00:00:00.000Z'
+const initialDrafts = [
+  {
+    stage: 'Calibration',
+    draft: {
+      revision: 0,
+      value: { _tag: 'Calibration', settings: [], overrides: [] },
+      canUndo: false,
+      canRedo: false,
+    },
+  },
+  {
+    stage: 'Registration',
+    draft: {
+      revision: 0,
+      value: { _tag: 'Registration', settings: [], inclusions: [] },
+      canUndo: false,
+      canRedo: false,
+    },
+  },
+  {
+    stage: 'Stacking',
+    draft: {
+      revision: 0,
+      value: { _tag: 'Stacking', settings: [], frameChoices: [] },
+      canUndo: false,
+      canRedo: false,
+    },
+  },
+  {
+    stage: 'Develop',
+    draft: {
+      revision: 0,
+      value: {
+        _tag: 'Develop',
+        operation: { _tag: 'Stretch', method: 'asinh', amount: 0.35 },
+      },
+      canUndo: false,
+      canRedo: false,
+    },
+  },
+].map((stage) => ({
+  ...stage,
+  resultHistory: { canUndo: false, canRedo: false },
+  run: { _tag: 'Unavailable', reason: 'CurrentUpstreamResultRequired' },
+}))
+
+const openedProject = {
+  projectId: 'project-1',
+  revision: 1,
+  name: 'M27',
+  authority: { _tag: 'Allowed' },
+  sources: [],
+  warnings: [],
+  stages: initialDrafts,
+  savedAssetIds: [],
+  createdAt: now,
+  updatedAt: now,
+}

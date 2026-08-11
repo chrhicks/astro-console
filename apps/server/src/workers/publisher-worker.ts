@@ -3,7 +3,6 @@ import { createReadStream, statSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
-import type { ProcessSaveStorage } from '../services/process-save.ts'
 import type {
   PipelineStage,
   PublisherWorkResult,
@@ -55,7 +54,7 @@ export type PublisherProvider = {
 
 export function createPublisherWorker(
   database: DatabaseSync,
-  storage: Pick<ProcessSaveStorage, 'outputsRoot'>,
+  storage: { readonly outputsRoot: string },
   provider: PublisherProvider,
   observability: {
     readonly traceWork?: (

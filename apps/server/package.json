@@ -31,7 +31,6 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
-    "processor": "node --experimental-strip-types src/workers/processor-service.ts",
     "backup:preflight": "node --experimental-strip-types scripts/backup-preflight.ts",
     "test": "tsx --test src/server.integration.test.ts src/integration/*.test.ts scripts/*.test.mjs",
     "typecheck": "tsc --project tsconfig.json"

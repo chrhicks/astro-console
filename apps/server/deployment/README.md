@@ -134,7 +134,7 @@ local state, dependencies, Git history, archives, and unrelated apps from the
 release build context.
 
 Rig discovery, live Access/JWKS rotation validation, tunnel routing, storage thresholds,
-R2 publication, processor/publisher services, and backup restore validation
+R2 publication, publisher service, and backup restore validation
 remain activation work. Do not create placeholder workers that imply those
 boundaries are live.
 
@@ -159,26 +159,6 @@ opening its migration-only database connection. It treats only recognized
 SQLite busy/locked failures as transient and continues its bounded pass loop;
 other errors remain terminal. Confirm this behavior from publisher logs during
 the next supervised host run.
-
-## One-shot processor evidence utility
-
-The manifest processor is retained only as the one-shot utility that produced
-the M13 source/output/publication evidence. It is not an origin environment,
-Compose service, HTTP command, browser control, or ongoing processing
-workflow. For a separately authorized evidence run, copy
-`processor.config.example` outside the repository and run the immutable image
-once with `node --experimental-strip-types src/workers/processor-service.ts`.
-
-Mount only the canonical state volume at `/var/lib/astro-console`, an
-app-owned `processor-sources` bind read-only at the same path, writable
-app-owned `originals` and `outputs` binds at their configured paths, and one
-read-only manifest bind at `/run/config/process-output-manifest.json`. The
-manifest names only relative source paths; it can materialize an immutable
-original with truthful lineage, then delegates containment, symlink, checksum,
-idempotency, and publication-outbox rules to Process Save. Originals are not
-published by ingest alone, and the utility neither deletes nor renames its host
-manifest. Inspect the one JSON result and exit; do not keep the container
-running.
 
 ## Authorized downloads
 

@@ -5,15 +5,11 @@ import {
   AcquireActiveWork,
   AcquireSession,
   ActiveRunState,
-  AppliedProcessingOperation,
-  AssistantFinding,
   DownloadRoutingDecision,
   LibraryAsset,
   AssetId,
-  AssetRevision,
   AppSnapshot,
   AttemptId,
-  CheckpointId,
   ClientId,
   ClientConnection,
   ClientProjectionState,
@@ -21,56 +17,31 @@ import {
   ControlLeaseState,
   ControlRequestResolution,
   EventCursor,
-  FailedProcessingAttemptRecord,
-  FindingId,
   IncrementalProjectionEvent,
-  NonNegativeInt,
   OperationId,
   PointingSolveResult,
   PolarDecision,
-  PreviewId,
-  ProcessingImageRef,
-  ProcessingOutputId,
-  ProcessingPressureDecision,
-  ProcessingRevision,
-  ProcessingSession,
-  ProcessingSessionId,
-  ProcessingSourceRef,
-  ProcessingTransition,
   projectSnapshotForClient,
-  OpenAssetInProcessDecision,
   RepublicationStartDecision,
   RepresentationId,
   RunDefinition,
   RunMutationPreview,
   RunSequenceDefinition,
   RunStartReadiness,
-  SaveCompletionDecision,
   SnapshotVersion,
   RecoverySeriesDecision,
   RecoverySeriesId,
   SolveCompletionDecision,
-  StagedArtifact,
-  StartProcessingDecision,
   acceptLatestPolarMeasurement,
   applyRunMutation,
-  completeProcessingApply,
-  completeProcessingPreview,
-  completeProcessingSave,
   decideAssetDownload,
-  decideOpenAssetInProcess,
   decideRepublishAsset,
   decideStartRun,
-  decideStartProcessingSession,
-  discardHardenedProcessingSession,
-  evaluateProcessingPressure,
   expireControlGrace,
   installAuthoritativeSnapshot,
   markClientDisconnected,
   markControllerDisconnected,
-  leaveProcessingSessionUnfinished,
   navigateWorkspace,
-  moveHardenedProcessingHistory,
   receiveIncrementalEvent,
   openRecoverySeries,
   recordCorrectionAcknowledgement,
@@ -80,11 +51,7 @@ import {
   releaseControl,
   requestControl,
   resolveControlRequest,
-  queueAssistantSuggestionPreview,
-  queueProcessingPreview,
   routeAttention,
-  retryHardenedProcessingStage,
-  startProcessingApply,
   takeControl,
 } from './index.js'
 
@@ -254,57 +221,6 @@ const solveCompletion = (
   proposalId: `${attemptId}-proposal`,
   proposalExpiresAtEpochMs: 61_000,
 })
-const processingSource = (role: 'original' | 'linearMaster' = 'linearMaster') =>
-  ProcessingSourceRef.make({
-    assetId: AssetId.make('asset-source'),
-    assetRevision: AssetRevision.make(2),
-    role,
-    checksum: 'sha256:source',
-    locallyAvailable: true,
-  })
-const processingBase = ProcessingImageRef.cases.SourceAsset.make({
-  assetId: AssetId.make('asset-source'),
-  checksum: 'sha256:source',
-})
-const historyEntry = () =>
-  AppliedProcessingOperation.make({
-    operationId: OperationId.make('op-1'),
-    attemptId: AttemptId.make('attempt-1'),
-    operation: 'calibrate',
-    toolId: 'siril',
-    parameters: [],
-    input: processingBase,
-    output: ProcessingImageRef.cases.DerivedOutput.make({
-      outputId: ProcessingOutputId.make('out-1'),
-      checksum: 'sha256:out-1',
-    }),
-    checkpointId: CheckpointId.make('checkpoint-linear'),
-  })
-const processing = (withHistory = false) =>
-  ProcessingSession.make({
-    sessionId: ProcessingSessionId.make('process-1'),
-    revision: ProcessingRevision.make(5),
-    lifecycle: 'active',
-    phase: 'develop',
-    sources: [processingSource()],
-    baseImage: processingBase,
-    history: withHistory ? [historyEntry()] : [],
-    historyPosition: NonNegativeInt.make(withHistory ? 1 : 0),
-    assistantFindings: [],
-    savedAssetIds: [],
-  })
-const queuePreview = (
-  session: ProcessingSession,
-  baseHistoryPosition = session.historyPosition,
-) =>
-  queueProcessingPreview(session, {
-    previewId: PreviewId.make('preview-process'),
-    clientPreviewSequence: NonNegativeInt.make(1),
-    operation: 'stretch',
-    toolId: 'siril',
-    parameters: [{ key: 'amount', value: { _tag: 'NumberValue', value: 0.6 } }],
-    baseHistoryPosition,
-  })
 const asset = (
   role:
     | 'original'
@@ -391,7 +307,6 @@ const appSnapshot = (snapshotVersion = 10, eventCursor = 40) =>
       lastConfirmedAt: '2026-07-22T20:00:00Z',
       actions: [{ _tag: 'Available', action: 'PauseRun' }],
     },
-    processingSessions: [],
     library: { assetCount: 0, selectedAssetIds: [], activeOperationIds: [] },
     selectedAssets: [],
     health: [
@@ -435,24 +350,9 @@ const scenarioIds = [
   'ACQ-05',
   'ACQ-06',
   'ACQ-07',
-  'PROC-01',
-  'PROC-02',
-  'PROC-03',
-  'PROC-04',
-  'PROC-05',
-  'PROC-06',
-  'PROC-07',
-  'PROC-08',
-  'PROC-09',
-  'PROC-10',
-  'PROC-11',
-  'PROC-12',
-  'PROC-13',
-  'PROC-14',
   'LIB-01',
   'LIB-02',
   'LIB-03',
-  'LIB-04',
 ] as const
 
 type ScenarioId = (typeof scenarioIds)[number]
@@ -787,214 +687,6 @@ const checks: Record<ScenarioId, () => void> = {
       )
     }
   },
-  'PROC-01': () => {
-    const result = decideStartProcessingSession(
-      ProcessingSessionId.make('process-build'),
-      [processingSource('original')],
-    )
-    assert.equal(StartProcessingDecision.$is('Started')(result), true)
-    if (StartProcessingDecision.$is('Started')(result)) {
-      assert.equal(result.session.phase, 'build')
-      assert.equal(
-        result.work === undefined ? undefined : result.work._tag,
-        'BuildLinearMaster',
-      )
-    }
-  },
-  'PROC-02': () => {
-    const result = decideStartProcessingSession(
-      ProcessingSessionId.make('process-develop'),
-      [processingSource()],
-    )
-    assert.equal(StartProcessingDecision.$is('Started')(result), true)
-    if (StartProcessingDecision.$is('Started')(result))
-      assert.equal(result.session.phase, 'develop')
-  },
-  'PROC-03': () => {
-    const result = queuePreview(processing())
-    assert.equal(ProcessingTransition.$is('PreviewQueued')(result), true)
-    if (ProcessingTransition.$is('PreviewQueued')(result))
-      assert.equal(result.session.history.length, 0)
-  },
-  'PROC-04': () => {
-    const queued = queuePreview(processing())
-    assert.equal(ProcessingTransition.$is('PreviewQueued')(queued), true)
-    if (!ProcessingTransition.$is('PreviewQueued')(queued)) return
-    const ready = completeProcessingPreview(
-      queued.session,
-      PreviewId.make('preview-process'),
-      ProcessingOutputId.make('out-preview'),
-    )
-    assert.equal(ProcessingTransition.$is('PreviewCompleted')(ready), true)
-    if (!ProcessingTransition.$is('PreviewCompleted')(ready)) return
-    const started = startProcessingApply(
-      ready.session,
-      AttemptId.make('attempt-stretch'),
-      OperationId.make('op-stretch'),
-      PreviewId.make('preview-process'),
-    )
-    assert.equal(ProcessingTransition.$is('ApplyStarted')(started), true)
-    if (!ProcessingTransition.$is('ApplyStarted')(started)) return
-    const completed = completeProcessingApply(
-      started.session,
-      AttemptId.make('attempt-stretch'),
-      ProcessingOutputId.make('out-stretch'),
-      'sha256:out-stretch',
-      CheckpointId.make('cp-stretch'),
-    )
-    assert.equal(ProcessingTransition.$is('ApplyCompleted')(completed), true)
-  },
-  'PROC-05': () => {
-    const undone = moveHardenedProcessingHistory(processing(true), 'undo')
-    assert.equal(ProcessingTransition.$is('HistoryMoved')(undone), true)
-    if (ProcessingTransition.$is('HistoryMoved')(undone)) {
-      assert.equal(
-        ProcessingTransition.$is('HistoryMoved')(
-          moveHardenedProcessingHistory(undone.session, 'redo'),
-        ),
-        true,
-      )
-    }
-  },
-  'PROC-06': () => {
-    const undone = moveHardenedProcessingHistory(processing(true), 'undo')
-    assert.equal(ProcessingTransition.$is('HistoryMoved')(undone), true)
-    if (!ProcessingTransition.$is('HistoryMoved')(undone)) return
-    const queued = queuePreview(undone.session)
-    assert.equal(ProcessingTransition.$is('PreviewQueued')(queued), true)
-    if (!ProcessingTransition.$is('PreviewQueued')(queued)) return
-    const ready = completeProcessingPreview(
-      queued.session,
-      PreviewId.make('preview-process'),
-      ProcessingOutputId.make('out-alternate-preview'),
-    )
-    assert.equal(ProcessingTransition.$is('PreviewCompleted')(ready), true)
-    if (!ProcessingTransition.$is('PreviewCompleted')(ready)) return
-    const started = startProcessingApply(
-      ready.session,
-      AttemptId.make('attempt-alt'),
-      OperationId.make('op-alt'),
-      PreviewId.make('preview-process'),
-    )
-    assert.equal(ProcessingTransition.$is('ApplyStarted')(started), true)
-    if (!ProcessingTransition.$is('ApplyStarted')(started)) return
-    const completed = completeProcessingApply(
-      started.session,
-      AttemptId.make('attempt-alt'),
-      ProcessingOutputId.make('out-alt'),
-      'sha256:out-alt',
-      CheckpointId.make('cp-alt'),
-    )
-    assert.equal(ProcessingTransition.$is('ApplyCompleted')(completed), true)
-    if (ProcessingTransition.$is('ApplyCompleted')(completed))
-      assert.equal(completed.session.history.length, 1)
-  },
-  'PROC-07': () => {
-    const finding = AssistantFinding.make({
-      findingId: FindingId.make('finding-1'),
-      version: NonNegativeInt.make(1),
-      operation: 'stretch',
-      toolId: 'siril',
-      parameters: [],
-      input: processingBase,
-    })
-    const result = queueAssistantSuggestionPreview(
-      ProcessingSession.make({ ...processing(), assistantFindings: [finding] }),
-      finding.findingId,
-      finding.version,
-      PreviewId.make('assistant-preview'),
-      1,
-    )
-    assert.equal(ProcessingTransition.$is('PreviewQueued')(result), true)
-    if (ProcessingTransition.$is('PreviewQueued')(result))
-      assert.equal(result.session.historyPosition, 0)
-  },
-  'PROC-08': () => {
-    const failedAttempt = FailedProcessingAttemptRecord.make({
-      attemptId: AttemptId.make('attempt-stretch'),
-      operationId: OperationId.make('op-stretch'),
-      operation: 'stretch',
-      toolId: 'siril',
-      parameters: [],
-      input: historyEntry().output,
-      baseHistoryPosition: NonNegativeInt.make(1),
-      checkpointId: CheckpointId.make('checkpoint-linear'),
-      diagnosticRef: 'diag-1',
-    })
-    const result = retryHardenedProcessingStage(
-      ProcessingSession.make({ ...processing(true), failedAttempt }),
-      failedAttempt.attemptId,
-      AttemptId.make('attempt-stretch-retry'),
-      failedAttempt.checkpointId,
-    )
-    assert.equal(ProcessingTransition.$is('RetryStarted')(result), true)
-  },
-  'PROC-09': () =>
-    assert.equal(
-      evaluateProcessingPressure({
-        memoryUsedFraction: 0.4,
-        storageFreeGiB: 800,
-        thermalCelsius: 55,
-        acquisitionWriteBacklogMiB: 40,
-        captureActive: true,
-      })._tag,
-      'Continue',
-    ),
-  'PROC-10': () =>
-    assert.equal(
-      ProcessingPressureDecision.$is('Pause')(
-        evaluateProcessingPressure({
-          memoryUsedFraction: 0.5,
-          storageFreeGiB: 5,
-          thermalCelsius: 60,
-          acquisitionWriteBacklogMiB: 0,
-          captureActive: false,
-        }),
-      ),
-      true,
-    ),
-  'PROC-11': () =>
-    assert.equal(
-      installAuthoritativeSnapshot(client(), appSnapshot(20, 80)).snapshot
-        .snapshotVersion,
-      20,
-    ),
-  'PROC-12': () =>
-    assert.equal(
-      ProcessingTransition.$is('LeftUnfinished')(
-        leaveProcessingSessionUnfinished(processing()),
-      ),
-      true,
-    ),
-  'PROC-13': () => {
-    const saved = completeProcessingSave(processing(true), 'comparison-m27', [
-      StagedArtifact.make({
-        assetId: AssetId.make('asset-final'),
-        outputId: ProcessingOutputId.make('out-1'),
-        role: 'final',
-        format: 'fits',
-        checksum: 'sha256:asset-final',
-        permanentBytesReady: true,
-      }),
-    ])
-    assert.equal(SaveCompletionDecision.$is('Saved')(saved), true)
-    if (SaveCompletionDecision.$is('Saved')(saved)) {
-      assert.equal(saved.session.lifecycle, 'active')
-      assert.deepEqual(saved.session.savedAssetIds, ['asset-final'])
-    }
-  },
-  'PROC-14': () => {
-    const discarded = discardHardenedProcessingSession(
-      processing(true),
-      'discard-1',
-      'discard-1',
-    )
-    assert.equal(ProcessingTransition.$is('Discarded')(discarded), true)
-    if (ProcessingTransition.$is('Discarded')(discarded)) {
-      assert.equal(discarded.session.history.length, 0)
-      assert.equal(discarded.session.sources[0].assetId, 'asset-source')
-    }
-  },
   'LIB-01': () => assert.equal(asset('final').assetId, 'asset-1'),
   'LIB-02': () => {
     assert.equal(
@@ -1028,23 +720,11 @@ const checks: Record<ScenarioId, () => void> = {
     if (RepublicationStartDecision.$is('Started')(result))
       assert.equal(result.asset.assetId, 'asset-1')
   },
-  'LIB-04': () => {
-    const develop = decideOpenAssetInProcess(asset('linearMaster'))
-    const build = decideOpenAssetInProcess(asset('original'))
-    assert.equal(
-      OpenAssetInProcessDecision.$is('Start')(develop) && develop.phase,
-      'develop',
-    )
-    assert.equal(
-      OpenAssetInProcessDecision.$is('Start')(build) && build.phase,
-      'build',
-    )
-  },
 }
 
 describe('Gate 5 scenario evidence catalog', () => {
-  it('contains the exact 43-scenario baseline', () => {
-    assert.equal(scenarioIds.length, 43)
+  it('contains the exact retained non-Process scenario baseline', () => {
+    assert.equal(scenarioIds.length, 28)
     assert.deepEqual(Object.keys(checks), scenarioIds)
   })
 

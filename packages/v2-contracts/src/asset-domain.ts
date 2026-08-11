@@ -6,12 +6,12 @@ import {
   PositiveNumber,
   OperationId,
   ProcessingOutputId,
-  ProcessingRevision,
-  ProcessingSessionId,
+  ProcessingProjectId,
+  ProcessingStageAttemptId,
+  ProcessingStageResultId,
   RepresentationId,
   RunId,
 } from './primitives.js'
-import { ProcessingImageRef, ProcessingSession } from './processing-domain.js'
 
 export const AssetFormat = Schema.Literals([
   'cameraRaw',
@@ -107,7 +107,11 @@ export const ReviewAssetRequest = Schema.Struct({
 export const AssetLineage = Schema.Struct({
   comparisonGroupId: Schema.NonEmptyString,
   sourceAssetIds: Schema.NonEmptyArray(AssetId),
-  processingSessionId: Schema.optionalKey(ProcessingSessionId),
+  processingProjectId: Schema.optionalKey(ProcessingProjectId),
+  processingAttemptIds: Schema.optionalKey(
+    Schema.Array(ProcessingStageAttemptId),
+  ),
+  processingResultId: Schema.optionalKey(ProcessingStageResultId),
   processingOutputId: Schema.optionalKey(ProcessingOutputId),
   operationIds: Schema.Array(OperationId),
 })
@@ -194,132 +198,28 @@ export const LibraryAsset = Schema.Struct({
       }
     }
     if (
-      (asset.lineage.processingSessionId === undefined) !==
+      (asset.lineage.processingProjectId === undefined) !==
       (asset.lineage.processingOutputId === undefined)
     ) {
       return {
         path: ['lineage'],
         issue:
-          'processing session and output identities must be recorded together',
+          'Processing Project and output identities must be recorded together',
+      }
+    }
+    if (
+      asset.lineage.processingResultId !== undefined &&
+      asset.lineage.processingProjectId === undefined
+    ) {
+      return {
+        path: ['lineage'],
+        issue: 'a Processing Result requires its Processing Project identity',
       }
     }
   }),
 )
 
 export interface LibraryAsset extends Schema.Schema.Type<typeof LibraryAsset> {}
-
-export const StagedArtifact = Schema.Struct({
-  assetId: AssetId,
-  outputId: ProcessingOutputId,
-  role: Schema.Literals(['linearMaster', 'intermediate', 'final', 'preview']),
-  format: Schema.Literals(['fits', 'tiff', 'png', 'jpeg']),
-  checksum: Schema.NonEmptyString,
-  permanentBytesReady: Schema.Boolean,
-})
-
-export type SaveCompletionDecision = Data.TaggedEnum<{
-  Saved: {
-    readonly session: ProcessingSession
-    readonly assets: ReadonlyArray<LibraryAsset>
-  }
-  Rejected: {
-    readonly reason:
-      | 'SaveSelectionInvalid'
-      | 'ArtifactBytesNotReady'
-      | 'ProcessingOutputUnavailable'
-      | 'AssetIdentityConflict'
-  }
-}>
-
-export const SaveCompletionDecision = Data.taggedEnum<SaveCompletionDecision>()
-
-export const completeProcessingSave = (
-  session: ProcessingSession,
-  comparisonGroupId: string,
-  staged: ReadonlyArray<typeof StagedArtifact.Type>,
-  existingAssetIds: ReadonlyArray<typeof AssetId.Type> = [],
-): SaveCompletionDecision => {
-  if (staged.length === 0)
-    return SaveCompletionDecision.Rejected({ reason: 'SaveSelectionInvalid' })
-  const stagedAssetIds = staged.map((artifact) => artifact.assetId)
-  const unavailableAssetIds = new Set([
-    ...existingAssetIds,
-    ...session.savedAssetIds,
-  ])
-  if (
-    new Set(stagedAssetIds).size !== stagedAssetIds.length ||
-    stagedAssetIds.some((assetId) => unavailableAssetIds.has(assetId))
-  ) {
-    return SaveCompletionDecision.Rejected({ reason: 'AssetIdentityConflict' })
-  }
-  if (staged.some((artifact) => !artifact.permanentBytesReady)) {
-    return SaveCompletionDecision.Rejected({ reason: 'ArtifactBytesNotReady' })
-  }
-  const historyOutputs = new Set(
-    session.history.map((entry) => entry.output.outputId),
-  )
-  const baseOutputId =
-    session.baseImage !== undefined &&
-    ProcessingImageRef.guards.DerivedOutput(session.baseImage)
-      ? session.baseImage.outputId
-      : undefined
-  if (
-    staged.some((artifact) =>
-      artifact.role === 'linearMaster'
-        ? artifact.outputId !== baseOutputId
-        : !historyOutputs.has(artifact.outputId),
-    )
-  ) {
-    return SaveCompletionDecision.Rejected({
-      reason: 'ProcessingOutputUnavailable',
-    })
-  }
-  const sourceAssetIds = session.sources.map((source) => source.assetId)
-  const [firstSource, ...otherSources] = sourceAssetIds
-  if (firstSource === undefined)
-    return SaveCompletionDecision.Rejected({ reason: 'SaveSelectionInvalid' })
-  const assets = staged.map((artifact) =>
-    LibraryAsset.make({
-      assetId: artifact.assetId,
-      revision: AssetRevision.make(0),
-      role: artifact.role,
-      format: artifact.format,
-      checksum: artifact.checksum,
-      localAvailable: true,
-      lineage: {
-        comparisonGroupId,
-        sourceAssetIds: [firstSource, ...otherSources],
-        processingSessionId: session.sessionId,
-        processingOutputId: artifact.outputId,
-        operationIds: operationLineageForOutput(session, artifact.outputId),
-      },
-      representations: [],
-    }),
-  )
-  return SaveCompletionDecision.Saved({
-    session: ProcessingSession.make({
-      ...session,
-      revision: ProcessingRevision.make(session.revision + 1),
-      savedAssetIds: [
-        ...session.savedAssetIds,
-        ...assets.map((asset) => asset.assetId),
-      ],
-    }),
-    assets,
-  })
-}
-
-function operationLineageForOutput(
-  session: ProcessingSession,
-  outputId: typeof ProcessingOutputId.Type,
-): ReadonlyArray<typeof OperationId.Type> {
-  const outputIndex = session.history.findIndex(
-    (entry) => entry.output.outputId === outputId,
-  )
-  return session.history
-    .slice(0, outputIndex + 1)
-    .map((entry) => entry.operationId)
-}
 
 export const AssetDeliveryWork = Schema.TaggedUnion({
   StageForRemoteDownload: {
@@ -700,7 +600,9 @@ export const LibraryComparison = Schema.Struct({
       format: AssetFormat,
       checksum: Schema.NonEmptyString,
       sourceAssetIds: Schema.NonEmptyArray(AssetId),
-      processingSessionId: Schema.optionalKey(Schema.NonEmptyString),
+      processingProjectId: Schema.optionalKey(ProcessingProjectId),
+      processingAttemptIds: Schema.Array(ProcessingStageAttemptId),
+      processingResultId: Schema.optionalKey(ProcessingStageResultId),
       processingOutputId: Schema.optionalKey(ProcessingOutputId),
       operationIds: Schema.Array(OperationId),
     }),
@@ -761,9 +663,13 @@ function comparisonEntry(asset: LibraryAsset) {
     format: asset.format,
     checksum: asset.checksum,
     sourceAssetIds: asset.lineage.sourceAssetIds,
-    ...(asset.lineage.processingSessionId === undefined
+    ...(asset.lineage.processingProjectId === undefined
       ? {}
-      : { processingSessionId: asset.lineage.processingSessionId }),
+      : { processingProjectId: asset.lineage.processingProjectId }),
+    processingAttemptIds: asset.lineage.processingAttemptIds ?? [],
+    ...(asset.lineage.processingResultId === undefined
+      ? {}
+      : { processingResultId: asset.lineage.processingResultId }),
     ...(asset.lineage.processingOutputId === undefined
       ? {}
       : { processingOutputId: asset.lineage.processingOutputId }),
@@ -779,61 +685,4 @@ function sameIds(
     left.length === right.length &&
     left.every((value, index) => value === right[index])
   )
-}
-
-export type OpenAssetInProcessDecision = Data.TaggedEnum<{
-  Start: {
-    readonly assetId: typeof AssetId.Type
-    readonly phase: 'build' | 'develop'
-  }
-  Resume: { readonly sessionId: ProcessingSession['sessionId'] }
-  Rejected: {
-    readonly reason:
-      | 'SourceAssetUnavailable'
-      | 'SourceRoleUnsupported'
-      | 'ProcessingSessionUnavailable'
-      | 'ProcessingSessionSourceMismatch'
-  }
-}>
-
-export const OpenAssetInProcessDecision =
-  Data.taggedEnum<OpenAssetInProcessDecision>()
-
-export const decideOpenAssetInProcess = (
-  asset: LibraryAsset,
-  unfinishedSession?: ProcessingSession,
-): OpenAssetInProcessDecision => {
-  if (!asset.localAvailable)
-    return OpenAssetInProcessDecision.Rejected({
-      reason: 'SourceAssetUnavailable',
-    })
-  if (unfinishedSession !== undefined) {
-    if (unfinishedSession.lifecycle !== 'unfinished') {
-      return OpenAssetInProcessDecision.Rejected({
-        reason: 'ProcessingSessionUnavailable',
-      })
-    }
-    return unfinishedSession.sources.some(
-      (source) => source.assetId === asset.assetId,
-    )
-      ? OpenAssetInProcessDecision.Resume({
-          sessionId: unfinishedSession.sessionId,
-        })
-      : OpenAssetInProcessDecision.Rejected({
-          reason: 'ProcessingSessionSourceMismatch',
-        })
-  }
-  if (asset.role === 'original')
-    return OpenAssetInProcessDecision.Start({
-      assetId: asset.assetId,
-      phase: 'build',
-    })
-  if (asset.role === 'linearMaster')
-    return OpenAssetInProcessDecision.Start({
-      assetId: asset.assetId,
-      phase: 'develop',
-    })
-  return OpenAssetInProcessDecision.Rejected({
-    reason: 'SourceRoleUnsupported',
-  })
 }

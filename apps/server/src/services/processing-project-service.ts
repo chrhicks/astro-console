@@ -1,129 +1,62 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import type { DatabaseSync } from 'node:sqlite'
 import { Schema } from 'effect'
 import {
   AssetId,
   AssetRevision,
-  AttemptId,
-  CaptureSetId,
   CheckpointId,
-  Command,
-  DevelopAttempt,
-  DevelopDraft,
-  DevelopHistoryEntry,
-  DevelopOutput,
+  CaptureSetId,
+  CreateProcessingProjectRequest,
   DevelopOperation,
-  DevelopPreview,
-  DevelopSavedResult,
-  DevelopState,
+  ExecutableProcessingStage,
+  IntentId,
+  OpenedProcessingProject,
+  PersonId,
+  ClientId,
   PreviewId,
-  ProcessingOutputId,
-  ProcessingProject,
+  ProcessingAttempt,
+  ProcessingAttemptOutput,
+  ProcessingAttemptStageEvidence,
+  ProcessingCurrentResult,
+  ProcessingDevelopPreview,
+  ProcessingDevelopBase,
+  ProcessingFrozenSource,
   ProcessingLibraryFormat,
   ProcessingLibraryRole,
-  CalibrationOverride,
-  CalibrationFrameOutcome,
-  CalibrationRecommendation,
-  RegistrationFrameInclusion,
-  StackingFrameChoice,
-  StackingRecommendation,
+  ProcessingOutputId,
+  ProcessingProject,
+  ProcessingProjectAuthority,
+  ProcessingProjectChangeRequest,
+  ProcessingProjectChanged,
+  ProcessingProjectEvidence,
+  ProcessingProjectEvidenceQuery,
+  ProcessingProjectError,
   ProcessingProjectId,
+  ProcessingProjectIntent,
+  ProcessingProjectNotice,
   ProcessingProjectRevision,
   ProcessingProjectSource,
-  ProcessingStageAttempt,
-  ProcessingStageAttemptId,
+  ProcessingProjectSummary,
+  ProcessingProjectWarning,
+  ProcessingRecommendation,
+  ProcessingStageDraft,
+  ProcessingStageDraftValue,
+  ProcessingStageResult,
   ProcessingStageResultId,
   ProcessingStageState,
-  ProcessingProjectWarning,
+  ProcessingStageView,
+  ProcessingStageAttemptId,
+  decideProcessingProjectAuthority,
+  currentProcessingStageResult,
+  sameProcessingResult,
   type ProcessingSourceRole,
 } from '@astro-console/v2-contracts'
 import type { LocalIdentity } from '../auth/identity.ts'
 
-type ProjectCommand = Extract<
-  typeof Command.Type,
-  | { readonly _tag: 'CreateProcessingProject' }
-  | { readonly _tag: 'AddProcessingProjectSources' }
-  | { readonly _tag: 'RemoveProcessingProjectSource' }
-  | { readonly _tag: 'AssignProcessingSourceRole' }
-  | { readonly _tag: 'NavigateProcessingProjectStage' }
-  | { readonly _tag: 'UpdateProcessingStageDraft' }
-  | { readonly _tag: 'UndoProcessingStageDraft' }
-  | { readonly _tag: 'RedoProcessingStageDraft' }
-  | { readonly _tag: 'SetCalibrationUseAnyway' }
-  | { readonly _tag: 'SetRegistrationFrameIncluded' }
-  | { readonly _tag: 'SetStackingFrameIncluded' }
-  | { readonly _tag: 'RunProcessingProjectStage' }
-  | { readonly _tag: 'SelectProcessingStageResult' }
-  | { readonly _tag: 'SaveProcessingProjectMaster' }
-  | { readonly _tag: 'OpenProcessingProjectDevelop' }
-  | { readonly _tag: 'UpdateProcessingDevelopDraft' }
-  | { readonly _tag: 'UndoProcessingDevelopDraft' }
-  | { readonly _tag: 'RedoProcessingDevelopDraft' }
-  | { readonly _tag: 'SyncProcessingDevelopPreview' }
-  | { readonly _tag: 'ApplyProcessingDevelopPreview' }
-  | { readonly _tag: 'UndoProcessingDevelopStep' }
-  | { readonly _tag: 'RedoProcessingDevelopStep' }
-  | { readonly _tag: 'RetryProcessingDevelopApply' }
-  | { readonly _tag: 'SaveProcessingDevelopResult' }
->
-
 const ProjectRow = Schema.Struct({ project: Schema.String })
-const UnknownRecord = Schema.Record(Schema.String, Schema.Unknown)
-const ProjectStageWorkRow = Schema.Struct({
-  session_id: Schema.String,
-  payload: Schema.String,
-  state: Schema.String,
-  claim_token: Schema.NullOr(Schema.String),
-})
-const ProjectStageWorkPayload = Schema.Struct({
-  projectId: ProcessingProjectId,
-  projectRevision: ProcessingProjectRevision,
-  attemptId: ProcessingStageAttemptId,
-  stage: Schema.Literals(['Calibration', 'Registration', 'Stacking']),
-})
-const ProjectDevelopWorkPayload = Schema.Struct({
-  projectId: ProcessingProjectId,
-  projectRevision: ProcessingProjectRevision,
-  attemptId: AttemptId,
-  stage: Schema.Literal('Develop'),
-})
-const ReceiptRow = Schema.Struct({ response: Schema.String })
-const MasterArtifactRow = Schema.Struct({ checksum: Schema.String })
-const DevelopArtifactRow = Schema.Struct({
-  path: Schema.String,
-  checksum: Schema.String,
-})
-const ProjectAcceptedResponse = Schema.Struct({
-  outcome: Schema.Literal('accepted'),
-  replayed: Schema.Boolean,
-  effect: Schema.Literals([
-    'projectCreated',
-    'projectSourcesAdded',
-    'projectSourceRemoved',
-    'projectSourceRoleAssigned',
-    'projectStageNavigated',
-    'projectStageDraftUpdated',
-    'projectStageDraftUndone',
-    'projectStageDraftRedone',
-    'calibrationUseAnywayUpdated',
-    'registrationFrameInclusionUpdated',
-    'stackingFrameInclusionUpdated',
-    'projectStageRunQueued',
-    'projectStageResultSelected',
-    'projectMasterSaved',
-    'projectDevelopOpened',
-    'projectDevelopDraftUpdated',
-    'projectDevelopDraftUndone',
-    'projectDevelopDraftRedone',
-    'projectDevelopPreviewSynchronized',
-    'projectDevelopApplyQueued',
-    'projectDevelopStepUndone',
-    'projectDevelopStepRedone',
-    'projectDevelopRetryQueued',
-    'projectDevelopResultSaved',
-  ]),
-  project: ProcessingProject,
+const ReceiptRow = Schema.Struct({
+  semantic_key: Schema.String,
+  response: Schema.String,
 })
 const SourceRow = Schema.Struct({
   asset_id: Schema.String,
@@ -138,7 +71,7 @@ const SourceRow = Schema.Struct({
 const StoredDetail = Schema.Struct({
   checksum: Schema.optionalKey(Schema.String),
   targetName: Schema.optionalKey(Schema.String),
-  captureSetId: Schema.optionalKey(CaptureSetId),
+  captureSetId: Schema.optionalKey(Schema.String),
   equipment: Schema.optionalKey(
     Schema.Struct({ rigId: Schema.String, cameraDeviceId: Schema.String }),
   ),
@@ -149,1383 +82,1323 @@ const StoredDetail = Schema.Struct({
   }),
   capture: Schema.optionalKey(
     Schema.Struct({
+      frameType: Schema.Literals(['light', 'dark', 'flat', 'bias']),
       exposureSeconds: Schema.Number,
       filter: Schema.String,
       binning: Schema.Int,
-      frameType: Schema.Literals(['light', 'dark', 'flat', 'bias']),
     }),
   ),
 })
-type StackingAttemptEvidence = {
-  readonly stageOutcome: 'Succeeded' | 'Warning' | 'Failed' | 'Unavailable'
-  readonly frameOutcomes: ReadonlyArray<typeof CalibrationFrameOutcome.Type>
-  readonly diagnostics: ReadonlyArray<string>
-  readonly stackingOutput?: {
-    readonly checksum: string
-    readonly format: 'fits'
-    readonly includedAssetIds: ReadonlyArray<typeof AssetId.Type>
-    readonly diagnostic: string
-  }
-  readonly outputArtifact?: { readonly path: string; readonly checksum: string }
+const ProjectWorkRow = Schema.Struct({
+  work_id: Schema.String,
+  project_id: Schema.String,
+  kind: Schema.Literal('projectStage'),
+  payload: Schema.String,
+  state: Schema.Literals(['pending', 'claimed']),
+  stage: ExecutableProcessingStage,
+  claim_token: Schema.NullOr(Schema.String),
+  enqueued_at: Schema.String,
+})
+const ProjectWorkPayload = Schema.Struct({
+  projectId: ProcessingProjectId,
+  attemptId: ProcessingStageAttemptId,
+  stage: ExecutableProcessingStage,
+})
+const ProjectBacklogRow = Schema.Struct({
+  count: Schema.Int,
+  oldest: Schema.NullOr(Schema.String),
+})
+const LibraryDetail = Schema.Struct({
+  checksum: Schema.optionalKey(Schema.String),
+  lineage: Schema.Struct({
+    processingOutputId: Schema.optionalKey(Schema.String),
+  }),
+})
+const SavedMasterRow = Schema.Struct({
+  asset_id: Schema.String,
+  revision: Schema.Int,
+  role: Schema.String,
+  detail: Schema.String,
+})
+
+type Project = typeof ProcessingProject.Type
+type Stage = typeof ExecutableProcessingStage.Type
+type Intent = typeof ProcessingProjectIntent.Type
+type ChangeRequest = typeof ProcessingProjectChangeRequest.Type
+type Caller = LocalIdentity
+type NoticeSubscriber = {
+  readonly values: Array<typeof ProcessingProjectNotice.Type>
+  readonly waiters: Array<() => void>
 }
 
-export const isProcessingProjectCommand = (
-  command: typeof Command.Type,
-): command is ProjectCommand =>
-  Command.guards.CreateProcessingProject(command) ||
-  Command.guards.AddProcessingProjectSources(command) ||
-  Command.guards.RemoveProcessingProjectSource(command) ||
-  Command.guards.AssignProcessingSourceRole(command) ||
-  Command.guards.NavigateProcessingProjectStage(command) ||
-  Command.guards.UpdateProcessingStageDraft(command) ||
-  Command.guards.UndoProcessingStageDraft(command) ||
-  Command.guards.RedoProcessingStageDraft(command) ||
-  Command.guards.SetCalibrationUseAnyway(command) ||
-  Command.guards.SetRegistrationFrameIncluded(command) ||
-  Command.guards.SetStackingFrameIncluded(command) ||
-  Command.guards.RunProcessingProjectStage(command) ||
-  Command.guards.SelectProcessingStageResult(command) ||
-  Command.guards.SaveProcessingProjectMaster(command) ||
-  Command.guards.OpenProcessingProjectDevelop(command) ||
-  Command.guards.UpdateProcessingDevelopDraft(command) ||
-  Command.guards.UndoProcessingDevelopDraft(command) ||
-  Command.guards.RedoProcessingDevelopDraft(command) ||
-  Command.guards.SyncProcessingDevelopPreview(command) ||
-  Command.guards.ApplyProcessingDevelopPreview(command) ||
-  Command.guards.UndoProcessingDevelopStep(command) ||
-  Command.guards.RedoProcessingDevelopStep(command) ||
-  Command.guards.RetryProcessingDevelopApply(command) ||
-  Command.guards.SaveProcessingDevelopResult(command)
+const noticeSubscribers = new WeakMap<DatabaseSync, Set<NoticeSubscriber>>()
 
-export function processingProjects(database: DatabaseSync) {
-  return Schema.decodeUnknownSync(Schema.Array(ProjectRow))(
+export type ProcessingProjectMaterialization = {
+  readonly workId: string
+  readonly stage: Stage
+  readonly payload: string
+}
+
+export type ProcessingProjectMaterializedEvidence = {
+  readonly path: string
+  readonly checksum: string
+}
+
+export type ProcessingProjectWorkResult =
+  | { readonly outcome: 'idle'; readonly backlog: 0 }
+  | {
+      readonly outcome: 'completed' | 'failed' | 'stale' | 'claimedUnresolved'
+      readonly kind: 'projectStage'
+      readonly stage: Stage
+      readonly backlog: number
+      readonly oldestAgeSeconds: number
+    }
+
+type ProjectError = typeof ProcessingProjectError.Type
+
+export function createProcessingProjectLifecycle(database: DatabaseSync) {
+  const list = (caller: Caller) => {
+    void caller
+    return readProjects(database).map((project) => projectSummary(project))
+  }
+
+  const open = (caller: Caller, projectId: typeof ProcessingProjectId.Type) => {
+    const project = readProject(database, projectId)
+    return project === undefined
+      ? undefined
+      : projectView(database, project, caller)
+  }
+
+  const evidence = (
+    caller: Caller,
+    query: typeof ProcessingProjectEvidenceQuery.Type,
+  ) => {
+    void caller
+    const project = readProject(database, query.projectId)
+    if (project === undefined) return undefined
+    const filtered = project.attempts.filter(
+      (attempt) => query.stage === undefined || attempt.stage === query.stage,
+    )
+    const start =
+      query.afterAttemptId === undefined
+        ? 0
+        : Math.max(
+            0,
+            filtered.findIndex(
+              (attempt) => attempt.attemptId === query.afterAttemptId,
+            ) + 1,
+          )
+    const limit = query.limit ?? 50
+    const attempts = filtered.slice(start, start + limit)
+    const next = filtered[start + limit]
+    return ProcessingProjectEvidence.make({
+      projectId: project.projectId,
+      attempts,
+      ...(next === undefined ? {} : { nextAttemptId: next.attemptId }),
+    })
+  }
+
+  const create = (
+    caller: Caller,
+    request: typeof CreateProcessingProjectRequest.Type,
+  ): typeof ProcessingProjectChanged.Type | ProjectError => {
+    const denied = authorityError(caller)
+    if (denied !== undefined) return denied
+    const replay = readReceipt(database, request.intentId, caller, request)
+    if (replay !== undefined) return replay
+    const sources = resolveSelection(database, request.selection)
+    if (sources === undefined || sources.length === 0)
+      return ProcessingProjectError.cases.SourceSelectionInvalid.make({
+        issues: ['The selection does not resolve to exact retained Assets.'],
+      })
+    const now = new Date().toISOString()
+    const assigned = assignSuggestedRoles(sources)
+    const project = withWarnings(
+      ProcessingProject.make({
+        projectId: ProcessingProjectId.make(`project-${randomUUID()}`),
+        revision: ProcessingProjectRevision.make(0),
+        name: request.name,
+        ...projectTarget(assigned),
+        sources: assigned,
+        warnings: [],
+        stages: initialStages(),
+        attempts: [],
+        savedAssetIds: [],
+        createdAt: now,
+        updatedAt: now,
+      }),
+    )
+    const response = ProcessingProjectChanged.make({
+      outcome: 'Accepted',
+      replayed: false,
+      project: projectView(database, project, caller),
+    })
+    database.exec('BEGIN IMMEDIATE')
+    try {
+      persistNewProject(database, project)
+      writeReceipt(database, request.intentId, caller, request, response)
+      database.exec('COMMIT')
+      publishNotice(database, project)
+      return response
+    } catch {
+      database.exec('ROLLBACK')
+      throw new Error('Processing Project persistence is unavailable.')
+    }
+  }
+
+  const change = (
+    caller: Caller,
+    request: ChangeRequest,
+  ): typeof ProcessingProjectChanged.Type | ProjectError => {
+    const denied = authorityError(caller)
+    if (denied !== undefined) return denied
+    const replay = readReceipt(database, request.intentId, caller, request)
+    if (replay !== undefined) return replay
+    const current = readProject(database, request.projectId)
+    if (current === undefined)
+      return ProcessingProjectError.cases.ProjectNotFound.make({
+        projectId: request.projectId,
+      })
+    if (current.revision !== request.expectedProjectRevision)
+      return ProcessingProjectError.cases.ProjectRevisionConflict.make({
+        projectId: request.projectId,
+        currentRevision: current.revision,
+      })
+    const active = activeAttempt(current)
+    if (active !== undefined)
+      return ProcessingProjectError.cases.ActiveAttemptConflict.make({
+        attemptId: active.attemptId,
+        stage: active.stage,
+      })
+
+    const decision = decideChange(database, current, request.intent)
+    if (!('project' in decision)) return decision
+    const response = ProcessingProjectChanged.make({
+      outcome: 'Accepted',
+      replayed: false,
+      project: projectView(database, decision.project, caller),
+    })
+    database.exec('BEGIN IMMEDIATE')
+    try {
+      const updated = database
+        .prepare(
+          'UPDATE processing_projects SET revision=?,project=?,updated_at=? WHERE project_id=? AND revision=?',
+        )
+        .run(
+          decision.project.revision,
+          JSON.stringify(decision.project),
+          decision.project.updatedAt,
+          decision.project.projectId,
+          current.revision,
+        )
+      if (updated.changes !== 1) throw new Error('stale Project revision')
+      if ('work' in decision && decision.work !== undefined)
+        enqueue(database, decision.work)
+      if ('save' in decision && decision.save !== undefined)
+        saveLibraryAsset(database, decision.project, decision.save)
+      writeReceipt(database, request.intentId, caller, request, response)
+      database.exec('COMMIT')
+      publishNotice(database, decision.project)
+      return response
+    } catch {
+      database.exec('ROLLBACK')
+      throw new Error('Processing Project persistence is unavailable.')
+    }
+  }
+
+  const changes = async function* (
+    caller: Caller,
+  ): AsyncIterable<typeof ProcessingProjectNotice.Type> {
+    void caller
+    const subscriber: NoticeSubscriber = { values: [], waiters: [] }
+    const subscribers = noticeSubscribers.get(database) ?? new Set()
+    noticeSubscribers.set(database, subscribers)
+    subscribers.add(subscriber)
+    try {
+      while (true) {
+        if (subscriber.values.length === 0)
+          await new Promise<void>((resolve) => subscriber.waiters.push(resolve))
+        const notice = subscriber.values.shift()
+        if (notice !== undefined) yield notice
+      }
+    } finally {
+      subscribers.delete(subscriber)
+    }
+  }
+
+  return { list, create, open, evidence, change, changes }
+}
+
+/** Internal seam used only by the deterministic Process worker adapter. */
+export function createProcessingProjectWorkModule(
+  database: DatabaseSync,
+  now: () => Date = () => new Date(),
+) {
+  const advance = (
+    materialize: (
+      work: ProcessingProjectMaterialization,
+    ) => ProcessingProjectMaterializedEvidence | undefined,
+  ): ProcessingProjectWorkResult => {
+    const backlog = Schema.decodeUnknownSync(ProjectBacklogRow)(
+      database
+        .prepare(
+          "SELECT COUNT(*) AS count,MIN(enqueued_at) AS oldest FROM processing_work WHERE kind='projectStage' AND state IN ('pending','claimed')",
+        )
+        .get(),
+    )
+    if (backlog.count === 0) return { outcome: 'idle', backlog: 0 }
+    const oldestAgeSeconds =
+      backlog.oldest === null
+        ? 0
+        : Math.max(0, now().getTime() - Date.parse(backlog.oldest)) / 1_000
+    const row = Schema.decodeUnknownSync(Schema.optional(ProjectWorkRow))(
+      database
+        .prepare(
+          "SELECT work_id,project_id,kind,payload,state,stage,claim_token,enqueued_at FROM processing_work WHERE kind='projectStage' AND state IN ('pending','claimed') ORDER BY rowid LIMIT 1",
+        )
+        .get(),
+    )
+    if (row === undefined) return { outcome: 'idle', backlog: 0 }
+    const claimed = claim(database, row, now)
+    if (claimed === undefined)
+      return workResult('stale', row.stage, backlog.count, oldestAgeSeconds)
+    let materialized: ProcessingProjectMaterializedEvidence | undefined
+    try {
+      materialized = materialize({
+        workId: row.work_id,
+        stage: row.stage,
+        payload: row.payload,
+      })
+    } catch {
+      materialized = undefined
+    }
+    if (materialized === undefined)
+      return workResult(
+        'claimedUnresolved',
+        row.stage,
+        backlog.count,
+        oldestAgeSeconds,
+      )
+    const settled = settle(database, row, claimed, materialized, now)
+    return workResult(settled, row.stage, backlog.count, oldestAgeSeconds)
+  }
+  return { advance }
+}
+
+function decideChange(
+  database: DatabaseSync,
+  project: Project,
+  intent: Intent,
+) {
+  if (ProcessingProjectIntent.guards.AddSources(intent)) {
+    const selected = resolveSelection(database, intent.selection)
+    if (selected === undefined || selected.length === 0)
+      return ProcessingProjectError.cases.SourceSelectionInvalid.make({
+        issues: ['The selection does not resolve to exact retained Assets.'],
+      })
+    const known = new Set(project.sources.map((source) => source.assetId))
+    const added = assignSuggestedRoles(
+      selected.filter((source) => !known.has(source.assetId)),
+      project.targetName,
+    )
+    return {
+      project: revise(project, { sources: [...project.sources, ...added] }),
+    }
+  }
+  if (ProcessingProjectIntent.guards.RemoveSource(intent)) {
+    if (!project.sources.some((source) => source.assetId === intent.assetId))
+      return ProcessingProjectError.cases.SourceNotFound.make({
+        assetId: intent.assetId,
+      })
+    return {
+      project: revise(project, {
+        sources: project.sources.filter(
+          (source) => source.assetId !== intent.assetId,
+        ),
+      }),
+    }
+  }
+  if (ProcessingProjectIntent.guards.AssignSourceRole(intent)) {
+    const source = project.sources.find(
+      (candidate) => candidate.assetId === intent.assetId,
+    )
+    if (source === undefined)
+      return ProcessingProjectError.cases.SourceNotFound.make({
+        assetId: intent.assetId,
+      })
+    if (
+      intent.role === 'Lights' &&
+      project.targetName !== undefined &&
+      source.targetName !== undefined &&
+      source.targetName !== project.targetName
+    )
+      return ProcessingProjectError.cases.SourceSelectionInvalid.make({
+        issues: [
+          `${source.targetName} does not match Project target ${project.targetName}.`,
+        ],
+      })
+    return {
+      project: revise(project, {
+        sources: project.sources.map((candidate) =>
+          candidate.assetId === source.assetId
+            ? ProcessingProjectSource.make({ ...candidate, role: intent.role })
+            : candidate,
+        ),
+      }),
+    }
+  }
+  if (ProcessingProjectIntent.guards.ReplaceDraft(intent)) {
+    const stage = findStage(project, intent.draft._tag)
+    if (stage === undefined)
+      return ProcessingProjectError.cases.DraftInvalid.make({
+        stage: intent.draft._tag,
+        issues: ['The draft does not name an executable Project stage.'],
+      })
+    const draft = ProcessingStageDraft.make({
+      revision: stage.draft.revision + 1,
+      value: intent.draft,
+      undo: [...stage.draft.undo, stage.draft.value].slice(-10),
+      redo: [],
+    })
+    return {
+      project: revise(project, {
+        stages: replaceStage(
+          project.stages,
+          stage.stage === 'Develop'
+            ? { ...withoutDevelopPreview(stage), draft }
+            : { ...stage, draft },
+        ),
+      }),
+    }
+  }
+  if (
+    ProcessingProjectIntent.guards.UndoDraft(intent) ||
+    ProcessingProjectIntent.guards.RedoDraft(intent)
+  ) {
+    const stage = findStage(project, intent.stage)
+    if (stage === undefined)
+      return ProcessingProjectError.cases.DraftInvalid.make({
+        stage: intent.stage,
+        issues: ['The draft stage is unavailable.'],
+      })
+    const undoing = ProcessingProjectIntent.guards.UndoDraft(intent)
+    const source = undoing ? stage.draft.undo : stage.draft.redo
+    const value = source.at(-1)
+    if (value === undefined)
+      return ProcessingProjectError.cases.HistoryUnavailable.make({
+        stage: intent.stage,
+        target: 'Draft',
+        direction: undoing ? 'Undo' : 'Redo',
+      })
+    const draft = ProcessingStageDraft.make({
+      revision: stage.draft.revision + 1,
+      value,
+      undo: undoing
+        ? stage.draft.undo.slice(0, -1)
+        : [...stage.draft.undo, stage.draft.value].slice(-10),
+      redo: undoing
+        ? [...stage.draft.redo, stage.draft.value].slice(-10)
+        : stage.draft.redo.slice(0, -1),
+    })
+    return {
+      project: revise(project, {
+        stages: replaceStage(
+          project.stages,
+          stage.stage === 'Develop'
+            ? { ...withoutDevelopPreview(stage), draft }
+            : { ...stage, draft },
+        ),
+      }),
+    }
+  }
+  if (ProcessingProjectIntent.guards.SyncDevelopPreview(intent)) {
+    const stage = findStage(project, 'Develop')
+    const upstream = developBaseResult(project)
+    if (
+      stage === undefined ||
+      upstream === undefined ||
+      stage.draft.revision !== intent.expectedDraftRevision ||
+      !ProcessingStageDraftValue.guards.Develop(stage.draft.value)
+    )
+      return ProcessingProjectError.cases.RunUnavailable.make({
+        stage: 'Develop',
+        reason: 'DevelopPreviewRequired',
+      })
+    const preview = ProcessingDevelopPreview.make({
+      previewId: PreviewId.make(`preview-${randomUUID()}`),
+      draftRevision: stage.draft.revision,
+      inputCheckpointId: upstream.checkpointId,
+      operation: stage.draft.value.operation,
+      state: 'ready',
+      checksum: `sha256:${digest({
+        upstream: upstream.checksum,
+        draft: stage.draft.value,
+      })}`,
+      synchronizedAt: new Date().toISOString(),
+    })
+    return {
+      project: revise(project, {
+        stages: replaceStage(project.stages, {
+          ...stage,
+          developPreview: preview,
+        }),
+      }),
+    }
+  }
+  if (ProcessingProjectIntent.guards.RunStage(intent))
+    return decideRun(database, project, intent)
+  if (ProcessingProjectIntent.guards.OpenDevelop(intent)) {
+    const base = developBaseForAsset(database, project, intent.assetId)
+    if (base === undefined)
+      return ProcessingProjectError.cases.SaveUnavailable.make({
+        stage: 'Develop',
+        reason: 'CurrentLineageRequired',
+      })
+    const develop = findStage(project, 'Develop')
+    const stages =
+      develop === undefined
+        ? project.stages
+        : replaceStage(project.stages, withoutDevelopPreview(develop))
+    return {
+      project: revise(project, {
+        developBase: base,
+        stages: restoreLineage(stages, base),
+      }),
+    }
+  }
+  if (
+    ProcessingProjectIntent.guards.UndoCurrentResult(intent) ||
+    ProcessingProjectIntent.guards.RedoCurrentResult(intent)
+  ) {
+    const stage = findStage(project, intent.stage)
+    if (stage === undefined)
+      return ProcessingProjectError.cases.HistoryUnavailable.make({
+        stage: intent.stage,
+        target: 'CurrentResult',
+        direction: ProcessingProjectIntent.guards.UndoCurrentResult(intent)
+          ? 'Undo'
+          : 'Redo',
+      })
+    const cursor = ProcessingProjectIntent.guards.UndoCurrentResult(intent)
+      ? stage.resultCursor - 1
+      : stage.resultCursor + 1
+    if (cursor < 0 || cursor > stage.resultHistory.length)
+      return ProcessingProjectError.cases.HistoryUnavailable.make({
+        stage: intent.stage,
+        target: 'CurrentResult',
+        direction: ProcessingProjectIntent.guards.UndoCurrentResult(intent)
+          ? 'Undo'
+          : 'Redo',
+      })
+    return {
+      project: revise(project, {
+        stages: restoreLineage(
+          replaceStage(project.stages, { ...stage, resultCursor: cursor }),
+          project.developBase,
+        ),
+      }),
+    }
+  }
+  return decideSave(database, project, intent.stage)
+}
+
+function decideRun(
+  database: DatabaseSync,
+  project: Project,
+  intent: Extract<Intent, { readonly _tag: 'RunStage' }>,
+) {
+  const stage = findStage(project, intent.stage)
+  if (stage === undefined)
+    return ProcessingProjectError.cases.RunUnavailable.make({
+      stage: intent.stage,
+      reason: 'CurrentUpstreamResultRequired',
+    })
+  let frozen: {
+    draftRevision: number
+    draft: typeof ProcessingStageDraftValue.Type
+    sources: ReadonlyArray<typeof ProcessingFrozenSource.Type>
+    upstream?: typeof ProcessingStageResult.Type
+    preview?: typeof ProcessingDevelopPreview.Type
+    retryOfAttemptId?: typeof ProcessingStageAttemptId.Type
+  }
+  if (
+    ProcessingProjectIntent.cases.RunStage.fields.from.guards.FailedAttempt(
+      intent.from,
+    )
+  ) {
+    const failedAttemptId = intent.from.attemptId
+    const failed = project.attempts.find(
+      (attempt) =>
+        attempt.attemptId === failedAttemptId &&
+        attempt.stage === intent.stage &&
+        attempt.state === 'failed',
+    )
+    if (failed === undefined)
+      return ProcessingProjectError.cases.RunUnavailable.make({
+        stage: intent.stage,
+        reason: 'CurrentUpstreamResultRequired',
+      })
+    frozen = {
+      draftRevision: failed.draftRevision,
+      draft: failed.draft,
+      sources: failed.sources,
+      ...(failed.upstream === undefined
+        ? {}
+        : { upstream: resultFrom(failed.upstream) }),
+      ...(failed.previewId === undefined ||
+      failed.inputCheckpointId === undefined
+        ? {}
+        : {
+            preview: ProcessingDevelopPreview.make({
+              previewId: failed.previewId,
+              draftRevision: failed.draftRevision,
+              inputCheckpointId: failed.inputCheckpointId,
+              operation: ProcessingStageDraftValue.guards.Develop(failed.draft)
+                ? failed.draft.operation
+                : DevelopOperation.cases.Stretch.make({
+                    method: 'asinh',
+                    amount: 0.25,
+                  }),
+              state: 'ready',
+            }),
+          }),
+      retryOfAttemptId: failed.attemptId,
+    }
+  } else {
+    const sources = freezeSources(project.sources)
+    if (sources === undefined)
+      return ProcessingProjectError.cases.RunUnavailable.make({
+        stage: intent.stage,
+        reason: 'LightsRequired',
+      })
+    const upstream = upstreamResult(project, intent.stage)
+    const unavailable = runUnavailable(database, project, stage, upstream)
+    if (unavailable !== undefined)
+      return ProcessingProjectError.cases.RunUnavailable.make({
+        stage: intent.stage,
+        reason: unavailable,
+      })
+    frozen = {
+      draftRevision: stage.draft.revision,
+      draft: stage.draft.value,
+      sources,
+      ...(upstream === undefined ? {} : { upstream }),
+      ...(stage.developPreview === undefined
+        ? {}
+        : { preview: stage.developPreview }),
+    }
+  }
+  const attemptId = ProcessingStageAttemptId.make(`attempt-${randomUUID()}`)
+  const now = new Date().toISOString()
+  const attempt = ProcessingAttempt.make({
+    attemptId,
+    stage: intent.stage,
+    state: 'queued',
+    draftRevision: frozen.draftRevision,
+    draft: frozen.draft,
+    sources: frozen.sources,
+    ...(frozen.upstream === undefined
+      ? {}
+      : { upstream: upstreamReference(frozen.upstream) }),
+    ...(frozen.preview === undefined
+      ? {}
+      : {
+          previewId: frozen.preview.previewId,
+          inputCheckpointId: frozen.preview.inputCheckpointId,
+        }),
+    ...(frozen.retryOfAttemptId === undefined
+      ? {}
+      : { retryOfAttemptId: frozen.retryOfAttemptId }),
+    frozenAt: now,
+    outputs: [],
+    evidence: initialAttemptEvidence(project, intent.stage, frozen),
+    diagnostics: [],
+  })
+  const revised = revise(project, { attempts: [...project.attempts, attempt] })
+  return {
+    project: revised,
+    work: {
+      workId: `project-stage-${attemptId}`,
+      projectId: project.projectId,
+      attemptId,
+      stage: intent.stage,
+      enqueuedAt: now,
+    },
+  }
+}
+
+function decideSave(
+  database: DatabaseSync,
+  project: Project,
+  stageName: 'Stacking' | 'Develop',
+) {
+  const result = currentResult(project, stageName)
+  if (result === undefined)
+    return ProcessingProjectError.cases.SaveUnavailable.make({
+      stage: stageName,
+      reason: 'CurrentResultRequired',
+    })
+  const existing = savedAssetForOutput(database, result.outputId)
+  if (existing !== undefined) {
+    if (project.savedAssetIds.includes(existing)) return { project }
+    return {
+      project: revise(project, {
+        savedAssetIds: [...project.savedAssetIds, existing],
+      }),
+    }
+  }
+  const assetId = AssetId.make(
+    `asset-${stageName === 'Stacking' ? 'master' : 'develop'}-${randomUUID()}`,
+  )
+  return {
+    project: revise(project, {
+      savedAssetIds: [...project.savedAssetIds, assetId],
+    }),
+    save: { assetId, result },
+  }
+}
+
+function claim(
+  database: DatabaseSync,
+  row: typeof ProjectWorkRow.Type,
+  now: () => Date,
+) {
+  if (row.state === 'claimed') return row.claim_token ?? undefined
+  const token = randomUUID()
+  const payload = Schema.decodeUnknownSync(ProjectWorkPayload)(
+    JSON.parse(row.payload),
+  )
+  const project = readProject(database, payload.projectId)
+  const attempt = project?.attempts.find(
+    (candidate) => candidate.attemptId === payload.attemptId,
+  )
+  if (project === undefined || attempt?.state !== 'queued') return undefined
+  const startedAt = now().toISOString()
+  const running = revise(project, {
+    attempts: project.attempts.map((candidate) =>
+      candidate.attemptId === attempt.attemptId
+        ? ProcessingAttempt.make({ ...candidate, state: 'running', startedAt })
+        : candidate,
+    ),
+  })
+  database.exec('BEGIN IMMEDIATE')
+  try {
+    const work = database
+      .prepare(
+        "UPDATE processing_work SET state='claimed',claim_token=?,claimed_at=?,attempts=attempts+1 WHERE work_id=? AND state='pending'",
+      )
+      .run(token, startedAt, row.work_id)
+    const changed = database
+      .prepare(
+        'UPDATE processing_projects SET revision=?,project=?,updated_at=? WHERE project_id=? AND revision=?',
+      )
+      .run(
+        running.revision,
+        JSON.stringify(running),
+        running.updatedAt,
+        running.projectId,
+        project.revision,
+      )
+    if (work.changes !== 1 || changed.changes !== 1)
+      throw new Error('stale claim')
+    database.exec('COMMIT')
+    publishNotice(database, running)
+    return token
+  } catch {
+    database.exec('ROLLBACK')
+    return undefined
+  }
+}
+
+function settle(
+  database: DatabaseSync,
+  row: typeof ProjectWorkRow.Type,
+  claimToken: string,
+  materialized: ProcessingProjectMaterializedEvidence,
+  now: () => Date,
+): 'completed' | 'failed' | 'stale' {
+  const payload = Schema.decodeUnknownSync(ProjectWorkPayload)(
+    JSON.parse(row.payload),
+  )
+  const project = readProject(database, payload.projectId)
+  const attempt = project?.attempts.find(
+    (candidate) => candidate.attemptId === payload.attemptId,
+  )
+  if (project === undefined || attempt?.state !== 'running') return 'stale'
+  const successful = materialized.checksum.startsWith('sha256:')
+  const settledAt = now().toISOString()
+  const outputId = ProcessingOutputId.make(`output-${attempt.attemptId}`)
+  const resultId = ProcessingStageResultId.make(`result-${attempt.attemptId}`)
+  const completed = ProcessingAttempt.make({
+    ...attempt,
+    state: successful ? 'succeeded' : 'failed',
+    settledAt,
+    outcome: successful ? 'Succeeded' : 'Failed',
+    outputs: successful
+      ? [
+          ProcessingAttemptOutput.make({
+            outputId,
+            checksum: materialized.checksum,
+            relation: 'WorkingResult',
+          }),
+        ]
+      : [],
+    evidence: completedEvidence(attempt, materialized.checksum),
+    diagnostics: successful
+      ? [
+          'Deterministic local evidence only; astronomy processing quality is not claimed.',
+        ]
+      : ['The deterministic result could not be verified.'],
+  })
+  const stage = findStage(project, attempt.stage)
+  if (stage === undefined) return 'stale'
+  const result = ProcessingStageResult.make({
+    resultId,
+    attemptId: attempt.attemptId,
+    stage: attempt.stage,
+    outcome: 'Succeeded',
+    checksum: materialized.checksum,
+    outputId,
+    checkpointId: CheckpointId.make(`checkpoint-${attempt.attemptId}`),
+    sources: attempt.sources,
+    ...(attempt.upstream === undefined ? {} : { upstream: attempt.upstream }),
+    summary: `${attempt.stage} completed with deterministic local evidence.`,
+    completedAt: settledAt,
+  })
+  const nextStage = successful
+    ? {
+        ...stage,
+        resultHistory: [
+          ...stage.resultHistory.slice(0, stage.resultCursor),
+          result,
+        ],
+        resultCursor: stage.resultCursor + 1,
+      }
+    : stage
+  const settledProject = revise(project, {
+    attempts: project.attempts.map((candidate) =>
+      candidate.attemptId === completed.attemptId ? completed : candidate,
+    ),
+    stages: restoreLineage(
+      replaceStage(project.stages, nextStage),
+      project.developBase,
+    ),
+  })
+  database.exec('BEGIN IMMEDIATE')
+  try {
+    const work = database
+      .prepare(
+        "UPDATE processing_work SET state=?,settled_at=?,checkpoint=? WHERE work_id=? AND state='claimed' AND claim_token=?",
+      )
+      .run(
+        successful ? 'settled' : 'failed',
+        settledAt,
+        successful ? 'complete' : 'failed',
+        row.work_id,
+        claimToken,
+      )
+    const changed = database
+      .prepare(
+        'UPDATE processing_projects SET revision=?,project=?,updated_at=? WHERE project_id=? AND revision=?',
+      )
+      .run(
+        settledProject.revision,
+        JSON.stringify(settledProject),
+        settledProject.updatedAt,
+        settledProject.projectId,
+        project.revision,
+      )
+    if (work.changes !== 1 || changed.changes !== 1)
+      throw new Error('stale settlement')
     database
       .prepare(
-        'SELECT project FROM processing_projects ORDER BY updated_at,project_id',
+        'INSERT OR REPLACE INTO processing_artifacts VALUES (?,?,?,?,?,?,0)',
       )
-      .all(),
-  ).map((row) => {
-    const stored = Schema.decodeUnknownSync(UnknownRecord)(
-      JSON.parse(row.project),
-    )
-    const project = Schema.decodeUnknownSync(ProcessingProject)({
-      currentStage: 'Sources',
-      stages: initialStages(),
-      ...normalizeStoredProject(database, stored),
+      .run(
+        `${row.work_id}:result`,
+        project.projectId,
+        row.work_id,
+        outputId,
+        materialized.path,
+        materialized.checksum,
+      )
+    database.exec('COMMIT')
+    publishNotice(database, settledProject)
+    return successful ? 'completed' : 'failed'
+  } catch {
+    database.exec('ROLLBACK')
+    return 'stale'
+  }
+}
+
+function completedEvidence(
+  attempt: typeof ProcessingAttempt.Type,
+  checksum: string,
+) {
+  if (ProcessingAttemptStageEvidence.guards.Stacking(attempt.evidence))
+    return ProcessingAttemptStageEvidence.cases.Stacking.make({
+      ...attempt.evidence,
+      stackChecksum: checksum,
     })
-    return ProcessingProject.make({
-      ...project,
-      stages: recomputeLineage(project.stages, project.sources),
+  return attempt.evidence
+}
+
+function initialAttemptEvidence(
+  project: Project,
+  stage: Stage,
+  frozen: {
+    draft: typeof ProcessingStageDraftValue.Type
+    preview?: typeof ProcessingDevelopPreview.Type
+  },
+) {
+  const recommendations = project.sources.map((source) =>
+    ProcessingRecommendation.make({
+      assetId: source.assetId,
+      assetRevision: source.assetRevision,
+      decision:
+        source.availability === 'availableLocally' ||
+        source.availability === 'published'
+          ? 'Include'
+          : 'Exclude',
+      reasons: [
+        source.availability === 'availableLocally' ||
+        source.availability === 'published'
+          ? 'The exact retained source is available.'
+          : 'The exact retained source is unavailable.',
+      ],
+    }),
+  )
+  if (stage === 'Calibration')
+    return ProcessingAttemptStageEvidence.cases.Calibration.make({
+      recommendations,
+      overrides: ProcessingStageDraftValue.guards.Calibration(frozen.draft)
+        ? frozen.draft.overrides
+        : [],
+      frameOutcomes: [],
     })
+  if (stage === 'Registration')
+    return ProcessingAttemptStageEvidence.cases.Registration.make({
+      recommendations,
+      inclusions: ProcessingStageDraftValue.guards.Registration(frozen.draft)
+        ? frozen.draft.inclusions
+        : [],
+      transforms: [],
+      viableAssetIds: [],
+    })
+  if (stage === 'Stacking')
+    return ProcessingAttemptStageEvidence.cases.Stacking.make({
+      recommendations,
+      frameChoices: ProcessingStageDraftValue.guards.Stacking(frozen.draft)
+        ? frozen.draft.frameChoices
+        : [],
+      includedAssetIds: project.sources
+        .filter((source) => source.role === 'Lights')
+        .map((source) => source.assetId),
+    })
+  if (frozen.preview === undefined)
+    throw new Error('Develop preview is required')
+  return ProcessingAttemptStageEvidence.cases.Develop.make({
+    previewId: frozen.preview.previewId,
+    inputCheckpointId: frozen.preview.inputCheckpointId,
+    relatedOutputIds: [],
   })
 }
 
-function normalizeStoredProject(
-  database: DatabaseSync,
-  stored: typeof UnknownRecord.Type,
-) {
-  if (!Array.isArray(stored.stages)) return stored
-  return {
-    ...stored,
-    sources: Array.isArray(stored.sources)
-      ? stored.sources.map((value) => {
-          const source = Schema.decodeUnknownSync(UnknownRecord)(value)
-          const identity = Schema.decodeUnknownSync(
-            Schema.Struct({
-              assetId: AssetId,
-              assetRevision: AssetRevision,
-            }),
-          )(value)
-          const retained = Schema.decodeUnknownSync(
-            Schema.optional(
-              Schema.Struct({
-                role: ProcessingLibraryRole,
-                format: ProcessingLibraryFormat,
-              }),
-            ),
-          )(
-            database
-              .prepare(
-                'SELECT role,format FROM library_assets WHERE asset_id=? AND revision=?',
-              )
-              .get(identity.assetId, identity.assetRevision),
-          )
-          return {
-            ...source,
-            libraryRole: source.libraryRole ?? retained?.role ?? 'unknown',
-            libraryFormat:
-              source.libraryFormat ?? retained?.format ?? 'unknown',
-          }
-        })
-      : [],
-    stages: stored.stages.map((value) => {
-      const stage = Schema.decodeUnknownSync(UnknownRecord)(value)
-      const draft = Schema.decodeUnknownSync(UnknownRecord)(stage.draft)
-      const normalizeHistory = (history: unknown) =>
-        Array.isArray(history)
-          ? history.map((entry) =>
-              Array.isArray(entry)
-                ? {
-                    settings: entry,
-                    overrides: [],
-                    registrationInclusions: [],
-                    stackingFrameChoices: [],
-                  }
-                : {
-                    ...Schema.decodeUnknownSync(UnknownRecord)(entry),
-                    overrides:
-                      Schema.decodeUnknownSync(UnknownRecord)(entry)
-                        .overrides ?? [],
-                    registrationInclusions:
-                      Schema.decodeUnknownSync(UnknownRecord)(entry)
-                        .registrationInclusions ?? [],
-                    stackingFrameChoices:
-                      Schema.decodeUnknownSync(UnknownRecord)(entry)
-                        .stackingFrameChoices ?? [],
-                  },
-            )
-          : []
-      return {
-        ...stage,
-        draft: {
-          ...draft,
-          overrides: draft.overrides ?? [],
-          registrationInclusions: draft.registrationInclusions ?? [],
-          stackingFrameChoices: draft.stackingFrameChoices ?? [],
-          undo: normalizeHistory(draft.undo),
-          redo: normalizeHistory(draft.redo),
-        },
-        calibrationRecommendations: stage.calibrationRecommendations ?? [],
-        stackingRecommendations: stage.stackingRecommendations ?? [],
-        attempts: Array.isArray(stage.attempts)
-          ? stage.attempts.map((entry) => ({
-              ...Schema.decodeUnknownSync(UnknownRecord)(entry),
-              recommendations:
-                Schema.decodeUnknownSync(UnknownRecord)(entry)
-                  .recommendations ?? [],
-              overrides:
-                Schema.decodeUnknownSync(UnknownRecord)(entry).overrides ?? [],
-              registrationInclusions:
-                Schema.decodeUnknownSync(UnknownRecord)(entry)
-                  .registrationInclusions ?? [],
-              stackingRecommendations:
-                Schema.decodeUnknownSync(UnknownRecord)(entry)
-                  .stackingRecommendations ?? [],
-              stackingFrameChoices:
-                Schema.decodeUnknownSync(UnknownRecord)(entry)
-                  .stackingFrameChoices ?? [],
-              stackingInputAssetIds:
-                Schema.decodeUnknownSync(UnknownRecord)(entry)
-                  .stackingInputAssetIds ?? [],
-              frameOutcomes:
-                Schema.decodeUnknownSync(UnknownRecord)(entry).frameOutcomes ??
-                [],
-              outputs:
-                Schema.decodeUnknownSync(UnknownRecord)(entry).outputs ?? [],
-              registrationTransforms:
-                Schema.decodeUnknownSync(UnknownRecord)(entry)
-                  .registrationTransforms ?? [],
-              viableAssetIds:
-                Schema.decodeUnknownSync(UnknownRecord)(entry).viableAssetIds ??
-                [],
-              diagnostics:
-                Schema.decodeUnknownSync(UnknownRecord)(entry).diagnostics ??
-                [],
-            }))
-          : [],
-      }
-    }),
-  }
-}
-
-export function executeProcessingProjectCommand(
-  database: DatabaseSync,
-  command: ProjectCommand,
-  identity: LocalIdentity,
-) {
-  const existing = Schema.decodeUnknownSync(Schema.optional(ReceiptRow))(
-    database
-      .prepare(
-        'SELECT response FROM processing_project_receipts WHERE idempotency_key=? AND owner_person_id=?',
-      )
-      .get(command.idempotencyKey, identity.personId),
-  )
-  if (existing !== undefined)
-    return ProjectAcceptedResponse.make({
-      ...Schema.decodeUnknownSync(ProjectAcceptedResponse)(
-        JSON.parse(existing.response),
-      ),
-      replayed: true,
-    })
-
-  const current = Command.guards.CreateProcessingProject(command)
-    ? undefined
-    : processingProjects(database).find(
-        (project) => project.projectId === command.projectId,
-      )
-  if (
-    current !== undefined &&
-    !Command.guards.CreateProcessingProject(command) &&
-    current.revision !== command.expectedProjectRevision
-  )
-    return { outcome: 'rejected' as const, reason: 'ProjectRevisionConflict' }
-
-  let project: ProcessingProject
-  let work:
-    | {
-        workId: string
-        attemptId: string
-        stage: string
-        kind: 'projectStage' | 'projectDevelopApply'
-      }
-    | undefined
-  let masterSave:
-    | {
-        assetId: typeof AssetId.Type
-        attemptId: typeof ProcessingStageAttemptId.Type
-        resultId: typeof ProcessingStageResultId.Type
-        registrationAttemptId: typeof ProcessingStageAttemptId.Type
-        checksum: string
-        includedAssetIds: ReadonlyArray<typeof AssetId.Type>
-        savedAt: string
-      }
-    | undefined
-  let developSave:
-    | {
-        assetId: typeof AssetId.Type
-        checksum: string
-        outputId: typeof ProcessingOutputId.Type
-        checkpointId: typeof CheckpointId.Type
-        attemptId: typeof AttemptId.Type
-        operationIds: ReadonlyArray<string>
-        savedAt: string
-      }
-    | undefined
-  if (Command.guards.NavigateProcessingProjectStage(command)) {
-    if (current === undefined)
-      return { outcome: 'rejected' as const, reason: 'ProjectNotFound' }
-    const selectedSavedMaster = current.stages
-      .find((stage) => stage.stage === 'Stacking')
-      ?.attempts.find(
-        (attempt) =>
-          attempt.attemptId ===
-          current.stages.find((stage) => stage.stage === 'Stacking')
-            ?.selectedAttemptId,
-      )?.savedMaster
-    if (command.stage === 'Develop') {
-      if (selectedSavedMaster === undefined)
-        return { outcome: 'rejected' as const, reason: 'SavedMasterRequired' }
-      project = reviseProject(current, current.sources, {
-        currentStage: command.stage,
-        developMasterAssetId: selectedSavedMaster.assetId,
-        develop: current.develop ?? initialDevelopState(selectedSavedMaster),
-      })
-    } else
-      project = reviseProject(current, current.sources, {
-        currentStage: command.stage,
-      })
-  } else if (
-    Command.guards.UpdateProcessingStageDraft(command) ||
-    Command.guards.UndoProcessingStageDraft(command) ||
-    Command.guards.RedoProcessingStageDraft(command) ||
-    Command.guards.SetCalibrationUseAnyway(command) ||
-    Command.guards.SetRegistrationFrameIncluded(command) ||
-    Command.guards.SetStackingFrameIncluded(command)
-  ) {
-    if (current === undefined)
-      return { outcome: 'rejected' as const, reason: 'ProjectNotFound' }
-    const stageName = Command.guards.SetCalibrationUseAnyway(command)
-      ? 'Calibration'
-      : Command.guards.SetRegistrationFrameIncluded(command)
-        ? 'Registration'
-        : Command.guards.SetStackingFrameIncluded(command)
-          ? 'Stacking'
-          : command.stage
-    const stage = current.stages.find((item) => item.stage === stageName)
-    if (stage === undefined)
-      return { outcome: 'rejected' as const, reason: 'StageNotFound' }
-    const draft = stage.draft
-    if (Command.guards.SetCalibrationUseAnyway(command)) {
-      const recommendation = stage.calibrationRecommendations.find(
-        (candidate) => candidate.assetId === command.assetId,
-      )
-      if (recommendation?.compatibility !== 'Advisory mismatch')
-        return {
-          outcome: 'rejected' as const,
-          reason: 'CalibrationOverrideUnavailable',
-        }
-    }
-    if (Command.guards.SetRegistrationFrameIncluded(command)) {
-      const latest = stage.attempts
-        .filter(
-          (attempt) =>
-            attempt.state === 'succeeded' && !attempt.basedOnEarlierUpstream,
-        )
-        .at(-1)
-      const outcome = latest?.frameOutcomes.find(
-        (candidate) => candidate.assetId === command.assetId,
-      )
-      const transform = latest?.registrationTransforms.find(
-        (candidate) => candidate.assetId === command.assetId,
-      )
-      if (outcome?.outcome !== 'Warning' || transform?.usable !== true)
-        return {
-          outcome: 'rejected' as const,
-          reason: 'RegistrationFrameChoiceUnavailable',
-        }
-    }
-    if (Command.guards.SetStackingFrameIncluded(command)) {
-      const recommendation = stage.stackingRecommendations.find(
-        (candidate) => candidate.assetId === command.assetId,
-      )
-      if (recommendation?.technicallyUsable !== true)
-        return {
-          outcome: 'rejected' as const,
-          reason: 'StackingFrameChoiceUnavailable',
-        }
-    }
-    const snapshot = {
-      settings: draft.settings,
-      overrides: draft.overrides,
-      registrationInclusions: draft.registrationInclusions,
-      stackingFrameChoices: draft.stackingFrameChoices,
-    }
-    const nextDraft = Command.guards.SetCalibrationUseAnyway(command)
-      ? {
-          revision: draft.revision + 1,
-          settings: draft.settings,
-          overrides: command.useAnyway
-            ? [
-                ...draft.overrides.filter(
-                  (override) => override.assetId !== command.assetId,
-                ),
-                { assetId: command.assetId, decision: 'Use anyway' as const },
-              ]
-            : draft.overrides.filter(
-                (override) => override.assetId !== command.assetId,
-              ),
-          registrationInclusions: draft.registrationInclusions,
-          stackingFrameChoices: draft.stackingFrameChoices,
-          undo: [...draft.undo, snapshot].slice(-10),
-          redo: [],
-        }
-      : Command.guards.SetRegistrationFrameIncluded(command)
-        ? {
-            revision: draft.revision + 1,
-            settings: draft.settings,
-            overrides: draft.overrides,
-            registrationInclusions: command.included
-              ? [
-                  ...draft.registrationInclusions.filter(
-                    (choice) => choice.assetId !== command.assetId,
-                  ),
-                  {
-                    assetId: command.assetId,
-                    decision: 'Include warning frame' as const,
-                  },
-                ]
-              : draft.registrationInclusions.filter(
-                  (choice) => choice.assetId !== command.assetId,
-                ),
-            stackingFrameChoices: draft.stackingFrameChoices,
-            undo: [...draft.undo, snapshot].slice(-10),
-            redo: [],
-          }
-        : Command.guards.SetStackingFrameIncluded(command)
-          ? {
-              revision: draft.revision + 1,
-              settings: draft.settings,
-              overrides: draft.overrides,
-              registrationInclusions: draft.registrationInclusions,
-              stackingFrameChoices: [
-                ...draft.stackingFrameChoices.filter(
-                  (choice) => choice.assetId !== command.assetId,
-                ),
-                {
-                  assetId: command.assetId,
-                  decision: command.included
-                    ? ('Include' as const)
-                    : ('Exclude' as const),
-                },
-              ],
-              undo: [...draft.undo, snapshot].slice(-10),
-              redo: [],
-            }
-          : Command.guards.UpdateProcessingStageDraft(command)
-            ? {
-                revision: draft.revision + 1,
-                settings: command.settings,
-                overrides: draft.overrides,
-                registrationInclusions: draft.registrationInclusions,
-                stackingFrameChoices: draft.stackingFrameChoices,
-                undo: [...draft.undo, snapshot].slice(-10),
-                redo: [],
-              }
-            : Command.guards.UndoProcessingStageDraft(command)
-              ? draft.undo.length === 0
-                ? undefined
-                : {
-                    revision: draft.revision + 1,
-                    settings: draft.undo.at(-1)?.settings ?? [],
-                    overrides: draft.undo.at(-1)?.overrides ?? [],
-                    registrationInclusions:
-                      draft.undo.at(-1)?.registrationInclusions ?? [],
-                    stackingFrameChoices:
-                      draft.undo.at(-1)?.stackingFrameChoices ?? [],
-                    undo: draft.undo.slice(0, -1),
-                    redo: [snapshot, ...draft.redo].slice(0, 10),
-                  }
-              : draft.redo.length === 0
-                ? undefined
-                : {
-                    revision: draft.revision + 1,
-                    settings: draft.redo[0]?.settings ?? [],
-                    overrides: draft.redo[0]?.overrides ?? [],
-                    registrationInclusions:
-                      draft.redo[0]?.registrationInclusions ?? [],
-                    stackingFrameChoices:
-                      draft.redo[0]?.stackingFrameChoices ?? [],
-                    undo: [...draft.undo, snapshot].slice(-10),
-                    redo: draft.redo.slice(1),
-                  }
-    if (nextDraft === undefined)
-      return { outcome: 'rejected' as const, reason: 'DraftHistoryUnavailable' }
-    project = reviseProject(current, current.sources, {
-      currentStage: stageName,
-      stages: replaceStage(current.stages, { ...stage, draft: nextDraft }),
-    })
-  } else if (Command.guards.RunProcessingProjectStage(command)) {
-    if (current === undefined)
-      return { outcome: 'rejected' as const, reason: 'ProjectNotFound' }
-    const stage = current.stages.find((item) => item.stage === command.stage)
-    if (stage === undefined)
-      return { outcome: 'rejected' as const, reason: 'StageNotFound' }
-    if (
-      command.stage === 'Calibration' &&
-      !current.sources.some(
-        (source) =>
-          source.role === 'Lights' &&
-          isCalibrationInputSource(source) &&
-          (source.availability === 'availableLocally' ||
-            source.availability === 'published'),
-      )
-    )
-      return {
-        outcome: 'rejected' as const,
-        reason: 'CalibrationLightsUnavailable',
-      }
-    if (
-      stage.attempts.some(
-        (attempt) => attempt.state === 'queued' || attempt.state === 'running',
-      )
-    )
-      return { outcome: 'rejected' as const, reason: 'StageAttemptActive' }
-    const upstream = upstreamAttempt(current, command.stage)
-    if (command.stage !== 'Calibration' && upstream === undefined)
-      return { outcome: 'rejected' as const, reason: 'UpstreamResultRequired' }
-    const upstreamResult =
-      command.stage === 'Registration' && upstream !== undefined
-        ? current.stages
-            .find((item) => item.stage === 'Calibration')
-            ?.attempts.find((item) => item.attemptId === upstream)
-        : undefined
-    const registrationResult =
-      command.stage === 'Stacking' && upstream !== undefined
-        ? current.stages
-            .find((item) => item.stage === 'Registration')
-            ?.attempts.find((item) => item.attemptId === upstream)
-        : undefined
-    if (
-      command.stage === 'Registration' &&
-      registrationReference(stage.draft.settings, upstreamResult) === undefined
-    )
-      return {
-        outcome: 'rejected' as const,
-        reason: 'RegistrationReferenceUnavailable',
-      }
-    const stackRecommendations =
-      command.stage === 'Stacking'
-        ? stackingRecommendations(registrationResult)
-        : []
-    const stackingInputAssetIds = stackRecommendations.flatMap(
-      (recommendation) => {
-        const choice = stage.draft.stackingFrameChoices.find(
-          (candidate) => candidate.assetId === recommendation.assetId,
-        )
-        const included =
-          choice?.decision === 'Include' ||
-          (choice === undefined && recommendation.decision === 'Include')
-        return recommendation.technicallyUsable && included
-          ? [recommendation.assetId]
-          : []
-      },
-    )
-    if (command.stage === 'Stacking' && stackingInputAssetIds.length === 0)
-      return {
-        outcome: 'rejected' as const,
-        reason: 'StackingInputUnavailable',
-      }
-    const attemptId = ProcessingStageAttemptId.make(
-      `stage-attempt-${randomUUID()}`,
-    )
-    const attempt = ProcessingStageAttempt.make({
-      attemptId,
-      stage: command.stage,
-      state: 'queued',
-      draftRevision: stage.draft.revision,
-      settings: stage.draft.settings,
-      toolIdentity:
-        command.stage === 'Calibration'
-          ? 'deterministic-calibration-adapter-v1'
-          : command.stage === 'Registration'
-            ? 'deterministic-registration-adapter-v1'
-            : 'deterministic-stacking-adapter-v1',
-      resultKind:
-        command.stage === 'Calibration'
-          ? 'deterministicCalibrationEvidence'
-          : command.stage === 'Registration'
-            ? 'deterministicRegistrationEvidence'
-            : 'deterministicStackingEvidence',
-      basedOnEarlierUpstream: false,
-      sourceRevisions:
-        command.stage === 'Registration' && upstreamResult !== undefined
-          ? upstreamResult.frameOutcomes.map((source) => ({
-              assetId: source.assetId,
-              assetRevision: source.assetRevision,
-              role: 'Lights' as const,
-            }))
-          : command.stage === 'Stacking' && registrationResult !== undefined
-            ? registrationResult.registrationTransforms
-                .filter((transform) =>
-                  registrationResult.viableAssetIds.includes(transform.assetId),
-                )
-                .map((transform) => ({
-                  assetId: transform.assetId,
-                  assetRevision: transform.assetRevision,
-                  role: 'Lights' as const,
-                }))
-            : current.sources.map((source) => ({
-                assetId: source.assetId,
-                assetRevision: source.assetRevision,
-                role: source.role,
-              })),
-      recommendations:
-        command.stage === 'Calibration' ? stage.calibrationRecommendations : [],
-      overrides: command.stage === 'Calibration' ? stage.draft.overrides : [],
-      registrationInclusions:
-        command.stage === 'Registration'
-          ? stage.draft.registrationInclusions
-          : [],
-      stackingRecommendations: stackRecommendations,
-      stackingFrameChoices:
-        command.stage === 'Stacking' ? stage.draft.stackingFrameChoices : [],
-      stackingInputAssetIds,
-      frameOutcomes: [],
-      outputs: [],
-      registrationTransforms: [],
-      viableAssetIds: [],
-      diagnostics: [],
-      ...(upstream === undefined ? {} : { upstreamAttemptId: upstream }),
-    })
-    project = reviseProject(current, current.sources, {
-      currentStage: command.stage,
-      stages: replaceStage(current.stages, {
-        ...stage,
-        attempts: [...stage.attempts, attempt],
-      }),
-    })
-    work = {
-      workId: `project-stage-${attemptId}`,
-      attemptId,
-      stage: command.stage,
-      kind: 'projectStage',
-    }
-  } else if (Command.guards.SelectProcessingStageResult(command)) {
-    if (current === undefined)
-      return { outcome: 'rejected' as const, reason: 'ProjectNotFound' }
-    const stage = current.stages.find((item) => item.stage === command.stage)
-    const attempt = stage?.attempts.find(
-      (item) => item.attemptId === command.attemptId,
-    )
-    if (stage === undefined || attempt?.state !== 'succeeded')
-      return { outcome: 'rejected' as const, reason: 'StageResultUnavailable' }
-    project = reviseProject(current, current.sources, {
-      currentStage: command.stage,
-      stages: replaceStage(current.stages, {
-        ...stage,
-        selectedAttemptId: attempt.attemptId,
-      }),
-    })
-  } else if (Command.guards.SaveProcessingProjectMaster(command)) {
-    if (current === undefined)
-      return { outcome: 'rejected' as const, reason: 'ProjectNotFound' }
-    const stage = current.stages.find((item) => item.stage === 'Stacking')
-    const attempt = stage?.attempts.find(
-      (item) => item.attemptId === stage.selectedAttemptId,
-    )
-    if (
-      stage === undefined ||
-      attempt?.state !== 'succeeded' ||
-      attempt.resultId === undefined ||
-      attempt.upstreamAttemptId === undefined ||
-      attempt.stackingOutput === undefined
-    )
-      return { outcome: 'rejected' as const, reason: 'StackResultRequired' }
-    if (attempt.savedMaster !== undefined) project = current
-    else {
-      const artifact = Schema.decodeUnknownSync(
-        Schema.optional(MasterArtifactRow),
-      )(
-        database
-          .prepare(
-            'SELECT checksum FROM processing_artifacts WHERE session_id=? AND output_id=?',
-          )
-          .get(current.projectId, `stack-output-${attempt.attemptId}`),
-      )
-      if (artifact?.checksum !== attempt.stackingOutput.checksum)
-        return { outcome: 'rejected' as const, reason: 'StackResultRequired' }
-      const savedAt = new Date().toISOString()
-      const save = {
-        assetId: AssetId.make(`asset-master-${randomUUID()}`),
-        attemptId: attempt.attemptId,
-        resultId: attempt.resultId,
-        registrationAttemptId: attempt.upstreamAttemptId,
-        checksum: attempt.stackingOutput.checksum,
-        includedAssetIds: attempt.stackingOutput.includedAssetIds,
-        savedAt,
-      }
-      masterSave = save
-      project = reviseProject(current, current.sources, {
-        currentStage: 'Master',
-        stages: replaceStage(current.stages, {
-          ...stage,
-          attempts: stage.attempts.map((candidate) =>
-            candidate.attemptId === attempt.attemptId
-              ? {
-                  ...candidate,
-                  savedMaster: {
-                    assetId: save.assetId,
-                    assetRevision: AssetRevision.make(1),
-                    checksum: save.checksum,
-                    projectId: current.projectId,
-                    registrationAttemptId: save.registrationAttemptId,
-                    stackingAttemptId: attempt.attemptId,
-                    stackResultId: save.resultId,
-                    savedAt,
-                  },
-                }
-              : candidate,
-          ),
-        }),
-      })
-    }
-  } else if (Command.guards.OpenProcessingProjectDevelop(command)) {
-    if (current === undefined)
-      return { outcome: 'rejected' as const, reason: 'ProjectNotFound' }
-    const saved = current.stages
-      .find((stage) => stage.stage === 'Stacking')
-      ?.attempts.find(
-        (attempt) => attempt.savedMaster?.assetId === command.assetId,
-      )?.savedMaster
-    if (saved === undefined)
-      return { outcome: 'rejected' as const, reason: 'SavedMasterRequired' }
-    if (
-      current.develop !== undefined &&
-      current.develop.base.assetId !== saved.assetId
-    )
-      return { outcome: 'rejected' as const, reason: 'DevelopBaseConflict' }
-    project = reviseProject(current, current.sources, {
-      currentStage: 'Develop',
-      developMasterAssetId: saved.assetId,
-      develop: current.develop ?? initialDevelopState(saved),
-    })
-  } else if (
-    Command.guards.UpdateProcessingDevelopDraft(command) ||
-    Command.guards.UndoProcessingDevelopDraft(command) ||
-    Command.guards.RedoProcessingDevelopDraft(command)
-  ) {
-    if (current?.develop === undefined)
-      return { outcome: 'rejected' as const, reason: 'DevelopBaseRequired' }
-    if (developAttemptActive(current.develop))
-      return { outcome: 'rejected' as const, reason: 'DevelopApplyActive' }
-    const draft = current.develop.draft
-    const snapshot = { operation: draft.operation }
-    const nextDraft = Command.guards.UpdateProcessingDevelopDraft(command)
-      ? DevelopDraft.make({
-          revision: draft.revision + 1,
-          operation: command.operation,
-          undo: [...draft.undo, snapshot].slice(-10),
-          redo: [],
-        })
-      : Command.guards.UndoProcessingDevelopDraft(command)
-        ? draft.undo.length === 0
-          ? undefined
-          : DevelopDraft.make({
-              revision: draft.revision + 1,
-              operation: draft.undo.at(-1)?.operation ?? draft.operation,
-              undo: draft.undo.slice(0, -1),
-              redo: [snapshot, ...draft.redo].slice(0, 10),
-            })
-        : draft.redo.length === 0
-          ? undefined
-          : DevelopDraft.make({
-              revision: draft.revision + 1,
-              operation: draft.redo[0]?.operation ?? draft.operation,
-              undo: [...draft.undo, snapshot].slice(-10),
-              redo: draft.redo.slice(1),
-            })
-    if (nextDraft === undefined)
-      return { outcome: 'rejected' as const, reason: 'DraftHistoryUnavailable' }
-    project = reviseProject(current, current.sources, {
-      currentStage: 'Develop',
-      develop: DevelopState.make({
-        ...withoutDevelopPreview(current.develop),
-        draft: nextDraft,
-      }),
-    })
-  } else if (Command.guards.SyncProcessingDevelopPreview(command)) {
-    if (current?.develop === undefined)
-      return { outcome: 'rejected' as const, reason: 'DevelopBaseRequired' }
-    const develop = current.develop
-    if (developAttemptActive(develop))
-      return { outcome: 'rejected' as const, reason: 'DevelopApplyActive' }
-    if (command.expectedDevelopDraftRevision !== develop.draft.revision)
-      return {
-        outcome: 'rejected' as const,
-        reason: 'DevelopDraftRevisionConflict',
-      }
-    const checkpoint = currentDevelopCheckpoint(develop)
-    const now = new Date().toISOString()
-    const preview = DevelopPreview.make({
-      previewId: PreviewId.make(`develop-preview-${randomUUID()}`),
-      draftRevision: develop.draft.revision,
-      inputCheckpointId: checkpoint.checkpointId,
-      operation: develop.draft.operation,
-      toolIdentity: 'deterministic-develop-adapter-v1',
-      checksum: `sha256:${digestJson({
-        inputChecksum: checkpoint.checksum,
-        operation: develop.draft.operation,
-        tool: 'deterministic-develop-adapter-v1',
-      })}`,
-      synchronizedAt: now,
-    })
-    project = reviseProject(current, current.sources, {
-      currentStage: 'Develop',
-      develop: DevelopState.make({ ...develop, preview }),
-    })
-  } else if (Command.guards.ApplyProcessingDevelopPreview(command)) {
-    if (current?.develop === undefined)
-      return { outcome: 'rejected' as const, reason: 'DevelopBaseRequired' }
-    const develop = current.develop
-    if (developAttemptActive(develop))
-      return { outcome: 'rejected' as const, reason: 'DevelopApplyActive' }
-    const checkpoint = currentDevelopCheckpoint(develop)
-    const preview = develop.preview
-    if (
-      preview === undefined ||
-      preview.previewId !== command.previewId ||
-      preview.draftRevision !== develop.draft.revision ||
-      preview.inputCheckpointId !== checkpoint.checkpointId
-    )
-      return { outcome: 'rejected' as const, reason: 'DevelopPreviewRequired' }
-    const relatedInputOutputIds = developStarPair(develop)
-    if (
-      DevelopOperation.guards.AddStars(develop.draft.operation) &&
-      relatedInputOutputIds.length !== 2
-    )
-      return { outcome: 'rejected' as const, reason: 'DevelopStarPairRequired' }
-    const attemptId = AttemptId.make(`develop-attempt-${randomUUID()}`)
-    const attempt = DevelopAttempt.make({
-      attemptId,
-      state: 'queued',
-      inputCheckpointId: checkpoint.checkpointId,
-      previewId: preview.previewId,
-      draftRevision: develop.draft.revision,
-      operation: develop.draft.operation,
-      toolIdentity: 'deterministic-develop-adapter-v1',
-      inputChecksum: checkpoint.checksum,
-      relatedInputOutputIds,
-      outputs: [],
-      diagnostics: [],
-    })
-    project = reviseProject(current, current.sources, {
-      currentStage: 'Develop',
-      develop: DevelopState.make({
-        ...withoutDevelopFailure(develop),
-        attempts: [...develop.attempts, attempt],
-      }),
-    })
-    work = {
-      workId: `project-develop-${attemptId}`,
-      attemptId,
-      stage: 'Develop',
-      kind: 'projectDevelopApply',
-    }
-  } else if (
-    Command.guards.UndoProcessingDevelopStep(command) ||
-    Command.guards.RedoProcessingDevelopStep(command)
-  ) {
-    if (current?.develop === undefined)
-      return { outcome: 'rejected' as const, reason: 'DevelopBaseRequired' }
-    const develop = current.develop
-    if (developAttemptActive(develop))
-      return { outcome: 'rejected' as const, reason: 'DevelopApplyActive' }
-    const cursor = Command.guards.UndoProcessingDevelopStep(command)
-      ? develop.historyCursor - 1
-      : develop.historyCursor + 1
-    if (cursor < 0 || cursor > develop.history.length)
-      return {
-        outcome: 'rejected' as const,
-        reason: 'DevelopHistoryUnavailable',
-      }
-    project = reviseProject(current, current.sources, {
-      currentStage: 'Develop',
-      develop: DevelopState.make({
-        ...withoutDevelopPreview(develop),
-        historyCursor: cursor,
-      }),
-    })
-  } else if (Command.guards.RetryProcessingDevelopApply(command)) {
-    if (current?.develop === undefined)
-      return { outcome: 'rejected' as const, reason: 'DevelopBaseRequired' }
-    const develop = current.develop
-    if (developAttemptActive(develop))
-      return { outcome: 'rejected' as const, reason: 'DevelopApplyActive' }
-    const failed = develop.attempts.find(
-      (attempt) =>
-        attempt.attemptId === command.failedAttemptId &&
-        attempt.state === 'failed' &&
-        develop.failedAttemptId === attempt.attemptId,
-    )
-    if (failed === undefined)
-      return {
-        outcome: 'rejected' as const,
-        reason: 'DevelopFailedAttemptRequired',
-      }
-    const attemptId = AttemptId.make(`develop-attempt-${randomUUID()}`)
-    const {
-      startedAt: _startedAt,
-      completedAt: _completedAt,
-      ...retryBase
-    } = failed
-    const retry = DevelopAttempt.make({
-      ...retryBase,
-      attemptId,
-      state: 'queued',
-      outputs: [],
-      diagnostics: [],
-      retryOfAttemptId: failed.attemptId,
-    })
-    project = reviseProject(current, current.sources, {
-      currentStage: 'Develop',
-      develop: DevelopState.make({
-        ...develop,
-        attempts: [...develop.attempts, retry],
-      }),
-    })
-    work = {
-      workId: `project-develop-${attemptId}`,
-      attemptId,
-      stage: 'Develop',
-      kind: 'projectDevelopApply',
-    }
-  } else if (Command.guards.SaveProcessingDevelopResult(command)) {
-    if (current?.develop === undefined)
-      return { outcome: 'rejected' as const, reason: 'DevelopBaseRequired' }
-    const develop = current.develop
-    const entry = currentDevelopEntry(develop)
-    if (entry === undefined)
-      return {
-        outcome: 'rejected' as const,
-        reason: 'DevelopAppliedResultRequired',
-      }
-    const existingSave = develop.savedResults.find(
-      (saved) => saved.checkpointId === entry.checkpointId,
-    )
-    if (existingSave !== undefined) project = current
-    else {
-      const artifact = Schema.decodeUnknownSync(
-        Schema.optional(MasterArtifactRow),
-      )(
-        database
-          .prepare(
-            'SELECT checksum FROM processing_artifacts WHERE session_id=? AND output_id=?',
-          )
-          .get(current.projectId, entry.outputId),
-      )
-      if (artifact?.checksum !== entry.checksum)
-        return {
-          outcome: 'rejected' as const,
-          reason: 'DevelopAppliedResultRequired',
-        }
-      const savedAt = new Date().toISOString()
-      const saved = DevelopSavedResult.make({
-        assetId: AssetId.make(`asset-develop-${randomUUID()}`),
-        assetRevision: AssetRevision.make(1),
-        checksum: entry.checksum,
-        checkpointId: entry.checkpointId,
-        attemptId: entry.attemptId,
-        outputId: entry.outputId,
-        savedAt,
-      })
-      const stackingAttempt = current.stages
-        .find((stage) => stage.stage === 'Stacking')
-        ?.attempts.find(
-          (attempt) => attempt.attemptId === develop.base.stackingAttemptId,
-        )
-      const registrationAttempt = current.stages
-        .find((stage) => stage.stage === 'Registration')
-        ?.attempts.find(
-          (attempt) => attempt.attemptId === stackingAttempt?.upstreamAttemptId,
-        )
-      developSave = {
-        ...saved,
-        operationIds: [
-          ...(registrationAttempt?.upstreamAttemptId === undefined
-            ? []
-            : [registrationAttempt.upstreamAttemptId]),
-          ...(stackingAttempt?.upstreamAttemptId === undefined
-            ? []
-            : [stackingAttempt.upstreamAttemptId]),
-          develop.base.stackingAttemptId,
-          ...develop.history
-            .slice(0, develop.historyCursor)
-            .map((item) => item.attemptId),
-        ],
-      }
-      project = reviseProject(current, current.sources, {
-        currentStage: 'Develop',
-        develop: DevelopState.make({
-          ...develop,
-          savedResults: [...develop.savedResults, saved],
-        }),
-      })
-    }
-  } else if (Command.guards.AssignProcessingSourceRole(command)) {
-    if (current === undefined)
-      return { outcome: 'rejected' as const, reason: 'ProjectNotFound' }
-    const source = current.sources.find(
-      (candidate) => candidate.assetId === command.assetId,
-    )
-    if (source === undefined)
-      return { outcome: 'rejected' as const, reason: 'SourceNotFound' }
-    if (
-      command.role === 'Lights' &&
-      source.targetName !== undefined &&
-      current.targetName !== undefined &&
-      source.targetName !== current.targetName
-    )
-      return { outcome: 'rejected' as const, reason: 'TargetConflict' }
-    project = reviseProject(
-      current,
-      current.sources.map((candidate) =>
-        candidate.assetId === source.assetId
-          ? ProcessingProjectSource.make({ ...candidate, role: command.role })
-          : candidate,
-      ),
-    )
-  } else if (Command.guards.RemoveProcessingProjectSource(command)) {
-    if (current === undefined)
-      return { outcome: 'rejected' as const, reason: 'ProjectNotFound' }
-    if (
-      current.stages.some((stage) =>
-        stage.attempts.some(
-          (attempt) =>
-            attempt.state === 'queued' || attempt.state === 'running',
-        ),
-      )
-    )
-      return { outcome: 'rejected' as const, reason: 'StageAttemptActive' }
-    if (!current.sources.some((source) => source.assetId === command.assetId))
-      return { outcome: 'rejected' as const, reason: 'SourceNotFound' }
-    project = reviseProject(
-      current,
-      current.sources.filter((source) => source.assetId !== command.assetId),
-    )
-  } else {
-    const selected = resolveSelection(database, command.selection)
-    if (selected.length === 0)
-      return { outcome: 'rejected' as const, reason: 'SourceSelectionInvalid' }
-    const now = new Date().toISOString()
-    if (Command.guards.CreateProcessingProject(command)) {
-      const sources = assignSuggestedRoles(selected, undefined)
-      project = withProjectWarnings(
-        ProcessingProject.make({
-          projectId: ProcessingProjectId.make(`project-${randomUUID()}`),
-          revision: ProcessingProjectRevision.make(0),
-          name: command.name,
-          ...projectTarget(sources),
-          sources,
-          warnings: [],
-          currentStage: 'Sources',
-          stages: initialStages(sources),
-          createdAt: now,
-          updatedAt: now,
-        }),
-      )
-    } else {
-      if (current === undefined)
-        return { outcome: 'rejected' as const, reason: 'ProjectNotFound' }
-      const known = new Set(current.sources.map((source) => source.assetId))
-      const added = assignSuggestedRoles(
-        selected.filter((source) => !known.has(source.assetId)),
-        current.targetName,
-      )
-      project = reviseProject(current, [...current.sources, ...added])
-    }
-  }
-
-  const effect = Command.guards.CreateProcessingProject(command)
-    ? ('projectCreated' as const)
-    : Command.guards.AddProcessingProjectSources(command)
-      ? ('projectSourcesAdded' as const)
-      : Command.guards.RemoveProcessingProjectSource(command)
-        ? ('projectSourceRemoved' as const)
-        : Command.guards.AssignProcessingSourceRole(command)
-          ? ('projectSourceRoleAssigned' as const)
-          : Command.guards.NavigateProcessingProjectStage(command)
-            ? ('projectStageNavigated' as const)
-            : Command.guards.UpdateProcessingStageDraft(command)
-              ? ('projectStageDraftUpdated' as const)
-              : Command.guards.UndoProcessingStageDraft(command)
-                ? ('projectStageDraftUndone' as const)
-                : Command.guards.RedoProcessingStageDraft(command)
-                  ? ('projectStageDraftRedone' as const)
-                  : Command.guards.SetCalibrationUseAnyway(command)
-                    ? ('calibrationUseAnywayUpdated' as const)
-                    : Command.guards.SetRegistrationFrameIncluded(command)
-                      ? ('registrationFrameInclusionUpdated' as const)
-                      : Command.guards.SetStackingFrameIncluded(command)
-                        ? ('stackingFrameInclusionUpdated' as const)
-                        : Command.guards.RunProcessingProjectStage(command)
-                          ? ('projectStageRunQueued' as const)
-                          : Command.guards.SelectProcessingStageResult(command)
-                            ? ('projectStageResultSelected' as const)
-                            : Command.guards.SaveProcessingProjectMaster(
-                                  command,
-                                )
-                              ? ('projectMasterSaved' as const)
-                              : Command.guards.OpenProcessingProjectDevelop(
-                                    command,
-                                  )
-                                ? ('projectDevelopOpened' as const)
-                                : Command.guards.UpdateProcessingDevelopDraft(
-                                      command,
-                                    )
-                                  ? ('projectDevelopDraftUpdated' as const)
-                                  : Command.guards.UndoProcessingDevelopDraft(
-                                        command,
-                                      )
-                                    ? ('projectDevelopDraftUndone' as const)
-                                    : Command.guards.RedoProcessingDevelopDraft(
-                                          command,
-                                        )
-                                      ? ('projectDevelopDraftRedone' as const)
-                                      : Command.guards.SyncProcessingDevelopPreview(
-                                            command,
-                                          )
-                                        ? ('projectDevelopPreviewSynchronized' as const)
-                                        : Command.guards.ApplyProcessingDevelopPreview(
-                                              command,
-                                            )
-                                          ? ('projectDevelopApplyQueued' as const)
-                                          : Command.guards.UndoProcessingDevelopStep(
-                                                command,
-                                              )
-                                            ? ('projectDevelopStepUndone' as const)
-                                            : Command.guards.RedoProcessingDevelopStep(
-                                                  command,
-                                                )
-                                              ? ('projectDevelopStepRedone' as const)
-                                              : Command.guards.RetryProcessingDevelopApply(
-                                                    command,
-                                                  )
-                                                ? ('projectDevelopRetryQueued' as const)
-                                                : ('projectDevelopResultSaved' as const)
-  const response = {
-    outcome: 'accepted' as const,
-    replayed: false,
-    effect,
-    project,
-  }
-  database.exec('BEGIN IMMEDIATE')
-  try {
-    database
-      .prepare(
-        'INSERT INTO processing_projects(project_id,revision,project,updated_at) VALUES(?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET revision=excluded.revision,project=excluded.project,updated_at=excluded.updated_at',
-      )
-      .run(
-        project.projectId,
-        project.revision,
-        JSON.stringify(project),
-        project.updatedAt,
-      )
-    database
-      .prepare('INSERT INTO processing_project_receipts VALUES (?,?,?)')
-      .run(command.idempotencyKey, identity.personId, JSON.stringify(response))
-    if (masterSave !== undefined) {
-      const detail = {
-        assetId: masterSave.assetId,
-        revision: 1,
-        role: 'linearMaster',
-        format: 'fits',
-        checksum: masterSave.checksum,
-        availability: 'availableLocally',
-        capturedAt: masterSave.savedAt,
-        comparisonGroupId: `processing-project-${project.projectId}`,
-        ...(project.targetName === undefined
-          ? {}
-          : { targetName: project.targetName }),
-        lineage: {
-          sourceAssetIds: masterSave.includedAssetIds,
-          processingSessionId: project.projectId,
-          processingOutputId: masterSave.resultId,
-          operationIds: [
-            masterSave.registrationAttemptId,
-            masterSave.attemptId,
-          ],
-        },
-        representations: [
-          { label: 'Saved deterministic Master retained', state: 'available' },
-        ],
-      }
-      database
-        .prepare('INSERT INTO library_assets VALUES (?,?,?,?,?,?,?,?,?,?)')
-        .run(
-          masterSave.assetId,
-          1,
-          'linearMaster',
-          'fits',
-          'availableLocally',
-          detail.comparisonGroupId,
-          masterSave.savedAt,
-          masterSave.savedAt,
-          0,
-          JSON.stringify(detail),
-        )
-      database
-        .prepare(
-          'UPDATE processing_artifacts SET saved=1 WHERE session_id=? AND output_id=?',
-        )
-        .run(project.projectId, `stack-output-${masterSave.attemptId}`)
-      database
-        .prepare(
-          'INSERT INTO process_asset_events (asset_id,event_type,checksum) VALUES (?,?,?)',
-        )
-        .run(masterSave.assetId, 'ProcessSaved', masterSave.checksum)
-    }
-    if (developSave !== undefined) {
-      const detail = {
-        assetId: developSave.assetId,
-        revision: 1,
-        role: 'final',
-        format: 'fits',
-        checksum: developSave.checksum,
-        availability: 'availableLocally',
-        capturedAt: developSave.savedAt,
-        comparisonGroupId: `processing-project-${project.projectId}`,
-        ...(project.targetName === undefined
-          ? {}
-          : { targetName: project.targetName }),
-        lineage: {
-          sourceAssetIds: [project.develop?.base.assetId],
-          processingSessionId: project.projectId,
-          processingOutputId: developSave.outputId,
-          operationIds: developSave.operationIds,
-        },
-        representations: [
-          {
-            label: 'Saved deterministic Develop result retained',
-            state: 'available',
+function projectSummary(project: Project) {
+  const active = activeAttempt(project)
+  return ProcessingProjectSummary.make({
+    projectId: project.projectId,
+    revision: project.revision,
+    name: project.name,
+    ...(project.targetName === undefined
+      ? {}
+      : { targetName: project.targetName }),
+    sourceCount: project.sources.length,
+    state:
+      active !== undefined
+        ? 'Working'
+        : project.attempts.at(-1)?.state === 'failed'
+          ? 'Attention'
+          : 'Ready',
+    ...(active === undefined
+      ? {}
+      : {
+          active: {
+            stage: active.stage,
+            state:
+              active.state === 'queued'
+                ? ('Queued' as const)
+                : ('Running' as const),
           },
-        ],
-      }
-      database
-        .prepare('INSERT INTO library_assets VALUES (?,?,?,?,?,?,?,?,?,?)')
-        .run(
-          developSave.assetId,
-          1,
-          'final',
-          'fits',
-          'availableLocally',
-          detail.comparisonGroupId,
-          developSave.savedAt,
-          developSave.savedAt,
-          0,
-          JSON.stringify(detail),
-        )
-      database
-        .prepare(
-          'UPDATE processing_artifacts SET saved=1 WHERE session_id=? AND output_id=?',
-        )
-        .run(project.projectId, developSave.outputId)
-      database
-        .prepare(
-          'INSERT INTO process_asset_events (asset_id,event_type,checksum) VALUES (?,?,?)',
-        )
-        .run(developSave.assetId, 'ProcessSaved', developSave.checksum)
-    }
-    if (work !== undefined)
-      database
-        .prepare(
-          "INSERT INTO processing_work(work_id,session_id,kind,payload,state,stage,enqueued_at) VALUES(?,?, ?, ?, 'pending', ?, ?)",
-        )
-        .run(
-          work.workId,
-          project.projectId,
-          work.kind,
-          JSON.stringify({
-            _tag:
-              work.kind === 'projectStage'
-                ? 'RunProcessingProjectStage'
-                : 'ApplyProcessingDevelopPreview',
-            projectId: project.projectId,
-            projectRevision: project.revision,
-            attemptId: work.attemptId,
-            stage: work.stage,
-          }),
-          work.stage,
-          new Date().toISOString(),
-        )
-    database.exec('COMMIT')
-    return response
-  } catch {
-    database.exec('ROLLBACK')
-    return {
-      outcome: 'rejected' as const,
-      reason: 'ProjectPersistenceUnavailable',
-    }
-  }
+        }),
+    updatedAt: project.updatedAt,
+  })
 }
 
-function initialDevelopState(saved: {
-  readonly assetId: typeof AssetId.Type
-  readonly assetRevision: typeof AssetRevision.Type
-  readonly checksum: string
-  readonly stackingAttemptId: typeof ProcessingStageAttemptId.Type
-  readonly stackResultId: typeof ProcessingStageResultId.Type
-}) {
-  return DevelopState.make({
-    base: {
-      assetId: saved.assetId,
-      assetRevision: saved.assetRevision,
-      checksum: saved.checksum,
-      stackingAttemptId: saved.stackingAttemptId,
-      stackResultId: saved.stackResultId,
-    },
+function projectView(database: DatabaseSync, project: Project, caller: Caller) {
+  const active = activeAttempt(project)
+  return OpenedProcessingProject.make({
+    projectId: project.projectId,
+    revision: project.revision,
+    name: project.name,
+    ...(project.targetName === undefined
+      ? {}
+      : { targetName: project.targetName }),
+    authority: authority(caller),
+    sources: project.sources,
+    warnings: project.warnings,
+    stages: project.stages.map((stage) => stageView(database, project, stage)),
+    ...(project.developBase === undefined
+      ? {}
+      : { developBase: project.developBase }),
+    ...(active === undefined
+      ? {}
+      : {
+          activeAttempt: {
+            attemptId: active.attemptId,
+            stage: active.stage,
+            state:
+              active.state === 'queued'
+                ? ('Queued' as const)
+                : ('Running' as const),
+            acceptedAt: active.frozenAt,
+            ...(active.startedAt === undefined
+              ? {}
+              : { startedAt: active.startedAt }),
+          },
+        }),
+    savedAssetIds: project.savedAssetIds,
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+  })
+}
+
+function stageView(
+  database: DatabaseSync,
+  project: Project,
+  stage: typeof ProcessingStageState.Type,
+) {
+  const result = currentProcessingStageResult(stage)
+  const unavailable = runUnavailable(
+    database,
+    project,
+    stage,
+    upstreamResult(project, stage.stage),
+  )
+  return ProcessingStageView.make({
+    stage: stage.stage,
     draft: {
-      revision: 0,
+      revision: stage.draft.revision,
+      value: stage.draft.value,
+      canUndo: stage.draft.undo.length > 0,
+      canRedo: stage.draft.redo.length > 0,
+    },
+    ...(result === undefined
+      ? {}
+      : {
+          currentResult: ProcessingCurrentResult.make({
+            resultId: result.resultId,
+            attemptId: result.attemptId,
+            outcome: result.outcome,
+            lineage: 'Current',
+            summary: result.summary,
+            completedAt: result.completedAt,
+          }),
+        }),
+    ...(stage.developPreview === undefined
+      ? {}
+      : {
+          developPreview: {
+            previewId: stage.developPreview.previewId,
+            draftRevision: stage.developPreview.draftRevision,
+            inputCheckpointId: stage.developPreview.inputCheckpointId,
+            state:
+              stage.developPreview.state === 'queued'
+                ? ('Queued' as const)
+                : stage.developPreview.state === 'computing'
+                  ? ('Computing' as const)
+                  : stage.developPreview.state === 'ready'
+                    ? ('Ready' as const)
+                    : ('Failed' as const),
+          },
+        }),
+    resultHistory: {
+      canUndo: stage.resultCursor > 0,
+      canRedo: stage.resultCursor < stage.resultHistory.length,
+    },
+    run:
+      unavailable === undefined
+        ? ProcessingStageView.fields.run.cases.Available.make({
+            label:
+              stage.stage === 'Develop'
+                ? 'Apply'
+                : result === undefined
+                  ? 'Run'
+                  : 'Rerun',
+          })
+        : ProcessingStageView.fields.run.cases.Unavailable.make({
+            reason: unavailable,
+          }),
+  })
+}
+
+function runUnavailable(
+  database: DatabaseSync,
+  project: Project,
+  stage: typeof ProcessingStageState.Type,
+  upstream: typeof ProcessingStageResult.Type | undefined,
+):
+  | 'LightsRequired'
+  | 'CurrentUpstreamResultRequired'
+  | 'SavedMasterRequired'
+  | 'DevelopPreviewRequired'
+  | 'AttemptActive'
+  | undefined {
+  if (activeAttempt(project) !== undefined) return 'AttemptActive'
+  if (stage.stage === 'Calibration')
+    return project.sources.some((source) => source.role === 'Lights')
+      ? undefined
+      : 'LightsRequired'
+  if (upstream === undefined) return 'CurrentUpstreamResultRequired'
+  if (stage.stage !== 'Develop') return undefined
+  if (savedAssetForOutput(database, upstream.outputId) === undefined)
+    return 'SavedMasterRequired'
+  const preview = stage.developPreview
+  return preview !== undefined &&
+    preview.state === 'ready' &&
+    preview.draftRevision === stage.draft.revision &&
+    preview.inputCheckpointId === upstream.checkpointId
+    ? undefined
+    : 'DevelopPreviewRequired'
+}
+
+function initialStages() {
+  const drafts = {
+    Calibration: ProcessingStageDraftValue.cases.Calibration.make({
+      settings: [
+        { key: 'operation', value: 'calibrate-and-debayer' },
+        { key: 'missingSupport', value: 'allow-with-warning' },
+      ],
+      overrides: [],
+    }),
+    Registration: ProcessingStageDraftValue.cases.Registration.make({
+      settings: [
+        { key: 'referenceAssetId', value: 'auto' },
+        { key: 'alignmentModel', value: 'translation' },
+        { key: 'starDetection', value: 'balanced' },
+      ],
+      inclusions: [],
+    }),
+    Stacking: ProcessingStageDraftValue.cases.Stacking.make({
+      settings: [
+        { key: 'weighting', value: 'equal' },
+        { key: 'rejection', value: 'winsorized-sigma' },
+      ],
+      frameChoices: [],
+    }),
+    Develop: ProcessingStageDraftValue.cases.Develop.make({
       operation: DevelopOperation.cases.Stretch.make({
         method: 'asinh',
         amount: 0.25,
       }),
-      undo: [],
-      redo: [],
-    },
-    attempts: [],
-    history: [],
-    historyCursor: 0,
-    savedResults: [],
+    }),
+  } as const
+  return (['Calibration', 'Registration', 'Stacking', 'Develop'] as const).map(
+    (stage) =>
+      ProcessingStageState.make({
+        stage,
+        draft: ProcessingStageDraft.make({
+          revision: 0,
+          value: drafts[stage],
+          undo: [],
+          redo: [],
+        }),
+        resultHistory: [],
+        resultCursor: 0,
+      }),
+  )
+}
+
+function restoreLineage(
+  stages: ReadonlyArray<typeof ProcessingStageState.Type>,
+  developBase?: typeof ProcessingDevelopBase.Type,
+) {
+  const ordered = [...stages]
+  for (let index = 1; index < ordered.length; index += 1) {
+    const stage = ordered[index]
+    const upstream = ordered[index - 1]
+    if (stage === undefined || upstream === undefined) continue
+    const currentUpstream =
+      stage.stage === 'Develop' && developBase !== undefined
+        ? upstream.resultHistory.find(
+            (result) =>
+              result.resultId === developBase.stackingResultId &&
+              result.attemptId === developBase.stackingAttemptId &&
+              result.checksum === developBase.checksum,
+          )
+        : currentProcessingStageResult(upstream)
+    const match = stage.resultHistory.findLastIndex((result) =>
+      sameProcessingResult(result.upstream, currentUpstream),
+    )
+    ordered[index] = ProcessingStageState.make(
+      stage.stage === 'Develop' && match < 0
+        ? { ...withoutDevelopPreview(stage), resultCursor: 0 }
+        : { ...stage, resultCursor: match < 0 ? 0 : match + 1 },
+    )
+  }
+  return ordered
+}
+
+function upstreamResult(project: Project, stage: Stage) {
+  if (stage === 'Develop') return developBaseResult(project)
+  const index = project.stages.findIndex(
+    (candidate) => candidate.stage === stage,
+  )
+  if (index <= 0) return undefined
+  const upstream = project.stages[index - 1]
+  return upstream === undefined
+    ? undefined
+    : currentProcessingStageResult(upstream)
+}
+
+function developBaseResult(project: Project) {
+  const base = project.developBase
+  if (base === undefined) return undefined
+  return findStage(project, 'Stacking')?.resultHistory.find(
+    (result) =>
+      result.resultId === base.stackingResultId &&
+      result.attemptId === base.stackingAttemptId &&
+      result.checksum === base.checksum,
+  )
+}
+
+function developBaseForAsset(
+  database: DatabaseSync,
+  project: Project,
+  assetId: typeof AssetId.Type,
+) {
+  if (!project.savedAssetIds.includes(assetId)) return undefined
+  const row = Schema.decodeUnknownSync(Schema.optional(SavedMasterRow))(
+    database
+      .prepare(
+        "SELECT asset_id,revision,role,detail FROM library_assets WHERE asset_id=? AND role='linearMaster'",
+      )
+      .get(assetId),
+  )
+  if (row === undefined) return undefined
+  const detail = Schema.decodeUnknownSync(LibraryDetail)(JSON.parse(row.detail))
+  const result = findStage(project, 'Stacking')?.resultHistory.find(
+    (candidate) =>
+      candidate.outputId === detail.lineage.processingOutputId &&
+      candidate.checksum === detail.checksum,
+  )
+  if (result === undefined) return undefined
+  return ProcessingDevelopBase.make({
+    assetId,
+    assetRevision: AssetRevision.make(row.revision),
+    checksum: result.checksum,
+    stackingAttemptId: result.attemptId,
+    stackingResultId: result.resultId,
   })
 }
 
-function developAttemptActive(develop: typeof DevelopState.Type) {
-  return develop.attempts.some(
-    (attempt) => attempt.state === 'queued' || attempt.state === 'running',
-  )
+function currentResult(project: Project, stage: Stage) {
+  const found = findStage(project, stage)
+  return found === undefined ? undefined : currentProcessingStageResult(found)
 }
 
-function withoutDevelopPreview(develop: typeof DevelopState.Type) {
-  const { preview: _preview, ...rest } = develop
-  return rest
+function upstreamReference(result: typeof ProcessingStageResult.Type) {
+  return {
+    stage: result.stage,
+    resultId: result.resultId,
+    attemptId: result.attemptId,
+    checksum: result.checksum,
+  }
 }
 
-function withoutDevelopFailure(develop: typeof DevelopState.Type) {
-  const { failedAttemptId: _failedAttemptId, ...rest } = develop
-  return rest
+function resultFrom(
+  reference: NonNullable<(typeof ProcessingAttempt.Type)['upstream']>,
+) {
+  return ProcessingStageResult.make({
+    ...reference,
+    outcome: 'Succeeded',
+    outputId: ProcessingOutputId.make(`output-${reference.attemptId}`),
+    checkpointId: CheckpointId.make(`checkpoint-${reference.attemptId}`),
+    sources: [],
+    summary: 'Frozen retry upstream.',
+    completedAt: new Date(0).toISOString(),
+  })
 }
 
-function currentDevelopEntry(develop: typeof DevelopState.Type) {
-  return develop.historyCursor === 0
-    ? undefined
-    : develop.history[develop.historyCursor - 1]
-}
-
-function currentDevelopCheckpoint(develop: typeof DevelopState.Type) {
-  const entry = currentDevelopEntry(develop)
-  return (
-    entry ?? {
-      checkpointId: CheckpointId.make(`develop-base-${develop.base.assetId}`),
-      checksum: develop.base.checksum,
-    }
-  )
-}
-
-function developStarPair(develop: typeof DevelopState.Type) {
-  const entry = currentDevelopEntry(develop)
-  if (entry === undefined) return []
-  const attempt = develop.attempts.find(
-    (candidate) => candidate.attemptId === entry.attemptId,
-  )
-  const starless = attempt?.outputs.find(
-    (output) => output.relation === 'starless',
-  )
-  const companion = attempt?.outputs.find(
-    (output) => output.relation === 'starCompanion',
-  )
-  return starless === undefined || companion === undefined
-    ? []
-    : [starless.outputId, companion.outputId]
-}
-
-function digestJson(value: unknown) {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex')
+function freezeSources(sources: Project['sources']) {
+  const frozen: Array<typeof ProcessingFrozenSource.Type> = []
+  for (const source of sources) {
+    if (source.checksum === undefined) return undefined
+    frozen.push(
+      ProcessingFrozenSource.make({
+        assetId: source.assetId,
+        assetRevision: source.assetRevision,
+        role: source.role,
+        checksum: source.checksum,
+      }),
+    )
+  }
+  return frozen
 }
 
 function resolveSelection(
   database: DatabaseSync,
-  selection: {
-    readonly assetIds: ReadonlyArray<string>
-    readonly captureSetIds: ReadonlyArray<string>
-  },
+  selection: (typeof CreateProcessingProjectRequest.Type)['selection'],
 ) {
   const rows = Schema.decodeUnknownSync(Schema.Array(SourceRow))(
     database
       .prepare(
-        `SELECT asset_id,revision,availability,comparison_group_id,captured_at,role,detail
-         ,format FROM library_assets ORDER BY captured_at,asset_id`,
+        'SELECT asset_id,revision,availability,comparison_group_id,captured_at,role,format,detail FROM library_assets ORDER BY captured_at,asset_id',
       )
       .all(),
   )
   const assetIds = new Set(selection.assetIds)
-  const captureSets = new Set(selection.captureSetIds)
-  return rows
+  const captureSetIds = new Set(selection.captureSetIds)
+  const selected = rows
     .map(projectSource)
     .filter(
       (source) =>
         assetIds.has(source.assetId) ||
         (source.captureSetId !== undefined &&
-          captureSets.has(source.captureSetId)),
+          captureSetIds.has(source.captureSetId)),
     )
+  if (
+    [...assetIds].some(
+      (assetId) => !selected.some((source) => source.assetId === assetId),
+    ) ||
+    [...captureSetIds].some(
+      (captureSetId) =>
+        !selected.some((source) => source.captureSetId === captureSetId),
+    )
+  )
+    return undefined
+  return selected
 }
 
 function projectSource(row: typeof SourceRow.Type) {
   const detail = Schema.decodeUnknownSync(StoredDetail)(JSON.parse(row.detail))
-  const suggestedRole = suggestedRoleFor(detail.capture?.frameType)
-  const targetName = detail.targetName
   return ProcessingProjectSource.make({
     assetId: AssetId.make(row.asset_id),
     assetRevision: AssetRevision.make(row.revision),
     role: 'Unassigned',
-    suggestedRole,
+    suggestedRole: suggestedRole(detail.capture?.frameType),
     libraryRole: row.role,
     libraryFormat: row.format,
     ...(detail.captureSetId === undefined
       ? {}
-      : { captureSetId: detail.captureSetId }),
-    ...(targetName === undefined ? {} : { targetName }),
+      : { captureSetId: CaptureSetId.make(detail.captureSetId) }),
+    ...(detail.targetName === undefined
+      ? {}
+      : { targetName: detail.targetName }),
     capturedAt: row.captured_at,
-    ...(detail.checksum === undefined ? {} : { checksum: detail.checksum }),
+    checksum:
+      detail.checksum ??
+      `sha256:${digest({ assetId: row.asset_id, revision: row.revision })}`,
     availability: row.availability,
     provenance: {
       ...detail.lineage,
@@ -1542,19 +1415,9 @@ function projectSource(row: typeof SourceRow.Type) {
   })
 }
 
-function suggestedRoleFor(
-  frameType: 'light' | 'dark' | 'flat' | 'bias' | undefined,
-): ProcessingSourceRole {
-  if (frameType === 'light') return 'Lights'
-  if (frameType === 'dark') return 'Darks'
-  if (frameType === 'flat') return 'Flats'
-  if (frameType === 'bias') return 'Bias'
-  return 'Unassigned'
-}
-
 function assignSuggestedRoles(
   sources: ReadonlyArray<typeof ProcessingProjectSource.Type>,
-  existingTarget: string | undefined,
+  existingTarget?: string,
 ) {
   let target = existingTarget
   return sources.map((source) => {
@@ -1574,7 +1437,7 @@ function assignSuggestedRoles(
             warning(
               'TargetConflict',
               [source.assetId],
-              `${source.targetName} does not match project target ${target}; the frame remains Unassigned.`,
+              `${source.targetName} does not match project target ${target}; the source remains Unassigned.`,
             ),
           ]
         : [],
@@ -1582,1373 +1445,23 @@ function assignSuggestedRoles(
   })
 }
 
-function reviseProject(
-  current: ProcessingProject,
-  sources: ReadonlyArray<typeof ProcessingProjectSource.Type>,
-  changes: Partial<ProcessingProject> = {},
-) {
-  return withProjectWarnings(
-    ProcessingProject.make({
-      ...current,
-      revision: ProcessingProjectRevision.make(current.revision + 1),
-      ...(current.targetName === undefined
-        ? projectTarget(sources)
-        : { targetName: current.targetName }),
-      sources,
-      ...changes,
-      stages: recomputeLineage(changes.stages ?? current.stages, sources),
-      warnings: [],
-      updatedAt: new Date().toISOString(),
-    }),
-  )
+function suggestedRole(
+  frameType: 'light' | 'dark' | 'flat' | 'bias' | undefined,
+): ProcessingSourceRole {
+  if (frameType === 'light') return 'Lights'
+  if (frameType === 'dark') return 'Darks'
+  if (frameType === 'flat') return 'Flats'
+  if (frameType === 'bias') return 'Bias'
+  return 'Unassigned'
 }
 
-function initialStages(
-  sources: ReadonlyArray<typeof ProcessingProjectSource.Type> = [],
-) {
-  return (['Calibration', 'Registration', 'Stacking'] as const).map((stage) =>
-    ProcessingStageState.make({
-      stage,
-      draft: {
-        revision: 0,
-        settings:
-          stage === 'Calibration'
-            ? [
-                { key: 'operation', value: 'calibrate-and-debayer' },
-                { key: 'allowUncalibrated', value: 'true' },
-              ]
-            : stage === 'Registration'
-              ? [
-                  { key: 'referenceAssetId', value: 'auto' },
-                  { key: 'alignmentModel', value: 'translation' },
-                  { key: 'starDetection', value: 'balanced' },
-                ]
-              : [
-                  { key: 'weighting', value: 'equal' },
-                  { key: 'rejection', value: 'winsorized-sigma' },
-                ],
-        overrides: [],
-        registrationInclusions: [],
-        stackingFrameChoices: [],
-        undo: [],
-        redo: [],
-      },
-      attempts: [],
-      calibrationRecommendations:
-        stage === 'Calibration' ? calibrationRecommendations(sources) : [],
-      stackingRecommendations: [],
-    }),
-  )
-}
-
-function replaceStage(
-  stages: ProcessingProject['stages'],
-  replacement: ProcessingProject['stages'][number],
-) {
-  return stages.map((stage) =>
-    stage.stage === replacement.stage ? replacement : stage,
-  )
-}
-
-function upstreamAttempt(
-  project: ProcessingProject,
-  stage: 'Calibration' | 'Registration' | 'Stacking',
-) {
-  if (stage === 'Calibration') return undefined
-  const upstreamStage =
-    stage === 'Registration' ? 'Calibration' : 'Registration'
-  const upstream = project.stages.find((item) => item.stage === upstreamStage)
-  const attempt = upstream?.attempts.find(
-    (item) => item.attemptId === upstream.selectedAttemptId,
-  )
-  return attempt?.state === 'succeeded' && !attempt.basedOnEarlierUpstream
-    ? attempt.attemptId
-    : undefined
-}
-
-function registrationReference(
-  settings: ReadonlyArray<{ readonly key: string; readonly value: string }>,
-  upstream: typeof ProcessingStageAttempt.Type | undefined,
-) {
-  const outputs = upstream?.outputs ?? []
-  const selected =
-    settings.find((setting) => setting.key === 'referenceAssetId')?.value ??
-    'auto'
-  return selected === 'auto'
-    ? outputs[0]
-    : outputs.find((output) => output.sourceAssetId === selected)
-}
-
-export function settleProcessingProjectStage(
-  database: DatabaseSync,
-  workId: string,
-  claimToken: string,
-  checksum: string,
-  artifactPath: string,
-) {
-  const row = Schema.decodeUnknownSync(Schema.optional(ProjectStageWorkRow))(
-    database
-      .prepare(
-        'SELECT session_id,payload,state,claim_token FROM processing_work WHERE work_id=?',
-      )
-      .get(workId),
-  )
-  if (
-    row === undefined ||
-    row.state !== 'claimed' ||
-    row.claim_token !== claimToken
-  )
-    return { outcome: 'stale' as const }
-  const payload = Schema.decodeUnknownSync(ProjectStageWorkPayload)(
-    JSON.parse(row.payload),
-  )
-  const project = processingProjects(database).find(
-    (item) => item.projectId === row.session_id,
-  )
-  if (project === undefined) return { outcome: 'stale' as const }
-  const stage = project.stages.find((item) => item.stage === payload.stage)
-  const attempt = stage?.attempts.find(
-    (item) => item.attemptId === payload.attemptId,
-  )
-  if (
-    stage === undefined ||
-    attempt === undefined ||
-    attempt.state !== 'queued'
-  )
-    return { outcome: 'stale' as const }
-  const now = new Date().toISOString()
-  const calibrationEvidence =
-    attempt.stage === 'Calibration'
-      ? calibrationAttemptEvidence(
-          project,
-          attempt,
-          checksum,
-          artifactPath,
-          claimToken,
-        )
-      : undefined
-  const registrationEvidence =
-    attempt.stage === 'Registration'
-      ? registrationAttemptEvidence(
-          project,
-          attempt,
-          checksum,
-          artifactPath,
-          claimToken,
-        )
-      : undefined
-  const stackingEvidence =
-    attempt.stage === 'Stacking'
-      ? stackingAttemptEvidence(
-          project,
-          attempt,
-          checksum,
-          artifactPath,
-          claimToken,
-        )
-      : undefined
-  const calibration =
-    calibrationEvidence === undefined
-      ? undefined
-      : {
-          stageOutcome: calibrationEvidence.stageOutcome,
-          frameOutcomes: calibrationEvidence.frameOutcomes,
-          outputs: calibrationEvidence.outputs,
-          diagnostics: calibrationEvidence.diagnostics,
-        }
-  const registration =
-    registrationEvidence === undefined
-      ? undefined
-      : {
-          stageOutcome: registrationEvidence.stageOutcome,
-          frameOutcomes: registrationEvidence.frameOutcomes,
-          outputs: registrationEvidence.outputs,
-          diagnostics: registrationEvidence.diagnostics,
-          registrationTransforms: registrationEvidence.transforms,
-          viableAssetIds: registrationEvidence.viableAssetIds,
-        }
-  const stacking =
-    stackingEvidence === undefined
-      ? undefined
-      : {
-          stageOutcome: stackingEvidence.stageOutcome,
-          frameOutcomes: stackingEvidence.frameOutcomes,
-          diagnostics: stackingEvidence.diagnostics,
-          ...(stackingEvidence.stackingOutput === undefined
-            ? {}
-            : { stackingOutput: stackingEvidence.stackingOutput }),
-        }
-  const evidence = calibration ?? registration ?? stacking
-  const successful =
-    stacking !== undefined
-      ? stacking.stackingOutput !== undefined
-      : evidence === undefined ||
-        ('outputs' in evidence &&
-          evidence.outputs.length > 0 &&
-          (registration === undefined ||
-            registration.viableAssetIds.length > 0))
-  const completed = ProcessingStageAttempt.make({
-    ...attempt,
-    state: successful ? 'succeeded' : 'failed',
-    ...(successful
-      ? {
-          resultId: ProcessingStageResultId.make(
-            `stage-result-${attempt.attemptId}`,
-          ),
-          outputChecksum: checksum,
-        }
-      : {}),
-    ...(evidence ?? {
-      stageOutcome: 'Succeeded' as const,
-      frameOutcomes: [],
-      outputs: [],
-      diagnostics: [],
-      registrationTransforms: [],
-      viableAssetIds: [],
-      stackingRecommendations: attempt.stackingRecommendations,
-      stackingFrameChoices: attempt.stackingFrameChoices,
-      stackingInputAssetIds: attempt.stackingInputAssetIds,
-    }),
-    startedAt: now,
-    completedAt: now,
-  })
-  const selectedStages = replaceStage(project.stages, {
-    ...stage,
-    attempts: stage.attempts.map((item) =>
-      item.attemptId === attempt.attemptId ? completed : item,
-    ),
-    ...(completed.state === 'succeeded'
-      ? { selectedAttemptId: attempt.attemptId }
-      : {}),
-  })
-  const settledProject = reviseProject(project, project.sources, {
-    stages: selectedStages,
-  })
-  database.exec('BEGIN IMMEDIATE')
-  try {
-    const changed = database
-      .prepare(
-        `UPDATE processing_work SET state=?,settled_at=?,checkpoint=? WHERE work_id=? AND state='claimed' AND claim_token=?`,
-      )
-      .run(
-        completed.state === 'succeeded' ? 'settled' : 'failed',
-        now,
-        completed.state === 'succeeded' ? 'complete' : 'failed',
-        workId,
-        claimToken,
-      )
-    if (changed.changes !== 1) throw new Error('stale project stage settlement')
-    database
-      .prepare(
-        'UPDATE processing_projects SET revision=?,project=?,updated_at=? WHERE project_id=? AND revision=?',
-      )
-      .run(
-        settledProject.revision,
-        JSON.stringify(settledProject),
-        settledProject.updatedAt,
-        settledProject.projectId,
-        project.revision,
-      )
-    database
-      .prepare(
-        'INSERT OR REPLACE INTO processing_artifacts VALUES (?,?,?,?,?,?,0)',
-      )
-      .run(
-        `${workId}:evidence`,
-        settledProject.projectId,
-        workId,
-        `stage-evidence-${workId}`,
-        artifactPath,
-        checksum,
-      )
-    for (const [index, artifact] of (
-      calibrationEvidence?.outputArtifacts ?? []
-    ).entries()) {
-      database
-        .prepare(
-          'INSERT OR REPLACE INTO processing_artifacts VALUES (?,?,?,?,?,?,0)',
-        )
-        .run(
-          `${workId}:calibration:${artifact.sourceAssetId}`,
-          settledProject.projectId,
-          workId,
-          `calibration-output-${attempt.attemptId}-${index + 1}`,
-          artifact.path,
-          artifact.checksum,
-        )
-    }
-    for (const [index, artifact] of (
-      registrationEvidence?.outputArtifacts ?? []
-    ).entries())
-      database
-        .prepare(
-          'INSERT OR REPLACE INTO processing_artifacts VALUES (?,?,?,?,?,?,0)',
-        )
-        .run(
-          `${workId}:registration:${artifact.sourceAssetId}`,
-          settledProject.projectId,
-          workId,
-          `registration-transform-${attempt.attemptId}-${index + 1}`,
-          artifact.path,
-          artifact.checksum,
-        )
-    if (stackingEvidence?.outputArtifact !== undefined)
-      database
-        .prepare(
-          'INSERT OR REPLACE INTO processing_artifacts VALUES (?,?,?,?,?,?,0)',
-        )
-        .run(
-          `${workId}:stacking:master`,
-          settledProject.projectId,
-          workId,
-          `stack-output-${attempt.attemptId}`,
-          stackingEvidence.outputArtifact.path,
-          stackingEvidence.outputArtifact.checksum,
-        )
-    database.exec('COMMIT')
-    return {
-      outcome: 'settled' as const,
-      stageOutcome: completed.stageOutcome ?? 'Succeeded',
-    }
-  } catch {
-    database.exec('ROLLBACK')
-    return { outcome: 'stale' as const }
-  }
-}
-
-export function settleProcessingProjectDevelop(
-  database: DatabaseSync,
-  workId: string,
-  claimToken: string,
-  evidencePath: string,
-) {
-  const row = Schema.decodeUnknownSync(Schema.optional(ProjectStageWorkRow))(
-    database
-      .prepare(
-        'SELECT session_id,payload,state,claim_token FROM processing_work WHERE work_id=?',
-      )
-      .get(workId),
-  )
-  if (
-    row === undefined ||
-    row.state !== 'claimed' ||
-    row.claim_token !== claimToken
-  )
-    return { outcome: 'stale' as const }
-  const payload = Schema.decodeUnknownSync(ProjectDevelopWorkPayload)(
-    JSON.parse(row.payload),
-  )
-  const project = processingProjects(database).find(
-    (candidate) => candidate.projectId === payload.projectId,
-  )
-  const develop = project?.develop
-  const attempt = develop?.attempts.find(
-    (candidate) => candidate.attemptId === payload.attemptId,
-  )
-  if (
-    project === undefined ||
-    develop === undefined ||
-    attempt === undefined ||
-    attempt.state !== 'queued'
-  )
-    return { outcome: 'stale' as const }
-  const inputOutputId =
-    attempt.inputCheckpointId ===
-    CheckpointId.make(`develop-base-${develop.base.assetId}`)
-      ? `stack-output-${develop.base.stackingAttemptId}`
-      : develop.history.find(
-          (entry) => entry.checkpointId === attempt.inputCheckpointId,
-        )?.outputId
-  const inputArtifact =
-    inputOutputId === undefined
-      ? undefined
-      : Schema.decodeUnknownSync(Schema.optional(DevelopArtifactRow))(
-          database
-            .prepare(
-              'SELECT path,checksum FROM processing_artifacts WHERE session_id=? AND output_id=?',
-            )
-            .get(project.projectId, inputOutputId),
-        )
-  const relatedArtifacts = attempt.relatedInputOutputIds.map((outputId) =>
-    Schema.decodeUnknownSync(Schema.optional(DevelopArtifactRow))(
-      database
-        .prepare(
-          'SELECT path,checksum FROM processing_artifacts WHERE session_id=? AND output_id=?',
-        )
-        .get(project.projectId, outputId),
-    ),
-  )
-  const inputAvailable =
-    inputArtifact !== undefined &&
-    inputArtifact.checksum === attempt.inputChecksum &&
-    existsSync(inputArtifact.path) &&
-    relatedArtifacts.every(
-      (artifact) => artifact !== undefined && existsSync(artifact.path),
-    )
-  const now = new Date().toISOString()
-  let outputs: ReadonlyArray<typeof DevelopOutput.Type> = []
-  const outputArtifacts: Array<{
-    readonly outputId: typeof ProcessingOutputId.Type
-    readonly path: string
-    readonly checksum: string
-  }> = []
-  if (inputAvailable) {
-    const relations = DevelopOperation.guards.RemoveStars(attempt.operation)
-      ? (['starless', 'starCompanion'] as const)
-      : (['developed'] as const)
-    outputs = relations.map((relation) => {
-      const outputId = ProcessingOutputId.make(
-        `develop-output-${attempt.attemptId}-${relation}`,
-      )
-      const frozen = {
-        kind: 'deterministicDevelopEvidence',
-        base: develop.base,
-        inputCheckpointId: attempt.inputCheckpointId,
-        inputChecksum: attempt.inputChecksum,
-        relatedInputOutputIds: attempt.relatedInputOutputIds,
-        operation: attempt.operation,
-        toolIdentity: attempt.toolIdentity,
-        relation,
-      }
-      const bytes = deterministicFitsBytes(frozen)
-      const checksum = `sha256:${createHash('sha256').update(bytes).digest('hex')}`
-      const path = `${evidencePath}.develop.${relation}.fits`
-      retainAtomicBytes(path, bytes, claimToken, 'Develop output')
-      outputArtifacts.push({ outputId, path, checksum })
-      return DevelopOutput.make({
-        outputId,
-        checksum,
-        format: 'fits',
-        relation,
-        diagnostic:
-          'Deterministic 1 x 1 FITS evidence; not an astronomy-quality image.',
-      })
-    })
-  }
-  const completed = DevelopAttempt.make({
-    ...attempt,
-    state: inputAvailable ? 'succeeded' : 'failed',
-    outputs,
-    diagnostics: inputAvailable
-      ? [
-          'Deterministic Develop evidence only; astronomy processing quality is not claimed.',
-          ...(DevelopOperation.guards.RemoveStars(attempt.operation)
-            ? [
-                'Starless and star-companion outputs are retained as one related pair.',
-              ]
-            : DevelopOperation.guards.AddStars(attempt.operation)
-              ? [
-                  'The exact retained starless and star-companion pair was consumed.',
-                ]
-              : []),
-        ]
-      : [
-          'The exact input checkpoint bytes are unavailable or do not match the frozen checksum.',
-        ],
-    startedAt: now,
-    completedAt: now,
-  })
-  const primary = completed.outputs.find(
-    (output) => output.relation !== 'starCompanion',
-  )
-  const branch = develop.history.slice(0, develop.historyCursor)
-  const history =
-    completed.state === 'succeeded' && primary !== undefined
-      ? [
-          ...branch,
-          DevelopHistoryEntry.make({
-            checkpointId: CheckpointId.make(
-              `develop-checkpoint-${attempt.attemptId}`,
-            ),
-            attemptId: attempt.attemptId,
-            outputId: primary.outputId,
-            checksum: primary.checksum,
-            operation: attempt.operation,
-            relatedOutputIds: completed.outputs.map(
-              (output) => output.outputId,
-            ),
-          }),
-        ]
-      : develop.history
-  const nextDevelop = DevelopState.make({
-    ...(completed.state === 'succeeded'
-      ? withoutDevelopFailure(withoutDevelopPreview(develop))
-      : develop),
-    attempts: develop.attempts.map((candidate) =>
-      candidate.attemptId === attempt.attemptId ? completed : candidate,
-    ),
-    history,
-    historyCursor:
-      completed.state === 'succeeded' ? history.length : develop.historyCursor,
-    ...(completed.state === 'failed'
-      ? { failedAttemptId: completed.attemptId }
-      : {}),
-  })
-  const settledProject = reviseProject(project, project.sources, {
-    currentStage: 'Develop',
-    develop: nextDevelop,
-  })
-  database.exec('BEGIN IMMEDIATE')
-  try {
-    const changed = database
-      .prepare(
-        `UPDATE processing_work SET state=?,settled_at=?,checkpoint=? WHERE work_id=? AND state='claimed' AND claim_token=?`,
-      )
-      .run(
-        completed.state === 'succeeded' ? 'settled' : 'failed',
-        now,
-        completed.state === 'succeeded' ? 'complete' : 'failed',
-        workId,
-        claimToken,
-      )
-    if (changed.changes !== 1) throw new Error('stale Develop settlement')
-    const updated = database
-      .prepare(
-        'UPDATE processing_projects SET revision=?,project=?,updated_at=? WHERE project_id=? AND revision=?',
-      )
-      .run(
-        settledProject.revision,
-        JSON.stringify(settledProject),
-        settledProject.updatedAt,
-        settledProject.projectId,
-        project.revision,
-      )
-    if (updated.changes !== 1) throw new Error('stale Develop project')
-    database
-      .prepare(
-        'INSERT OR REPLACE INTO processing_artifacts VALUES (?,?,?,?,?,?,0)',
-      )
-      .run(
-        `${workId}:evidence`,
-        project.projectId,
-        workId,
-        `develop-evidence-${attempt.attemptId}`,
-        evidencePath,
-        `sha256:${createHash('sha256').update(readFileSync(evidencePath)).digest('hex')}`,
-      )
-    for (const artifact of outputArtifacts)
-      database
-        .prepare(
-          'INSERT OR REPLACE INTO processing_artifacts VALUES (?,?,?,?,?,?,0)',
-        )
-        .run(
-          `${workId}:${artifact.outputId}`,
-          project.projectId,
-          workId,
-          artifact.outputId,
-          artifact.path,
-          artifact.checksum,
-        )
-    database.exec('COMMIT')
-    return {
-      outcome: 'settled' as const,
-      successful: completed.state === 'succeeded',
-    }
-  } catch {
-    database.exec('ROLLBACK')
-    return { outcome: 'stale' as const }
-  }
-}
-
-function deterministicFitsBytes(value: unknown) {
-  const pixel = createHash('sha256')
-    .update(JSON.stringify(value))
-    .digest()
-    .readUInt16BE(0)
-  const card = (key: string, cardValue: string) =>
-    `${key.padEnd(8, ' ')}= ${cardValue}`.padEnd(80, ' ')
-  const header = [
-    card('SIMPLE', '                    T'),
-    card('BITPIX', '                   16'),
-    card('NAXIS', '                    2'),
-    card('NAXIS1', '                    1'),
-    card('NAXIS2', '                    1'),
-    card('BZERO', '                32768'),
-    card('BSCALE', '                    1'),
-    'END'.padEnd(80, ' '),
-  ]
-    .join('')
-    .padEnd(2880, ' ')
-  const data = Buffer.alloc(2880)
-  data.writeUInt16BE(pixel, 0)
-  return Buffer.concat([Buffer.from(header, 'ascii'), data])
-}
-
-function retainAtomicBytes(
-  path: string,
-  bytes: Buffer,
-  claimToken: string,
-  label: string,
-) {
-  if (!existsSync(path)) {
-    const temporaryPath = `${path}.${claimToken}.tmp`
-    if (existsSync(temporaryPath)) {
-      if (!readFileSync(temporaryPath).equals(bytes))
-        throw new Error(`temporary ${label} does not match frozen evidence`)
-    } else writeFileSync(temporaryPath, bytes, { flag: 'wx' })
-    renameSync(temporaryPath, path)
-  }
-  if (!readFileSync(path).equals(bytes))
-    throw new Error(`retained ${label} does not match frozen evidence`)
-}
-
-function calibrationAttemptEvidence(
-  project: ProcessingProject,
-  attempt: typeof ProcessingStageAttempt.Type,
-  evidenceChecksum: string,
-  artifactPath: string,
-  claimToken: string,
-) {
-  const sources = new Map(
-    project.sources.map((source) => [source.assetId, source]),
-  )
-  const overrideIds = new Set(
-    attempt.overrides.map((override) => override.assetId),
-  )
-  const usableSupport = attempt.recommendations.filter(
-    (recommendation) =>
-      recommendation.decision === 'Include' ||
-      (recommendation.decision === 'Review' &&
-        overrideIds.has(recommendation.assetId)),
-  )
-  const adapterFailure = attempt.settings.some(
-    (setting) => setting.key === 'adapterMode' && setting.value === 'fail',
-  )
-  const allowUncalibrated =
-    attempt.settings.find((setting) => setting.key === 'allowUncalibrated')
-      ?.value !== 'false'
-  const outputArtifacts: Array<{
-    sourceAssetId: typeof AssetId.Type
-    sourceAssetRevision: typeof AssetRevision.Type
-    path: string
-    checksum: string
-  }> = []
-  const frameOutcomes = attempt.sourceRevisions
-    .filter((source) => source.role === 'Lights')
-    .map((input) => {
-      const source = sources.get(input.assetId)
-      if (
-        source === undefined ||
-        !isCalibrationInputSource(source) ||
-        (source.availability !== 'availableLocally' &&
-          source.availability !== 'published')
-      )
-        return {
-          assetId: input.assetId,
-          assetRevision: input.assetRevision,
-          outcome: 'Unavailable' as const,
-          message:
-            source !== undefined && !isCalibrationInputSource(source)
-              ? 'The frozen Light is not an original camera-raw or FITS Library asset.'
-              : 'The frozen Light bytes are not currently readable.',
-          diagnostic:
-            source !== undefined && !isCalibrationInputSource(source)
-              ? 'CalibrationInputUnsupported'
-              : 'SourceBytesUnavailable',
-        }
-      if (adapterFailure)
-        return {
-          assetId: input.assetId,
-          assetRevision: input.assetRevision,
-          outcome: 'Failed' as const,
-          message:
-            'The deterministic Calibration adapter reported a bounded failure.',
-          diagnostic: 'DeterministicAdapterFailure',
-        }
-      const matchingSupport = usableSupport.filter(
-        (support) =>
-          support.matchedLightAssetIds.includes(input.assetId) ||
-          overrideIds.has(support.assetId),
-      )
-      const warning = matchingSupport.length === 0
-      if (warning && !allowUncalibrated)
-        return {
-          assetId: input.assetId,
-          assetRevision: input.assetRevision,
-          outcome: 'Failed' as const,
-          message:
-            'No compatible or explicitly included mismatched support was selected and uncalibrated continuation is disabled.',
-          diagnostic: 'CalibrationSupportRequired',
-        }
-      const outputBytes = JSON.stringify({
-        kind: 'deterministicCalibrationEvidence',
-        sourceAssetId: input.assetId,
-        sourceAssetRevision: input.assetRevision,
-        frozenEvidenceChecksum: evidenceChecksum,
-        settings: attempt.settings,
-        recommendations: attempt.recommendations,
-        overrides: attempt.overrides,
-        toolIdentity: attempt.toolIdentity,
-      })
-      const outputChecksum = `sha256:${createHash('sha256')
-        .update(outputBytes)
-        .digest('hex')}`
-      const outputPath = `${artifactPath}.${outputArtifacts.length + 1}.calibration.json`
-      if (!existsSync(outputPath)) {
-        const temporaryPath = `${outputPath}.${claimToken}.tmp`
-        if (existsSync(temporaryPath)) {
-          if (readFileSync(temporaryPath, 'utf8') !== outputBytes)
-            throw new Error(
-              'temporary Calibration output does not match frozen evidence',
-            )
-        } else writeFileSync(temporaryPath, outputBytes, { flag: 'wx' })
-        renameSync(temporaryPath, outputPath)
-      }
-      const retainedBytes = readFileSync(outputPath, 'utf8')
-      if (retainedBytes !== outputBytes)
-        throw new Error(
-          'retained Calibration output does not match frozen evidence',
-        )
-      const retainedChecksum = `sha256:${createHash('sha256')
-        .update(retainedBytes)
-        .digest('hex')}`
-      if (retainedChecksum !== outputChecksum)
-        throw new Error('retained Calibration output checksum mismatch')
-      outputArtifacts.push({
-        sourceAssetId: input.assetId,
-        sourceAssetRevision: input.assetRevision,
-        path: outputPath,
-        checksum: outputChecksum,
-      })
-      return {
-        assetId: input.assetId,
-        assetRevision: input.assetRevision,
-        outcome: warning ? ('Warning' as const) : ('Succeeded' as const),
-        message: warning
-          ? 'Calibration continued without compatible support under the retained draft setting.'
-          : 'The deterministic adapter used compatible or explicitly included mismatched support.',
-        outputChecksum,
-      }
-    })
-  const outputs = frameOutcomes.flatMap((outcome) =>
-    outcome.outputChecksum === undefined
-      ? []
-      : [
-          {
-            sourceAssetId: outcome.assetId,
-            sourceAssetRevision: outcome.assetRevision,
-            checksum: outcome.outputChecksum,
-            format: 'deterministicEvidenceJson' as const,
-          },
-        ],
-  )
-  const stageOutcome =
-    outputs.length === 0
-      ? frameOutcomes.some((outcome) => outcome.outcome === 'Unavailable')
-        ? ('Unavailable' as const)
-        : ('Failed' as const)
-      : frameOutcomes.some((outcome) => outcome.outcome !== 'Succeeded')
-        ? ('Warning' as const)
-        : ('Succeeded' as const)
-  return {
-    stageOutcome,
-    frameOutcomes,
-    outputs,
-    diagnostics: [
-      'Deterministic adapter evidence only; astronomy calibration quality is not claimed.',
-      ...attempt.recommendations.flatMap((recommendation) =>
-        recommendation.reasons.map(
-          (reason) => `${recommendation.assetId}: ${reason}`,
-        ),
-      ),
-    ],
-    outputArtifacts,
-  }
-}
-
-function registrationAttemptEvidence(
-  project: ProcessingProject,
-  attempt: typeof ProcessingStageAttempt.Type,
-  evidenceChecksum: string,
-  artifactPath: string,
-  claimToken: string,
-) {
-  const calibration = project.stages
-    .find((stage) => stage.stage === 'Calibration')
-    ?.attempts.find(
-      (candidate) => candidate.attemptId === attempt.upstreamAttemptId,
-    )
-  const reference = registrationReference(attempt.settings, calibration)
-  if (calibration === undefined || reference === undefined)
-    return {
-      stageOutcome: 'Unavailable' as const,
-      frameOutcomes: attempt.sourceRevisions.map((source) => ({
-        assetId: source.assetId,
-        assetRevision: source.assetRevision,
-        outcome: 'Unavailable' as const,
-        message: 'The exact selected Calibration output is unavailable.',
-        diagnostic: 'CalibrationOutputUnavailable',
-      })),
-      outputs: [],
-      diagnostics: [
-        'Registration requires one exact selected Calibration result.',
-      ],
-      transforms: [],
-      viableAssetIds: [],
-      outputArtifacts: [],
-    }
-  const upstreamOutputs = new Map(
-    calibration.outputs.map((output) => [output.sourceAssetId, output]),
-  )
-  const includedWarnings = new Set(
-    attempt.registrationInclusions.map((choice) => choice.assetId),
-  )
-  const model =
-    attempt.settings.find((setting) => setting.key === 'alignmentModel')
-      ?.value === 'affine'
-      ? ('affine' as const)
-      : ('translation' as const)
-  const strict =
-    attempt.settings.find((setting) => setting.key === 'starDetection')
-      ?.value === 'strict'
-  const fail = attempt.settings.some(
-    (setting) => setting.key === 'adapterMode' && setting.value === 'fail',
-  )
-  const partial = attempt.settings.some(
-    (setting) => setting.key === 'adapterMode' && setting.value === 'partial',
-  )
-  const outputArtifacts: Array<{
-    sourceAssetId: typeof AssetId.Type
-    sourceAssetRevision: typeof AssetRevision.Type
-    path: string
-    checksum: string
-  }> = []
-  const transforms: Array<{
-    assetId: typeof AssetId.Type
-    assetRevision: typeof AssetRevision.Type
-    referenceAssetId: typeof AssetId.Type
-    referenceAssetRevision: typeof AssetRevision.Type
-    model: 'translation' | 'affine'
-    coefficients: ReadonlyArray<number>
-    checksum: string
-    usable: boolean
-    diagnostic?: string
-  }> = []
-  const frameOutcomes = attempt.sourceRevisions.map((source, index) => {
-    const upstream = upstreamOutputs.get(source.assetId)
-    if (upstream === undefined)
-      return {
-        assetId: source.assetId,
-        assetRevision: source.assetRevision,
-        outcome: 'Unavailable' as const,
-        message:
-          'Calibration produced no readable output for this Light, so Registration has no input bytes.',
-        diagnostic: 'CalibrationOutputUnavailable',
-      }
-    const isReference = source.assetId === reference.sourceAssetId
-    if (fail || (!isReference && (partial || strict)))
-      return {
-        assetId: source.assetId,
-        assetRevision: source.assetRevision,
-        outcome: 'Failed' as const,
-        message:
-          'The deterministic adapter found no usable transform for this Light.',
-        diagnostic: 'NoUsableTransform',
-      }
-    const warning = !isReference && index % 2 === 1
-    const coefficients = isReference
-      ? [1, 0, 0, 0, 1, 0]
-      : model === 'affine'
-        ? [1, 0.001, index, -0.001, 1, index * -0.5]
-        : [1, 0, index, 0, 1, index * -0.5]
-    const bytes = JSON.stringify({
-      kind: 'deterministicRegistrationTransform',
-      sourceAssetId: source.assetId,
-      sourceAssetRevision: source.assetRevision,
-      referenceAssetId: reference.sourceAssetId,
-      referenceAssetRevision: reference.sourceAssetRevision,
-      model,
-      coefficients,
-      upstreamAttemptId: attempt.upstreamAttemptId,
-      upstreamChecksum: upstream.checksum,
-      frozenEvidenceChecksum: evidenceChecksum,
-      settings: attempt.settings,
-      registrationInclusions: attempt.registrationInclusions,
-      toolIdentity: attempt.toolIdentity,
-    })
-    const checksum = `sha256:${createHash('sha256').update(bytes).digest('hex')}`
-    const path = `${artifactPath}.${outputArtifacts.length + 1}.registration.json`
-    if (!existsSync(path)) {
-      const temporaryPath = `${path}.${claimToken}.tmp`
-      if (existsSync(temporaryPath)) {
-        if (readFileSync(temporaryPath, 'utf8') !== bytes)
-          throw new Error(
-            'temporary Registration transform does not match frozen evidence',
-          )
-      } else writeFileSync(temporaryPath, bytes, { flag: 'wx' })
-      renameSync(temporaryPath, path)
-    }
-    const retained = readFileSync(path, 'utf8')
-    if (retained !== bytes)
-      throw new Error(
-        'retained Registration transform does not match frozen evidence',
-      )
-    if (
-      `sha256:${createHash('sha256').update(retained).digest('hex')}` !==
-      checksum
-    )
-      throw new Error('retained Registration transform checksum mismatch')
-    outputArtifacts.push({
-      sourceAssetId: source.assetId,
-      sourceAssetRevision: source.assetRevision,
-      path,
-      checksum,
-    })
-    transforms.push({
-      assetId: source.assetId,
-      assetRevision: source.assetRevision,
-      referenceAssetId: reference.sourceAssetId,
-      referenceAssetRevision: reference.sourceAssetRevision,
-      model,
-      coefficients,
-      checksum,
-      usable: true,
-      ...(warning ? { diagnostic: 'AlignmentNeedsReview' } : {}),
-    })
-    return {
-      assetId: source.assetId,
-      assetRevision: source.assetRevision,
-      outcome: warning ? ('Warning' as const) : ('Succeeded' as const),
-      message: warning
-        ? includedWarnings.has(source.assetId)
-          ? 'A usable transform was retained and this Light is included despite the alignment warning.'
-          : 'A usable transform was retained, but this Light stays out of the next Stack input until included.'
-        : isReference
-          ? 'This exact calibrated Light is the Registration reference.'
-          : 'The deterministic adapter retained a usable transform.',
-      outputChecksum: checksum,
-      ...(warning ? { diagnostic: 'AlignmentNeedsReview' } : {}),
-    }
-  })
-  const outputs = transforms.map((transform) => ({
-    sourceAssetId: transform.assetId,
-    sourceAssetRevision: transform.assetRevision,
-    checksum: transform.checksum,
-    format: 'deterministicEvidenceJson' as const,
-  }))
-  const viableAssetIds = frameOutcomes.flatMap((outcome) =>
-    outcome.outcome === 'Succeeded' ||
-    (outcome.outcome === 'Warning' && includedWarnings.has(outcome.assetId))
-      ? [outcome.assetId]
-      : [],
-  )
-  const stageOutcome =
-    viableAssetIds.length === 0
-      ? frameOutcomes.some((outcome) => outcome.outcome === 'Unavailable')
-        ? ('Unavailable' as const)
-        : ('Failed' as const)
-      : frameOutcomes.some((outcome) => outcome.outcome !== 'Succeeded')
-        ? ('Warning' as const)
-        : ('Succeeded' as const)
-  return {
-    stageOutcome,
-    frameOutcomes,
-    outputs,
-    diagnostics: [
-      'Deterministic transform evidence only; astronomy registration quality is not claimed.',
-      `${viableAssetIds.length} Light${viableAssetIds.length === 1 ? '' : 's'} selected for the next Stack input.`,
-    ],
-    transforms,
-    viableAssetIds,
-    outputArtifacts,
-  }
-}
-
-function stackingAttemptEvidence(
-  project: ProcessingProject,
-  attempt: typeof ProcessingStageAttempt.Type,
-  evidenceChecksum: string,
-  artifactPath: string,
-  claimToken: string,
-): StackingAttemptEvidence {
-  const registration = project.stages
-    .find((stage) => stage.stage === 'Registration')
-    ?.attempts.find(
-      (candidate) => candidate.attemptId === attempt.upstreamAttemptId,
-    )
-  const transforms = new Map(
-    registration?.registrationTransforms.map((transform) => [
-      transform.assetId,
-      transform,
-    ]) ?? [],
-  )
-  const frameOutcomes = attempt.stackingRecommendations.map(
-    (recommendation) => {
-      const included = attempt.stackingInputAssetIds.includes(
-        recommendation.assetId,
-      )
-      const transform = transforms.get(recommendation.assetId)
-      if (
-        registration === undefined ||
-        transform?.usable !== true ||
-        !registration.viableAssetIds.includes(recommendation.assetId)
-      )
-        return {
-          assetId: recommendation.assetId,
-          assetRevision: recommendation.assetRevision,
-          outcome: 'Unavailable' as const,
-          message:
-            'This Light has no usable transform in the exact Registration result.',
-          diagnostic: 'RegistrationTransformUnavailable',
-        }
-      return {
-        assetId: recommendation.assetId,
-        assetRevision: recommendation.assetRevision,
-        outcome:
-          recommendation.decision === 'Review' && included
-            ? ('Warning' as const)
-            : ('Succeeded' as const),
-        message: included
-          ? recommendation.decision === 'Review'
-            ? 'This technically usable Light is included after operator review.'
-            : 'This technically usable Light is included in the Stack.'
-          : 'This technically usable Light remains outside this Stack attempt.',
-        ...(recommendation.decision === 'Review' && included
-          ? { diagnostic: 'IncludedAfterReview' }
-          : {}),
-      }
-    },
-  )
-  const included = attempt.stackingInputAssetIds.filter(
-    (assetId) => transforms.get(assetId)?.usable === true,
-  )
-  if (registration === undefined || included.length === 0)
-    return {
-      stageOutcome: 'Unavailable' as const,
-      frameOutcomes,
-      diagnostics: [
-        'The exact selected Registration result has no usable Stack input.',
-      ],
-    }
-  const frozen = JSON.stringify({
-    kind: 'deterministicStackingEvidence',
-    upstreamAttemptId: attempt.upstreamAttemptId,
-    includedAssetIds: included,
-    transforms: included.map((assetId) => transforms.get(assetId)?.checksum),
-    settings: attempt.settings,
-    recommendations: attempt.stackingRecommendations,
-    choices: attempt.stackingFrameChoices,
-    toolIdentity: attempt.toolIdentity,
-    evidenceChecksum,
-  })
-  const pixel = createHash('sha256').update(frozen).digest().readUInt16BE(0)
-  const card = (key: string, value: string) =>
-    `${key.padEnd(8, ' ')}= ${value}`.padEnd(80, ' ')
-  const header = [
-    card('SIMPLE', '                    T'),
-    card('BITPIX', '                   16'),
-    card('NAXIS', '                    2'),
-    card('NAXIS1', '                    1'),
-    card('NAXIS2', '                    1'),
-    card('BZERO', '                32768'),
-    card('BSCALE', '                    1'),
-    'END'.padEnd(80, ' '),
-  ]
-    .join('')
-    .padEnd(2880, ' ')
-  const data = Buffer.alloc(2880)
-  data.writeUInt16BE(pixel, 0)
-  const bytes = Buffer.concat([Buffer.from(header, 'ascii'), data])
-  const outputChecksum = `sha256:${createHash('sha256').update(bytes).digest('hex')}`
-  const path = `${artifactPath}.stacking.fits`
-  if (!existsSync(path)) {
-    const temporaryPath = `${path}.${claimToken}.tmp`
-    if (existsSync(temporaryPath)) {
-      if (!readFileSync(temporaryPath).equals(bytes))
-        throw new Error('temporary Stack output does not match frozen evidence')
-    } else writeFileSync(temporaryPath, bytes, { flag: 'wx' })
-    renameSync(temporaryPath, path)
-  }
-  if (!readFileSync(path).equals(bytes))
-    throw new Error('retained Stack output does not match frozen evidence')
-  return {
-    stageOutcome: frameOutcomes.some((outcome) => outcome.outcome === 'Warning')
-      ? ('Warning' as const)
-      : ('Succeeded' as const),
-    frameOutcomes,
-    diagnostics: [
-      'Deterministic FITS evidence only; astronomy stacking quality is not claimed.',
-      `${included.length} Light${included.length === 1 ? '' : 's'} contributed to this versioned Stack result.`,
-    ],
-    stackingOutput: {
-      checksum: outputChecksum,
-      format: 'fits' as const,
-      includedAssetIds: included,
-      diagnostic:
-        'Deterministic 1 x 1 FITS evidence; not an astronomy-quality image.',
-    },
-    outputArtifact: { path, checksum: outputChecksum },
-  }
-}
-
-function recomputeLineage(
-  stages: ProcessingProject['stages'],
-  sources: ProcessingProject['sources'],
-) {
-  const exactSources = sources.map((source) => ({
-    assetId: source.assetId,
-    assetRevision: source.assetRevision,
-    role: source.role,
-  }))
-  const calibration = stages.find((stage) => stage.stage === 'Calibration')
-  const recommendations = calibrationRecommendations(sources)
-  const advisoryIds = new Set(
-    recommendations
-      .filter(
-        (recommendation) =>
-          recommendation.compatibility === 'Advisory mismatch',
-      )
-      .map((recommendation) => recommendation.assetId),
-  )
-  const retainCurrentOverrides = (snapshot: {
-    settings: ReadonlyArray<{ readonly key: string; readonly value: string }>
-    overrides: ReadonlyArray<typeof CalibrationOverride.Type>
-    registrationInclusions: ReadonlyArray<
-      typeof RegistrationFrameInclusion.Type
-    >
-    stackingFrameChoices: ReadonlyArray<typeof StackingFrameChoice.Type>
-  }) => ({
-    ...snapshot,
-    overrides: snapshot.overrides.filter((override) =>
-      advisoryIds.has(override.assetId),
-    ),
-  })
-  const calibrated = calibration && {
-    ...calibration,
-    draft: {
-      ...calibration.draft,
-      overrides: calibration.draft.overrides.filter((override) =>
-        advisoryIds.has(override.assetId),
-      ),
-      undo: calibration.draft.undo.map(retainCurrentOverrides),
-      redo: calibration.draft.redo.map(retainCurrentOverrides),
-    },
-    attempts: calibration.attempts.map((attempt) => ({
-      ...attempt,
-      basedOnEarlierUpstream:
-        JSON.stringify(attempt.sourceRevisions) !==
-        JSON.stringify(exactSources),
-    })),
-  }
-  const selectedCalibration = calibrated?.attempts.find(
-    (attempt) => attempt.attemptId === calibrated.selectedAttemptId,
-  )
-  const registration = stages.find((stage) => stage.stage === 'Registration')
-  const registered = registration && {
-    ...registration,
-    attempts: registration.attempts.map((attempt) => ({
-      ...attempt,
-      basedOnEarlierUpstream:
-        selectedCalibration?.state !== 'succeeded' ||
-        selectedCalibration.basedOnEarlierUpstream ||
-        attempt.upstreamAttemptId !== selectedCalibration.attemptId,
-    })),
-  }
-  const selectedRegistration = registered?.attempts.find(
-    (attempt) => attempt.attemptId === registered.selectedAttemptId,
-  )
-  const stackRecommendations = stackingRecommendations(selectedRegistration)
-  const stackIds = new Set(
-    stackRecommendations
-      .filter((recommendation) => recommendation.technicallyUsable)
-      .map((recommendation) => recommendation.assetId),
-  )
-  return stages.map((stage) =>
-    stage.stage === 'Calibration'
-      ? {
-          ...(calibrated ?? stage),
-          calibrationRecommendations: recommendations,
-        }
-      : stage.stage === 'Registration'
-        ? (registered ?? stage)
-        : {
-            ...stage,
-            stackingRecommendations: stackRecommendations,
-            draft: {
-              ...stage.draft,
-              stackingFrameChoices: stage.draft.stackingFrameChoices.filter(
-                (choice) => stackIds.has(choice.assetId),
-              ),
-            },
-            attempts: stage.attempts.map((attempt) => ({
-              ...attempt,
-              basedOnEarlierUpstream:
-                selectedRegistration?.state !== 'succeeded' ||
-                selectedRegistration.basedOnEarlierUpstream ||
-                attempt.upstreamAttemptId !== selectedRegistration.attemptId,
-            })),
-          },
-  )
-}
-
-function stackingRecommendations(
-  registration: typeof ProcessingStageAttempt.Type | undefined,
-) {
-  if (registration?.state !== 'succeeded') return []
-  const viable = new Set(registration.viableAssetIds)
-  return registration.registrationTransforms.map((transform, index) =>
-    StackingRecommendation.make({
-      assetId: transform.assetId,
-      assetRevision: transform.assetRevision,
-      technicallyUsable: transform.usable && viable.has(transform.assetId),
-      decision:
-        !transform.usable || !viable.has(transform.assetId)
-          ? 'Exclude'
-          : index % 3 === 0
-            ? 'Include'
-            : index % 3 === 1
-              ? 'Review'
-              : 'Exclude',
-      reasons: [
-        !transform.usable || !viable.has(transform.assetId)
-          ? 'This Light has no transform in the exact viable Registration subset.'
-          : index % 3 === 0
-            ? 'The retained transform is usable and this frame is recommended for the Stack.'
-            : index % 3 === 1
-              ? 'The retained transform is usable; review this frame before adding its signal.'
-              : 'The retained transform is usable, but the deterministic quality review recommends leaving it out.',
-      ],
-    }),
-  )
-}
-
-function calibrationRecommendations(
-  sources: ReadonlyArray<typeof ProcessingProjectSource.Type>,
-) {
-  const lights = sources.filter((source) => source.role === 'Lights')
-  return sources
-    .filter(
-      (source) => source.role !== 'Lights' && source.role !== 'Unassigned',
-    )
-    .map((source) => calibrationRecommendation(source, lights))
-}
-
-function calibrationRecommendation(
-  source: typeof ProcessingProjectSource.Type,
-  lights: ReadonlyArray<typeof ProcessingProjectSource.Type>,
-) {
-  if (!isCalibrationInputSource(source))
-    return CalibrationRecommendation.make({
-      assetId: source.assetId,
-      assetRevision: source.assetRevision,
-      role: source.role,
-      decision: 'Exclude',
-      compatibility: 'Technically unavailable',
-      reasons: [
-        source.libraryRole === 'unknown' || source.libraryFormat === 'unknown'
-          ? 'The exact Library role or format is unavailable, so this source cannot be used for Calibration.'
-          : `Calibration requires an original camera-raw or FITS asset; this source is ${source.libraryRole} / ${source.libraryFormat}.`,
-      ],
-      matchedLightAssetIds: [],
-    })
-  if (
-    source.availability !== 'availableLocally' &&
-    source.availability !== 'published'
-  )
-    return CalibrationRecommendation.make({
-      assetId: source.assetId,
-      assetRevision: source.assetRevision,
-      role: source.role,
-      decision: 'Exclude',
-      compatibility: 'Technically unavailable',
-      reasons: ['The retained source bytes are not currently readable.'],
-      matchedLightAssetIds: [],
-    })
-  const matched: Array<typeof AssetId.Type> = []
-  const mismatches: Array<string> = []
-  for (const light of lights) {
-    const facts = compatibilityFacts(source, light)
-    if (facts.length === 0) matched.push(light.assetId)
-    else mismatches.push(...facts.map((fact) => `${light.assetId}: ${fact}`))
-  }
-  const reasons = [
-    ...(mismatches.length === 0
-      ? [
-          'Retained exposure, filter, binning, and camera facts are compatible where applicable.',
-        ]
-      : mismatches),
-    'Gain and temperature are not retained and were not evaluated.',
-  ]
-  return CalibrationRecommendation.make({
-    assetId: source.assetId,
-    assetRevision: source.assetRevision,
-    role: source.role,
-    decision: mismatches.length === 0 ? 'Include' : 'Review',
-    compatibility: mismatches.length === 0 ? 'Compatible' : 'Advisory mismatch',
-    reasons,
-    matchedLightAssetIds: matched,
-  })
-}
-
-function isCalibrationInputSource(source: typeof ProcessingProjectSource.Type) {
-  return (
-    source.libraryRole === 'original' &&
-    (source.libraryFormat === 'cameraRaw' || source.libraryFormat === 'fits')
-  )
-}
-
-function compatibilityFacts(
-  support: typeof ProcessingProjectSource.Type,
-  light: typeof ProcessingProjectSource.Type,
-) {
-  const facts: Array<string> = []
-  const compare = (
-    label: string,
-    supportValue: string | number | undefined,
-    lightValue: string | number | undefined,
-  ) => {
-    if (supportValue === undefined || lightValue === undefined)
-      facts.push(`${label} is not retained for both sources`)
-    else if (supportValue !== lightValue) facts.push(`${label} differs`)
-  }
-  compare('binning', support.provenance.binning, light.provenance.binning)
-  compare(
-    'camera identity',
-    support.provenance.cameraDeviceId,
-    light.provenance.cameraDeviceId,
-  )
-  if (support.role === 'Darks')
-    compare(
-      'exposure',
-      support.provenance.exposureSeconds,
-      light.provenance.exposureSeconds,
-    )
-  if (support.role === 'Flats' || support.role === 'Dark flats')
-    compare('filter', support.provenance.filter, light.provenance.filter)
-  return facts
-}
-
-function projectTarget(
-  sources: ReadonlyArray<typeof ProcessingProjectSource.Type>,
-) {
-  const targetName = sources.find(
-    (source) => source.role === 'Lights' && source.targetName !== undefined,
-  )?.targetName
-  return targetName === undefined ? {} : { targetName }
-}
-
-function withProjectWarnings(project: ProcessingProject) {
-  const warnings: Array<typeof ProcessingProjectWarning.Type> = []
-  const lights = project.sources.filter((source) => source.role === 'Lights')
-  const reference = lights[0]
-  if (reference !== undefined) {
-    const conflicts = lights.filter(
-      (source) =>
-        source.provenance.filter !== reference.provenance.filter ||
-        source.provenance.binning !== reference.provenance.binning,
-    )
-    if (conflicts.length > 0)
-      warnings.push(
-        warning(
-          'MetadataConflict',
-          conflicts.map((source) => source.assetId),
-          'Light metadata differs from the first selected Light. Review filter and binning before Calibration.',
-        ),
-      )
-  }
-  for (const source of project.sources) {
+function withWarnings(project: Project) {
+  const warnings = project.sources.flatMap((source) => {
+    const result: Array<typeof ProcessingProjectWarning.Type> = [
+      ...source.warnings,
+    ]
     if (source.role !== source.suggestedRole)
-      warnings.push(
+      result.push(
         warning(
           'RoleSuggested',
           [source.assetId],
@@ -2959,14 +1472,15 @@ function withProjectWarnings(project: ProcessingProject) {
       source.availability !== 'availableLocally' &&
       source.availability !== 'published'
     )
-      warnings.push(
+      result.push(
         warning(
           'SourceUnavailable',
           [source.assetId],
-          `${source.assetId} is frozen in the project but its bytes are not currently local.`,
+          `${source.assetId} is frozen in the Project but its bytes are unavailable.`,
         ),
       )
-  }
+    return result
+  })
   return ProcessingProject.make({ ...project, warnings })
 }
 
@@ -2976,4 +1490,279 @@ function warning(
   message: string,
 ) {
   return ProcessingProjectWarning.make({ code, assetIds, message })
+}
+
+function revise(project: Project, changes: Partial<Project>) {
+  const sources = changes.sources ?? project.sources
+  const { targetName: _targetName, ...withoutTarget } = project
+  return withWarnings(
+    ProcessingProject.make({
+      ...withoutTarget,
+      revision: ProcessingProjectRevision.make(project.revision + 1),
+      ...projectTarget(sources),
+      ...changes,
+      sources,
+      warnings: [],
+      updatedAt: new Date().toISOString(),
+    }),
+  )
+}
+
+function projectTarget(sources: Project['sources']) {
+  const targetName = sources.find(
+    (source) => source.role === 'Lights' && source.targetName !== undefined,
+  )?.targetName
+  return targetName === undefined ? {} : { targetName }
+}
+
+function withoutDevelopPreview(stage: typeof ProcessingStageState.Type) {
+  const { developPreview: _developPreview, ...rest } = stage
+  return rest
+}
+
+function activeAttempt(project: Project) {
+  return project.attempts.find(
+    (attempt) => attempt.state === 'queued' || attempt.state === 'running',
+  )
+}
+
+function findStage(project: Project, stage: Stage) {
+  return project.stages.find((candidate) => candidate.stage === stage)
+}
+
+function replaceStage(
+  stages: Project['stages'],
+  replacement: typeof ProcessingStageState.Type,
+) {
+  return stages.map((stage) =>
+    stage.stage === replacement.stage ? replacement : stage,
+  )
+}
+
+function readProjects(database: DatabaseSync) {
+  return Schema.decodeUnknownSync(Schema.Array(ProjectRow))(
+    database
+      .prepare(
+        'SELECT project FROM processing_projects ORDER BY updated_at,project_id',
+      )
+      .all(),
+  ).map((row) =>
+    Schema.decodeUnknownSync(ProcessingProject)(JSON.parse(row.project)),
+  )
+}
+
+function readProject(
+  database: DatabaseSync,
+  projectId: typeof ProcessingProjectId.Type,
+) {
+  const row = Schema.decodeUnknownSync(Schema.optional(ProjectRow))(
+    database
+      .prepare('SELECT project FROM processing_projects WHERE project_id=?')
+      .get(projectId),
+  )
+  return row === undefined
+    ? undefined
+    : Schema.decodeUnknownSync(ProcessingProject)(JSON.parse(row.project))
+}
+
+function persistNewProject(database: DatabaseSync, project: Project) {
+  database
+    .prepare(
+      'INSERT INTO processing_projects(project_id,revision,project,updated_at) VALUES(?,?,?,?)',
+    )
+    .run(
+      project.projectId,
+      project.revision,
+      JSON.stringify(project),
+      project.updatedAt,
+    )
+}
+
+function enqueue(
+  database: DatabaseSync,
+  work: {
+    readonly workId: string
+    readonly projectId: typeof ProcessingProjectId.Type
+    readonly attemptId: typeof ProcessingStageAttemptId.Type
+    readonly stage: Stage
+    readonly enqueuedAt: string
+  },
+) {
+  database
+    .prepare(
+      "INSERT INTO processing_work(work_id,project_id,kind,payload,state,stage,enqueued_at) VALUES(?,?, 'projectStage', ?, 'pending', ?, ?)",
+    )
+    .run(
+      work.workId,
+      work.projectId,
+      JSON.stringify({
+        projectId: work.projectId,
+        attemptId: work.attemptId,
+        stage: work.stage,
+      }),
+      work.stage,
+      work.enqueuedAt,
+    )
+}
+
+function saveLibraryAsset(
+  database: DatabaseSync,
+  project: Project,
+  save: {
+    readonly assetId: typeof AssetId.Type
+    readonly result: typeof ProcessingStageResult.Type
+  },
+) {
+  const now = new Date().toISOString()
+  const role = save.result.stage === 'Stacking' ? 'linearMaster' : 'final'
+  const detail = {
+    assetId: save.assetId,
+    revision: 1,
+    role,
+    format: 'fits',
+    checksum: save.result.checksum,
+    availability: 'availableLocally',
+    capturedAt: now,
+    comparisonGroupId: `processing-project-${project.projectId}`,
+    ...(project.targetName === undefined
+      ? {}
+      : { targetName: project.targetName }),
+    lineage: {
+      sourceAssetIds: save.result.sources.map((source) => source.assetId),
+      processingProjectId: project.projectId,
+      processingAttemptIds: [save.result.attemptId],
+      processingResultId: save.result.resultId,
+      processingOutputId: save.result.outputId,
+      operationIds: [save.result.attemptId],
+    },
+    representations: [
+      { label: 'Saved Processing Project result', state: 'available' },
+    ],
+  }
+  database
+    .prepare('INSERT INTO library_assets VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(
+      save.assetId,
+      1,
+      role,
+      'fits',
+      'availableLocally',
+      detail.comparisonGroupId,
+      now,
+      now,
+      0,
+      JSON.stringify(detail),
+    )
+  database
+    .prepare(
+      'UPDATE processing_artifacts SET saved=1 WHERE project_id=? AND output_id=?',
+    )
+    .run(project.projectId, save.result.outputId)
+  database
+    .prepare(
+      'INSERT INTO process_asset_events (asset_id,event_type,checksum) VALUES (?,?,?)',
+    )
+    .run(save.assetId, 'ProcessSaved', save.result.checksum)
+}
+
+function savedAssetForOutput(
+  database: DatabaseSync,
+  outputId: typeof ProcessingOutputId.Type,
+) {
+  const rows = Schema.decodeUnknownSync(
+    Schema.Array(
+      Schema.Struct({ asset_id: Schema.String, detail: Schema.String }),
+    ),
+  )(
+    database
+      .prepare(
+        "SELECT asset_id,detail FROM library_assets WHERE role IN ('linearMaster','final')",
+      )
+      .all(),
+  )
+  const row = rows.find((candidate) => {
+    const detail = Schema.decodeUnknownSync(LibraryDetail)(
+      JSON.parse(candidate.detail),
+    )
+    return detail.lineage.processingOutputId === outputId
+  })
+  return row === undefined ? undefined : AssetId.make(row.asset_id)
+}
+
+function readReceipt(
+  database: DatabaseSync,
+  intentId: typeof IntentId.Type,
+  caller: Caller,
+  request: unknown,
+) {
+  const row = Schema.decodeUnknownSync(Schema.optional(ReceiptRow))(
+    database
+      .prepare(
+        'SELECT semantic_key,response FROM processing_project_receipts WHERE idempotency_key=? AND owner_person_id=?',
+      )
+      .get(intentId, caller.personId),
+  )
+  if (row === undefined) return undefined
+  if (row.semantic_key !== digest(request))
+    return ProcessingProjectError.cases.IntentConflict.make({
+      intentId,
+    })
+  const response = Schema.decodeUnknownSync(ProcessingProjectChanged)(
+    JSON.parse(row.response),
+  )
+  return ProcessingProjectChanged.make({ ...response, replayed: true })
+}
+
+function writeReceipt(
+  database: DatabaseSync,
+  intentId: typeof IntentId.Type,
+  caller: Caller,
+  request: unknown,
+  response: typeof ProcessingProjectChanged.Type,
+) {
+  database
+    .prepare('INSERT INTO processing_project_receipts VALUES (?,?,?,?)')
+    .run(intentId, caller.personId, digest(request), JSON.stringify(response))
+}
+
+function authority(caller: Caller) {
+  return decideProcessingProjectAuthority({
+    personId: PersonId.make(caller.personId),
+    clientId: ClientId.make(caller.clientId),
+    role: caller.role ?? 'viewer',
+    capability: caller.capability,
+  })
+}
+
+function authorityError(caller: Caller): ProjectError | undefined {
+  const decision = authority(caller)
+  return ProcessingProjectAuthority.guards.Allowed(decision)
+    ? undefined
+    : ProcessingProjectError.cases.ProcessAuthorityDenied.make({
+        reason: decision.reason,
+      })
+}
+
+function publishNotice(database: DatabaseSync, project: Project) {
+  const notice = ProcessingProjectNotice.make({
+    projectId: project.projectId,
+    revision: project.revision,
+  })
+  for (const subscriber of noticeSubscribers.get(database) ?? []) {
+    subscriber.values.push(notice)
+    subscriber.waiters.shift()?.()
+  }
+}
+
+function workResult(
+  outcome: Exclude<ProcessingProjectWorkResult['outcome'], 'idle'>,
+  stage: Stage,
+  backlog: number,
+  oldestAgeSeconds: number,
+): ProcessingProjectWorkResult {
+  return { outcome, kind: 'projectStage', stage, backlog, oldestAgeSeconds }
+}
+
+function digest(value: unknown) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }

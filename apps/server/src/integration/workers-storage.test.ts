@@ -6,8 +6,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
-  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -30,37 +28,26 @@ import { createR2Provider } from '../storage/r2-provider.ts'
 import { createR2DownloadGrantIssuer } from '../storage/r2-download-grant.ts'
 import { createDownloadGrantService } from '../workers/download-grant-service.ts'
 import { isSqliteBusy } from '../workers/publisher-service.ts'
-import {
-  createProcessorService,
-  runProcessor,
-} from '../workers/processor-service.ts'
 import { ingestSourceAsset } from '../services/source-ingest.ts'
 import {
   downloadGrantSignerConfig,
   originServerConfig,
-  processorEnvironmentConfig,
   publisherEnvironmentConfig,
 } from '../config/environment-config.ts'
 
 function createFixtureService(
   databasePath?: Parameters<typeof createLocalWebService>[0],
   identityResolver?: Parameters<typeof createLocalWebService>[1],
-  processSaveStorage?: Parameters<typeof createLocalWebService>[2],
+  unused?: Parameters<typeof createLocalWebService>[2],
   downloadGrants?: Parameters<typeof createLocalWebService>[3],
 ) {
   return createLocalWebService(
     databasePath,
     identityResolver,
-    processSaveStorage,
+    unused,
     downloadGrants,
     { fixture: 'm27' },
   )
-}
-
-function first<Value>(values: ReadonlyArray<Value>) {
-  const value = values[0]
-  assert.ok(value !== undefined)
-  return value
 }
 
 const CountRow = Schema.Struct({ count: Schema.Int })
@@ -246,21 +233,6 @@ test('focused executable configurations decode defaults and conditional branches
       secretPath: '/run/secrets/grant',
     },
   )
-  assert.equal((await read(processorEnvironmentConfig, {})).mode, 'disabled')
-  assert.equal(
-    (
-      await read(processorEnvironmentConfig, {
-        ASTRO_PROCESSOR_MODE: 'manifest',
-        ASTRO_SERVER_DB: '/var/lib/astro-console/state.sqlite',
-        ASTRO_PROCESSOR_SOURCES_ROOT: '/var/lib/astro-console/sources',
-        ASTRO_PROCESSOR_ORIGINALS_ROOT: '/var/lib/astro-console/originals',
-        ASTRO_PROCESSOR_OUTPUTS_ROOT: '/var/lib/astro-console/outputs',
-        ASTRO_PROCESSOR_MANIFEST_PATH: '/run/config/manifest.json',
-        ASTRO_PROCESSOR_OWNER_PERSON_ID: 'owner',
-      })
-    ).mode,
-    'manifest',
-  )
   assert.equal(
     (
       await read(downloadGrantSignerConfig, {
@@ -287,14 +259,6 @@ test('focused executable configurations decode defaults and conditional branches
     read(originServerConfig, {
       ASTRO_ADMISSION_MODE: 'development',
       ASTRO_SERVER_BIND: '0.0.0.0',
-    }),
-  )
-  await assert.rejects(
-    read(processorEnvironmentConfig, { ASTRO_PROCESSOR_MODE: 'manifest' }),
-  )
-  await assert.rejects(
-    read(processorEnvironmentConfig, {
-      ASTRO_PROCESSOR_MODE: 'wrong',
     }),
   )
   await assert.rejects(
@@ -344,270 +308,52 @@ test('focused executable configurations decode defaults and conditional branches
 
 function publisherFixture(idempotencyKey: string) {
   const root = mkdtempSync(join(tmpdir(), 'astro-publisher-'))
-  const sources = join(root, 'sources')
   const outputs = join(root, 'outputs')
-  mkdirSync(sources)
-  writeFileSync(join(sources, 'final.tiff'), 'publication-bytes')
-  const service = createFixtureService(join(root, 'state.sqlite'), undefined, {
-    sourcesRoot: sources,
-    outputsRoot: outputs,
-    sources: { final: 'final.tiff' },
+  mkdirSync(outputs)
+  const digest = createHash('sha256').update(idempotencyKey).digest('hex')
+  const assetId = `asset-process-${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`
+  const bytes = 'publication-bytes'
+  const checksum = createHash('sha256').update(bytes).digest('hex')
+  writeFileSync(join(outputs, `${assetId}.tiff`), bytes)
+  const service = createFixtureService(join(root, 'state.sqlite'))
+  const now = new Date().toISOString()
+  const detail = JSON.stringify({
+    assetId,
+    revision: 1,
+    role: 'final',
+    format: 'tiff',
+    availability: 'availableLocally',
+    capturedAt: now,
+    comparisonGroupId: 'processing-project-publisher',
+    lineage: { sourceAssetIds: [], runId: 'run-m27-001' },
+    representations: [{ label: 'Publisher fixture', state: 'available' }],
   })
-  const saved = service.saveProcess({
-    sessionId: 'process-m27-001',
-    expectedRevision: 4,
-    idempotencyKey,
-    outputs: [{ sourceId: 'final', representation: 'final' }],
-  })
-  if (saved.outcome !== 'accepted' || !('assetIds' in saved))
-    throw new Error('publisher fixture save did not accept')
-  return { root, outputs, service, saved, assetId: first(saved.assetIds) }
+  service.database
+    .prepare('INSERT INTO library_assets VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(
+      assetId,
+      1,
+      'final',
+      'tiff',
+      'availableLocally',
+      'processing-project-publisher',
+      now,
+      now,
+      0,
+      detail,
+    )
+  service.database
+    .prepare(
+      "INSERT INTO outbox(id,kind,payload,state,attempts) VALUES(?, 'PublishAsset', ?, 'pending', 0)",
+    )
+    .run(`publish-${assetId}`, JSON.stringify({ assetId, checksum }))
+  service.database
+    .prepare(
+      'INSERT INTO process_asset_events(asset_id,event_type,checksum) VALUES(?,?,?)',
+    )
+    .run(assetId, 'ProcessSaved', checksum)
+  return { root, outputs, service, assetId }
 }
-
-test('manifest processor is disabled by default and only saves bounded configured source outputs', () => {
-  const disabledPath = join(
-    mkdtempSync(join(tmpdir(), 'astro-processor-disabled-')),
-    'state.sqlite',
-  )
-  assert.deepEqual(runProcessor({ mode: 'disabled' }), { outcome: 'disabled' })
-  assert.equal(existsSync(disabledPath), false)
-  const root = mkdtempSync(join(tmpdir(), 'astro-processor-'))
-  const sources = join(root, 'sources')
-  const originals = join(root, 'originals')
-  const outputs = join(root, 'outputs')
-  const databasePath = join(root, 'state.sqlite')
-  const manifestPath = join(root, 'manifest.json')
-  mkdirSync(sources)
-  writeFileSync(join(sources, 'original.tiff'), 'original-bytes')
-  writeFileSync(join(sources, 'final.tiff'), 'final-bytes')
-  const config = {
-    mode: 'manifest' as const,
-    databasePath,
-    sourcesRoot: sources,
-    originalsRoot: originals,
-    outputsRoot: outputs,
-    manifestPath,
-    ownerPersonId: 'owner',
-  }
-  const manifest = {
-    sessionId: 'm27-process-001',
-    expectedRevision: 1,
-    idempotencyKey: 'processor-save',
-    outputs: [{ sourceId: 'final', representation: 'final' }],
-    sources: { original: 'original.tiff', final: 'final.tiff' },
-    metadata: {
-      comparisonGroupId: 'm27-001',
-      sourceAssetIds: ['asset-source-m27-001'],
-      runId: 'm27-run-001',
-      solveAttemptId: 'm27-solve-001',
-    },
-    sourceIngest: {
-      assetId: 'asset-source-m27-001',
-      sourceId: 'original',
-      format: 'tiff',
-      capturedAt: '2026-07-28T00:00:00.000Z',
-      comparisonGroupId: 'm27-001',
-      lineage: { runId: 'm27-run-001', solveAttemptId: 'm27-solve-001' },
-      idempotencyKey: 'source-ingest-001',
-    },
-  }
-  writeFileSync(manifestPath, JSON.stringify(manifest))
-  const openTestDatabase = (path: string) =>
-    openAppOwnedDatabase(path, `${root}/`)
-  const missing = createProcessorService(
-    { ...config, manifestPath: join(root, 'missing.json') },
-    { databaseOpener: openTestDatabase },
-  )
-  assert.deepEqual(missing.runOnce(), {
-    outcome: 'rejected',
-    reason: 'ManifestUnavailable',
-  })
-  missing.close()
-  const unavailable = createProcessorService(config, {
-    databaseOpener: openTestDatabase,
-  })
-  assert.deepEqual(unavailable.runOnce(), {
-    outcome: 'rejected',
-    reason: 'OwnerUnavailable',
-  })
-  unavailable.close()
-  const seeded = openTestDatabase(databasePath)
-  seeded
-    .prepare('INSERT INTO memberships VALUES (?,?,?)')
-    .run('processor-owner-subject', 'owner', 'owner')
-  seeded.close()
-  const processor = createProcessorService(config, {
-    databaseOpener: openTestDatabase,
-  })
-  const accepted = processor.runOnce()
-  assert.equal(accepted.outcome, 'accepted')
-  if (accepted.outcome !== 'accepted')
-    throw new Error('processor save did not accept')
-  if (!('assetIds' in accepted))
-    throw new Error('processor save did not create assets')
-  assert.equal(accepted.assetIds.length, 1)
-  assert.deepEqual(processor.runOnce(), accepted)
-  processor.close()
-  const inspected = createLocalWebService(databasePath)
-  assert.equal(
-    databaseRow(
-      CountRow,
-      inspected.database
-        .prepare(
-          "SELECT count(*) AS count FROM outbox WHERE kind='PublishAsset'",
-        )
-        .get(),
-    ).count,
-    1,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      inspected.database
-        .prepare(
-          "SELECT count(*) AS count FROM source_ingest_events WHERE asset_id='asset-source-m27-001'",
-        )
-        .get(),
-    ).count,
-    1,
-  )
-  assert.equal(existsSync(join(originals, 'asset-source-m27-001.tiff')), true)
-  const savedDetail = JSON.parse(
-    databaseRow(
-      AssetDetailRow,
-      inspected.database
-        .prepare(
-          "SELECT detail FROM library_assets WHERE asset_id LIKE 'asset-process-%'",
-        )
-        .get(),
-    ).detail,
-  )
-  assert.deepEqual(savedDetail.lineage, {
-    sourceAssetIds: ['asset-source-m27-001'],
-    runId: 'm27-run-001',
-    solveAttemptId: 'm27-solve-001',
-    processingSessionId: 'm27-process-001',
-    processingOutputId: 'final',
-    operationIds: [],
-  })
-  const before = databaseRow(
-    CountRow,
-    inspected.database
-      .prepare(
-        "SELECT count(*) AS count FROM library_assets WHERE asset_id LIKE 'asset-process-%'",
-      )
-      .get(),
-  ).count
-  inspected.close()
-  writeFileSync(
-    manifestPath,
-    JSON.stringify({
-      ...manifest,
-      idempotencyKey: 'processor-metadata-mismatch',
-      sourceIngest: undefined,
-      metadata: {
-        ...manifest.metadata,
-        solveAttemptId: 'm27-solve-mismatch',
-      },
-    }),
-  )
-  const mismatched = createProcessorService(config, {
-    databaseOpener: openTestDatabase,
-  })
-  assert.deepEqual(mismatched.runOnce(), {
-    outcome: 'rejected',
-    reason: 'InvalidInput',
-  })
-  mismatched.close()
-  const mismatchInspection = createLocalWebService(databasePath)
-  assert.equal(
-    databaseRow(
-      CountRow,
-      mismatchInspection.database
-        .prepare(
-          "SELECT count(*) AS count FROM library_assets WHERE asset_id LIKE 'asset-process-%'",
-        )
-        .get(),
-    ).count,
-    before,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      mismatchInspection.database
-        .prepare(
-          "SELECT count(*) AS count FROM outbox WHERE kind='PublishAsset'",
-        )
-        .get(),
-    ).count,
-    1,
-  )
-  mismatchInspection.close()
-  writeFileSync(manifestPath, 'not json')
-  const malformed = createProcessorService(config, {
-    databaseOpener: openTestDatabase,
-  })
-  assert.deepEqual(malformed.runOnce(), {
-    outcome: 'rejected',
-    reason: 'InvalidManifest',
-  })
-  malformed.close()
-  writeFileSync(
-    manifestPath,
-    JSON.stringify({
-      ...manifest,
-      idempotencyKey: 'processor-escape',
-      sources: { final: '../outside.tiff' },
-    }),
-  )
-  const escaped = createProcessorService(config, {
-    databaseOpener: openTestDatabase,
-  })
-  assert.deepEqual(escaped.runOnce(), {
-    outcome: 'rejected',
-    reason: 'InvalidManifest',
-  })
-  escaped.close()
-  writeFileSync(join(root, 'outside.tiff'), 'outside')
-  symlinkSync(join(root, 'outside.tiff'), join(sources, 'link.tiff'))
-  writeFileSync(
-    manifestPath,
-    JSON.stringify({
-      ...manifest,
-      idempotencyKey: 'processor-link',
-      sources: { final: 'link.tiff' },
-    }),
-  )
-  const linked = createProcessorService(config, {
-    databaseOpener: openTestDatabase,
-  })
-  assert.equal(linked.runOnce().outcome, 'rejected')
-  linked.close()
-  const final = createLocalWebService(databasePath)
-  assert.equal(
-    databaseRow(
-      CountRow,
-      final.database
-        .prepare(
-          "SELECT count(*) AS count FROM library_assets WHERE asset_id LIKE 'asset-process-%'",
-        )
-        .get(),
-    ).count,
-    before,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      final.database
-        .prepare(
-          "SELECT count(*) AS count FROM outbox WHERE kind='PublishAsset'",
-        )
-        .get(),
-    ).count,
-    1,
-  )
-  final.close()
-})
 
 test('source ingest records transaction-failure originals as checksum-backed orphans', () => {
   const root = mkdtempSync(join(tmpdir(), 'astro-source-orphan-'))
@@ -1130,230 +876,6 @@ test('SQLite resilience creates a checked snapshot and disposable restore drill 
   assert.match(restored.restored.sha256, /^[0-9a-f]{64}$/)
   assert.equal(existsSync(drill), false)
   assert.throws(() => restoreDrill(target, target), /separate/)
-})
-
-test('Process Save materializes configured sources before one Asset, lineage, receipt, and publication outbox transaction', () => {
-  const root = mkdtempSync(join(tmpdir(), 'astro-process-save-'))
-  const sources = join(root, 'sources')
-  const outputs = join(root, 'outputs')
-  writeFileSync(join(root, 'outside.fits'), 'outside')
-  mkdirSync(sources)
-  writeFileSync(join(sources, 'linear.fits'), 'linear-bytes')
-  writeFileSync(join(sources, 'final.tiff'), 'final-bytes')
-  const service = createFixtureService(join(root, 'state.sqlite'), undefined, {
-    sourcesRoot: sources,
-    outputsRoot: outputs,
-    sources: {
-      linear: 'linear.fits',
-      final: 'final.tiff',
-      escape: '../outside.fits',
-    },
-  })
-  const command = {
-    sessionId: 'process-m27-001',
-    expectedRevision: 4,
-    idempotencyKey: 'save-1',
-    outputs: [
-      { sourceId: 'linear', representation: 'linearMaster' },
-      { sourceId: 'final', representation: 'final' },
-    ],
-  }
-  const accepted = service.saveProcess(command)
-  assert.equal(accepted.outcome, 'accepted')
-  if (accepted.outcome !== 'accepted') throw new Error('save did not accept')
-  assert.equal(accepted.assetIds.length, 2)
-  assert.equal(readdirSync(outputs).length, 2)
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare('SELECT count(*) AS count FROM process_asset_events')
-        .get(),
-    ).count,
-    2,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare(
-          "SELECT count(*) AS count FROM outbox WHERE kind='PublishAsset'",
-        )
-        .get(),
-    ).count,
-    2,
-  )
-  const event = databaseRow(
-    EventRow,
-    service.database
-      .prepare('SELECT checksum FROM process_asset_events WHERE asset_id=?')
-      .get(first(accepted.assetIds)),
-  )
-  const savedName = readdirSync(outputs).find((name) =>
-    name.startsWith(first(accepted.assetIds)),
-  )
-  assert.equal(
-    event.checksum,
-    createHash('sha256')
-      .update(readFileSync(join(outputs, savedName ?? 'missing')))
-      .digest('hex'),
-  )
-  assert.deepEqual(service.saveProcess(command), accepted)
-  assert.equal(readdirSync(outputs).length, 2)
-  const detail = databaseRow(
-    AssetDetailRow,
-    service.database
-      .prepare('SELECT detail FROM library_assets WHERE asset_id=?')
-      .get(first(accepted.assetIds)),
-  )
-  assert.doesNotMatch(
-    detail.detail,
-    new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
-  )
-  assert.doesNotMatch(detail.detail, /outputs|storage/i)
-  assert.match(detail.detail, /"checksum":"[a-f0-9]{64}"/)
-  assert.equal(
-    service.saveProcess({
-      ...command,
-      idempotencyKey: 'escape',
-      outputs: [{ sourceId: '../outside.fits', representation: 'final' }],
-    }).outcome,
-    'rejected',
-  )
-  service.close()
-})
-
-test('Process Save rejects symlinks and records transaction-failure bytes as removable orphans', () => {
-  const root = mkdtempSync(join(tmpdir(), 'astro-process-orphan-'))
-  const sources = join(root, 'sources')
-  const outputs = join(root, 'outputs')
-  mkdirSync(sources)
-  writeFileSync(join(sources, 'source.fits'), 'bytes')
-  writeFileSync(join(root, 'outside.fits'), 'outside')
-  symlinkSync(join(root, 'outside.fits'), join(sources, 'link.fits'))
-  const service = createFixtureService(join(root, 'state.sqlite'), undefined, {
-    sourcesRoot: sources,
-    outputsRoot: outputs,
-    sources: { source: 'source.fits', link: 'link.fits' },
-  })
-  assert.equal(
-    service.saveProcess({
-      sessionId: 'process-m27-001',
-      expectedRevision: 4,
-      idempotencyKey: 'symlink',
-      outputs: [{ sourceId: 'link', representation: 'final' }],
-    }).outcome,
-    'rejected',
-  )
-  service.database.exec(
-    "CREATE TRIGGER reject_publication BEFORE INSERT ON outbox WHEN NEW.kind='PublishAsset' BEGIN SELECT RAISE(ABORT, 'forced publication failure'); END;",
-  )
-  const failed = service.saveProcess({
-    sessionId: 'process-m27-001',
-    expectedRevision: 4,
-    idempotencyKey: 'commit-failure',
-    outputs: [{ sourceId: 'source', representation: 'final' }],
-  })
-  assert.deepEqual(failed, {
-    outcome: 'rejected',
-    reason: 'MaterializationFailed',
-  })
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare(
-          "SELECT count(*) AS count FROM library_assets WHERE asset_id LIKE 'asset-process-%'",
-        )
-        .get(),
-    ).count,
-    0,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare('SELECT count(*) AS count FROM process_save_orphans')
-        .get(),
-    ).count,
-    1,
-  )
-  assert.equal(service.cleanupSavedOrphans(), 1)
-  assert.equal(readdirSync(outputs).length, 0)
-  service.close()
-})
-
-test('Process Save leaves no success metadata when later filesystem materialization fails', () => {
-  const root = mkdtempSync(join(tmpdir(), 'astro-process-write-failure-'))
-  const sources = join(root, 'sources')
-  const outputs = join(root, 'outputs')
-  mkdirSync(sources)
-  writeFileSync(join(sources, 'first.fits'), 'first')
-  const service = createFixtureService(join(root, 'state.sqlite'), undefined, {
-    sourcesRoot: sources,
-    outputsRoot: outputs,
-    sources: { first: 'first.fits', missing: 'missing.tiff' },
-  })
-  const result = service.saveProcess({
-    sessionId: 'process-m27-001',
-    expectedRevision: 4,
-    idempotencyKey: 'write-failure',
-    outputs: [
-      { sourceId: 'first', representation: 'linearMaster' },
-      { sourceId: 'missing', representation: 'final' },
-    ],
-  })
-  assert.deepEqual(result, {
-    outcome: 'rejected',
-    reason: 'MaterializationFailed',
-  })
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare(
-          "SELECT count(*) AS count FROM library_assets WHERE asset_id LIKE 'asset-process-%'",
-        )
-        .get(),
-    ).count,
-    0,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare('SELECT count(*) AS count FROM process_save_receipts')
-        .get(),
-    ).count,
-    0,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare(
-          "SELECT count(*) AS count FROM outbox WHERE kind='PublishAsset'",
-        )
-        .get(),
-    ).count,
-    0,
-  )
-  assert.equal(
-    databaseRow(
-      CountRow,
-      service.database
-        .prepare('SELECT count(*) AS count FROM process_save_orphans')
-        .get(),
-    ).count,
-    1,
-  )
-  assert.equal(
-    readdirSync(outputs).some((name) => name.endsWith('.tmp')),
-    false,
-  )
-  assert.equal(service.cleanupSavedOrphans(), 1)
-  assert.equal(readdirSync(outputs).length, 0)
-  service.close()
 })
 
 test('publisher worker verifies fake provider metadata, retries idempotently, and keeps Library detail safe', async () => {

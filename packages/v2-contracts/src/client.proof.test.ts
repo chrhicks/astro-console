@@ -91,24 +91,6 @@ const snapshot = (
       lastConfirmedAt: generatedAt,
       actions: [{ _tag: 'Available', action: 'PauseRun' }],
     },
-    processingSessions: [
-      {
-        sessionId: 'process-1',
-        revision: 8,
-        lifecycle: 'active',
-        phase: 'develop',
-        sourceAssetIds: ['asset-source'],
-        historyPosition: 2,
-        historyLength: 2,
-        currentOutputId: 'output-current',
-        previewState: 'computing',
-        previewAgeSeconds: 17,
-        pressureState: 'normal',
-        assistantFindings: [],
-        savedAssetIds: [],
-        actions: [{ _tag: 'Available', action: 'SaveProcessingArtifacts' }],
-      },
-    ],
     library: {
       assetCount: 1,
       selectedAssetIds: ['asset-source'],
@@ -202,10 +184,6 @@ describe('client and phone server proofs', () => {
             '2026-07-22T20:00:00Z',
           )
         }
-        assert.equal(
-          disconnected.snapshot.processingSessions[0]?.previewAgeSeconds,
-          17,
-        )
         assert.deepEqual(disconnected.snapshot, current.snapshot)
         assert.equal('pendingCommands' in disconnected, false)
 
@@ -251,7 +229,6 @@ describe('client and phone server proofs', () => {
         lastConfirmedAt: '2026-07-22T20:05:00Z',
         actions: [],
       },
-      processingSessions: [],
       library: { assetCount: 0, selectedAssetIds: [], activeOperationIds: [] },
       selectedAssets: [],
       health: [
@@ -264,16 +241,15 @@ describe('client and phone server proofs', () => {
     })
     const reconnected = installAuthoritativeSnapshot(disconnected, fresh, [
       'Run entered Verify',
-      'Processing session completed elsewhere',
+      'Processing Project changed elsewhere',
     ])
 
     assert.equal(ClientConnection.guards.Current(reconnected.connection), true)
     assert.deepEqual(reconnected.snapshot, fresh)
     assert.deepEqual(reconnected.changesWhileAway, [
       'Run entered Verify',
-      'Processing session completed elsewhere',
+      'Processing Project changed elsewhere',
     ])
-    assert.equal(reconnected.snapshot.processingSessions.length, 0)
     assert.equal(reconnected.snapshot.selectedAssets.length, 0)
 
     const next = IncrementalProjectionEvent.cases.HealthProjected.make({
@@ -378,7 +354,7 @@ describe('client and phone server proofs', () => {
       snapshotVersion: SnapshotVersion.make(11),
       generatedAt: '2026-07-22T20:00:41Z',
       changes: [
-        { _tag: 'ProcessingSessions', processingSessions: [] },
+        { _tag: 'Health', health: current.snapshot.health },
         { _tag: 'SelectedAssets', selectedAssets: [] },
       ],
     })
@@ -386,7 +362,6 @@ describe('client and phone server proofs', () => {
     assert.equal(IncrementalEventDecision.$is('Applied')(applied), true)
     if (!IncrementalEventDecision.$is('Applied')(applied)) return
     assert.equal(applied.state.snapshot.eventCursor, 41)
-    assert.deepEqual(applied.state.snapshot.processingSessions, [])
     assert.deepEqual(applied.state.snapshot.selectedAssets, [])
     assert.equal(
       Schema.decodeUnknownResult(IncrementalProjectionEvent)({
@@ -410,15 +385,10 @@ describe('client and phone server proofs', () => {
     })
 
     assert.equal(phone.run?.phase, desktop.run?.phase)
-    assert.equal(
-      phone.processingSessions[0]?.previewAgeSeconds,
-      desktop.processingSessions[0]?.previewAgeSeconds,
-    )
     assert.deepEqual(phone.health, desktop.health)
     assert.equal(phone.control.actions[0]?._tag, 'Unavailable')
     assert.equal(phone.plan?.actions[0]?._tag, 'Unavailable')
     assert.equal(phone.run?.actions[0]?._tag, 'Unavailable')
-    assert.equal(phone.processingSessions[0]?.actions[0]?._tag, 'Unavailable')
     assert.equal(phone.selectedAssets[0]?.actions[0]?._tag, 'Available')
 
     const phoneClient = client(phone)

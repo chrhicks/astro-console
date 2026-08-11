@@ -33,11 +33,6 @@ const acquireFreshness = {
   expectedAcquireRevision: 3,
 }
 
-const processingFreshness = {
-  sessionId: 'process-1',
-  expectedProcessingRevision: 5,
-}
-
 const assetFreshness = {
   assetId: 'asset-1',
   expectedAssetRevision: 6,
@@ -162,255 +157,21 @@ const commandFixtures: ReadonlyArray<unknown> = [
     idempotencyKey: 'i-15',
   },
   {
-    _tag: 'StartProcessingSession',
-    sourceAssetIds: ['asset-1'],
-    idempotencyKey: 'i-7',
-  },
-  {
     _tag: 'CreateProcessingProject',
     name: 'M27 multi-night',
     selection: { assetIds: ['asset-1'], captureSetIds: [] },
-    idempotencyKey: 'i-project-1',
+    intentId: 'intent-project-1',
   },
   {
-    _tag: 'AddProcessingProjectSources',
+    _tag: 'ChangeProcessingProject',
     projectId: 'project-1',
     expectedProjectRevision: 0,
-    selection: { assetIds: [], captureSetIds: ['capture-set-2'] },
-    idempotencyKey: 'i-project-2',
-  },
-  {
-    _tag: 'RemoveProcessingProjectSource',
-    projectId: 'project-1',
-    expectedProjectRevision: 1,
-    assetId: 'asset-1',
-    idempotencyKey: 'i-project-remove',
-  },
-  {
-    _tag: 'AssignProcessingSourceRole',
-    projectId: 'project-1',
-    expectedProjectRevision: 1,
-    assetId: 'asset-1',
-    role: 'Lights',
-    idempotencyKey: 'i-project-3',
-  },
-  {
-    _tag: 'NavigateProcessingProjectStage',
-    projectId: 'project-1',
-    expectedProjectRevision: 2,
-    stage: 'Calibration',
-    idempotencyKey: 'i-project-4',
-  },
-  {
-    _tag: 'UpdateProcessingStageDraft',
-    projectId: 'project-1',
-    expectedProjectRevision: 3,
-    stage: 'Calibration',
-    settings: [{ key: 'mode', value: 'default' }],
-    idempotencyKey: 'i-project-5',
-  },
-  {
-    _tag: 'UndoProcessingStageDraft',
-    projectId: 'project-1',
-    expectedProjectRevision: 4,
-    stage: 'Calibration',
-    idempotencyKey: 'i-project-6',
-  },
-  {
-    _tag: 'RedoProcessingStageDraft',
-    projectId: 'project-1',
-    expectedProjectRevision: 5,
-    stage: 'Calibration',
-    idempotencyKey: 'i-project-7',
-  },
-  {
-    _tag: 'SetCalibrationUseAnyway',
-    projectId: 'project-1',
-    expectedProjectRevision: 6,
-    assetId: 'asset-dark-1',
-    useAnyway: true,
-    idempotencyKey: 'i-project-override',
-  },
-  {
-    _tag: 'SetRegistrationFrameIncluded',
-    projectId: 'project-1',
-    expectedProjectRevision: 6,
-    assetId: 'asset-light-2',
-    included: true,
-    idempotencyKey: 'i-project-registration-frame',
-  },
-  {
-    _tag: 'SetStackingFrameIncluded',
-    projectId: 'project-1',
-    expectedProjectRevision: 6,
-    assetId: 'asset-light-2',
-    included: true,
-    idempotencyKey: 'i-project-stacking-frame',
-  },
-  {
-    _tag: 'RunProcessingProjectStage',
-    projectId: 'project-1',
-    expectedProjectRevision: 6,
-    stage: 'Calibration',
-    idempotencyKey: 'i-project-8',
-  },
-  {
-    _tag: 'SelectProcessingStageResult',
-    projectId: 'project-1',
-    expectedProjectRevision: 7,
-    stage: 'Calibration',
-    attemptId: 'stage-attempt-1',
-    idempotencyKey: 'i-project-9',
-  },
-  {
-    _tag: 'SaveProcessingProjectMaster',
-    projectId: 'project-1',
-    expectedProjectRevision: 8,
-    idempotencyKey: 'i-project-master-save',
-  },
-  {
-    _tag: 'OpenProcessingProjectDevelop',
-    projectId: 'project-1',
-    expectedProjectRevision: 9,
-    assetId: 'asset-master-1',
-    idempotencyKey: 'i-project-develop-open',
-  },
-  {
-    _tag: 'UpdateProcessingDevelopDraft',
-    projectId: 'project-1',
-    expectedProjectRevision: 10,
-    operation: { _tag: 'Stretch', method: 'asinh', amount: 0.4 },
-    idempotencyKey: 'i-project-develop-draft',
-  },
-  {
-    _tag: 'UndoProcessingDevelopDraft',
-    projectId: 'project-1',
-    expectedProjectRevision: 11,
-    idempotencyKey: 'i-project-develop-draft-undo',
-  },
-  {
-    _tag: 'RedoProcessingDevelopDraft',
-    projectId: 'project-1',
-    expectedProjectRevision: 12,
-    idempotencyKey: 'i-project-develop-draft-redo',
-  },
-  {
-    _tag: 'SyncProcessingDevelopPreview',
-    projectId: 'project-1',
-    expectedProjectRevision: 13,
-    expectedDevelopDraftRevision: 2,
-    idempotencyKey: 'i-project-develop-preview',
-  },
-  {
-    _tag: 'ApplyProcessingDevelopPreview',
-    projectId: 'project-1',
-    expectedProjectRevision: 14,
-    previewId: 'develop-preview-1',
-    idempotencyKey: 'i-project-develop-apply',
-  },
-  {
-    _tag: 'UndoProcessingDevelopStep',
-    projectId: 'project-1',
-    expectedProjectRevision: 15,
-    idempotencyKey: 'i-project-develop-undo',
-  },
-  {
-    _tag: 'RedoProcessingDevelopStep',
-    projectId: 'project-1',
-    expectedProjectRevision: 16,
-    idempotencyKey: 'i-project-develop-redo',
-  },
-  {
-    _tag: 'RetryProcessingDevelopApply',
-    projectId: 'project-1',
-    expectedProjectRevision: 17,
-    failedAttemptId: 'develop-attempt-1',
-    idempotencyKey: 'i-project-develop-retry',
-  },
-  {
-    _tag: 'SaveProcessingDevelopResult',
-    projectId: 'project-1',
-    expectedProjectRevision: 18,
-    idempotencyKey: 'i-project-develop-save',
-  },
-  {
-    _tag: 'ResumeProcessingSession',
-    sessionId: 'process-1',
-    expectedProcessingRevision: 5,
-  },
-  {
-    _tag: 'SyncProcessingPreview',
-    sessionId: 'process-1',
-    expectedProcessingRevision: 5,
-    operation: 'stretch',
-    toolId: 'siril',
-    parameters: [{ key: 'amount', value: { _tag: 'NumberValue', value: 0.6 } }],
-    baseHistoryPosition: 2,
-    clientPreviewSequence: 9,
-  },
-  {
-    _tag: 'ApplyProcessingPreview',
-    ...processingFreshness,
-    previewId: 'preview-2',
-    idempotencyKey: 'i-16',
-  },
-  {
-    _tag: 'UndoProcessingStep',
-    ...processingFreshness,
-    idempotencyKey: 'i-17',
-  },
-  {
-    _tag: 'RedoProcessingStep',
-    ...processingFreshness,
-    idempotencyKey: 'i-18',
-  },
-  {
-    _tag: 'PreviewAssistantSuggestion',
-    sessionId: 'process-1',
-    expectedProcessingRevision: 5,
-    findingId: 'finding-1',
-    findingVersion: 1,
-  },
-  {
-    _tag: 'MarkAssistantFindingViewed',
-    sessionId: 'process-1',
-    findingId: 'finding-1',
-    findingVersion: 1,
-  },
-  {
-    _tag: 'RetryProcessingStep',
-    ...processingFreshness,
-    failedAttemptId: 'attempt-2',
-    checkpointId: 'checkpoint-1',
-    idempotencyKey: 'i-19',
-  },
-  {
-    _tag: 'RetryProcessingBuild',
-    ...processingFreshness,
-    checkpoint: 'debayer',
-    idempotencyKey: 'i-19-build',
-  },
-  {
-    _tag: 'SwitchProcessingContext',
-    ...processingFreshness,
-    destination: { _tag: 'SavedAsset', assetId: 'asset-2' },
-    disposition: { _tag: 'LeaveUnfinished' },
-    idempotencyKey: 'i-20',
-  },
-  {
-    _tag: 'SaveProcessingArtifacts',
-    ...processingFreshness,
-    artifacts: [
-      { outputId: 'output-1', format: 'fits', role: 'final' },
-      { outputId: 'output-1', format: 'png', role: 'preview' },
-    ],
-    idempotencyKey: 'i-21',
-  },
-  {
-    _tag: 'DiscardProcessingSession',
-    ...processingFreshness,
-    confirmationId: 'discard-1',
-    idempotencyKey: 'i-22',
+    intentId: 'intent-project-2',
+    intent: {
+      _tag: 'RunStage',
+      stage: 'Calibration',
+      from: { _tag: 'CurrentDraft' },
+    },
   },
   { _tag: 'RequestAssetDownload', assetId: 'asset-1', idempotencyKey: 'i-8' },
   {
@@ -420,12 +181,11 @@ const commandFixtures: ReadonlyArray<unknown> = [
     sourceChecksum: 'sha256:abc',
     idempotencyKey: 'i-23',
   },
-  { _tag: 'OpenAssetInProcess', assetId: 'asset-1' },
 ]
 
 describe('Gate 5 contract foundation', () => {
   it('keeps the accepted command vocabulary closed', () => {
-    assert.equal(commandTags.length, 65)
+    assert.equal(commandTags.length, 29)
     assert.deepEqual(commandTags, acceptedCommandTags)
     assert.deepEqual(
       commandTags,
@@ -462,9 +222,11 @@ describe('Gate 5 contract foundation', () => {
     assert.equal(
       Result.isFailure(
         decode({
-          _tag: 'ResumeProcessingSession',
-          sessionId: 'process-1',
-          expectedProcessingRevision: -1,
+          _tag: 'ChangeProcessingProject',
+          projectId: 'project-1',
+          expectedProjectRevision: -1,
+          intentId: 'intent-invalid',
+          intent: { _tag: 'UndoDraft', stage: 'Calibration' },
         }),
       ),
       true,
@@ -536,7 +298,6 @@ describe('Gate 5 contract foundation', () => {
         lastConfirmedAt: '2026-07-22T20:00:00Z',
         actions: [],
       },
-      processingSessions: [],
       library: { assetCount: 0, selectedAssetIds: [], activeOperationIds: [] },
       selectedAssets: [],
       health: [
@@ -646,7 +407,7 @@ describe('Gate 5 contract foundation', () => {
     )
   })
 
-  it('keeps a Process source handoff separate from a processing session', () => {
+  it('keeps a Process source handoff separate from a Processing Project', () => {
     const handoff = Schema.decodeUnknownSync(ProcessSourceHandoff)({
       sourceAssetId: 'asset-source-1',
       revision: 1,
@@ -744,28 +505,26 @@ describe('Gate 5 contract foundation', () => {
   })
 
   it('keeps durable events closed and their payloads typed', () => {
-    assert.equal(Object.keys(DomainEvent.cases).length, 38)
+    assert.equal(Object.keys(DomainEvent.cases).length, 29)
     const event = Schema.decodeUnknownSync(DomainEventEnvelope)({
       eventId: 'event-1',
-      aggregateKind: 'ProcessingSession',
-      aggregateId: 'process-1',
+      aggregateKind: 'ProcessingProject',
+      aggregateId: 'project-1',
       aggregateRevision: 6,
       occurredAt: '2026-07-22T20:01:00Z',
       commandId: 'command-1',
       event: {
-        _tag: 'ProcessingStepFailed',
-        sessionId: 'process-1',
-        operationId: 'operation-1',
-        reason: 'tool exited 1',
-        diagnosticRef: 'diagnostic-1',
+        _tag: 'ProcessingProjectChanged',
+        projectId: 'project-1',
+        revision: 6,
       },
       schemaVersion: 1,
     })
-    assert.equal(event.event._tag, 'ProcessingStepFailed')
+    assert.equal(event.event._tag, 'ProcessingProjectChanged')
     assert.throws(() =>
       Schema.decodeUnknownSync(DomainEventEnvelope)({
         ...event,
-        event: { _tag: 'ProcessingStepFailed', payload: { arbitrary: true } },
+        event: { _tag: 'ProcessingProjectChanged', revision: 6 },
       }),
     )
     assert.equal(

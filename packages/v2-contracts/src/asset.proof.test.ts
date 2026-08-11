@@ -2,16 +2,8 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { Effect, Ref } from 'effect'
 import { DeliveryRepresentation, LibraryAsset } from './asset-domain.js'
-import {
-  makeAssetServerSimulation,
-  makeProcessingOpenAuthority,
-} from './asset-server-simulation.js'
+import { makeAssetServerSimulation } from './asset-server-simulation.js'
 import { ActorContext } from './gate.js'
-import { ProcessingSession, ProcessingSourceRef } from './processing-domain.js'
-import {
-  ProcessingSimulationState,
-  makeProcessingServerSimulation,
-} from './processing-server-simulation.js'
 import {
   AssetId,
   AssetRevision,
@@ -21,8 +13,9 @@ import {
   OperationId,
   PersonId,
   ProcessingOutputId,
-  ProcessingRevision,
-  ProcessingSessionId,
+  ProcessingProjectId,
+  ProcessingStageAttemptId,
+  ProcessingStageResultId,
   RepresentationId,
   SnapshotVersion,
 } from './primitives.js'
@@ -66,39 +59,6 @@ const initialState = {
   events: [],
   outbox: [],
 }
-
-const source = (assetId: string, role: 'original' | 'linearMaster') =>
-  ProcessingSourceRef.make({
-    assetId: AssetId.make(assetId),
-    assetRevision: AssetRevision.make(2),
-    role,
-    checksum: `sha256:${assetId}`,
-    locallyAvailable: true,
-  })
-
-const processingState = (
-  sessions: ReadonlyArray<ProcessingSession> = [],
-): ProcessingSimulationState => ({
-  sessions,
-  sourceCatalog: [source('raw-m27', 'original')],
-  pendingSaves: [],
-  assets: [],
-  viewedFindings: [],
-  pressure: { state: 'normal' },
-  snapshotVersion: SnapshotVersion.make(30),
-  eventCursor: EventCursor.make(50),
-  receipts: [],
-  results: [],
-  events: [],
-  outbox: [],
-})
-
-const makeProcessingServer = (state = processingState()) =>
-  makeProcessingServerSimulation({
-    initialState: state,
-    occurredAt: '2026-07-23T02:00:00Z',
-    discardConfirmation: (sessionId) => `confirm-${sessionId}`,
-  })
 
 const request = (commandId: string, idempotencyKey: string) => ({
   commandId,
@@ -638,7 +598,12 @@ describe('asset delivery server proof', () => {
           lineage: {
             comparisonGroupId: 'm27',
             sourceAssetIds: [AssetId.make('raw-m27')],
-            processingSessionId: ProcessingSessionId.make('process-m27'),
+            processingProjectId: ProcessingProjectId.make('project-m27'),
+            processingAttemptIds: [
+              ProcessingStageAttemptId.make('develop-attempt-m27'),
+            ],
+            processingResultId:
+              ProcessingStageResultId.make('develop-result-m27'),
             processingOutputId: ProcessingOutputId.make('output-final'),
             operationIds: [OperationId.make('operation-stretch')],
           },
@@ -665,7 +630,7 @@ describe('asset delivery server proof', () => {
           [final.assetId, preview.assetId],
           viewer,
         )
-        assert.equal(snapshots[0]?.processingSessionId, 'process-m27')
+        assert.equal(snapshots[0]?.processingProjectId, 'project-m27')
         assert.equal(snapshots[0]?.processingOutputId, 'output-final')
         assert.deepEqual(comparison.entries[0]?.operationIds, [
           'operation-stretch',
@@ -675,114 +640,6 @@ describe('asset delivery server proof', () => {
           'output-preview',
         )
         assert.deepEqual(yield* server.readState(), before)
-      }),
-    )
-  })
-
-  it('opens stable Library identity through the authoritative Processing service for Start and Resume', async () => {
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const processing = yield* makeProcessingServer()
-        const server = yield* makeAssetServerSimulation(
-          initialState,
-          '2026-07-23T02:00:00Z',
-          makeProcessingOpenAuthority(processing),
-        )
-        const open = {
-          commandId: 'open-raw',
-          command: { _tag: 'OpenAssetInProcess', assetId: 'raw-m27' },
-        }
-        const started = yield* server.openInProcess(open, owner)
-        assert.equal(started._tag, 'Started')
-        assert.equal(started.phase, 'build')
-        const startedAgain = yield* server.openInProcess(open, owner)
-        assert.equal(startedAgain.sessionId, started.sessionId)
-        const processAfterStart = yield* processing.readState()
-        assert.equal(processAfterStart.sessions.length, 1)
-        assert.equal(
-          processAfterStart.sessions[0]?.sources[0]?.assetId,
-          original.assetId,
-        )
-
-        const unfinished = ProcessingSession.make({
-          ...(processAfterStart.sessions[0] ??
-            ProcessingSession.make({
-              sessionId: ProcessingSessionId.make('missing'),
-              revision: ProcessingRevision.make(0),
-              lifecycle: 'active',
-              phase: 'build',
-              sources: [source('raw-m27', 'original')],
-              history: [],
-              historyPosition: NonNegativeInt.make(0),
-              assistantFindings: [],
-              savedAssetIds: [],
-            })),
-          lifecycle: 'unfinished',
-        })
-        const resumeProcessing = yield* makeProcessingServer(
-          processingState([unfinished]),
-        )
-        const resumeServer = yield* makeAssetServerSimulation(
-          initialState,
-          '2026-07-23T02:00:00Z',
-          makeProcessingOpenAuthority(resumeProcessing),
-        )
-        const resumed = yield* resumeServer.openInProcess(
-          {
-            commandId: 'resume-raw',
-            command: {
-              _tag: 'OpenAssetInProcess',
-              assetId: 'raw-m27',
-              unfinishedSessionId: unfinished.sessionId,
-            },
-          },
-          owner,
-        )
-        assert.equal(resumed._tag, 'Resumed')
-        assert.equal(resumed.sessionId, unfinished.sessionId)
-
-        const savedLinear = LibraryAsset.make({
-          ...original,
-          assetId: AssetId.make('linear-saved'),
-          revision: AssetRevision.make(0),
-          role: 'linearMaster',
-          format: 'fits',
-          checksum: 'sha256:linear-saved',
-        })
-        const savedProcessingState = processingState()
-        const savedProcessing = yield* makeProcessingServer({
-          ...savedProcessingState,
-          assets: [savedLinear],
-        })
-        const savedServer = yield* makeAssetServerSimulation(
-          { ...initialState, assets: [savedLinear] },
-          '2026-07-23T02:00:00Z',
-          makeProcessingOpenAuthority(savedProcessing),
-        )
-        const openedSaved = yield* savedServer.openInProcess(
-          {
-            commandId: 'open-saved-linear',
-            command: {
-              _tag: 'OpenAssetInProcess',
-              assetId: savedLinear.assetId,
-            },
-          },
-          owner,
-        )
-        assert.equal(openedSaved._tag, 'Started')
-        assert.equal(openedSaved.phase, 'develop')
-        assert.equal(
-          (yield* savedProcessing.readState()).sessions[0]?.sources[0]?.assetId,
-          savedLinear.assetId,
-        )
-
-        const rejected = yield* resumeServer.openInProcess(open, viewer).pipe(
-          Effect.as('accepted' as const),
-          Effect.catchTag('AssetServerSimulation.CommandRejected', () =>
-            Effect.succeed('rejected' as const),
-          ),
-        )
-        assert.equal(rejected, 'rejected')
       }),
     )
   })

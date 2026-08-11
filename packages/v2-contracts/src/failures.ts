@@ -23,7 +23,6 @@ const FreshnessReason = Schema.Literals([
   'PlanRevisionConflict',
   'RunRevisionConflict',
   'AcquireRevisionConflict',
-  'ProcessingSessionRevisionConflict',
   'AssetRevisionConflict',
   'ReconnectRequired',
   'ActiveRunConflict',
@@ -53,12 +52,8 @@ const IneligibleReason = Schema.Literals([
   'CorrectionIneligible',
   'PolarMeasurementIneligible',
   'PolarToleranceNotMet',
-  'ProcessingStepIneligible',
   'UndoUnavailable',
   'RedoUnavailable',
-  'ProcessingStepNotFailed',
-  'RetryInputChanged',
-  'DispositionRequired',
   'RepresentationAlreadyPublished',
   'StorageRepresentationIneligible',
 ])
@@ -72,13 +67,8 @@ const ReferenceReason = Schema.Literals([
   'PreviewSuperseded',
   'PreviewInputSuperseded',
   'PreviewFailed',
-  'AssistantFindingUnavailable',
-  'AssistantFindingSuperseded',
-  'CheckpointIneligible',
-  'ProcessingSessionUnavailable',
   'SourceAssetUnavailable',
   'ProcessingOutputUnavailable',
-  'DestinationUnavailable',
   'AssetNotFound',
   'AssetRepresentationUnavailable',
   'LocalOriginalUnavailable',
@@ -97,7 +87,6 @@ const CapabilityReason = Schema.Literals([
 const ResourceReason = Schema.Literals([
   'StorageReserveProtected',
   'DownloadConcurrencyLimited',
-  'ProcessingTransitionBusy',
 ])
 
 export const FailureDetail = Schema.TaggedUnion({

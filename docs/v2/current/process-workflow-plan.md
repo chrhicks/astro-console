@@ -7,7 +7,7 @@ into the operator workflow: choose evidence, assign its role, run explicit
 Calibration, Registration, and Stacking stages, save a Master, then Develop
 that exact Master with astronomy-specific tools.
 
-This work comes before Item 4 route promotion.
+This work was completed before Item 4 route promotion.
 
 ## Product Boundary
 
@@ -58,7 +58,7 @@ The persistent project navigation is:
 6. **Develop** — open the exact saved Master and apply astronomy-specific image
    development operations.
 
-The current worker checkpoints remain useful implementation detail:
+The worker checkpoints remain hidden implementation detail:
 
 | Operator stage | Current worker work   |
 | -------------- | --------------------- |
@@ -68,26 +68,29 @@ The current worker checkpoints remain useful implementation detail:
 | Stacking       | Evaluate and Stack    |
 
 The service must not automatically move through several operator stages after
-one broad `Build` action. Each executable stage starts only when the owner uses
-its explicit Run or Rerun action.
+one broad `Build` action. Stage viewing is client navigation. Each executable
+stage starts only when the owner uses its explicit Run or Rerun action.
 
 ## Small Durable Model
 
 Keep the model linear and versioned. Do not introduce a general DAG, event
 sourcing, or a normalized database row for every frame decision.
 
-- A project contains its exact sources, roles, target, and current selected
-  results.
-- Each executable stage has one editable draft, bounded draft undo/redo, an
-  append-only attempt list, and one selected result.
+- A project contains its exact sources, roles, target, and Current Results.
+- Each executable stage has one durable editable draft with bounded undo/redo,
+  immutable retained attempts, and one linear successful-result history.
 - An attempt freezes its input asset revisions, upstream result, settings,
   tool identity, recommendations, operator overrides, per-frame outcomes,
   diagnostics, outputs, and timestamps.
 - Registration names the Calibration attempt it used. Stacking names the
   Registration attempt it used. Develop names the saved Master it used.
-- A newer upstream result does not delete an older downstream result. The UI
-  marks the older result as based on an earlier attempt and lets the owner
-  select or rerun deliberately.
+- Run advances the Current Result. Undo and Redo move through successful
+  results; a failed attempt never replaces it. A successful Run after Undo
+  replaces the product redo branch without deleting its retained attempt
+  evidence.
+- Current Result currency uses exact upstream lineage. Restoring an earlier
+  upstream result automatically restores the newest matching downstream result
+  when one exists.
 - Store this state in the existing Process aggregate as bounded structured data
   where practical. Reuse the `processing_work` ledger and
   `processing_artifacts` records for worker ownership and files.

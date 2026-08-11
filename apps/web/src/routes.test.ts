@@ -10,6 +10,10 @@ test('routes parse stable IDs and build escaped URLs', () => {
   assert.deepEqual(parseRoute('/process/sessions/session%20one'), {
     kind: 'not-found',
   })
+  assert.deepEqual(parseRoute('/process/projects/project%20one'), {
+    kind: 'process-project',
+    projectId: 'project one',
+  })
   assert.deepEqual(parseRoute('/process', '?sourceAssetId=asset%2Fone'), {
     kind: 'process-source',
     sourceAssetId: 'asset/one',
@@ -36,6 +40,14 @@ test('routes parse stable IDs and build escaped URLs', () => {
   assert.equal(
     routeWithProjection(processSourceRoute),
     '/process?sourceAssetId=asset%2Fone',
+  )
+
+  const processProjectRoute = parseRoute('/process/projects/project%2Fone')
+  if (processProjectRoute.kind !== 'process-project')
+    assert.fail('Expected a process-project route')
+  assert.equal(
+    routeWithProjection(processProjectRoute),
+    '/process/projects/project%2Fone',
   )
 })
 

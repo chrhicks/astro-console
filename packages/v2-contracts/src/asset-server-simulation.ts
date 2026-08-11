@@ -10,7 +10,6 @@ import {
   LibraryComparison,
   LibraryComparisonDecision,
   LibraryAsset,
-  OpenAssetInProcessDecision,
   PublicationCompletionDecision,
   PublicationFailureDecision,
   RepublicationStartDecision,
@@ -18,7 +17,6 @@ import {
   buildLibraryComparison,
   completeAssetPublication,
   decideAssetDownload,
-  decideOpenAssetInProcess,
   decideRepublishAsset,
   expireAssetRepresentation,
   failAssetPublication,
@@ -38,21 +36,16 @@ import {
   IdempotencyRequest,
   classifyIdempotency,
 } from './idempotency.js'
-import { ProcessingSourceRef } from './processing-domain.js'
 import {
   AssetId,
-  AssetRevision,
-  CommandId,
   CommandResultRef,
   EventCursor,
   NormalizedInputHash,
   OperationId,
-  ProcessingSessionId,
   RepresentationId,
   SnapshotVersion,
 } from './primitives.js'
 import { AssetSnapshot, projectAssetSnapshot } from './snapshots.js'
-import type { ProcessingServerSimulation } from './processing-server-simulation.js'
 
 export const AssetDownloadResponse = Schema.TaggedUnion({
   StreamLocal: {
@@ -84,37 +77,6 @@ export const AssetRepublicationResponse = Schema.Struct({
 export interface AssetRepublicationResponse extends Schema.Schema.Type<
   typeof AssetRepublicationResponse
 > {}
-
-export const AssetProcessOpenResponse = Schema.TaggedUnion({
-  Started: {
-    sessionId: ProcessingSessionId,
-    assetId: AssetId,
-    phase: Schema.Literals(['build', 'develop']),
-  },
-  Resumed: {
-    sessionId: ProcessingSessionId,
-    assetId: AssetId,
-    phase: Schema.Literals(['build', 'develop']),
-  },
-})
-
-export type AssetProcessOpenResponse = typeof AssetProcessOpenResponse.Type
-
-export const ProcessingOpenRequest = Schema.Struct({
-  commandId: CommandId,
-  assetId: AssetId,
-  assetRevision: AssetRevision,
-  role: Schema.Literals(['original', 'linearMaster']),
-  checksum: Schema.NonEmptyString,
-  unfinishedSessionId: Schema.optionalKey(ProcessingSessionId),
-})
-
-export interface ProcessingOpenAuthority {
-  readonly open: (
-    request: typeof ProcessingOpenRequest.Type,
-    actor: MemberActor,
-  ) => Effect.Effect<AssetProcessOpenResponse, AssetProcessingOpenRejected>
-}
 
 export class AssetCommandRejected extends Schema.TaggedErrorClass<AssetCommandRejected>()(
   'AssetServerSimulation.CommandRejected',
@@ -158,20 +120,6 @@ export class AssetQueryRejected extends Schema.TaggedErrorClass<AssetQueryReject
       'ComparisonNeedsMultipleAssets',
       'DuplicateAssetSelection',
       'AssetsUnrelated',
-    ]),
-  },
-) {}
-
-export class AssetProcessingOpenRejected extends Schema.TaggedErrorClass<AssetProcessingOpenRejected>()(
-  'AssetServerSimulation.ProcessingOpenRejected',
-  {
-    reason: Schema.Literals([
-      'AssetNotFound',
-      'SourceAssetUnavailable',
-      'SourceRoleUnsupported',
-      'ProcessingSessionUnavailable',
-      'ProcessingSessionSourceMismatch',
-      'ProcessingAuthorityRejected',
     ]),
   },
 ) {}
@@ -251,13 +199,6 @@ export interface AssetServerSimulation {
     assetIds: ReadonlyArray<typeof AssetId.Type>,
     actor: MemberActor,
   ) => Effect.Effect<typeof LibraryComparison.Type, AssetQueryRejected>
-  readonly openInProcess: (
-    rawRequest: unknown,
-    actor: MemberActor,
-  ) => Effect.Effect<
-    AssetProcessOpenResponse,
-    Schema.SchemaError | AssetCommandRejected | AssetProcessingOpenRejected
-  >
   readonly republish: (
     rawRequest: unknown,
     actor: MemberActor,
@@ -276,11 +217,7 @@ export interface AssetServerSimulation {
 
 export const makeAssetServerSimulation = Effect.fn(
   'AssetServerSimulation.make',
-)(function* (
-  initialState: AssetServerSimulationState,
-  acceptedAt: string,
-  processingAuthority?: ProcessingOpenAuthority,
-) {
+)(function* (initialState: AssetServerSimulationState, acceptedAt: string) {
   const simulation = yield* makeAtomicServerSimulation(
     initialState,
     (state) => state.outbox,
@@ -661,86 +598,6 @@ export const makeAssetServerSimulation = Effect.fn(
     )
   })
 
-  const openInProcess: AssetServerSimulation['openInProcess'] = Effect.fn(
-    'AssetServerSimulation.openInProcess',
-  )(function* (rawRequest, actor) {
-    const envelope =
-      yield* Schema.decodeUnknownEffect(CommandEnvelope)(rawRequest)
-    const command = yield* Schema.decodeUnknownEffect(
-      Command.cases.OpenAssetInProcess,
-    )(envelope.command)
-    const asset = yield* simulation.transact((current) =>
-      Effect.gen(function* () {
-        const asset = current.assets.find(
-          (candidate) => candidate.assetId === command.assetId,
-        )
-        if (asset === undefined)
-          return yield* new AssetProcessingOpenRejected({
-            reason: 'AssetNotFound',
-          })
-        const gate = evaluateCommandGate({
-          envelope,
-          actor,
-          connected: true,
-          snapshotVersion: current.snapshotVersion,
-          currentRevisions: { asset: asset.revision },
-          idempotency: IdempotencyState.cases.Fresh.make({}),
-        })
-        return yield* CommandGateDecision.$match(gate, {
-          Rejected: ({ failure }) =>
-            Effect.fail(new AssetCommandRejected({ failure })),
-          ReplayPending: () =>
-            Effect.fail(
-              new AssetProcessingOpenRejected({
-                reason: 'ProcessingAuthorityRejected',
-              }),
-            ),
-          ReplayRecorded: () =>
-            Effect.fail(
-              new AssetProcessingOpenRejected({
-                reason: 'ProcessingAuthorityRejected',
-              }),
-            ),
-          Accepted: () =>
-            OpenAssetInProcessDecision.$match(decideOpenAssetInProcess(asset), {
-              Rejected: ({ reason }) =>
-                Effect.fail(new AssetProcessingOpenRejected({ reason })),
-              Resume: () =>
-                Effect.fail(
-                  new AssetProcessingOpenRejected({
-                    reason: 'ProcessingAuthorityRejected',
-                  }),
-                ),
-              Start: () => Effect.succeed({ state: current, result: asset }),
-            }),
-        })
-      }),
-    )
-    if (processingAuthority === undefined) {
-      return yield* new AssetProcessingOpenRejected({
-        reason: 'ProcessingAuthorityRejected',
-      })
-    }
-    if (asset.role !== 'original' && asset.role !== 'linearMaster') {
-      return yield* new AssetProcessingOpenRejected({
-        reason: 'SourceRoleUnsupported',
-      })
-    }
-    return yield* processingAuthority.open(
-      ProcessingOpenRequest.make({
-        commandId: envelope.commandId,
-        assetId: asset.assetId,
-        assetRevision: asset.revision,
-        role: asset.role,
-        checksum: asset.checksum,
-        ...(command.unfinishedSessionId === undefined
-          ? {}
-          : { unfinishedSessionId: command.unfinishedSessionId }),
-      }),
-      actor,
-    )
-  })
-
   return {
     requestDownload,
     republish,
@@ -749,122 +606,9 @@ export const makeAssetServerSimulation = Effect.fn(
     expireRepresentation,
     librarySnapshot,
     compareAssets,
-    openInProcess,
     readState: simulation.readState,
     dispatchOutbox: simulation.dispatchOutbox,
   } satisfies AssetServerSimulation
-})
-
-export const makeProcessingOpenAuthority = (
-  processing: Pick<ProcessingServerSimulation, 'execute' | 'readState'>,
-): ProcessingOpenAuthority => ({
-  open: Effect.fn('AssetServerSimulation.ProcessingOpenAuthority.open')(
-    function* (request, actor) {
-      const current = yield* processing.readState()
-      const catalogSource = current.sourceCatalog.find(
-        (candidate) => candidate.assetId === request.assetId,
-      )
-      const saved = current.assets.find(
-        (candidate) => candidate.assetId === request.assetId,
-      )
-      const source =
-        catalogSource ??
-        (saved === undefined || saved.role !== 'linearMaster'
-          ? undefined
-          : ProcessingSourceRef.make({
-              assetId: saved.assetId,
-              assetRevision: saved.revision,
-              role: 'linearMaster',
-              checksum: saved.checksum,
-              locallyAvailable: saved.localAvailable,
-            }))
-      if (
-        source === undefined ||
-        !source.locallyAvailable ||
-        source.role !== request.role ||
-        source.assetRevision !== request.assetRevision ||
-        source.checksum !== request.checksum
-      ) {
-        return yield* new AssetProcessingOpenRejected({
-          reason: 'SourceAssetUnavailable',
-        })
-      }
-      if (request.unfinishedSessionId !== undefined) {
-        const session = current.sessions.find(
-          (candidate) => candidate.sessionId === request.unfinishedSessionId,
-        )
-        if (session === undefined || session.lifecycle !== 'unfinished') {
-          return yield* new AssetProcessingOpenRejected({
-            reason: 'ProcessingSessionUnavailable',
-          })
-        }
-        if (
-          !session.sources.some(
-            (candidate) => candidate.assetId === request.assetId,
-          )
-        ) {
-          return yield* new AssetProcessingOpenRejected({
-            reason: 'ProcessingSessionSourceMismatch',
-          })
-        }
-        yield* processing
-          .execute(
-            {
-              commandId: `resume-${request.commandId}`,
-              command: {
-                _tag: 'ResumeProcessingSession',
-                sessionId: session.sessionId,
-                expectedProcessingRevision: session.revision,
-              },
-            },
-            actor,
-          )
-          .pipe(
-            Effect.mapError(
-              () =>
-                new AssetProcessingOpenRejected({
-                  reason: 'ProcessingAuthorityRejected',
-                }),
-            ),
-          )
-        return AssetProcessOpenResponse.cases.Resumed.make({
-          sessionId: session.sessionId,
-          assetId: request.assetId,
-          phase: session.phase,
-        })
-      }
-      const response = yield* processing
-        .execute(
-          {
-            commandId: `start-${request.commandId}`,
-            command: {
-              _tag: 'StartProcessingSession',
-              sourceAssetIds: [request.assetId],
-              idempotencyKey: `open-${request.commandId}`,
-            },
-          },
-          actor,
-        )
-        .pipe(
-          Effect.mapError(
-            () =>
-              new AssetProcessingOpenRejected({
-                reason: 'ProcessingAuthorityRejected',
-              }),
-          ),
-        )
-      if (response.projection.selectedSessionId === undefined) {
-        return yield* new AssetProcessingOpenRejected({
-          reason: 'ProcessingAuthorityRejected',
-        })
-      }
-      return AssetProcessOpenResponse.cases.Started.make({
-        sessionId: response.projection.selectedSessionId,
-        assetId: request.assetId,
-        phase: request.role === 'linearMaster' ? 'develop' : 'build',
-      })
-    },
-  ),
 })
 
 type RequestDownloadCommand = typeof Command.cases.RequestAssetDownload.Type

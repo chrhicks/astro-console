@@ -2,6 +2,12 @@
 
 Status: **accepted July 22, 2026**
 
+> **Current Process authority:** The Process names in this Gate 5 baseline are
+> historical. `ProcessingSession` and its global snapshot are retired. Use the
+> current [product specification](product-spec.md) and
+> [Process workflow](process-workflow-plan.md) for the Processing Project
+> lifecycle. Do not implement the retired Process vocabulary from this file.
+
 This document gives the accepted Gate 5 scenarios and actions one shared
 language before Effect Schemas, persistence records, HTTP routes, or event-bus
 messages are designed. It is the compact implementation reference for what a

@@ -25,7 +25,6 @@ export const ClientId = id('ClientId')
 export const PlanId = id('PlanId')
 export const RunId = id('RunId')
 export const LeaseId = id('LeaseId')
-export const ProcessingSessionId = id('ProcessingSessionId')
 export const ProcessingProjectId = id('ProcessingProjectId')
 export const ProcessingStageAttemptId = id('ProcessingStageAttemptId')
 export const ProcessingStageResultId = id('ProcessingStageResultId')
@@ -42,6 +41,7 @@ export const LibraryQueryId = id('LibraryQueryId')
 export const LibraryCursor = id('LibraryCursor')
 export const OperationId = id('OperationId')
 export const CommandId = id('CommandId')
+export const IntentId = id('IntentId')
 export const IdempotencyKey = id('IdempotencyKey')
 export const NormalizedInputHash = id('NormalizedInputHash')
 export const CommandResultRef = id('CommandResultRef')
@@ -51,7 +51,6 @@ export const PlanRevision = revision('PlanRevision')
 export const RunRevision = revision('RunRevision')
 export const LeaseRevision = revision('LeaseRevision')
 export const AcquireRevision = revision('AcquireRevision')
-export const ProcessingRevision = revision('ProcessingRevision')
 export const ProcessingProjectRevision = revision('ProcessingProjectRevision')
 export const AssetRevision = revision('AssetRevision')
 
@@ -69,11 +68,6 @@ export const LeaseFreshness = {
 
 export const AcquireFreshness = {
   expectedAcquireRevision: AcquireRevision,
-}
-
-export const ProcessingFreshness = {
-  sessionId: ProcessingSessionId,
-  expectedProcessingRevision: ProcessingRevision,
 }
 
 export const AssetFreshness = {

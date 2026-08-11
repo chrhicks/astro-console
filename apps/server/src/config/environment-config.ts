@@ -1,5 +1,4 @@
 import { Config, ConfigProvider, Effect, Option } from 'effect'
-import type { ProcessorConfig } from './processor-config.ts'
 import type { R2PublisherConfig } from './publisher-config.ts'
 import {
   alpacaSimulationScenarios,
@@ -717,66 +716,6 @@ export const publisherEnvironmentConfig = Config.all({
           'Publisher paths must be absolute app-owned container paths',
         )
       return Effect.succeed(input)
-    },
-  ),
-)
-
-export const processorEnvironmentConfig = Config.all({
-  databasePath: migratedOptional('ASTRO_SERVER_DB', 'ASTRO_LOCAL_WEB_DB'),
-  manifestPath: optional('ASTRO_PROCESSOR_MANIFEST_PATH'),
-  mode: text('ASTRO_PROCESSOR_MODE', 'disabled'),
-  originalsRoot: optional('ASTRO_PROCESSOR_ORIGINALS_ROOT'),
-  outputsRoot: optional('ASTRO_PROCESSOR_OUTPUTS_ROOT'),
-  ownerPersonId: optional('ASTRO_PROCESSOR_OWNER_PERSON_ID'),
-  sourcesRoot: optional('ASTRO_PROCESSOR_SOURCES_ROOT'),
-}).pipe(
-  Config.mapOrFail(
-    (input): Effect.Effect<ProcessorConfig, Config.ConfigError> => {
-      if (input.mode === 'disabled') return Effect.succeed({ mode: 'disabled' })
-      if (input.mode !== 'manifest')
-        return configFailure(
-          'ASTRO_PROCESSOR_MODE must be disabled or manifest',
-        )
-      if (
-        Option.isNone(input.databasePath) ||
-        Option.isNone(input.sourcesRoot) ||
-        Option.isNone(input.originalsRoot) ||
-        Option.isNone(input.outputsRoot) ||
-        Option.isNone(input.manifestPath) ||
-        Option.isNone(input.ownerPersonId)
-      )
-        return configFailure(
-          'Manifest processor requires database, source root, originals root, output root, manifest path, and owner person ID',
-        )
-      const databasePath = input.databasePath.value
-      const sourcesRoot = input.sourcesRoot.value
-      const originalsRoot = input.originalsRoot.value
-      const outputsRoot = input.outputsRoot.value
-      const manifestPath = input.manifestPath.value
-      const ownerPersonId = input.ownerPersonId.value
-      if (
-        !databasePath.startsWith('/var/lib/astro-console/') ||
-        !sourcesRoot.startsWith('/var/lib/astro-console/') ||
-        !originalsRoot.startsWith('/var/lib/astro-console/') ||
-        !outputsRoot.startsWith('/var/lib/astro-console/') ||
-        !manifestPath.startsWith('/run/config/') ||
-        /[\r\n]|(?:^|\/)\.\.(?:\/|$)/.test(
-          `${databasePath}/${sourcesRoot}/${originalsRoot}/${outputsRoot}/${manifestPath}`,
-        ) ||
-        !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(ownerPersonId)
-      )
-        return configFailure(
-          'Manifest processor paths must be app-owned and manifest host-managed',
-        )
-      return Effect.succeed({
-        mode: 'manifest',
-        databasePath,
-        sourcesRoot,
-        originalsRoot,
-        outputsRoot,
-        manifestPath,
-        ownerPersonId,
-      })
     },
   ),
 )

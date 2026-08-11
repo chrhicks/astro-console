@@ -83,12 +83,14 @@ is next; it does not change the visual authority.
 
 - Library selection and whole Capture Set intake must lead to a persistent
   Processing Project, not directly into transient worker progress.
-- Sources, Calibration, Registration, Stacking, Master, and Develop must remain
-  navigable after work completes. Earlier attempts and their evidence remain
-  inspectable.
-- The service owns source roles, recommendations, warnings, attempts, selected
-  results, lineage, eligibility, and denial reasons. Do not invent these in the
-  client or delay deterministic work to make progress easier to see.
+- Sources, Calibration, Registration, Stacking, Master, and Develop remain
+  client navigation inside an explicitly opened Processing Project. Navigation
+  is not durable Project state.
+- The service owns source roles, recommendations, warnings, Current Results,
+  immutable attempt evidence, lineage, eligibility, and denial reasons. The
+  primary workspace shows Current Result; earlier attempts remain secondary
+  evidence. Do not invent these facts in the client or delay deterministic work
+  to make progress easier to see.
 - Develop is an astronomy workflow. Preserve the dominant image workspace and
   astronomy operations without drifting into layers, masks, compositing, or a
   general Photoshop-style editor.

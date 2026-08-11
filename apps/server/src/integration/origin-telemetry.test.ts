@@ -1264,7 +1264,7 @@ test('Library HTTP paths export one safe business boundary each', async () => {
   assert.doesNotMatch(payload, /\.fits/)
 })
 
-test('Process HTTP flows export one safe business boundary each', async () => {
+test('Process HTTP flows export one safe Project boundary each', async () => {
   const collector = await testCollector()
   const telemetry = createOriginTelemetry({
     configProvider: ConfigProvider.fromUnknown({
@@ -1275,9 +1275,7 @@ test('Process HTTP flows export one safe business boundary each', async () => {
     }),
   })
   const sourceAssetId = 'asset-m27-006'
-  const acceptedCommandId = 'private-process-command-id'
-  const acceptedIdempotencyKey = 'private-process-idempotency-key'
-  const rejectedCommandId = 'private-invalid-process-command-id'
+  const createIntentId = 'private-project-create-intent'
   try {
     await telemetry.initialize()
     const service = createLocalWebService(
@@ -1285,52 +1283,37 @@ test('Process HTTP flows export one safe business boundary each', async () => {
       undefined,
       undefined,
       undefined,
-      { fixture: 'm27', telemetry },
+      { fixture: 'm27', telemetry, processWorkAutoRun: false },
     )
     try {
       const listener = await service.listen()
       try {
         const base = `http://127.0.0.1:${listener.port}`
-        const openResponse = await fetch(
-          `${base}/api/workspaces/process?sourceAssetId=${sourceAssetId}`,
-        )
-        assert.equal(openResponse.status, 200)
-        const handoff = Schema.decodeUnknownSync(
-          Schema.Struct({
-            sourceAssetId: Schema.String,
-            revision: Schema.Number,
-          }),
-        )(await openResponse.json())
-        assert.equal(handoff.sourceAssetId, sourceAssetId)
+        const listResponse = await fetch(`${base}/api/process/projects`)
+        assert.equal(listResponse.status, 200)
+        await listResponse.body?.cancel()
 
-        const acceptedResponse = await fetch(`${base}/api/process/commands`, {
+        const acceptedResponse = await fetch(`${base}/api/process/projects`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            commandId: acceptedCommandId,
-            command: {
-              _tag: 'StartProcessingSession',
-              sourceAssetIds: [sourceAssetId],
-              idempotencyKey: acceptedIdempotencyKey,
-            },
+            name: 'Private Project name',
+            selection: { assetIds: [sourceAssetId], captureSetIds: [] },
+            intentId: createIntentId,
           }),
         })
-        assert.equal(acceptedResponse.status, 202)
+        assert.equal(acceptedResponse.status, 201)
         await acceptedResponse.body?.cancel()
-        for (let stage = 0; stage < 6; stage += 1) service.processWorkPass()
 
-        const rejectedResponse = await fetch(`${base}/api/process/commands`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            commandId: rejectedCommandId,
-            command: {
-              _tag: 'PrivateInvalidProcessCommand',
-              privateBody: 'PRIVATE_PROCESS_BODY',
-            },
-          }),
-        })
-        assert.equal(rejectedResponse.status, 409)
+        const rejectedResponse = await fetch(
+          `${base}/api/process/projects/private-project-id`,
+          {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ privateBody: 'PRIVATE_PROCESS_BODY' }),
+          },
+        )
+        assert.equal(rejectedResponse.status, 400)
         await rejectedResponse.body?.cancel()
       } finally {
         await listener.close()
@@ -1346,46 +1329,30 @@ test('Process HTTP flows export one safe business boundary each', async () => {
   const payload = Buffer.concat(
     collector.requests.map((request) => request.body),
   ).toString('utf8')
-  assert.equal(textOccurrences(payload, 'Process.workspace.open'), 1)
-  assert.equal(textOccurrences(payload, 'Process.command.execute'), 2)
-  assert.equal(textOccurrences(payload, 'HTTP GET /api/workspaces/process'), 1)
-  assert.equal(textOccurrences(payload, 'HTTP POST /api/process/commands'), 2)
+  assert.equal(textOccurrences(payload, 'Process.project.read'), 1)
+  assert.equal(textOccurrences(payload, 'Process.project.change'), 2)
+  assert.equal(textOccurrences(payload, 'HTTP GET /api/process/projects'), 1)
+  assert.equal(textOccurrences(payload, 'HTTP POST /api/process/projects'), 1)
+  assert.equal(
+    textOccurrences(payload, 'HTTP PATCH /api/process/projects/:projectId'),
+    1,
+  )
   assert.match(payload, /astro\.workspace/)
   assert.match(payload, /astro\.process\.operation/)
-  assert.match(payload, /workspace\.open/)
-  assert.match(payload, /command\.execute/)
+  assert.match(payload, /project\.read/)
+  assert.match(payload, /project\.change/)
   assert.match(payload, /astro\.process\.outcome/)
   assert.match(payload, /accepted/)
   assert.match(payload, /rejected/)
-  assert.equal(textOccurrences(payload, 'astro.command.intent'), 1)
-  assert.equal(textOccurrences(payload, 'StartProcessingSession'), 1)
-  assert.equal(textOccurrences(payload, 'Process.worker.execute'), 6)
-  assert.match(payload, /astro\.process\.phase/)
-  assert.match(payload, /astro\.process\.work/)
-  assert.match(payload, /astro\.process\.stage/)
-  assert.match(payload, /astro\.process\.checkpoint\.state/)
-  assert.match(payload, /astro\.process\.retry/)
-  assert.match(payload, /astro\.process\.adapter/)
-  assert.match(payload, /astro\.process\.selection/)
-  assert.match(payload, /astro\.process\.pressure/)
-  assert.match(payload, /deterministic-file-v1/)
-  assert.doesNotMatch(payload, /Server\.LibraryService\.processSource/)
   assert.doesNotMatch(payload, new RegExp(sourceAssetId))
   assert.doesNotMatch(payload, /owner-chicks/)
   assert.doesNotMatch(payload, /desktop-owner/)
-  assert.doesNotMatch(payload, new RegExp(acceptedCommandId))
-  assert.doesNotMatch(payload, new RegExp(rejectedCommandId))
-  assert.doesNotMatch(payload, new RegExp(acceptedIdempotencyKey))
-  assert.doesNotMatch(payload, /PrivateInvalidProcessCommand/)
+  assert.doesNotMatch(payload, new RegExp(createIntentId))
+  assert.doesNotMatch(payload, /Private Project name/)
+  assert.doesNotMatch(payload, /private-project-id/)
   assert.doesNotMatch(payload, /PRIVATE_PROCESS_BODY/)
-  assert.doesNotMatch(payload, /commandId/)
-  assert.doesNotMatch(payload, /sourceAssetIds/)
-  assert.doesNotMatch(payload, /idempotencyKey/)
-  assert.doesNotMatch(payload, /session-private-process-command-id/)
-  assert.doesNotMatch(payload, /m27-stack-/)
-  assert.doesNotMatch(payload, /run-m27-001/)
-  assert.doesNotMatch(payload, /solve-m27-001/)
-  assert.doesNotMatch(payload, /cameraRaw/)
+  assert.doesNotMatch(payload, /intentId/)
+  assert.doesNotMatch(payload, /assetIds/)
 })
 
 function textOccurrences(text: string, value: string) {

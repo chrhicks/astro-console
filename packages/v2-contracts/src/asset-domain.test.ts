@@ -4,75 +4,25 @@ import { Schema } from 'effect'
 import {
   AssetId,
   AssetRevision,
-  AttemptId,
-  CheckpointId,
   NonNegativeInt,
   OperationId,
   ProcessingOutputId,
-  ProcessingRevision,
-  ProcessingSessionId,
+  ProcessingProjectId,
+  ProcessingStageAttemptId,
+  ProcessingStageResultId,
   RepresentationId,
 } from './primitives.js'
-import {
-  AppliedProcessingOperation,
-  ProcessingImageRef,
-  ProcessingSession,
-  ProcessingSourceRef,
-} from './processing-domain.js'
 import {
   DeliveryRepresentation,
   CapturedFrameIntake,
   LibraryAsset,
   buildLibraryComparison,
   completeAssetPublication,
-  completeProcessingSave,
   decideAssetDownload,
-  decideOpenAssetInProcess,
   decideRepublishAsset,
   expireAssetRepresentation,
 } from './asset-domain.js'
 import { AssetSnapshot, projectAssetSnapshot } from './snapshots.js'
-
-const session = ProcessingSession.make({
-  sessionId: ProcessingSessionId.make('process-m27'),
-  revision: ProcessingRevision.make(4),
-  lifecycle: 'active',
-  phase: 'develop',
-  sources: [
-    ProcessingSourceRef.make({
-      assetId: AssetId.make('raw-m27'),
-      assetRevision: AssetRevision.make(3),
-      role: 'original',
-      checksum: 'sha256:raw-m27',
-      locallyAvailable: true,
-    }),
-  ],
-  baseImage: ProcessingImageRef.cases.DerivedOutput.make({
-    outputId: ProcessingOutputId.make('linear-m27'),
-    checksum: 'sha256:linear-m27',
-  }),
-  history: [
-    AppliedProcessingOperation.make({
-      operationId: OperationId.make('stretch-m27'),
-      attemptId: AttemptId.make('attempt-stretch-m27'),
-      operation: 'stretch',
-      toolId: 'siril',
-      parameters: [],
-      input: ProcessingImageRef.cases.DerivedOutput.make({
-        outputId: ProcessingOutputId.make('linear-m27'),
-        checksum: 'sha256:linear-m27',
-      }),
-      output: ProcessingImageRef.cases.DerivedOutput.make({
-        outputId: ProcessingOutputId.make('stretched-m27'),
-        checksum: 'sha256:stretched-m27',
-      }),
-      checkpointId: CheckpointId.make('checkpoint-stretched-m27'),
-    }),
-  ],
-  historyPosition: NonNegativeInt.make(1),
-  assistantFindings: [],
-  savedAssetIds: [],
-})
 
 const original = LibraryAsset.make({
   assetId: AssetId.make('raw-m27'),
@@ -120,141 +70,6 @@ describe('hardened Asset domain', () => {
         capture: { ...valid.capture, exposureSeconds: 0 },
       }),
       false,
-    )
-  })
-
-  it('creates several durable assets and leaves Process as a working session', () => {
-    const decision = completeProcessingSave(session, 'm27-source', [
-      {
-        assetId: AssetId.make('m27-final-fits'),
-        outputId: ProcessingOutputId.make('stretched-m27'),
-        role: 'final',
-        format: 'fits',
-        checksum: 'sha256:m27-final-fits',
-        permanentBytesReady: true,
-      },
-      {
-        assetId: AssetId.make('m27-preview-png'),
-        outputId: ProcessingOutputId.make('stretched-m27'),
-        role: 'preview',
-        format: 'png',
-        checksum: 'sha256:m27-preview-png',
-        permanentBytesReady: true,
-      },
-    ])
-    assert.equal(decision._tag, 'Saved')
-    if (decision._tag === 'Saved') {
-      assert.equal(decision.assets.length, 2)
-      assert.equal(decision.session.lifecycle, 'active')
-      assert.deepEqual(decision.assets[0]?.lineage.operationIds, [
-        OperationId.make('stretch-m27'),
-      ])
-    }
-  })
-
-  it('fails the whole save if any permanent output is not ready', () => {
-    const decision = completeProcessingSave(session, 'm27-source', [
-      {
-        assetId: AssetId.make('m27-final-fits'),
-        outputId: ProcessingOutputId.make('stretched-m27'),
-        role: 'final',
-        format: 'fits',
-        checksum: 'sha256:m27-final-fits',
-        permanentBytesReady: false,
-      },
-    ])
-    assert.deepEqual(decision, {
-      _tag: 'Rejected',
-      reason: 'ArtifactBytesNotReady',
-    })
-  })
-
-  it('rejects colliding stable asset identities and records only the operations that produced each output', () => {
-    const first = session.history[0]
-    assert.notEqual(first, undefined)
-    if (first === undefined) return
-    const second = AppliedProcessingOperation.make({
-      operationId: OperationId.make('color-m27'),
-      attemptId: AttemptId.make('attempt-color-m27'),
-      operation: 'color',
-      toolId: 'siril',
-      parameters: [],
-      input: first.output,
-      output: ProcessingImageRef.cases.DerivedOutput.make({
-        outputId: ProcessingOutputId.make('colored-m27'),
-        checksum: 'sha256:colored-m27',
-      }),
-      checkpointId: CheckpointId.make('checkpoint-colored-m27'),
-    })
-    const twoStepSession = ProcessingSession.make({
-      ...session,
-      history: [first, second],
-      historyPosition: NonNegativeInt.make(2),
-    })
-    const saved = completeProcessingSave(twoStepSession, 'm27-source', [
-      {
-        assetId: AssetId.make('m27-stretched'),
-        outputId: first.output.outputId,
-        role: 'intermediate',
-        format: 'fits',
-        checksum: 'sha256:m27-stretched',
-        permanentBytesReady: true,
-      },
-      {
-        assetId: AssetId.make('m27-colored'),
-        outputId: second.output.outputId,
-        role: 'final',
-        format: 'fits',
-        checksum: 'sha256:m27-colored',
-        permanentBytesReady: true,
-      },
-    ])
-    assert.equal(saved._tag, 'Saved')
-    if (saved._tag !== 'Saved') return
-    assert.deepEqual(saved.assets[0]?.lineage.operationIds, [first.operationId])
-    assert.deepEqual(saved.assets[1]?.lineage.operationIds, [
-      first.operationId,
-      second.operationId,
-    ])
-
-    assert.deepEqual(
-      completeProcessingSave(twoStepSession, 'm27-source', [
-        {
-          assetId: AssetId.make('duplicate'),
-          outputId: first.output.outputId,
-          role: 'intermediate',
-          format: 'fits',
-          checksum: 'sha256:first',
-          permanentBytesReady: true,
-        },
-        {
-          assetId: AssetId.make('duplicate'),
-          outputId: second.output.outputId,
-          role: 'final',
-          format: 'fits',
-          checksum: 'sha256:second',
-          permanentBytesReady: true,
-        },
-      ]),
-      { _tag: 'Rejected', reason: 'AssetIdentityConflict' },
-    )
-    assert.deepEqual(
-      completeProcessingSave(
-        twoStepSession,
-        'm27-source',
-        [
-          {
-            assetId: AssetId.make('existing-asset'),
-            outputId: second.output.outputId,
-            role: 'final',
-            format: 'fits',
-            checksum: 'sha256:existing',
-            permanentBytesReady: true,
-          },
-        ],
-        [AssetId.make('existing-asset')],
-      ),
-      { _tag: 'Rejected', reason: 'AssetIdentityConflict' },
     )
   })
 
@@ -329,34 +144,38 @@ describe('hardened Asset domain', () => {
     assert.equal(expired._tag, 'PreparationStarted')
   })
 
-  it('compares related saved assets without mutating them', () => {
-    const saved = completeProcessingSave(session, 'm27-source', [
-      {
-        assetId: AssetId.make('m27-final-fits'),
-        outputId: ProcessingOutputId.make('stretched-m27'),
-        role: 'final',
-        format: 'fits',
-        checksum: 'sha256:m27-final-fits',
-        permanentBytesReady: true,
+  it('compares related Project results without mutating them', () => {
+    const master = LibraryAsset.make({
+      ...original,
+      assetId: AssetId.make('m27-master'),
+      role: 'linearMaster',
+      format: 'fits',
+      lineage: {
+        ...original.lineage,
+        processingProjectId: ProcessingProjectId.make('project-m27'),
+        processingAttemptIds: [
+          ProcessingStageAttemptId.make('stack-attempt-1'),
+        ],
+        processingResultId: ProcessingStageResultId.make('stack-result-1'),
+        processingOutputId: ProcessingOutputId.make('stack-output-1'),
       },
-      {
-        assetId: AssetId.make('m27-preview-png'),
-        outputId: ProcessingOutputId.make('stretched-m27'),
-        role: 'preview',
-        format: 'png',
-        checksum: 'sha256:m27-preview-png',
-        permanentBytesReady: true,
+    })
+    const final = LibraryAsset.make({
+      ...master,
+      assetId: AssetId.make('m27-final'),
+      role: 'final',
+      lineage: {
+        ...master.lineage,
+        processingAttemptIds: [
+          ...(master.lineage.processingAttemptIds ?? []),
+          ProcessingStageAttemptId.make('develop-attempt-1'),
+        ],
+        processingResultId: ProcessingStageResultId.make('develop-result-1'),
+        processingOutputId: ProcessingOutputId.make('develop-output-1'),
       },
-    ])
-    assert.equal(saved._tag, 'Saved')
-    if (saved._tag === 'Saved') {
-      const comparison = buildLibraryComparison(saved.assets)
-      assert.equal(comparison._tag, 'Ready')
-      assert.equal(
-        saved.assets.every((asset) => asset.revision === AssetRevision.make(0)),
-        true,
-      )
-    }
+    })
+    const comparison = buildLibraryComparison([master, final])
+    assert.equal(comparison._tag, 'Ready')
   })
 
   it('rejects duplicate or falsely grouped comparison selections', () => {
@@ -403,27 +222,6 @@ describe('hardened Asset domain', () => {
         ],
       }),
     )
-  })
-
-  it('opens only source roles that justify a Process phase', () => {
-    assert.equal(decideOpenAssetInProcess(original)._tag, 'Start')
-    const derived = LibraryAsset.make({
-      ...original,
-      assetId: AssetId.make('preview-m27'),
-      role: 'preview',
-      format: 'png',
-      representations: [
-        DeliveryRepresentation.cases.Published.make({
-          representationId: RepresentationId.make('preview-r2'),
-          format: 'png',
-          expiresAtEpochMs: NonNegativeInt.make(500),
-        }),
-      ],
-    })
-    assert.deepEqual(decideOpenAssetInProcess(derived), {
-      _tag: 'Rejected',
-      reason: 'SourceRoleUnsupported',
-    })
   })
 
   it('expires and republishes delivery state without replacing canonical asset identity', () => {

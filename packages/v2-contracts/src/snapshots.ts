@@ -8,15 +8,6 @@ import {
   LibraryAsset,
 } from './asset-domain.js'
 import {
-  AssistantFinding,
-  FailedProcessingAttemptRecord,
-  ProcessingAttempt,
-  ProcessingImageRef,
-  ProcessingPreviewSpec,
-  ProcessingSession,
-  currentProcessingImage,
-} from './processing-domain.js'
-import {
   AcquireRevision,
   AttemptId,
   AssetId,
@@ -42,8 +33,9 @@ import {
   PlanRevision,
   PositiveInt,
   PositiveNumber,
-  ProcessingRevision,
-  ProcessingSessionId,
+  ProcessingProjectId,
+  ProcessingStageAttemptId,
+  ProcessingStageResultId,
   ProcessingOutputId,
   ProposalId,
   RepresentationId,
@@ -302,37 +294,6 @@ export const ControlSnapshot = Schema.Struct({
   actions: Schema.Array(ActionAvailability),
 })
 
-export const ProcessingSessionSnapshot = Schema.Struct({
-  sessionId: ProcessingSessionId,
-  revision: ProcessingRevision,
-  lifecycle: Schema.Literals(['active', 'unfinished', 'discarded']),
-  phase: Schema.Literals(['build', 'develop']),
-  sourceAssetIds: Schema.NonEmptyArray(AssetId),
-  baseImage: Schema.optionalKey(ProcessingImageRef),
-  currentImage: Schema.optionalKey(ProcessingImageRef),
-  historyPosition: NonNegativeInt,
-  historyLength: NonNegativeInt,
-  currentOutputId: Schema.optionalKey(ProcessingOutputId),
-  preview: Schema.optionalKey(ProcessingPreviewSpec),
-  previewState: Schema.Literals([
-    'none',
-    'queued',
-    'computing',
-    'ready',
-    'failed',
-  ]),
-  previewAgeSeconds: Schema.optionalKey(NonNegativeInt),
-  activeAttempt: Schema.optionalKey(ProcessingAttempt),
-  failedAttempt: Schema.optionalKey(FailedProcessingAttemptRecord),
-  assistantFindings: Schema.Array(AssistantFinding),
-  savedAssetIds: Schema.Array(AssetId),
-  pressureState: Schema.Literals(['normal', 'throttled', 'paused']),
-  pressureReason: Schema.optionalKey(Schema.NonEmptyString),
-  retryScope: Schema.optionalKey(Schema.NonEmptyString),
-  unreadAssistantFindings: Schema.optionalKey(NonNegativeInt),
-  actions: Schema.Array(ActionAvailability),
-})
-
 export const AssetRepresentationSnapshot = Schema.Struct({
   representationId: RepresentationId,
   storage: Schema.Literals(['local', 'r2']),
@@ -368,7 +329,11 @@ export const AssetSnapshot = Schema.Struct({
   localAvailable: Schema.Boolean,
   comparisonGroupId: Schema.NonEmptyString,
   sourceAssetIds: Schema.NonEmptyArray(AssetId),
-  processingSessionId: Schema.optionalKey(ProcessingSessionId),
+  processingProjectId: Schema.optionalKey(ProcessingProjectId),
+  processingAttemptIds: Schema.optionalKey(
+    Schema.Array(ProcessingStageAttemptId),
+  ),
+  processingResultId: Schema.optionalKey(ProcessingStageResultId),
   processingOutputId: Schema.optionalKey(ProcessingOutputId),
   operationIds: Schema.Array(OperationId),
   availability: Schema.Literals([
@@ -452,7 +417,11 @@ export const LibraryAssetDetail = Schema.Struct({
     solveAttemptId: Schema.optionalKey(Schema.NonEmptyString),
     sequenceId: Schema.optionalKey(Schema.NonEmptyString),
     acquisitionId: Schema.optionalKey(Schema.NonEmptyString),
-    processingSessionId: Schema.optionalKey(ProcessingSessionId),
+    processingProjectId: Schema.optionalKey(ProcessingProjectId),
+    processingAttemptIds: Schema.optionalKey(
+      Schema.Array(ProcessingStageAttemptId),
+    ),
+    processingResultId: Schema.optionalKey(ProcessingStageResultId),
     processingOutputId: Schema.optionalKey(ProcessingOutputId),
     operationIds: Schema.optionalKey(Schema.Array(OperationId)),
   }),
@@ -537,7 +506,11 @@ export const ProcessSourceHandoff = Schema.Struct({
     solveAttemptId: Schema.optionalKey(Schema.NonEmptyString),
     sequenceId: Schema.optionalKey(Schema.NonEmptyString),
     acquisitionId: Schema.optionalKey(Schema.NonEmptyString),
-    processingSessionId: Schema.optionalKey(ProcessingSessionId),
+    processingProjectId: Schema.optionalKey(ProcessingProjectId),
+    processingAttemptIds: Schema.optionalKey(
+      Schema.Array(ProcessingStageAttemptId),
+    ),
+    processingResultId: Schema.optionalKey(ProcessingStageResultId),
     processingOutputId: Schema.optionalKey(ProcessingOutputId),
     operationIds: Schema.optionalKey(Schema.Array(OperationId)),
   }),
@@ -610,7 +583,6 @@ export const AppSnapshot = Schema.Struct({
   control: ControlSnapshot,
   plan: Schema.optionalKey(PlanSnapshot),
   run: Schema.optionalKey(RunSnapshot),
-  processingSessions: Schema.Array(ProcessingSessionSnapshot),
   library: Schema.Struct({
     assetCount: NonNegativeInt,
     selectedAssetIds: Schema.Array(AssetId),
@@ -621,55 +593,6 @@ export const AppSnapshot = Schema.Struct({
 })
 
 export interface AppSnapshot extends Schema.Schema.Type<typeof AppSnapshot> {}
-
-export interface ProcessingPressureSnapshotInput {
-  readonly state: 'normal' | 'throttled' | 'paused'
-  readonly reason?: string
-}
-
-export function projectProcessingSessionSnapshot(
-  session: ProcessingSession,
-  pressure: ProcessingPressureSnapshotInput,
-): typeof ProcessingSessionSnapshot.Type {
-  const currentImage = currentProcessingImage(session)
-  const currentOutputId =
-    currentImage !== undefined &&
-    ProcessingImageRef.guards.DerivedOutput(currentImage)
-      ? currentImage.outputId
-      : undefined
-  return ProcessingSessionSnapshot.make({
-    sessionId: session.sessionId,
-    revision: session.revision,
-    lifecycle: session.lifecycle,
-    phase: session.phase,
-    sourceAssetIds: [
-      session.sources[0].assetId,
-      ...session.sources.slice(1).map((source) => source.assetId),
-    ],
-    ...(session.baseImage === undefined
-      ? {}
-      : { baseImage: session.baseImage }),
-    ...(currentImage === undefined ? {} : { currentImage }),
-    historyPosition: session.historyPosition,
-    historyLength: NonNegativeInt.make(session.history.length),
-    ...(currentOutputId === undefined ? {} : { currentOutputId }),
-    ...(session.preview === undefined ? {} : { preview: session.preview }),
-    previewState: session.preview?.state ?? 'none',
-    ...(session.activeAttempt === undefined
-      ? {}
-      : { activeAttempt: session.activeAttempt }),
-    ...(session.failedAttempt === undefined
-      ? {}
-      : { failedAttempt: session.failedAttempt }),
-    assistantFindings: session.assistantFindings,
-    savedAssetIds: session.savedAssetIds,
-    pressureState: pressure.state,
-    ...(pressure.reason === undefined
-      ? {}
-      : { pressureReason: pressure.reason }),
-    actions: [],
-  })
-}
 
 export function projectAssetSnapshot(
   asset: LibraryAsset,
@@ -778,9 +701,13 @@ export function projectAssetSnapshot(
     localAvailable: asset.localAvailable,
     comparisonGroupId: asset.lineage.comparisonGroupId,
     sourceAssetIds: asset.lineage.sourceAssetIds,
-    ...(asset.lineage.processingSessionId === undefined
+    ...(asset.lineage.processingProjectId === undefined
       ? {}
-      : { processingSessionId: asset.lineage.processingSessionId }),
+      : { processingProjectId: asset.lineage.processingProjectId }),
+    processingAttemptIds: asset.lineage.processingAttemptIds ?? [],
+    ...(asset.lineage.processingResultId === undefined
+      ? {}
+      : { processingResultId: asset.lineage.processingResultId }),
     ...(asset.lineage.processingOutputId === undefined
       ? {}
       : { processingOutputId: asset.lineage.processingOutputId }),

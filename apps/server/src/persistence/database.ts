@@ -15,6 +15,7 @@ const RunDefinitionMigrationRow = Schema.Struct({
   run_definition_id: Schema.String,
   definition: Schema.String,
 })
+const TableColumnRow = Schema.Struct({ name: Schema.String })
 
 export class DatabasePathNotAppOwned extends Schema.TaggedErrorClass<DatabasePathNotAppOwned>()(
   'Database.PathNotAppOwned',
@@ -28,13 +29,6 @@ export function openOriginDatabase(databasePath: string) {
 }
 
 export function openPublisherDatabase(
-  databasePath: string,
-  allowedRoot = '/var/lib/astro-console/',
-) {
-  return openAppOwnedDatabase(databasePath, allowedRoot)
-}
-
-export function openProcessorDatabase(
   databasePath: string,
   allowedRoot = '/var/lib/astro-console/',
 ) {
@@ -67,8 +61,9 @@ function openDatabase(databasePath: string, pragmas: string) {
 }
 
 function initializeSchema(database: DatabaseSync) {
+  dropRetiredProcessingData(database)
   database.exec(
-    "CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS events (cursor INTEGER PRIMARY KEY,type TEXT NOT NULL,snapshot TEXT NOT NULL); CREATE TABLE IF NOT EXISTS receipts (idempotency_key TEXT PRIMARY KEY,response TEXT NOT NULL); CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL,claim_token TEXT,claimed_by TEXT,claim_until TEXT,attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT,retry_after TEXT,ack_at TEXT); CREATE TABLE IF NOT EXISTS control_requests (request_id TEXT PRIMARY KEY,client_id TEXT NOT NULL UNIQUE,person_id TEXT NOT NULL,created_at TEXT NOT NULL,expires_at TEXT NOT NULL,target_control_capable INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS control_command_receipts (idempotency_key TEXT NOT NULL,actor_person_id TEXT NOT NULL,actor_client_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,actor_person_id,actor_client_id)); CREATE TABLE IF NOT EXISTS memberships (external_subject TEXT PRIMARY KEY,person_id TEXT NOT NULL,role TEXT NOT NULL); CREATE TABLE IF NOT EXISTS library_assets (asset_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,role TEXT NOT NULL,format TEXT NOT NULL,availability TEXT NOT NULL,comparison_group_id TEXT NOT NULL,captured_at TEXT NOT NULL,updated_at TEXT NOT NULL,sharpness REAL NOT NULL,detail TEXT NOT NULL); CREATE TABLE IF NOT EXISTS workspace_projections (name TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS process_save_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id)); CREATE TABLE IF NOT EXISTS process_asset_events (asset_id TEXT NOT NULL,event_type TEXT NOT NULL,checksum TEXT NOT NULL); CREATE TABLE IF NOT EXISTS process_save_orphans (path TEXT PRIMARY KEY,checksum TEXT NOT NULL,recorded_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS asset_publications (asset_id TEXT PRIMARY KEY,checksum TEXT NOT NULL,state TEXT NOT NULL,updated_at TEXT NOT NULL,object_key TEXT NOT NULL DEFAULT ''); CREATE TABLE IF NOT EXISTS source_ingest_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id)); CREATE TABLE IF NOT EXISTS source_ingest_events (asset_id TEXT PRIMARY KEY,event_type TEXT NOT NULL,checksum TEXT NOT NULL); CREATE TABLE IF NOT EXISTS source_ingest_orphans (path TEXT PRIMARY KEY,checksum TEXT NOT NULL,recorded_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS observing_plans (plan_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,projection TEXT NOT NULL,run_eligible INTEGER NOT NULL DEFAULT 0); CREATE TABLE IF NOT EXISTS observing_plan_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id)); CREATE TABLE IF NOT EXISTS run_definitions (run_definition_id TEXT PRIMARY KEY,source_plan_id TEXT NOT NULL,source_plan_revision INTEGER NOT NULL,definition TEXT NOT NULL,accepted_at TEXT NOT NULL,UNIQUE(source_plan_id,source_plan_revision)); CREATE TABLE IF NOT EXISTS run_definition_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id)); CREATE TABLE IF NOT EXISTS run_intervention_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id)); CREATE TABLE IF NOT EXISTS run_mutation_previews (preview_id TEXT PRIMARY KEY,run_id TEXT NOT NULL,run_revision INTEGER NOT NULL,owner_person_id TEXT NOT NULL,mutation TEXT NOT NULL,consequences TEXT NOT NULL,classification TEXT NOT NULL,expires_at TEXT NOT NULL,applied_at TEXT); CREATE TABLE IF NOT EXISTS run_mutation_preview_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id)); CREATE TABLE IF NOT EXISTS run_start_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id))",
+    "CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS events (cursor INTEGER PRIMARY KEY,type TEXT NOT NULL,snapshot TEXT NOT NULL); CREATE TABLE IF NOT EXISTS receipts (idempotency_key TEXT PRIMARY KEY,response TEXT NOT NULL); CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL,claim_token TEXT,claimed_by TEXT,claim_until TEXT,attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT,retry_after TEXT,ack_at TEXT); CREATE TABLE IF NOT EXISTS control_requests (request_id TEXT PRIMARY KEY,client_id TEXT NOT NULL UNIQUE,person_id TEXT NOT NULL,created_at TEXT NOT NULL,expires_at TEXT NOT NULL,target_control_capable INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS control_command_receipts (idempotency_key TEXT NOT NULL,actor_person_id TEXT NOT NULL,actor_client_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,actor_person_id,actor_client_id)); CREATE TABLE IF NOT EXISTS memberships (external_subject TEXT PRIMARY KEY,person_id TEXT NOT NULL,role TEXT NOT NULL); CREATE TABLE IF NOT EXISTS library_assets (asset_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,role TEXT NOT NULL,format TEXT NOT NULL,availability TEXT NOT NULL,comparison_group_id TEXT NOT NULL,captured_at TEXT NOT NULL,updated_at TEXT NOT NULL,sharpness REAL NOT NULL,detail TEXT NOT NULL); CREATE TABLE IF NOT EXISTS workspace_projections (name TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS process_asset_events (asset_id TEXT NOT NULL,event_type TEXT NOT NULL,checksum TEXT NOT NULL); CREATE TABLE IF NOT EXISTS asset_publications (asset_id TEXT PRIMARY KEY,checksum TEXT NOT NULL,state TEXT NOT NULL,updated_at TEXT NOT NULL,object_key TEXT NOT NULL DEFAULT ''); CREATE TABLE IF NOT EXISTS source_ingest_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id)); CREATE TABLE IF NOT EXISTS source_ingest_events (asset_id TEXT PRIMARY KEY,event_type TEXT NOT NULL,checksum TEXT NOT NULL); CREATE TABLE IF NOT EXISTS source_ingest_orphans (path TEXT PRIMARY KEY,checksum TEXT NOT NULL,recorded_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS observing_plans (plan_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,projection TEXT NOT NULL,run_eligible INTEGER NOT NULL DEFAULT 0); CREATE TABLE IF NOT EXISTS observing_plan_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id)); CREATE TABLE IF NOT EXISTS run_definitions (run_definition_id TEXT PRIMARY KEY,source_plan_id TEXT NOT NULL,source_plan_revision INTEGER NOT NULL,definition TEXT NOT NULL,accepted_at TEXT NOT NULL,UNIQUE(source_plan_id,source_plan_revision)); CREATE TABLE IF NOT EXISTS run_definition_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id)); CREATE TABLE IF NOT EXISTS run_intervention_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id)); CREATE TABLE IF NOT EXISTS run_mutation_previews (preview_id TEXT PRIMARY KEY,run_id TEXT NOT NULL,run_revision INTEGER NOT NULL,owner_person_id TEXT NOT NULL,mutation TEXT NOT NULL,consequences TEXT NOT NULL,classification TEXT NOT NULL,expires_at TEXT NOT NULL,applied_at TEXT); CREATE TABLE IF NOT EXISTS run_mutation_preview_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id)); CREATE TABLE IF NOT EXISTS run_start_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id))",
   )
   database.exec(
     'CREATE TABLE IF NOT EXISTS acquire_sessions (run_id TEXT PRIMARY KEY,session TEXT NOT NULL); CREATE TABLE IF NOT EXISTS acquire_receipts (idempotency_key TEXT NOT NULL,actor_client_id TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,actor_client_id)); CREATE TABLE IF NOT EXISTS camera_observations (run_id TEXT PRIMARY KEY,observation TEXT NOT NULL); CREATE TABLE IF NOT EXISTS acquire_work (attempt_id TEXT PRIMARY KEY,state TEXT NOT NULL); CREATE TABLE IF NOT EXISTS plate_solve_runs (attempt_id TEXT PRIMARY KEY,source_asset_id TEXT NOT NULL,evidence TEXT NOT NULL); CREATE TABLE IF NOT EXISTS captured_frame_receipts (idempotency_key TEXT PRIMARY KEY,semantic_key TEXT NOT NULL,response TEXT NOT NULL); CREATE TABLE IF NOT EXISTS captured_frame_events (asset_id TEXT PRIMARY KEY,event_type TEXT NOT NULL,checksum TEXT NOT NULL); CREATE TABLE IF NOT EXISTS captured_frame_orphans (path TEXT PRIMARY KEY,checksum TEXT NOT NULL,recorded_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS frame_inspections (asset_id TEXT PRIMARY KEY,state TEXT NOT NULL,detail TEXT NOT NULL); CREATE TABLE IF NOT EXISTS asset_reviews (asset_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,review TEXT NOT NULL); CREATE TABLE IF NOT EXISTS asset_review_receipts (asset_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(asset_id,idempotency_key))',
@@ -77,24 +72,43 @@ function initializeSchema(database: DatabaseSync) {
     'CREATE TABLE IF NOT EXISTS configured_acquire_work (effect_id TEXT PRIMARY KEY,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL)',
   )
   database.exec(
-    'CREATE TABLE IF NOT EXISTS processing_workspace (id INTEGER PRIMARY KEY CHECK(id=1),state TEXT NOT NULL)',
+    'CREATE TABLE IF NOT EXISTS processing_work (work_id TEXT PRIMARY KEY,project_id TEXT NOT NULL,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL,stage TEXT,checkpoint TEXT,claim_token TEXT,enqueued_at TEXT NOT NULL,claimed_at TEXT,settled_at TEXT,attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT)',
   )
   database.exec(
-    'CREATE TABLE IF NOT EXISTS processing_work (work_id TEXT PRIMARY KEY,session_id TEXT NOT NULL,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL,stage TEXT,checkpoint TEXT,claim_token TEXT,enqueued_at TEXT NOT NULL,claimed_at TEXT,settled_at TEXT,attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT)',
+    'CREATE TABLE IF NOT EXISTS processing_artifacts (artifact_id TEXT PRIMARY KEY,project_id TEXT NOT NULL,work_id TEXT NOT NULL,output_id TEXT,path TEXT NOT NULL,checksum TEXT NOT NULL,saved INTEGER NOT NULL DEFAULT 0)',
   )
   database.exec(
-    'CREATE TABLE IF NOT EXISTS processing_artifacts (artifact_id TEXT PRIMARY KEY,session_id TEXT NOT NULL,work_id TEXT NOT NULL,output_id TEXT,path TEXT NOT NULL,checksum TEXT NOT NULL,saved INTEGER NOT NULL DEFAULT 0)',
-  )
-  database.exec(
-    'CREATE TABLE IF NOT EXISTS processing_work_receipts (idempotency_key TEXT PRIMARY KEY,response TEXT NOT NULL)',
-  )
-  database.exec(
-    'CREATE TABLE IF NOT EXISTS processing_projects (project_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,project TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS processing_project_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id))',
+    'CREATE TABLE IF NOT EXISTS processing_projects (project_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,project TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS processing_project_receipts (idempotency_key TEXT NOT NULL,owner_person_id TEXT NOT NULL,semantic_key TEXT NOT NULL,response TEXT NOT NULL,PRIMARY KEY(idempotency_key,owner_person_id))',
   )
   database.exec(
     'CREATE TABLE IF NOT EXISTS run_executor_work (work_id TEXT PRIMARY KEY,run_id TEXT NOT NULL,kind TEXT NOT NULL,payload TEXT NOT NULL,state TEXT NOT NULL,command_attempted_at TEXT,acknowledged_at TEXT,settled_at TEXT,last_error TEXT)',
   )
   migrateStructuredRunDefinitions(database)
+}
+
+function dropRetiredProcessingData(database: DatabaseSync) {
+  const columns = (table: string) =>
+    Schema.decodeUnknownSync(Schema.Array(TableColumnRow))(
+      database.prepare(`PRAGMA table_info(${table})`).all(),
+    ).map((row) => row.name)
+  const projects = columns('processing_projects')
+  const receipts = columns('processing_project_receipts')
+  const work = columns('processing_work')
+  const artifacts = columns('processing_artifacts')
+  const incompatible =
+    (projects.length > 0 && !projects.includes('project')) ||
+    (receipts.length > 0 && !receipts.includes('semantic_key')) ||
+    (work.length > 0 &&
+      (!work.includes('project_id') || work.includes('session_id'))) ||
+    (artifacts.length > 0 &&
+      (!artifacts.includes('project_id') || artifacts.includes('session_id')))
+  if (incompatible)
+    database.exec(
+      'DROP TABLE IF EXISTS processing_projects; DROP TABLE IF EXISTS processing_project_receipts; DROP TABLE IF EXISTS processing_work; DROP TABLE IF EXISTS processing_artifacts',
+    )
+  database.exec(
+    'DROP TABLE IF EXISTS processing_workspace; DROP TABLE IF EXISTS process_save_receipts; DROP TABLE IF EXISTS process_save_orphans',
+  )
 }
 
 function migrateStructuredRunDefinitions(database: DatabaseSync) {

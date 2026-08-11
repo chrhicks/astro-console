@@ -2,6 +2,12 @@
 
 Status: **complete — Gate 5 closed after hardening July 22, 2026**
 
+> **Current Process authority:** Processing Session material in this closed
+> audit is historical evidence. Use the current
+> [product specification](product-spec.md) and
+> [Process workflow](process-workflow-plan.md) for the implemented Processing
+> Project lifecycle.
+
 This audit asks a stricter question than “does the fixture pass?”:
 
 > If a future server implemented this contract literally, does the fixture

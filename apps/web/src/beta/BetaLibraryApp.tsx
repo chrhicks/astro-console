@@ -20,8 +20,7 @@ import {
   type ActionDescriptor,
   type Tone,
 } from '@nightbook/ui'
-import { ProcessingProjection } from '@astro-console/v2-contracts'
-import { Schema } from 'effect'
+import { AssetId, CaptureSetId, IntentId } from '@astro-console/v2-contracts'
 import {
   useEffect,
   useMemo,
@@ -35,6 +34,7 @@ import type {
   LibraryQuery,
 } from '../library-client'
 import type { Projection } from '../presentation'
+import { processClient, type ProcessingProjectList } from '../process-client'
 import { BetaCommandBar, type BetaControlSubmit } from './BetaObserveApp'
 import { nightbookHref } from './route'
 import '@nightbook/ui/styles.css'
@@ -42,7 +42,7 @@ import './beta-observe.css'
 import './beta-library.css'
 
 type DetailState = 'loading' | 'not-found' | 'unavailable'
-type IntakeProject = (typeof ProcessingProjection.Type)['projects'][number]
+type IntakeProject = ProcessingProjectList[number]
 type LibraryIntake = {
   selectedAssetIds: ReadonlySet<string>
   selectedCaptureSetIds: ReadonlySet<string>
@@ -604,10 +604,10 @@ function LineagePanel({ detail }: { detail: LibraryAssetDetail }) {
           {detail.lineage.solveAttemptId ? (
             <DataListItem label="Solve" value={detail.lineage.solveAttemptId} />
           ) : null}
-          {detail.lineage.processingSessionId ? (
+          {detail.lineage.processingProjectId ? (
             <DataListItem
-              label="Process session"
-              value={detail.lineage.processingSessionId}
+              label="Processing Project"
+              value={detail.lineage.processingProjectId}
             />
           ) : null}
           {detail.lineage.processingOutputId ? (
@@ -1392,10 +1392,10 @@ export function BetaLibraryPhone({
                 {detail.lineage.runId ? (
                   <DataListItem label="Run" value={detail.lineage.runId} />
                 ) : null}
-                {detail.lineage.processingSessionId ? (
+                {detail.lineage.processingProjectId ? (
                   <DataListItem
-                    label="Process session"
-                    value={detail.lineage.processingSessionId}
+                    label="Processing Project"
+                    value={detail.lineage.processingProjectId}
                   />
                 ) : null}
                 {detail.lineage.processingOutputId ? (
@@ -1527,8 +1527,6 @@ export function BetaLibraryApp(props: BetaLibraryAppProps) {
     ReadonlySet<string>
   >(new Set())
   const [projects, setProjects] = useState<ReadonlyArray<IntakeProject>>([])
-  const [processWorkspace, setProcessWorkspace] =
-    useState<typeof ProcessingProjection.Type>()
   const [projectName, setProjectName] = useState('New Processing Project')
   const [destination, setDestination] = useState('new')
   const [pending, setPending] = useState(false)
@@ -1536,17 +1534,11 @@ export function BetaLibraryApp(props: BetaLibraryAppProps) {
   useEffect(() => {
     if (phone) return
     let current = true
-    void fetch('/api/workspaces/process')
-      .then(async (response) => {
-        if (!response.ok) throw new Error('Process unavailable')
-        return Schema.decodeUnknownSync(ProcessingProjection)(
-          await response.json(),
-        )
-      })
-      .then((workspace) => {
+    void processClient
+      .list()
+      .then((listed) => {
         if (!current) return
-        setProcessWorkspace(workspace)
-        setProjects(workspace.projects)
+        setProjects(listed)
       })
       .catch(() => current && setMessage('Existing projects are unavailable.'))
     return () => {
@@ -1563,29 +1555,23 @@ export function BetaLibraryApp(props: BetaLibraryAppProps) {
     else next.add(value)
     update(next)
   }
-  const requestedProjectAction =
-    destination === 'new'
-      ? processWorkspace?.actions.find(
-          (action) => action.action === 'CreateProcessingProject',
-        )
-      : processWorkspace?.projectActions
-          .find((entry) => entry.projectId === destination)
-          ?.actions.find(
-            (action) => action.action === 'AddProcessingProjectSources',
-          )
   const disabled =
     phone ||
-    props.projection.shell.readOnly ||
-    requestedProjectAction?._tag !== 'Eligible'
-  const denial = props.projection.shell.readOnly
-    ? 'This client is read-only.'
-    : requestedProjectAction?._tag === 'Ineligible'
-      ? requestedProjectAction.reason === 'ownerRequired'
-        ? 'Owner membership is required.'
-        : 'A control-capable desktop client is required.'
-      : requestedProjectAction === undefined
-        ? 'The service did not project this project action.'
-        : undefined
+    props.projection.shell.membership !== 'Owner member' ||
+    props.projection.shell.control.readOnly ||
+    pending
+  const submitDisabled =
+    disabled ||
+    selectedAssetIds.size + selectedCaptureSetIds.size === 0 ||
+    (destination === 'new' && projectName.trim() === '')
+  const denial =
+    props.projection.shell.membership !== 'Owner member'
+      ? 'Owner membership is required for Project intake.'
+      : props.projection.shell.control.readOnly
+        ? 'Project intake requires a mutation-capable desktop.'
+        : selectedAssetIds.size + selectedCaptureSetIds.size === 0
+          ? 'Select at least one Asset or Capture Set.'
+          : undefined
   const intake: LibraryIntake = {
     selectedAssetIds,
     selectedCaptureSetIds,
@@ -1604,49 +1590,40 @@ export function BetaLibraryApp(props: BetaLibraryAppProps) {
       !disabled &&
       toggle(setSelectedCaptureSetIds, selectedCaptureSetIds, captureSetId),
     submit: () => {
-      if (disabled) return
+      if (submitDisabled) return
       const project = projects.find(
         (candidate) => candidate.projectId === destination,
       )
-      const command =
-        destination === 'new'
-          ? {
-              _tag: 'CreateProcessingProject',
-              name: projectName.trim(),
-              selection: {
-                assetIds: [...selectedAssetIds],
-                captureSetIds: [...selectedCaptureSetIds],
-              },
-              idempotencyKey: crypto.randomUUID(),
-            }
-          : {
-              _tag: 'AddProcessingProjectSources',
-              projectId: destination,
-              expectedProjectRevision: project?.revision,
-              selection: {
-                assetIds: [...selectedAssetIds],
-                captureSetIds: [...selectedCaptureSetIds],
-              },
-              idempotencyKey: crypto.randomUUID(),
-            }
       setPending(true)
       setMessage(undefined)
-      void fetch('/api/process/commands', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ commandId: crypto.randomUUID(), command }),
-      })
-        .then(async (response) => {
-          const result: unknown = await response.json()
-          if (
-            !response.ok ||
-            typeof result !== 'object' ||
-            result === null ||
-            !('outcome' in result) ||
-            result.outcome !== 'accepted'
+      const selection = {
+        assetIds: [...selectedAssetIds].map((assetId) => AssetId.make(assetId)),
+        captureSetIds: [...selectedCaptureSetIds].map((captureSetId) =>
+          CaptureSetId.make(captureSetId),
+        ),
+      }
+      const accepted =
+        destination === 'new'
+          ? processClient.create({
+              name: projectName.trim(),
+              selection,
+              intentId: IntentId.make(crypto.randomUUID()),
+            })
+          : project === undefined
+            ? Promise.reject(new Error('Project unavailable'))
+            : processClient.change({
+                projectId: project.projectId,
+                expectedProjectRevision: project.revision,
+                intentId: IntentId.make(crypto.randomUUID()),
+                intent: { _tag: 'AddSources', selection },
+              })
+      void accepted
+        .then((result) => {
+          location.assign(
+            nightbookHref(
+              `/process/projects/${encodeURIComponent(result.project.projectId)}`,
+            ),
           )
-            throw new Error('Project intake rejected')
-          location.assign(nightbookHref('/process'))
         })
         .catch(() => setMessage('The project intake was not accepted.'))
         .finally(() => setPending(false))

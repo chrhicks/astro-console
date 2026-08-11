@@ -2,18 +2,16 @@ import { Data, Schema } from 'effect'
 import {
   AssetId,
   AttemptId,
-  CheckpointId,
   ClientId,
   CommandId,
   EventCursor,
-  FindingId,
   GeneratedAt,
   NonNegativeInt,
   NonNegativeNumber,
   OperationId,
   PreviewId,
-  ProcessingOutputId,
-  ProcessingSessionId,
+  ProcessingProjectId,
+  ProcessingProjectRevision,
   ProposalId,
   RepresentationId,
   RunId,
@@ -24,7 +22,6 @@ import {
   AssetSnapshot,
   ControlSnapshot,
   PlanSnapshot,
-  ProcessingSessionSnapshot,
   RunSnapshot,
   SubsystemHealth,
 } from './snapshots.js'
@@ -51,16 +48,7 @@ export const DurableEventType = Schema.Literals([
   'AcquirePaused',
   'PolarMeasurementRecorded',
   'PolarAlignmentCompleted',
-  'ProcessingSessionStarted',
-  'ProcessingHistoryMoved',
-  'ProcessingStepApplyStarted',
-  'ProcessingStepRetryStarted',
-  'ProcessingStepCompleted',
-  'ProcessingStepFailed',
-  'AssistantFindingRecorded',
-  'AssistantFindingViewed',
-  'ProcessingArtifactsSaved',
-  'ProcessingSessionDiscarded',
+  'ProcessingProjectChanged',
   'AssetCreated',
   'AssetDownloadRequested',
   'AssetPublicationStarted',
@@ -76,7 +64,7 @@ export const AggregateKind = Schema.Literals([
   'ObservingPlan',
   'ActiveRun',
   'ControlLease',
-  'ProcessingSession',
+  'ProcessingProject',
   'Asset',
 ])
 
@@ -134,53 +122,9 @@ export const DomainEvent = Schema.TaggedUnion({
     withinTolerance: Schema.Boolean,
   },
   PolarAlignmentCompleted: { attemptId: AttemptId },
-  ProcessingSessionStarted: {
-    sessionId: ProcessingSessionId,
-    sourceAssetIds: Schema.NonEmptyArray(AssetId),
-    phase: Schema.Literals(['build', 'develop']),
-  },
-  ProcessingHistoryMoved: {
-    sessionId: ProcessingSessionId,
-    historyPosition: NonNegativeInt,
-  },
-  ProcessingStepApplyStarted: {
-    sessionId: ProcessingSessionId,
-    previewId: PreviewId,
-    operationId: OperationId,
-  },
-  ProcessingStepRetryStarted: {
-    sessionId: ProcessingSessionId,
-    failedAttemptId: AttemptId,
-    checkpointId: CheckpointId,
-    operationId: OperationId,
-  },
-  ProcessingStepCompleted: {
-    sessionId: ProcessingSessionId,
-    operationId: OperationId,
-    outputId: ProcessingOutputId,
-  },
-  ProcessingStepFailed: {
-    sessionId: ProcessingSessionId,
-    operationId: OperationId,
-    ...FailureFact,
-  },
-  AssistantFindingRecorded: {
-    sessionId: ProcessingSessionId,
-    findingId: FindingId,
-    findingVersion: NonNegativeInt,
-  },
-  AssistantFindingViewed: {
-    sessionId: ProcessingSessionId,
-    findingId: FindingId,
-    findingVersion: NonNegativeInt,
-  },
-  ProcessingArtifactsSaved: {
-    sessionId: ProcessingSessionId,
-    assetIds: Schema.NonEmptyArray(AssetId),
-  },
-  ProcessingSessionDiscarded: {
-    sessionId: ProcessingSessionId,
-    cleanupState: Schema.Literals(['queued', 'complete']),
+  ProcessingProjectChanged: {
+    projectId: ProcessingProjectId,
+    revision: ProcessingProjectRevision,
   },
   AssetCreated: {
     assetId: AssetId,
@@ -283,26 +227,8 @@ function expectedAggregate(event: DomainEvent): ExpectedAggregate {
     AcquirePaused: () => aggregate('ActiveRun'),
     PolarMeasurementRecorded: () => aggregate('ActiveRun'),
     PolarAlignmentCompleted: () => aggregate('ActiveRun'),
-    ProcessingSessionStarted: ({ sessionId }) =>
-      aggregate('ProcessingSession', sessionId),
-    ProcessingHistoryMoved: ({ sessionId }) =>
-      aggregate('ProcessingSession', sessionId),
-    ProcessingStepApplyStarted: ({ sessionId }) =>
-      aggregate('ProcessingSession', sessionId),
-    ProcessingStepRetryStarted: ({ sessionId }) =>
-      aggregate('ProcessingSession', sessionId),
-    ProcessingStepCompleted: ({ sessionId }) =>
-      aggregate('ProcessingSession', sessionId),
-    ProcessingStepFailed: ({ sessionId }) =>
-      aggregate('ProcessingSession', sessionId),
-    AssistantFindingRecorded: ({ sessionId }) =>
-      aggregate('ProcessingSession', sessionId),
-    AssistantFindingViewed: ({ sessionId }) =>
-      aggregate('ProcessingSession', sessionId),
-    ProcessingArtifactsSaved: ({ sessionId }) =>
-      aggregate('ProcessingSession', sessionId),
-    ProcessingSessionDiscarded: ({ sessionId }) =>
-      aggregate('ProcessingSession', sessionId),
+    ProcessingProjectChanged: ({ projectId }) =>
+      aggregate('ProcessingProject', projectId),
     AssetCreated: ({ assetId }) => aggregate('Asset', assetId),
     AssetDownloadRequested: ({ assetId }) => aggregate('Asset', assetId),
     AssetPublicationStarted: ({ assetId }) => aggregate('Asset', assetId),
@@ -321,9 +247,6 @@ function aggregate(
 }
 
 export const ProjectionChange = Schema.TaggedUnion({
-  ProcessingSessions: {
-    processingSessions: Schema.Array(ProcessingSessionSnapshot),
-  },
   SelectedAssets: { selectedAssets: Schema.Array(AssetSnapshot) },
   Health: { health: Schema.Array(SubsystemHealth) },
 })
@@ -346,12 +269,6 @@ export const IncrementalProjectionEvent = Schema.TaggedUnion({
     snapshotVersion: SnapshotVersion,
     generatedAt: GeneratedAt,
     run: Schema.NullOr(RunSnapshot),
-  },
-  ProcessingProjected: {
-    eventCursor: EventCursor,
-    snapshotVersion: SnapshotVersion,
-    generatedAt: GeneratedAt,
-    processingSessions: Schema.Array(ProcessingSessionSnapshot),
   },
   AssetsProjected: {
     eventCursor: EventCursor,

@@ -98,7 +98,8 @@ function webRoute(pathname: string) {
   return (
     pathname === '/' ||
     /^\/(?:plan|observe|library|process)$/.test(pathname) ||
-    /^\/library\/assets\/[^/]+$/.test(pathname)
+    /^\/library\/assets\/[^/]+$/.test(pathname) ||
+    /^\/process\/projects\/[^/]+$/.test(pathname)
   )
 }
 

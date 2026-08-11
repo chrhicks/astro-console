@@ -15,7 +15,6 @@ import {
   ControlSnapshot,
   MembershipSnapshot,
   PlanSnapshot,
-  ProcessingSessionSnapshot,
   RunSnapshot,
 } from './snapshots.js'
 
@@ -192,12 +191,6 @@ export const projectSnapshotForClient = (
                 }),
           }),
         }),
-    processingSessions: canonical.processingSessions.map((session) =>
-      ProcessingSessionSnapshot.make({
-        ...session,
-        actions: projectActions(session.actions, membership.capability),
-      }),
-    ),
     selectedAssets: canonical.selectedAssets.map((asset) =>
       AssetSnapshot.make({
         ...asset,
@@ -249,16 +242,12 @@ function applyIncrementalEvent(
       run === null
         ? withoutRun(state.snapshot, common)
         : AppSnapshot.make({ ...state.snapshot, ...common, run }),
-    ProcessingProjected: ({ processingSessions }) =>
-      AppSnapshot.make({ ...state.snapshot, ...common, processingSessions }),
     AssetsProjected: ({ selectedAssets }) =>
       AppSnapshot.make({ ...state.snapshot, ...common, selectedAssets }),
     ProjectionBatch: ({ changes }) =>
       changes.reduce(
         (snapshot, change) =>
           ProjectionChange.match(change, {
-            ProcessingSessions: ({ processingSessions }) =>
-              AppSnapshot.make({ ...snapshot, processingSessions }),
             SelectedAssets: ({ selectedAssets }) =>
               AppSnapshot.make({ ...snapshot, selectedAssets }),
             Health: ({ health }) => AppSnapshot.make({ ...snapshot, health }),
@@ -328,7 +317,6 @@ function allActions(snapshot: AppSnapshot) {
     ...(snapshot.plan?.actions ?? []),
     ...(snapshot.run?.actions ?? []),
     ...(snapshot.run?.acquire?.actions ?? []),
-    ...snapshot.processingSessions.flatMap(({ actions }) => actions),
     ...snapshot.selectedAssets.flatMap(({ actions }) => actions),
   ]
 }

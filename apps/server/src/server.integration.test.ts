@@ -24,14 +24,14 @@ import {
   CommandHttpFailureEnvelope,
   CommandHttpSuccessEnvelope,
   DomainEvent,
-  LibraryAssetDetail,
   LibraryPage,
   ObserveCommandResponse,
   PlanCommandResponse,
   planSequencePresentation,
   ProcessSourceHandoff,
-  ProcessingProjection,
-  ProcessingResponse,
+  OpenedProcessingProject,
+  ProcessingProjectChanged,
+  ProcessingProjectEvidence,
   PreflightSnapshot,
   RefreshPreflightResponse,
   RunSnapshot,
@@ -66,27 +66,22 @@ import {
   DatabasePathNotAppOwned,
   openAppOwnedDatabase,
 } from './persistence/database.ts'
-import { createPublisherWorker } from './workers/publisher-worker.ts'
 import { originServerConfig } from './config/environment-config.ts'
 import { alpacaPreflightProvider } from './providers/alpaca-preflight-provider.ts'
 import { alpacaCameraProvider } from './providers/alpaca-camera-provider.ts'
 import { materializeCapturedFrame } from './services/captured-frame-intake.ts'
 import { createPlateSolveWorker } from './workers/plate-solve-worker.ts'
-import {
-  executeProcessCommand,
-  processSnapshot,
-} from './services/process-workspace.ts'
 
 function createFixtureService(
   databasePath?: Parameters<typeof createLocalWebService>[0],
   identityResolver?: Parameters<typeof createLocalWebService>[1],
-  processSaveStorage?: Parameters<typeof createLocalWebService>[2],
+  unused?: Parameters<typeof createLocalWebService>[2],
   downloadGrants?: Parameters<typeof createLocalWebService>[3],
 ) {
   return createLocalWebService(
     databasePath,
     identityResolver,
-    processSaveStorage,
+    unused,
     downloadGrants,
     { fixture: 'm27' },
   )
@@ -131,172 +126,6 @@ const capturedEquipment = {
   rigId: 'fixture-rig',
   cameraDeviceId: 'fixture-camera',
 }
-
-test('Process HTTP workflow durably builds, fails locally, retries, and resumes after restart', async (t) => {
-  const root = mkdtempSync(join(tmpdir(), 'astro-process-workspace-'))
-  const databasePath = join(root, 'state.sqlite')
-  const service = createFixtureService(databasePath)
-  let listener = await service.listen()
-  let activeService = service
-  t.after(async () => {
-    await listener.close().catch(() => undefined)
-    activeService.close()
-  })
-  let base = `http://127.0.0.1:${listener.port}`
-  const command = async (value: object) => {
-    const response = await fetch(`${base}/api/process/commands`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ commandId: crypto.randomUUID(), command: value }),
-    })
-    assert.equal(response.status, 202)
-    return Schema.decodeUnknownSync(ProcessingResponse)(await response.json())
-  }
-  const catalog = await fetch(
-    `${base}/api/library?queryId=process-proof&pageSize=40`,
-  )
-  const assets = Schema.decodeUnknownSync(LibraryPage)(
-    await catalog.json(),
-  ).results
-  const source = assets.find((asset) => asset.role === 'original')
-  assert.ok(source)
-  await command({
-    _tag: 'StartProcessingSession',
-    sourceAssetIds: [source.assetId],
-    idempotencyKey: 'process-start',
-  })
-  for (let stage = 0; stage < 6; stage += 1) activeService.processWorkPass()
-  let workspace = Schema.decodeUnknownSync(ProcessingProjection)(
-    await (await fetch(`${base}/api/workspaces/process`)).json(),
-  )
-  let session = workspace.sessions[0]
-  assert.equal(session?.phase, 'develop')
-  assert.ok(session)
-  await command({
-    _tag: 'SyncProcessingPreview',
-    sessionId: session.sessionId,
-    expectedProcessingRevision: session.revision,
-    operation: 'stretch',
-    toolId: 'deterministic-fail',
-    parameters: [],
-    baseHistoryPosition: session.historyPosition,
-    clientPreviewSequence: 1,
-  })
-  activeService.processWorkPass()
-  workspace = Schema.decodeUnknownSync(ProcessingProjection)(
-    await (await fetch(`${base}/api/workspaces/process`)).json(),
-  )
-  session = workspace.sessions[0]
-  assert.ok(session?.preview)
-  await command({
-    _tag: 'ApplyProcessingPreview',
-    sessionId: session.sessionId,
-    expectedProcessingRevision: session.revision,
-    previewId: session.preview?.previewId,
-    idempotencyKey: 'process-apply-fail',
-  })
-  activeService.processWorkPass()
-  workspace = Schema.decodeUnknownSync(ProcessingProjection)(
-    await (await fetch(`${base}/api/workspaces/process`)).json(),
-  )
-  session = workspace.sessions[0]
-  assert.ok(session?.failedAttempt)
-  await command({
-    _tag: 'RetryProcessingStep',
-    sessionId: session.sessionId,
-    expectedProcessingRevision: session.revision,
-    failedAttemptId: session.failedAttempt?.attemptId,
-    checkpointId: session.failedAttempt?.checkpointId,
-    idempotencyKey: 'process-retry',
-  })
-  activeService.processWorkPass()
-  await listener.close()
-  service.close()
-  const resumed = createFixtureService(databasePath)
-  activeService = resumed
-  listener = await resumed.listen()
-  base = `http://127.0.0.1:${listener.port}`
-  const recovered = Schema.decodeUnknownSync(ProcessingProjection)(
-    await (await fetch(`${base}/api/workspaces/process`)).json(),
-  )
-  const recoveredSession = recovered.sessions[0]
-  assert.ok(recoveredSession)
-  assert.equal(recoveredSession.lifecycle, 'unfinished')
-  assert.equal(recovered.sessions[0]?.phase, 'develop')
-  assert.equal(recovered.sessions[0]?.history.length, 1)
-  assert.equal(recovered.sessions[0]?.failedAttempt, undefined)
-  assert.deepEqual(
-    recovered.sessionActions[0]?.actions.find(
-      (action) => action.action === 'ResumeProcessingSession',
-    ),
-    { _tag: 'Eligible', action: 'ResumeProcessingSession' },
-  )
-  assert.deepEqual(
-    recovered.sessionActions[0]?.actions.find(
-      (action) => action.action === 'SyncProcessingPreview',
-    ),
-    {
-      _tag: 'Ineligible',
-      action: 'SyncProcessingPreview',
-      reason: 'sessionActiveRequired',
-    },
-  )
-  const resumedCommand = await command({
-    _tag: 'ResumeProcessingSession',
-    sessionId: recoveredSession.sessionId,
-    expectedProcessingRevision: recoveredSession.revision,
-  })
-  assert.equal(resumedCommand.effect, 'resumed')
-  const active = Schema.decodeUnknownSync(ProcessingProjection)(
-    await (await fetch(`${base}/api/workspaces/process`)).json(),
-  )
-  const activeSession = active.sessions[0]
-  assert.ok(activeSession)
-  assert.equal(activeSession.lifecycle, 'active')
-  assert.equal(activeSession.history.length, 1)
-  const outputId = activeSession.history[0]?.output.outputId
-  assert.ok(outputId)
-  await command({
-    _tag: 'SaveProcessingArtifacts',
-    sessionId: activeSession.sessionId,
-    expectedProcessingRevision: activeSession.revision,
-    artifacts: [{ outputId, format: 'tiff', role: 'final' }],
-    idempotencyKey: 'process-save-after-resume',
-  })
-  activeService.processWorkPass()
-  const savedWorkspace = Schema.decodeUnknownSync(ProcessingProjection)(
-    await (await fetch(`${base}/api/workspaces/process`)).json(),
-  )
-  const savedAssetId = savedWorkspace.assets[0]?.assetId
-  assert.ok(savedAssetId)
-  const savedDetail = Schema.decodeUnknownSync(LibraryAssetDetail)(
-    await fetch(`${base}/api/library/assets/${savedAssetId}`).then((response) =>
-      response.json(),
-    ),
-  )
-  assert.match(savedDetail.checksum ?? '', /^sha256:[0-9a-f]{64}$/)
-  assert.equal(savedDetail.lineage.processingSessionId, activeSession.sessionId)
-  assert.equal(savedDetail.lineage.processingOutputId, outputId)
-  assert.deepEqual(savedDetail.lineage.operationIds, [
-    activeSession.history[0]?.operationId,
-  ])
-  const savedFile = databaseRow(
-    SavedProcessArtifactRow,
-    resumed.database
-      .prepare(
-        "SELECT path,checksum FROM processing_artifacts WHERE session_id=? AND saved=1 AND path LIKE '%.tiff' LIMIT 1",
-      )
-      .get(activeSession.sessionId),
-  )
-  assert.equal(existsSync(savedFile.path), true)
-  assert.deepEqual(
-    [...readFileSync(savedFile.path).subarray(0, 4)],
-    [0x49, 0x49, 0x2a, 0x00],
-  )
-  assert.equal(savedDetail.checksum, savedFile.checksum)
-  await listener.close()
-  resumed.close()
-})
 
 test('local plate solver records solved and no-solution evidence without a mount path', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'astro-plate-solve-'))
@@ -4068,23 +3897,11 @@ function first<Value>(values: ReadonlyArray<Value>) {
 }
 
 const CountRow = Schema.Struct({ count: Schema.Int })
-const EventRow = Schema.Struct({ checksum: Schema.String })
-const StatusRow = Schema.Struct({ state: Schema.String })
 const ProjectionRow = Schema.Struct({ value: Schema.String })
 const RunDefinitionEvidenceRow = Schema.Struct({ definition: Schema.String })
 const PublicationRow = Schema.Struct({ object_key: Schema.String })
-const SavedProcessArtifactRow = Schema.Struct({
-  path: Schema.String,
-  checksum: Schema.String,
-})
 const PlateSolveEvidenceRow = Schema.Struct({ evidence: Schema.String })
 const AcquireSessionRow = Schema.Struct({ session: Schema.String })
-const ClaimedOutboxRow = Schema.Struct({
-  state: Schema.String,
-  claim_token: Schema.NullOr(Schema.String),
-  claimed_by: Schema.NullOr(Schema.String),
-  claim_until: Schema.NullOr(Schema.String),
-})
 
 function databaseRow<Row>(
   schema: Schema.Schema<Row> & Schema.ConstraintDecoder<unknown>,
@@ -4102,10 +3919,7 @@ async function nextEvent(
   return new TextDecoder().decode(event.value)
 }
 
-test('project stage worker settlement publishes one fresh SSE projection while idle polling stays quiet', async (t) => {
-  const publicationEvents: Array<
-    'connect' | 'disconnect' | 'publish' | 'writeFailure'
-  > = []
+test('Processing Project HTTP accepts explicit Project changes and exposes settled evidence', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'astro-stage-publication-'))
   const service = createLocalWebService(
     join(root, 'state.sqlite'),
@@ -4116,7 +3930,6 @@ test('project stage worker settlement publishes one fresh SSE projection while i
       fixture: 'm27',
       processWorkRoot: root,
       processWorkAutoRun: false,
-      observeProjectionPublication: (event) => publicationEvents.push(event),
     },
   )
   const listener = await service.listen()
@@ -4124,84 +3937,63 @@ test('project stage worker settlement publishes one fresh SSE projection while i
     await listener.close()
     service.close()
   })
-  const stream = await fetch(`http://127.0.0.1:${listener.port}/api/events`)
-  const reader = stream.body?.getReader()
-  await nextEvent(reader)
-  const identity = {
-    personId: 'owner-chicks',
-    clientId: 'desktop-owner',
-    role: 'owner' as const,
-    capability: 'controlCapable' as const,
-  }
-  assert.equal(
-    executeProcessCommand(
-      service.database,
-      {
-        commandId: crypto.randomUUID(),
-        command: {
-          _tag: 'CreateProcessingProject',
-          name: 'Live worker projection',
-          selection: { assetIds: [], captureSetIds: ['m27-stack-1'] },
-          idempotencyKey: 'live-worker-project',
-        },
-      },
-      identity,
-    ).outcome,
-    'accepted',
+  const base = `http://127.0.0.1:${listener.port}`
+  const createdResponse = await fetch(`${base}/api/process/projects`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      name: 'HTTP lifecycle proof',
+      selection: { assetIds: [], captureSetIds: ['m27-stack-1'] },
+      intentId: 'http-project-create',
+    }),
+  })
+  assert.equal(createdResponse.status, 201)
+  const created = Schema.decodeUnknownSync(ProcessingProjectChanged)(
+    await createdResponse.json(),
   )
-  const project = processSnapshot(service.database, identity).projects[0]
-  assert.ok(project)
-  assert.equal(
-    executeProcessCommand(
-      service.database,
-      {
-        commandId: crypto.randomUUID(),
-        command: {
-          _tag: 'RunProcessingProjectStage',
-          projectId: project.projectId,
-          expectedProjectRevision: project.revision,
+  const acceptedResponse = await fetch(
+    `${base}/api/process/projects/${created.project.projectId}`,
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        projectId: created.project.projectId,
+        expectedProjectRevision: created.project.revision,
+        intentId: 'http-calibration-run',
+        intent: {
+          _tag: 'RunStage',
           stage: 'Calibration',
-          idempotencyKey: 'live-worker-calibration',
+          from: { _tag: 'CurrentDraft' },
         },
-      },
-      identity,
-    ).outcome,
-    'accepted',
+      }),
+    },
   )
-
-  const beforeSettlement = publicationEvents.filter(
-    (event) => event === 'publish',
-  ).length
+  assert.equal(acceptedResponse.status, 200)
+  const accepted = Schema.decodeUnknownSync(ProcessingProjectChanged)(
+    await acceptedResponse.json(),
+  )
+  assert.equal(accepted.project.activeAttempt?.state, 'Queued')
   assert.deepEqual(service.processWorkPass(), {
     outcome: 'completed',
     kind: 'projectStage',
   })
-  const settledEvent = await nextEvent(reader)
-  assert.match(settledEvent, /id: 1/)
-  assert.match(settledEvent, /"snapshotVersion":2/)
-  const settledWorkspace = Schema.decodeUnknownSync(ProcessingProjection)(
-    await (
-      await fetch(`http://127.0.0.1:${listener.port}/api/workspaces/process`)
-    ).json(),
+  const opened = Schema.decodeUnknownSync(OpenedProcessingProject)(
+    await fetch(
+      `${base}/api/process/projects/${created.project.projectId}`,
+    ).then((response) => response.json()),
   )
   assert.equal(
-    settledWorkspace.projects[0]?.stages[0]?.attempts[0]?.state,
-    'succeeded',
+    opened.stages.find((stage) => stage.stage === 'Calibration')?.currentResult
+      ?.outcome,
+    'Succeeded',
   )
-  assert.equal(
-    settledWorkspace.projects[0]?.stages[0]?.attempts[0]?.resultKind,
-    'deterministicCalibrationEvidence',
+  const evidence = Schema.decodeUnknownSync(ProcessingProjectEvidence)(
+    await fetch(
+      `${base}/api/process/projects/${created.project.projectId}/evidence`,
+    ).then((response) => response.json()),
   )
-  assert.equal(
-    publicationEvents.filter((event) => event === 'publish').length,
-    beforeSettlement + 1,
-  )
-
-  assert.deepEqual(service.processWorkPass(), { outcome: 'idle' })
-  assert.equal(
-    publicationEvents.filter((event) => event === 'publish').length,
-    beforeSettlement + 1,
-  )
+  assert.equal(evidence.attempts[0]?.state, 'succeeded')
+  assert.equal(evidence.attempts[0]?.outputs[0]?.relation, 'WorkingResult')
 })
 
 test('fresh SQLite initialization creates the current V2 tables', () => {
@@ -4664,79 +4456,6 @@ test('production Access JWKS admission refreshes by kid, bounds cache use, and f
   assert.equal(calls, 5)
 })
 
-test('publisher recovers a claimed PublishAsset without touching its claim owner', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'astro-outbox-isolation-'))
-  const sources = join(root, 'sources')
-  const outputs = join(root, 'outputs')
-  const databasePath = join(root, 'state.sqlite')
-  mkdirSync(sources)
-  writeFileSync(join(sources, 'final.tiff'), 'publisher-bytes')
-  const service = createFixtureService(databasePath, undefined, {
-    sourcesRoot: sources,
-    outputsRoot: outputs,
-    sources: { final: 'final.tiff' },
-  })
-  const saved = service.saveProcess({
-    sessionId: 'process-outbox-isolation',
-    expectedRevision: 1,
-    idempotencyKey: 'outbox-isolation-save',
-    outputs: [{ sourceId: 'final', representation: 'final' }],
-  })
-  if (saved.outcome !== 'accepted' || !('assetIds' in saved))
-    throw new Error('save did not accept')
-  service.database
-    .prepare(
-      "UPDATE outbox SET state='claimed',claim_token='publisher-token',claimed_by='publisher-worker',claim_until=? WHERE kind='PublishAsset'",
-    )
-    .run('2000-01-01T00:00:00.000Z')
-  const isolated = databaseRow(
-    ClaimedOutboxRow,
-    service.database
-      .prepare(
-        "SELECT state,claim_token,claimed_by,claim_until FROM outbox WHERE kind='PublishAsset'",
-      )
-      .get(),
-  )
-  assert.equal(isolated.state, 'claimed')
-  assert.equal(isolated.claim_token, 'publisher-token')
-  assert.equal(isolated.claimed_by, 'publisher-worker')
-  assert.equal(isolated.claim_until, '2000-01-01T00:00:00.000Z')
-  let uploads = 0
-  const publisher = createPublisherWorker(
-    service.database,
-    { outputsRoot: outputs },
-    {
-      put: async (_key, file, metadata) => {
-        uploads += 1
-        assert.equal(file.checksum, metadata.checksum)
-      },
-      head: async () => {
-        const checksum = databaseRow(
-          EventRow,
-          service.database
-            .prepare(
-              'SELECT checksum FROM process_asset_events WHERE asset_id=?',
-            )
-            .get(first(saved.assetIds)),
-        )
-        return { checksum: checksum.checksum, bytes: 15 }
-      },
-    },
-  )
-  assert.equal(await publisher.pass(), 'published')
-  assert.equal(uploads, 1)
-  assert.equal(
-    databaseRow(
-      StatusRow,
-      service.database
-        .prepare("SELECT state FROM outbox WHERE kind='PublishAsset'")
-        .get(),
-    ).state,
-    'dispatched',
-  )
-  service.close()
-})
-
 test('persisted exhausted correction keeps evidence visible without issuing work and projects over SSE', async (t) => {
   const service = createFixtureService()
   const listener = await service.listen()
@@ -5090,7 +4809,7 @@ test('authenticated workspace projections preserve future intent, bounded Librar
   assert.equal(detail.assetId, assetId)
   assert.equal(detail.lineage.runId, 'run-m27-001')
   const processResponse = await fetch(
-    `${base}/api/workspaces/process?sourceAssetId=${assetId}`,
+    `${base}/api/library/assets/${assetId}/process-source`,
   )
   assert.equal(processResponse.status, 200)
   const process = Schema.decodeUnknownSync(ProcessSourceHandoff)(
@@ -5131,7 +4850,7 @@ test('authenticated workspace projections preserve future intent, bounded Librar
   listener = await service.listen()
   base = `http://127.0.0.1:${listener.port}`
   const refreshed = await fetch(
-    `${base}/api/workspaces/process?sourceAssetId=${assetId}`,
+    `${base}/api/library/assets/${assetId}/process-source`,
   )
   assert.equal(refreshed.status, 200)
   assert.equal(
@@ -5154,12 +4873,12 @@ test('authenticated workspace projections preserve future intent, bounded Librar
     outboxBefore,
   )
   assert.equal(
-    (await fetch(`${base}/api/workspaces/process?sourceAssetId=asset-other`))
+    (await fetch(`${base}/api/library/assets/asset-other/process-source`))
       .status,
     404,
   )
   const unavailable = await fetch(
-    `${base}/api/workspaces/process?sourceAssetId=asset-m27-013`,
+    `${base}/api/library/assets/asset-m27-013/process-source`,
   )
   assert.equal(unavailable.status, 409)
   assert.deepEqual(await unavailable.json(), {
@@ -5172,11 +4891,11 @@ test('authenticated workspace projections preserve future intent, bounded Librar
     .prepare("UPDATE library_assets SET detail='{}' WHERE asset_id=?")
     .run(assetId)
   assert.equal(
-    (await fetch(`${base}/api/workspaces/process?sourceAssetId=${assetId}`))
+    (await fetch(`${base}/api/library/assets/${assetId}/process-source`))
       .status,
     503,
   )
-  assert.equal((await fetch(`${base}/api/workspaces/process`)).status, 200)
+  assert.equal((await fetch(`${base}/api/process/projects`)).status, 200)
 })
 
 test('library-published fixture projects one durable Download Eligible M27 asset without work', async (t) => {
@@ -5405,7 +5124,7 @@ test('workspace projections remain behind existing admission', async (t) => {
   })
   for (const path of [
     '/api/workspaces/plan',
-    '/api/workspaces/process',
+    '/api/process/projects',
     '/api/library?queryId=workspace-coverage&sort=capturedAtDescending',
   ])
     assert.equal((await fetch(`${base}${path}`)).status, 401)

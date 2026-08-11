@@ -193,10 +193,11 @@ describe('shared command gate', () => {
       envelope: {
         commandId: 'command-5',
         command: {
-          _tag: 'UndoProcessingStep',
-          sessionId: 'process-1',
-          expectedProcessingRevision: 9,
-          idempotencyKey: 'intent-5',
+          _tag: 'ChangeProcessingProject',
+          projectId: 'project-1',
+          expectedProjectRevision: 9,
+          intent: { _tag: 'UndoCurrentResult', stage: 'Calibration' },
+          intentId: 'intent-5',
         },
       },
       actor: { ...ownerController, capability: 'readOnly' },
@@ -249,9 +250,11 @@ describe('shared command gate', () => {
       envelope: {
         commandId: 'command-viewer',
         command: {
-          _tag: 'ResumeProcessingSession',
-          sessionId: 'process-1',
-          expectedProcessingRevision: 9,
+          _tag: 'ChangeProcessingProject',
+          projectId: 'project-1',
+          expectedProjectRevision: 9,
+          intentId: 'process-viewer',
+          intent: { _tag: 'UndoDraft', stage: 'Calibration' },
         },
       },
       actor: {
@@ -306,10 +309,8 @@ describe('shared command gate', () => {
       envelope: {
         commandId: 'command-pending',
         command: {
-          _tag: 'ApplyProcessingPreview',
-          sessionId: 'process-1',
-          expectedProcessingRevision: 8,
-          previewId: 'preview-1',
+          _tag: 'RequestAssetDownload',
+          assetId: 'asset-1',
           idempotencyKey: 'intent-pending',
         },
       },
@@ -333,10 +334,8 @@ describe('shared command gate', () => {
       envelope: {
         commandId: 'command-8',
         command: {
-          _tag: 'DiscardProcessingSession',
-          sessionId: 'process-1',
-          expectedProcessingRevision: 9,
-          confirmationId: 'discard-1',
+          _tag: 'RequestAssetDownload',
+          assetId: 'asset-1',
           idempotencyKey: 'intent-used',
         },
       },

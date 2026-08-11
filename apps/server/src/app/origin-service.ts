@@ -8,16 +8,7 @@ import {
   CommandHttpFailureEnvelope,
   RefreshPreflightResponse,
 } from '@astro-console/v2-contracts'
-import {
-  executeProcessCommand,
-  prepareProcessingWorkspaceAfterRestart,
-  processSnapshot,
-} from '../services/process-workspace.ts'
-import {
-  cleanupProcessOrphans,
-  saveProcessOutputs,
-  type ProcessSaveStorage,
-} from '../services/process-save.ts'
+import { createProcessingProjectLifecycle } from '../services/processing-project-service.ts'
 import {
   materializeCapturedFrame,
   type CapturedFrameStorage,
@@ -57,6 +48,7 @@ import {
 import { controlCommandFromEnvelope } from '../persistence/control-sqlite-repository.ts'
 import { installPublishedLibraryFixture } from '../persistence/library-sqlite-repository.ts'
 import { createOriginRouter } from '../http/origin-router.ts'
+import { createProcessingProjectsHttpHandler } from '../http/processing-project-handlers.ts'
 import {
   initializeRuntimeState,
   installDevelopmentSimulationPlan,
@@ -100,8 +92,8 @@ import {
   libraryDetail,
   libraryReview,
   libraryPage,
+  processSourceHandoff,
   observeLiveFrameReview,
-  processWorkspace,
   workspace,
 } from '../http/library-handlers.ts'
 import {
@@ -126,9 +118,6 @@ import {
 import { tracedPlanWorkspaceRead } from '../observability/plan-telemetry.ts'
 import { tracedLibraryOperation } from '../observability/library-telemetry.ts'
 import {
-  annotateProcessCommandIntent,
-  processCommandIntent,
-  processCommandSelection,
   recordProcessBacklog,
   recordProcessPressureMetric,
   tracedProcessOperation,
@@ -214,7 +203,7 @@ export function createLocalWebService(
     clientId: 'desktop-owner',
     capability: 'controlCapable',
   }),
-  processSaveStorage?: ProcessSaveStorage,
+  _unused?: unknown,
   downloadGrants?: DownloadGrantConfig,
   options: {
     readonly fixture?:
@@ -272,7 +261,9 @@ export function createLocalWebService(
       database,
       options.simulation.launchScenario,
     )
-  prepareProcessingWorkspaceAfterRestart(database)
+  const processingProjects = createProcessingProjectLifecycle(database)
+  const processingProjectsHttp =
+    createProcessingProjectsHttpHandler(processingProjects)
   const acquireRepository = acquireSqliteRepository(database)
   const stateRepository: StateSqliteRepositoryShape = Effect.runSync(
     StateSqliteRepository.pipe(
@@ -590,6 +581,21 @@ export function createLocalWebService(
     const cursor = stateRepository.advanceProjectionCursor()
     publish('ProcessingProjected', cursor)
   }
+  const processingProjectNotices = processingProjects
+    .changes({
+      personId: 'system',
+      clientId: 'processing-project-notices',
+      role: 'owner',
+      capability: 'controlCapable',
+    })
+    [Symbol.asyncIterator]()
+  void (async () => {
+    while (true) {
+      const next = await processingProjectNotices.next()
+      if (next.done) return
+      publishProcessingProjection()
+    }
+  })()
   const runExecutor =
     options.cameraProvider === undefined ||
     options.runExecutionContext === undefined ||
@@ -928,28 +934,30 @@ export function createLocalWebService(
             Effect.sync(() => workspace(response, database, 'plan')),
           ),
         ),
-      processWorkspace: (response, url, identity) =>
+      processingProjects: (response, identity, request, url) =>
         runHttp(
           response,
           {
-            method: 'GET',
-            route: '/api/workspaces/process',
+            method:
+              request.method === 'POST'
+                ? 'POST'
+                : request.method === 'PATCH'
+                  ? 'PATCH'
+                  : 'GET',
+            route: url.pathname.endsWith('/evidence')
+              ? '/api/process/projects/:projectId/evidence'
+              : url.pathname === '/api/process/projects'
+                ? '/api/process/projects'
+                : '/api/process/projects/:projectId',
             workspace: 'process',
           },
-          url.searchParams.has('sourceAssetId')
-            ? tracedProcessOperation(
-                response,
-                'workspace.open',
-                processWorkspace(
-                  response,
-                  database,
-                  url,
-                  () => stateRepository.state().snapshotVersion,
-                ),
-              )
-            : Effect.sync(() =>
-                json(response, 200, processSnapshot(database, identity)),
-              ),
+          tracedProcessOperation(
+            response,
+            request.method === 'GET' ? 'project.read' : 'project.change',
+            Effect.promise(() =>
+              processingProjectsHttp(response, identity, request, url),
+            ),
+          ),
         ),
       libraryPage: (response, url) =>
         runHttp(
@@ -993,6 +1001,21 @@ export function createLocalWebService(
           encodedAssetId,
           identity,
           () => stateRepository.state().snapshotVersion,
+        ),
+      libraryProcessSource: (response, encodedAssetId) =>
+        runHttp(
+          response,
+          {
+            method: 'GET',
+            route: '/api/library/assets/:assetId/process-source',
+            workspace: 'library',
+          },
+          processSourceHandoff(
+            response,
+            database,
+            encodedAssetId,
+            () => stateRepository.state().snapshotVersion,
+          ),
         ),
       observeLiveFrameReview: (response, identity) =>
         observeLiveFrameReview(
@@ -1084,49 +1107,6 @@ export function createLocalWebService(
                 ),
             }),
             Effect.map(({ status, body }) => json(response, status, body)),
-          ),
-        ),
-      processCommand: (response, identity, request) =>
-        runHttp(
-          response,
-          {
-            method: 'POST',
-            route: '/api/process/commands',
-            workspace: 'process',
-          },
-          tracedProcessOperation(
-            response,
-            'command.execute',
-            Effect.promise(() => body(request)).pipe(
-              Effect.flatMap((raw) => {
-                const intent = processCommandIntent(raw)
-                return (
-                  intent === undefined
-                    ? Effect.void
-                    : annotateProcessCommandIntent(
-                        intent,
-                        processCommandSelection(raw),
-                      )
-                ).pipe(
-                  Effect.flatMap(() =>
-                    Effect.sync(() => {
-                      const result = executeProcessCommand(
-                        database,
-                        raw,
-                        identity,
-                      )
-                      if (result.outcome === 'accepted')
-                        publishProcessingProjection()
-                      return json(
-                        response,
-                        result.outcome === 'accepted' ? 202 : 409,
-                        result,
-                      )
-                    }),
-                  ),
-                )
-              }),
-            ),
           ),
         ),
       refreshPreflight: async (response, identity, request) => {
@@ -1620,6 +1600,7 @@ export function createLocalWebService(
       Effect.runSync(Fiber.interrupt(runExecutorFiber))
     if (processWorkFiber !== undefined)
       Effect.runSync(Fiber.interrupt(processWorkFiber))
+    void processingProjectNotices.return?.()
     Effect.runSync(projectionPublication.close())
     database.close()
   }
@@ -1665,14 +1646,6 @@ export function createLocalWebService(
       return undefined
     }
   }
-  const saveProcess = (raw: unknown, identity = projectionIdentity()) =>
-    processSaveStorage === undefined
-      ? { outcome: 'rejected' as const, reason: 'InvalidInput' as const }
-      : saveProcessOutputs(database, processSaveStorage, raw, identity)
-  const cleanupSavedOrphans = () =>
-    processSaveStorage === undefined
-      ? 0
-      : cleanupProcessOrphans(database, processSaveStorage)
   const ingestCapturedFrame = (raw: unknown, bytes: Uint8Array) => {
     const capturedFrameStorage = options.capturedFrameStorage
     if (capturedFrameStorage === undefined)
@@ -1796,12 +1769,10 @@ export function createLocalWebService(
     listen,
     close,
     ingestObservation,
-    saveProcess,
     ingestCapturedFrame,
     ingestCompletedCameraExposure,
     inspectFrame,
     solveRetainedFrame,
-    cleanupSavedOrphans,
     advanceFakeRun,
     runExecutorPass: () => runExecutor?.pass(),
     processWorkPass,

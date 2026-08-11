@@ -238,7 +238,7 @@ export const browserLibraryTransportLayer = Layer.succeed(
       ),
     loadProcessSourceHandoff: (assetId) =>
       load(
-        `/api/workspaces/process?sourceAssetId=${encodeURIComponent(assetId)}`,
+        `/api/library/assets/${encodeURIComponent(assetId)}/process-source`,
         true,
         true,
       ),

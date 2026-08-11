@@ -115,8 +115,28 @@ const page = Schema.decodeUnknownSync(LibraryPageSchema)({
 
 const controllerProjection = {
   ...unavailableProjection,
-  shell: { ...unavailableProjection.shell, readOnly: false },
+  shell: {
+    ...unavailableProjection.shell,
+    readOnly: false,
+    membership: 'Owner member',
+    control: { ...unavailableProjection.shell.control, readOnly: false },
+  },
 }
+
+test('allows a desktop owner to select Project sources without the Control Lease', () => {
+  const markup = renderToStaticMarkup(
+    createElement(BetaLibraryApp, {
+      projection: controllerProjection,
+      loading: false,
+      page: { query, value: page },
+      onSelectAsset: () => undefined,
+    }),
+  )
+
+  assert.match(markup, /Select frame/)
+  assert.doesNotMatch(markup, /type="checkbox" disabled=""/)
+  assert.match(markup, /Select at least one Asset or Capture Set/)
+})
 
 test('renders one real frame-review task from Library contracts', () => {
   const markup = renderToStaticMarkup(
@@ -221,7 +241,7 @@ test('disables every Library intake control for a read-only shell', () => {
       onSelectAsset: () => undefined,
     }),
   )
-  assert.match(markup, /This client is read-only/)
+  assert.match(markup, /Owner membership is required for Project intake/)
   assert.doesNotMatch(markup, /<input type="checkbox"(?! disabled)/)
   assert.match(markup, /<select class="nb-select" disabled=""/)
 })
@@ -327,7 +347,9 @@ test('renders complete Process output lineage without invented capture lineage',
     checksum: 'sha256:process-output',
     lineage: {
       sourceAssetIds: ['asset-m27-001'],
-      processingSessionId: 'session-process-1',
+      processingProjectId: 'project-process-1',
+      processingAttemptIds: ['attempt-process-1'],
+      processingResultId: 'result-process-1',
       processingOutputId: 'output-process-1',
       operationIds: ['operation-stretch-1'],
     },
@@ -343,8 +365,8 @@ test('renders complete Process output lineage without invented capture lineage',
   )
 
   assert.match(markup, /<dt>Checksum<\/dt>/)
-  assert.match(markup, /<dt>Process session<\/dt>/)
-  assert.match(markup, /session-process-1/)
+  assert.match(markup, /<dt>Processing Project<\/dt>/)
+  assert.match(markup, /project-process-1/)
   assert.match(markup, /<dt>Process output<\/dt>/)
   assert.match(markup, /output-process-1/)
   assert.match(markup, /<dt>Operations<\/dt>/)
@@ -357,7 +379,9 @@ test('phone retains exact Process output and operation lineage without controls'
     ...detail,
     lineage: {
       sourceAssetIds: ['asset-master-1'],
-      processingSessionId: 'project-1',
+      processingProjectId: 'project-1',
+      processingAttemptIds: ['calibration-attempt-1', 'develop-attempt-1'],
+      processingResultId: 'develop-result-1',
       processingOutputId: 'develop-output-1',
       operationIds: ['calibration-attempt-1', 'develop-attempt-1'],
     },

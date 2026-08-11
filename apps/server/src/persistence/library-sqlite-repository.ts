@@ -90,7 +90,7 @@ const LibraryDetail = Schema.Struct({
     solveAttemptId: Schema.optionalKey(Schema.String),
     sequenceId: Schema.optionalKey(Schema.String),
     acquisitionId: Schema.optionalKey(Schema.String),
-    processingSessionId: Schema.optionalKey(Schema.String),
+    processingProjectId: Schema.optionalKey(Schema.String),
     processingOutputId: Schema.optionalKey(Schema.String),
     operationIds: Schema.optionalKey(Schema.Array(Schema.String)),
   }),

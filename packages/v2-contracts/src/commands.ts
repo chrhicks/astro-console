@@ -4,33 +4,21 @@ import {
   AssetFreshness,
   AssetId,
   AttemptId,
-  CheckpointId,
   ClientId,
   CommandId,
   DurableMutation,
-  FindingId,
   LeaseFreshness,
   NonNegativeInt,
   PlanId,
   PlanRevision,
   PreviewId,
-  ProcessingFreshness,
-  ProcessingOutputId,
-  ProcessingProjectId,
-  ProcessingProjectRevision,
-  ProcessingStageAttemptId,
-  ProcessingSessionId,
   ProposalId,
   RepresentationId,
   RunFreshness,
 } from './primitives.js'
 import {
-  DevelopOperation,
-  ExecutableProcessingStage,
-  ProcessingProjectStage,
-  ProcessingProjectSourceSelection,
-  ProcessingStageSetting,
-  ProcessingSourceRole,
+  CreateProcessingProjectRequest,
+  ProcessingProjectChangeRequest,
 } from './processing-project-domain.js'
 
 const RunAndLeaseFreshness = {
@@ -41,10 +29,6 @@ const RunAndLeaseFreshness = {
 const AcquireCommandFreshness = {
   ...RunAndLeaseFreshness,
   ...AcquireFreshness,
-}
-
-const SourceSelection = {
-  sourceAssetIds: Schema.NonEmptyArray(AssetId),
 }
 
 export const RunSequenceDefinition = Schema.Struct({
@@ -117,38 +101,6 @@ export const CorrectionRevision = Schema.Struct({
   declinationArcsec: Schema.Finite,
 })
 
-export const ProcessingParameterValue = Schema.TaggedUnion({
-  NumberValue: { value: Schema.Finite },
-  BooleanValue: { value: Schema.Boolean },
-  TextValue: { value: Schema.String },
-  ChoiceValue: { value: Schema.NonEmptyString },
-})
-
-export const ProcessingParameter = Schema.Struct({
-  key: Schema.NonEmptyString,
-  value: ProcessingParameterValue,
-})
-
-export const ProcessingDestination = Schema.TaggedUnion({
-  SourceAssets: { assetIds: Schema.NonEmptyArray(AssetId) },
-  ExistingSession: { sessionId: ProcessingSessionId },
-  SavedAsset: { assetId: AssetId },
-})
-
-export const ProcessingArtifactSelection = Schema.Struct({
-  outputId: ProcessingOutputId,
-  format: Schema.Literals(['fits', 'tiff', 'png', 'jpeg']),
-  role: Schema.Literals(['linearMaster', 'intermediate', 'final', 'preview']),
-})
-
-export const ProcessingSwitchDisposition = Schema.TaggedUnion({
-  LeaveUnfinished: {},
-  SaveAndSwitch: {
-    artifacts: Schema.NonEmptyArray(ProcessingArtifactSelection),
-  },
-  DiscardAndSwitch: { confirmationId: Schema.NonEmptyString },
-})
-
 export const acceptedCommandTags = [
   'StartRunFromPlan',
   'PreviewRunMutation',
@@ -175,46 +127,10 @@ export const acceptedCommandTags = [
   'RecenterManagedCapture',
   'CapturePolarAlignmentMeasurement',
   'AcceptPolarAlignmentEvidence',
-  'StartProcessingSession',
   'CreateProcessingProject',
-  'AddProcessingProjectSources',
-  'RemoveProcessingProjectSource',
-  'AssignProcessingSourceRole',
-  'NavigateProcessingProjectStage',
-  'UpdateProcessingStageDraft',
-  'UndoProcessingStageDraft',
-  'RedoProcessingStageDraft',
-  'SetCalibrationUseAnyway',
-  'SetRegistrationFrameIncluded',
-  'SetStackingFrameIncluded',
-  'RunProcessingProjectStage',
-  'SelectProcessingStageResult',
-  'SaveProcessingProjectMaster',
-  'OpenProcessingProjectDevelop',
-  'UpdateProcessingDevelopDraft',
-  'UndoProcessingDevelopDraft',
-  'RedoProcessingDevelopDraft',
-  'SyncProcessingDevelopPreview',
-  'ApplyProcessingDevelopPreview',
-  'UndoProcessingDevelopStep',
-  'RedoProcessingDevelopStep',
-  'RetryProcessingDevelopApply',
-  'SaveProcessingDevelopResult',
-  'ResumeProcessingSession',
-  'SyncProcessingPreview',
-  'ApplyProcessingPreview',
-  'UndoProcessingStep',
-  'RedoProcessingStep',
-  'PreviewAssistantSuggestion',
-  'MarkAssistantFindingViewed',
-  'RetryProcessingStep',
-  'RetryProcessingBuild',
-  'SwitchProcessingContext',
-  'SaveProcessingArtifacts',
-  'DiscardProcessingSession',
+  'ChangeProcessingProject',
   'RequestAssetDownload',
   'RepublishAssetRepresentation',
-  'OpenAssetInProcess',
 ] as const
 
 export const CommandTag = Schema.Literals(acceptedCommandTags)
@@ -334,214 +250,11 @@ export const Command = Schema.TaggedUnion({
     attemptId: AttemptId,
     ...DurableMutation,
   },
-  StartProcessingSession: {
-    ...SourceSelection,
-    selection: Schema.optionalKey(Schema.Literal('recommended')),
-    ...DurableMutation,
-  },
   CreateProcessingProject: {
-    name: Schema.NonEmptyString,
-    selection: ProcessingProjectSourceSelection,
-    ...DurableMutation,
+    ...CreateProcessingProjectRequest.fields,
   },
-  AddProcessingProjectSources: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    selection: ProcessingProjectSourceSelection,
-    ...DurableMutation,
-  },
-  RemoveProcessingProjectSource: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    assetId: AssetId,
-    ...DurableMutation,
-  },
-  AssignProcessingSourceRole: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    assetId: AssetId,
-    role: ProcessingSourceRole,
-    ...DurableMutation,
-  },
-  NavigateProcessingProjectStage: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    stage: ProcessingProjectStage,
-    ...DurableMutation,
-  },
-  UpdateProcessingStageDraft: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    stage: ExecutableProcessingStage,
-    settings: Schema.Array(ProcessingStageSetting),
-    ...DurableMutation,
-  },
-  UndoProcessingStageDraft: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    stage: ExecutableProcessingStage,
-    ...DurableMutation,
-  },
-  RedoProcessingStageDraft: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    stage: ExecutableProcessingStage,
-    ...DurableMutation,
-  },
-  SetCalibrationUseAnyway: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    assetId: AssetId,
-    useAnyway: Schema.Boolean,
-    ...DurableMutation,
-  },
-  SetRegistrationFrameIncluded: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    assetId: AssetId,
-    included: Schema.Boolean,
-    ...DurableMutation,
-  },
-  SetStackingFrameIncluded: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    assetId: AssetId,
-    included: Schema.Boolean,
-    ...DurableMutation,
-  },
-  RunProcessingProjectStage: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    stage: ExecutableProcessingStage,
-    ...DurableMutation,
-  },
-  SelectProcessingStageResult: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    stage: ExecutableProcessingStage,
-    attemptId: ProcessingStageAttemptId,
-    ...DurableMutation,
-  },
-  SaveProcessingProjectMaster: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    ...DurableMutation,
-  },
-  OpenProcessingProjectDevelop: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    assetId: AssetId,
-    ...DurableMutation,
-  },
-  UpdateProcessingDevelopDraft: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    operation: DevelopOperation,
-    ...DurableMutation,
-  },
-  UndoProcessingDevelopDraft: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    ...DurableMutation,
-  },
-  RedoProcessingDevelopDraft: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    ...DurableMutation,
-  },
-  SyncProcessingDevelopPreview: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    expectedDevelopDraftRevision: Schema.Int,
-    ...DurableMutation,
-  },
-  ApplyProcessingDevelopPreview: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    previewId: PreviewId,
-    ...DurableMutation,
-  },
-  UndoProcessingDevelopStep: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    ...DurableMutation,
-  },
-  RedoProcessingDevelopStep: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    ...DurableMutation,
-  },
-  RetryProcessingDevelopApply: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    failedAttemptId: AttemptId,
-    ...DurableMutation,
-  },
-  SaveProcessingDevelopResult: {
-    projectId: ProcessingProjectId,
-    expectedProjectRevision: ProcessingProjectRevision,
-    ...DurableMutation,
-  },
-  ResumeProcessingSession: {
-    ...ProcessingFreshness,
-  },
-  SyncProcessingPreview: {
-    ...ProcessingFreshness,
-    operation: Schema.NonEmptyString,
-    toolId: Schema.NonEmptyString,
-    parameters: Schema.Array(ProcessingParameter),
-    baseHistoryPosition: NonNegativeInt,
-    clientPreviewSequence: NonNegativeInt,
-  },
-  ApplyProcessingPreview: {
-    ...ProcessingFreshness,
-    previewId: PreviewId,
-    ...DurableMutation,
-  },
-  UndoProcessingStep: {
-    ...ProcessingFreshness,
-    ...DurableMutation,
-  },
-  RedoProcessingStep: {
-    ...ProcessingFreshness,
-    ...DurableMutation,
-  },
-  PreviewAssistantSuggestion: {
-    ...ProcessingFreshness,
-    findingId: FindingId,
-    findingVersion: NonNegativeInt,
-  },
-  MarkAssistantFindingViewed: {
-    sessionId: ProcessingSessionId,
-    findingId: FindingId,
-    findingVersion: NonNegativeInt,
-  },
-  RetryProcessingStep: {
-    ...ProcessingFreshness,
-    failedAttemptId: AttemptId,
-    checkpointId: CheckpointId,
-    ...DurableMutation,
-  },
-  RetryProcessingBuild: {
-    ...ProcessingFreshness,
-    checkpoint: Schema.NonEmptyString,
-    ...DurableMutation,
-  },
-  SwitchProcessingContext: {
-    ...ProcessingFreshness,
-    destination: ProcessingDestination,
-    disposition: ProcessingSwitchDisposition,
-    ...DurableMutation,
-  },
-  SaveProcessingArtifacts: {
-    ...ProcessingFreshness,
-    artifacts: Schema.NonEmptyArray(ProcessingArtifactSelection),
-    ...DurableMutation,
-  },
-  DiscardProcessingSession: {
-    ...ProcessingFreshness,
-    confirmationId: Schema.NonEmptyString,
-    ...DurableMutation,
+  ChangeProcessingProject: {
+    ...ProcessingProjectChangeRequest.fields,
   },
   RequestAssetDownload: {
     assetId: AssetId,
@@ -553,10 +266,6 @@ export const Command = Schema.TaggedUnion({
     representationId: RepresentationId,
     sourceChecksum: Schema.NonEmptyString,
     ...DurableMutation,
-  },
-  OpenAssetInProcess: {
-    assetId: AssetId,
-    unfinishedSessionId: Schema.optionalKey(ProcessingSessionId),
   },
 })
 

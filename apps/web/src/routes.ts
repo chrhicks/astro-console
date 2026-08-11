@@ -3,11 +3,16 @@ import type { Workspace } from './presentation'
 
 export const AssetId = Schema.NonEmptyString.pipe(Schema.brand('AssetId'))
 export type AssetId = Schema.Schema.Type<typeof AssetId>
+export const ProcessingProjectId = Schema.NonEmptyString.pipe(
+  Schema.brand('ProcessingProjectId'),
+)
+export type ProcessingProjectId = Schema.Schema.Type<typeof ProcessingProjectId>
 
 export type Route =
   | { kind: 'workspace'; workspace: Workspace }
   | { kind: 'asset'; assetId: AssetId }
   | { kind: 'process-source'; sourceAssetId: AssetId }
+  | { kind: 'process-project'; projectId: ProcessingProjectId }
   | { kind: 'not-found' }
 
 function decodePathId(value: string) {
@@ -20,6 +25,13 @@ function decodePathId(value: string) {
 
 function decodeAssetId(value: unknown): AssetId | undefined {
   const result = Schema.decodeUnknownResult(AssetId)(value)
+  return Result.isSuccess(result) ? result.success : undefined
+}
+
+function decodeProcessingProjectId(
+  value: unknown,
+): ProcessingProjectId | undefined {
+  const result = Schema.decodeUnknownResult(ProcessingProjectId)(value)
   return Result.isSuccess(result) ? result.success : undefined
 }
 
@@ -51,6 +63,10 @@ export function parseRoute(pathname: string, search = ''): Route {
     const id = decodeAssetId(pathId)
     if (id) return { kind: 'asset', assetId: id }
   }
+  if (first === 'process' && second === 'projects' && pathId) {
+    const id = decodeProcessingProjectId(pathId)
+    if (id) return { kind: 'process-project', projectId: id }
+  }
   return { kind: 'not-found' }
 }
 
@@ -58,6 +74,8 @@ export function routePath(route: Exclude<Route, { kind: 'not-found' }>) {
   if (route.kind === 'workspace') return `/${route.workspace}`
   if (route.kind === 'asset')
     return `/library/assets/${encodeURIComponent(route.assetId)}`
+  if (route.kind === 'process-project')
+    return `/process/projects/${encodeURIComponent(route.projectId)}`
   return `/process?sourceAssetId=${encodeURIComponent(route.sourceAssetId)}`
 }
 
@@ -66,5 +84,6 @@ export const routeWithProjection = routePath
 export function routeWorkspace(route: Route): Workspace | undefined {
   if (route.kind === 'workspace') return route.workspace
   if (route.kind === 'asset') return 'library'
-  if (route.kind === 'process-source') return 'process'
+  if (route.kind === 'process-source' || route.kind === 'process-project')
+    return 'process'
 }

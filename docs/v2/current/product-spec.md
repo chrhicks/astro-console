@@ -104,23 +104,23 @@ must select manually.
 The UI should be designed around durable domain concepts rather than component
 state.
 
-| Entity              | Responsibility                                                                                                                                                                                                             |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Observatory         | Site, horizon, equipment, service health, and shared identity                                                                                                                                                              |
-| Rig                 | A connected set of callable mount, camera, focuser, filter, and storage capabilities                                                                                                                                       |
-| Observing Plan      | Ordered and constrained work proposed for a site, rig, and observing window; it is not limited to nighttime targets                                                                                                        |
-| Sequence            | One target's acquisition contract, capture settings, stop conditions, and failure policy                                                                                                                                   |
-| Active Run          | Immutable `RunDefinition` plus explicit approved runtime changes and current execution state                                                                                                                               |
-| Acquisition Attempt | Evidence and corrections used to align, solve, center, and prepare a target                                                                                                                                                |
-| Frame               | Durable captured evidence with settings, metrics, provenance, and review status                                                                                                                                            |
-| Asset               | Stable identity, lineage, checksums, representations, availability, and authorization for original or derived evidence                                                                                                     |
-| Configured Rig      | One selected Alpaca endpoint and its observed device identities, capabilities, connection state, and safe-state facts; it is not a browser-side device client                                                              |
-| Processing Session  | A durable, resumable Build/Develop working resource with linear applied history, synchronized preview state, working outputs, checkpoints, and references to any saved Library artifacts; it is not itself a Library asset |
-| Control Lease       | The single client currently authorized to issue observing commands                                                                                                                                                         |
-| Client Presence     | Ephemeral authenticated viewer identity, device, freshness, and capability; never authority by itself                                                                                                                      |
+| Entity              | Responsibility                                                                                                                                                                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Observatory         | Site, horizon, equipment, service health, and shared identity                                                                                                                                                                                   |
+| Rig                 | A connected set of callable mount, camera, focuser, filter, and storage capabilities                                                                                                                                                            |
+| Observing Plan      | Ordered and constrained work proposed for a site, rig, and observing window; it is not limited to nighttime targets                                                                                                                             |
+| Sequence            | One target's acquisition contract, capture settings, stop conditions, and failure policy                                                                                                                                                        |
+| Active Run          | Immutable `RunDefinition` plus explicit approved runtime changes and current execution state                                                                                                                                                    |
+| Acquisition Attempt | Evidence and corrections used to align, solve, center, and prepare a target                                                                                                                                                                     |
+| Frame               | Durable captured evidence with settings, metrics, provenance, and review status                                                                                                                                                                 |
+| Asset               | Stable identity, lineage, checksums, representations, availability, and authorization for original or derived evidence                                                                                                                          |
+| Configured Rig      | One selected Alpaca endpoint and its observed device identities, capabilities, connection state, and safe-state facts; it is not a browser-side device client                                                                                   |
+| Processing Project  | The durable, target-owned Process lifecycle. It owns exact Library sources, explicit stage drafts, immutable attempts, Current Result histories, synchronized Develop preview, unsaved working results, and references to saved Library Assets. |
+| Control Lease       | The single client currently authorized to issue observing commands                                                                                                                                                                              |
+| Client Presence     | Ephemeral authenticated viewer identity, device, freshness, and capability; never authority by itself                                                                                                                                           |
 
 The Astro Console service owns accepted run execution, mutation impact,
-current rig and workflow state, processing sessions, asset identity, presence,
+current rig and workflow state, Processing Projects, asset identity, presence,
 and the exclusive control lease. It decodes Alpaca provider data at its adapter
 boundary and records later observation or image evidence separately from a
 provider acknowledgement. These facts do not belong to a workspace, React
@@ -143,9 +143,9 @@ tree, browser tab, or connected client.
 ### Revisions, Freshness, And Reconnect
 
 The product keeps source-plan revision, current run revision, complete snapshot
-version, incremental event cursor, control-lease revision, and processing
-revision conceptually distinct. Primary UI uses semantic state; raw identifiers
-remain secondary diagnostics.
+version, incremental event cursor, control-lease revision, and Processing
+Project revision conceptually distinct. Primary UI uses semantic state; raw
+identifiers remain secondary diagnostics.
 
 - Every consequential intent is checked against current service-owned truth.
   Stale run, lease, or processing intent fails before physical or durable
@@ -560,6 +560,10 @@ original survive.
 Process transforms selected evidence while remaining independent of live rig
 control.
 
+Process Authority belongs to an owner on a mutation-capable desktop with a
+current Project revision. It does not require or inspect the observatory
+Control Lease. Phone remains read-only.
+
 Its accepted interaction model is recorded in the
 [Gate 4 Process reference](../gates/gate-04-process.md). Current composition and
 interaction authority lives in the [UI and UX direction](ui-ux.md) and the
@@ -577,13 +581,13 @@ expansion is in the [Item 3.5 Process workflow plan](process-workflow-plan.md).
 - use explained `Include`, `Exclude`, and `Review` determinations to reduce a
   large source group to a small exception queue while keeping manual
   `Accepted`, `Rejected`, and `Unreviewed` judgment distinct;
-- expose persistent Sources, Calibration, Registration, Stacking, Master, and
-  Develop stages, with explicit Run or Rerun actions and retained attempts for
-  each executable stage;
+- expose Sources, Calibration, Registration, Stacking, Master, and Develop as
+  client navigation over an explicitly opened Project, with explicit Run or
+  Rerun actions and retained attempts for each executable stage;
 - build and save a durable linear Master before Develop opens that exact saved
   Library artifact;
 - visually develop that Master through astronomy-specific operations and one
-  current, non-destructive edit history with undo and redo;
+  Current Result in a non-destructive linear history with undo and redo;
 - keep a large image preview visible while tools and adjustable parameters are
   evaluated;
 - automatically synchronize complete preview settings to the service after a
@@ -607,18 +611,20 @@ expansion is in the [Item 3.5 Process workflow plan](process-workflow-plan.md).
   unaffected upstream stages;
 - expose bounded owner-safe tool output and retry scope without replacing the
   visual editor;
-- switch among Processing Projects, stage attempts, saved Masters, and Library
-  sources while protecting unsaved work;
-- leave a synchronized session unfinished and resumable when switching data,
-  without turning the session itself into a Library artifact;
+- open Processing Projects by stable Project ID, inspect secondary attempt
+  evidence, and switch among saved Masters and Library sources while protecting
+  unsaved work;
+- leave a Processing Project unfinished and resumable when switching data,
+  without turning the Project itself into a Library Asset;
 - record exact inputs, parameters, tool versions, and provenance underneath
   the focused editing experience; and
 - save selected FITS and display artifacts into Library, or discard unsaved
   derived work while preserving source frames.
 
 General comparison among saved outputs belongs to Library; Process may open
-that capability as a convenience. Internal attempts and diagnostics remain
-inspectable but do not become the primary workspace navigation.
+that capability as a convenience. Immutable attempts and diagnostics remain
+available as secondary evidence but do not become the primary workspace
+navigation. The primary workspace shows the Current Result for each stage.
 
 Process is not a general photo editor. Layers, masks, brushes, painting, text,
 arbitrary selections, compositing, and a general node graph are out of scope.
@@ -672,6 +678,13 @@ Each executable stage attempt then freezes its own inputs, upstream result,
 settings, tool identity, decisions, overrides, outcomes, diagnostics, and
 outputs. Later Library or upstream changes do not silently alter a completed
 attempt.
+
+Each executable stage keeps one linear successful-result history. Run advances
+the Current Result; Undo and Redo move it. A failed attempt never replaces the
+Current Result. A successful Run after Undo replaces the product redo branch,
+while removed redo attempts remain immutable evidence. Current Result currency
+uses exact upstream lineage, so restoring an earlier upstream result also
+restores a matching downstream result when one exists.
 
 ## 9. Local Plate-Solve Evidence
 

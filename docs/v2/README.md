@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; Process execution and Item 3.5 complete; Nightbook routes promoted locally; ad-hoc architecture audit next**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; Nightbook routes promoted locally; Processing Project lifecycle refactor complete locally**
 
 Keep normal working context small. Do not read the complete V2 tree.
 
@@ -18,20 +18,20 @@ specific detail.
 
 ## Load On Demand
 
-| Need                                                      | Read                                                                                                         |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| UI or UX work, beta alignment, or route promotion         | [Current UI and UX direction](current/ui-ux.md), then the external Nightbook demo it names                   |
-| Accepted beta real-runtime delivery or Alpaca simulation  | [Nightbook beta real-runtime plan](current/beta-real-runtime-plan.md)                                        |
-| Explicit Process workflow and Item 3.5 delivery           | [Item 3.5 Process workflow plan](current/process-workflow-plan.md)                                           |
-| Workspace behavior or product entities                    | [Current product specification](current/product-spec.md); use it for domain truth, not visual composition    |
-| Accepted Gate 5 scenarios and ownership                   | [Gate 5 baseline](current/gate-05-scenarios.md)                                                              |
-| Accepted consequential actions                            | [Gate 5 action map](current/gate-05-action-map.md)                                                           |
-| Accepted contract language                                | [Gate 5 contract vocabulary](current/gate-05-contract-vocabulary.md)                                         |
-| Executable schemas and fixtures                           | [V2 contracts package](../../packages/v2-contracts/README.md)                                                |
-| Accepted interaction or ownership evidence                | One relevant document under [accepted gates](gates/README.md); gate layouts are not current visual authority |
-| Deployment, Cloudflare, storage, security, or operations  | [Infrastructure plan](infra/README.md), then only its relevant section                                       |
-| Completed plans, former UI authority, or rejected options | [Documentation archive](archive/README.md) or Git history                                                    |
-| Ideas outside current delivery                            | [Post-V2.0 notes](current/v2-post-v2.0-notes.md)                                                             |
+| Need                                                      | Read                                                                                                          |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| UI or UX work, beta alignment, or route promotion         | [Current UI and UX direction](current/ui-ux.md), then the external Nightbook demo it names                    |
+| Accepted beta real-runtime delivery or Alpaca simulation  | [Nightbook beta real-runtime plan](current/beta-real-runtime-plan.md)                                         |
+| Explicit Process workflow and Item 3.5 delivery           | [Item 3.5 Process workflow plan](current/process-workflow-plan.md)                                            |
+| Workspace behavior or product entities                    | [Current product specification](current/product-spec.md); use it for domain truth, not visual composition     |
+| Accepted Gate 5 scenarios and ownership                   | [Gate 5 baseline](current/gate-05-scenarios.md)                                                               |
+| Accepted non-Process consequential actions                | [Gate 5 action map](current/gate-05-action-map.md); its Process rows are a superseded historical baseline     |
+| Accepted non-Process contract language                    | [Gate 5 contract vocabulary](current/gate-05-contract-vocabulary.md); use the current Process documents above |
+| Executable schemas and fixtures                           | [V2 contracts package](../../packages/v2-contracts/README.md)                                                 |
+| Accepted interaction or ownership evidence                | One relevant document under [accepted gates](gates/README.md); gate layouts are not current visual authority  |
+| Deployment, Cloudflare, storage, security, or operations  | [Infrastructure plan](infra/README.md), then only its relevant section                                        |
+| Completed plans, former UI authority, or rejected options | [Documentation archive](archive/README.md) or Git history                                                     |
+| Ideas outside current delivery                            | [Post-V2.0 notes](current/v2-post-v2.0-notes.md)                                                              |
 
 ## Current Position
 
@@ -49,6 +49,14 @@ package in the external Nightbook workspace. Astro Console renders that
 presentation for Plan, Observe, Library, and Process. The former presentation
 has been removed. Existing `?ui=beta` and `?ui=legacy` links remain compatible,
 but generated links omit the presentation parameter.
+
+Process now has one explicit, project-ID-addressed Processing Project
+lifecycle. Its deep service interface owns Project authority, revisions,
+semantic intent receipts, drafts, immutable attempts, Current Result history,
+work claims, settlement, evidence, and Library save lineage. The former
+Processing Session contracts, projections, tables, APIs, and test data are
+retired. Current proof uses the deterministic local materializer; a real
+processing library adapter remains intentionally deferred.
 
 ## Context Rules
 

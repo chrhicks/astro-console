@@ -2,6 +2,11 @@
 
 Status: **accepted July 22, 2026**
 
+> **Current Process authority:** The Process rows in this Gate 5 baseline are
+> historical. Use the current [product specification](product-spec.md) and
+> [Process workflow](process-workflow-plan.md). The Processing Project lifecycle
+> replaces the retired Processing Session actions below.
+
 This document maps the accepted Gate 5 scenarios to service-facing intent
 contracts. It follows the accepted
 [scenario and state-ownership baseline](gate-05-scenarios.md) and does not

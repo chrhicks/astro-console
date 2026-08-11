@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–4 complete locally; ad-hoc architecture audit next**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–4 complete locally; Processing Project lifecycle refactor complete locally**
 
 ## Current Position
 
@@ -260,6 +260,25 @@ Functional and Designer review passed at wide, compact, and 390 px phone
 widths; phone remained read-only. This proves local deterministic service,
 SQLite, and browser behavior only.
 
+The follow-on architecture work replaced the split Process implementation with
+one Processing Project lifecycle module. Callers now use `list`, `create`,
+`open`, `evidence`, `change`, and `changes` against an explicit Project ID. The
+module owns owner-and-desktop authority independently of the observatory Control
+Lease, optimistic Project revisions, semantic intent receipts, bounded drafts,
+immutable attempts, linear Current Result undo and redo, exact upstream
+lineage restoration, durable work claims and settlement, secondary evidence,
+and saved Library lineage. Stage viewing is client-only navigation.
+
+The old Processing Session domain, global projection, command surface,
+workspace tables, save tables, worker API, processor executable, and test data
+are removed. Startup performs one destructive reset only when it detects the
+retired Process schema, then preserves the new Project data on normal restarts.
+The HTTP boundary is now `/api/process/projects` plus explicit Project detail,
+evidence, and change routes. The Nightbook Library creates or adds exact source
+selections without requiring the observatory Control Lease, and Project pages
+show Current Result as the product state while retained attempts remain
+evidence. A real Siril, RC Astro, or other processor adapter is not installed.
+
 After that simulator proof, an indoor GET-only readiness check reached ASCOM
 Remote at `192.168.4.104:11111`. Management and every device-property envelope
 returned `ErrorNumber: 0`. The configured identities were Telescope 0 `ASI
@@ -361,15 +380,15 @@ snapshot-gap recovery. Simulation and Library review controls follow the fresh
 held desktop lease, not whether Plan or Observe happens to have another eligible
 action, so moving between workspaces does not make the controller read-only.
 
-Current automated proof is green: contracts 187/187, server 184/184, and web
-136/136. Functional browser proof covered the normal Plan-to-Verify workflow,
+Current automated proof is green: contracts 147/147, server 173/173, and web
+109/109. Functional browser proof covered the normal Plan-to-Verify workflow,
 fresh acceptance projection, restart/no-replay, abort and reconciliation
-states. Automated browser projections cover the exact Observe-to-Library link
-and Library review state. Final read-only Designer review of the matching live
-retained frame passed at wide, 768 px, and 390 px. It corrected compressed
-compact Observe panels and added the exact read-only Library handoff to phone
-Observe. The 390 px projection has no horizontal overflow or mutation control,
-and an idle interval produced no refresh churn.
+states. It also covered explicit Project intake and routing, client-only stage
+navigation, deterministic Calibration settlement, live Current Result refresh,
+and a 390 px Project projection with no mutation control or horizontal
+overflow. Automated browser projections cover the exact Observe-to-Library
+link and Library review state. Designer review covers wide, 768 px, and 390 px
+Nightbook states separately.
 
 ## Observability
 
@@ -416,13 +435,14 @@ production deployment of the promoted routes, mount movement, live
 abort behavior, production processing tools, or sky image quality from the
 covered indoor frame.
 
-## Next Accepted Item
+## Next Owner Action
 
-**Run the ad-hoc architecture audit in a separate session.** Review the
-promoted system's current contracts, services, persistence, workers, web
-composition, deployment seams, and tests. Report prioritized findings before
-authorizing refactors. The legacy UI cleanup is complete and does not start
-this audit.
+Review and commit the completed Processing Project lifecycle work. Select and
+integrate a real processing library only in a later accepted item; the current
+deterministic materializer proves orchestration and evidence, not astronomy
+processing quality. The remaining accepted delivery list continues with the
+host backup repair and owner-observed outdoor Acquire proof when its operating
+window is available.
 
 ## Later Accepted Items
 

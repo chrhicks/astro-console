@@ -41,10 +41,11 @@ export type OriginRouterDependencies = {
     request: IncomingMessage,
   ) => RouteResult
   readonly planWorkspace: (response: ServerResponse) => RouteResult
-  readonly processWorkspace: (
+  readonly processingProjects: (
     response: ServerResponse,
-    url: URL,
     identity: LocalIdentity,
+    request: IncomingMessage,
+    url: URL,
   ) => RouteResult
   readonly libraryPage: (response: ServerResponse, url: URL) => RouteResult
   readonly libraryDownload: (response: ServerResponse, url: URL) => RouteResult
@@ -56,6 +57,10 @@ export type OriginRouterDependencies = {
     response: ServerResponse,
     encodedAssetId: string,
     identity: LocalIdentity,
+  ) => RouteResult
+  readonly libraryProcessSource: (
+    response: ServerResponse,
+    encodedAssetId: string,
   ) => RouteResult
   readonly observeLiveFrameReview: (
     response: ServerResponse,
@@ -73,11 +78,6 @@ export type OriginRouterDependencies = {
     request: IncomingMessage,
   ) => RouteResult
   readonly observeCommand: (
-    response: ServerResponse,
-    identity: LocalIdentity,
-    request: IncomingMessage,
-  ) => RouteResult
-  readonly processCommand: (
     response: ServerResponse,
     identity: LocalIdentity,
     request: IncomingMessage,
@@ -136,8 +136,11 @@ export const createOriginRouter =
       return dependencies.simulationControl(response, identity, request)
     if (request.method === 'GET' && url.pathname === '/api/workspaces/plan')
       return dependencies.planWorkspace(response)
-    if (request.method === 'GET' && url.pathname === '/api/workspaces/process')
-      return dependencies.processWorkspace(response, url, identity)
+    if (
+      url.pathname === '/api/process/projects' ||
+      url.pathname.startsWith('/api/process/projects/')
+    )
+      return dependencies.processingProjects(response, identity, request, url)
     if (request.method === 'GET' && url.pathname === '/api/library')
       return dependencies.libraryPage(response, url)
     if (request.method === 'GET' && url.pathname === '/api/observe/live-frame')
@@ -148,6 +151,18 @@ export const createOriginRouter =
       url.pathname.endsWith('/download')
     )
       return dependencies.libraryDownload(response, url)
+    if (
+      request.method === 'GET' &&
+      url.pathname.startsWith('/api/library/assets/') &&
+      url.pathname.endsWith('/process-source')
+    )
+      return dependencies.libraryProcessSource(
+        response,
+        url.pathname.slice(
+          '/api/library/assets/'.length,
+          -'/process-source'.length,
+        ),
+      )
     if (
       request.method === 'GET' &&
       url.pathname.startsWith('/api/library/assets/') &&
@@ -181,8 +196,6 @@ export const createOriginRouter =
       return dependencies.planCommand(response, identity, request)
     if (request.method === 'POST' && url.pathname === '/api/observe/commands')
       return dependencies.observeCommand(response, identity, request)
-    if (request.method === 'POST' && url.pathname === '/api/process/commands')
-      return dependencies.processCommand(response, identity, request)
     if (request.method === 'POST' && url.pathname === '/api/observe/preflight')
       return dependencies.refreshPreflight(response, identity, request)
     if (request.method === 'POST' && url.pathname === '/api/acquire/commands')

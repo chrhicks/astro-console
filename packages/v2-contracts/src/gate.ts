@@ -10,7 +10,6 @@ import {
   MembershipRole,
   PersonId,
   PlanRevision,
-  ProcessingRevision,
   RunRevision,
   SnapshotVersion,
   OperationId,
@@ -32,7 +31,6 @@ export const CurrentRevisions = Schema.Struct({
   run: Schema.optionalKey(RunRevision),
   lease: Schema.optionalKey(LeaseRevision),
   acquire: Schema.optionalKey(AcquireRevision),
-  processing: Schema.optionalKey(ProcessingRevision),
   asset: Schema.optionalKey(AssetRevision),
 })
 
@@ -108,52 +106,10 @@ export const commandPolicies = {
     authority: 'controller',
     requiresDesktop: true,
   },
-  StartProcessingSession: { authority: 'owner', requiresDesktop: true },
   CreateProcessingProject: { authority: 'owner', requiresDesktop: true },
-  AddProcessingProjectSources: { authority: 'owner', requiresDesktop: true },
-  RemoveProcessingProjectSource: {
-    authority: 'owner',
-    requiresDesktop: true,
-  },
-  AssignProcessingSourceRole: { authority: 'owner', requiresDesktop: true },
-  NavigateProcessingProjectStage: { authority: 'owner', requiresDesktop: true },
-  UpdateProcessingStageDraft: { authority: 'owner', requiresDesktop: true },
-  UndoProcessingStageDraft: { authority: 'owner', requiresDesktop: true },
-  RedoProcessingStageDraft: { authority: 'owner', requiresDesktop: true },
-  SetCalibrationUseAnyway: { authority: 'owner', requiresDesktop: true },
-  SetRegistrationFrameIncluded: {
-    authority: 'owner',
-    requiresDesktop: true,
-  },
-  SetStackingFrameIncluded: { authority: 'owner', requiresDesktop: true },
-  RunProcessingProjectStage: { authority: 'owner', requiresDesktop: true },
-  SelectProcessingStageResult: { authority: 'owner', requiresDesktop: true },
-  SaveProcessingProjectMaster: { authority: 'owner', requiresDesktop: true },
-  OpenProcessingProjectDevelop: { authority: 'owner', requiresDesktop: true },
-  UpdateProcessingDevelopDraft: { authority: 'owner', requiresDesktop: true },
-  UndoProcessingDevelopDraft: { authority: 'owner', requiresDesktop: true },
-  RedoProcessingDevelopDraft: { authority: 'owner', requiresDesktop: true },
-  SyncProcessingDevelopPreview: { authority: 'owner', requiresDesktop: true },
-  ApplyProcessingDevelopPreview: { authority: 'owner', requiresDesktop: true },
-  UndoProcessingDevelopStep: { authority: 'owner', requiresDesktop: true },
-  RedoProcessingDevelopStep: { authority: 'owner', requiresDesktop: true },
-  RetryProcessingDevelopApply: { authority: 'owner', requiresDesktop: true },
-  SaveProcessingDevelopResult: { authority: 'owner', requiresDesktop: true },
-  ResumeProcessingSession: { authority: 'owner', requiresDesktop: true },
-  SyncProcessingPreview: { authority: 'owner', requiresDesktop: true },
-  ApplyProcessingPreview: { authority: 'owner', requiresDesktop: true },
-  UndoProcessingStep: { authority: 'owner', requiresDesktop: true },
-  RedoProcessingStep: { authority: 'owner', requiresDesktop: true },
-  PreviewAssistantSuggestion: { authority: 'owner', requiresDesktop: true },
-  MarkAssistantFindingViewed: { authority: 'owner', requiresDesktop: true },
-  RetryProcessingStep: { authority: 'owner', requiresDesktop: true },
-  RetryProcessingBuild: { authority: 'owner', requiresDesktop: true },
-  SwitchProcessingContext: { authority: 'owner', requiresDesktop: true },
-  SaveProcessingArtifacts: { authority: 'owner', requiresDesktop: true },
-  DiscardProcessingSession: { authority: 'owner', requiresDesktop: true },
+  ChangeProcessingProject: { authority: 'owner', requiresDesktop: true },
   RequestAssetDownload: { authority: 'member', requiresDesktop: false },
   RepublishAssetRepresentation: { authority: 'owner', requiresDesktop: true },
-  OpenAssetInProcess: { authority: 'owner', requiresDesktop: true },
 } satisfies Record<CommandEnvelope['command']['_tag'], CommandPolicy>
 
 export type CommandGateDecision = Data.TaggedEnum<{
@@ -339,16 +295,6 @@ function evaluateMemberCommandGate(
     )
   }
   if (
-    'expectedProcessingRevision' in command &&
-    command.expectedProcessingRevision !== input.currentRevisions.processing
-  ) {
-    return freshnessConflict(
-      input,
-      'ProcessingSessionRevisionConflict',
-      'The processing session changed',
-    )
-  }
-  if (
     'expectedAssetRevision' in command &&
     command.expectedAssetRevision !== input.currentRevisions.asset
   ) {
@@ -384,7 +330,6 @@ function freshnessConflict(
     | 'PlanRevisionConflict'
     | 'RunRevisionConflict'
     | 'AcquireRevisionConflict'
-    | 'ProcessingSessionRevisionConflict'
     | 'AssetRevisionConflict',
   summary: string,
 ) {
