@@ -147,22 +147,28 @@ test('aborts a Process response body when its Effect is interrupted', async () =
   })
   globalThis.fetch = async (_input, init) => {
     signal = init?.signal ?? undefined
-    return {
-      status: 200,
-      json: () => {
-        markBodyStarted?.()
-        return new Promise<unknown>((_resolve, reject) => {
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start: (controller) => {
           signal?.addEventListener(
             'abort',
             () => {
               markAborted?.()
-              reject(new DOMException('Aborted', 'AbortError'))
+              controller.error(new DOMException('Aborted', 'AbortError'))
             },
             { once: true },
           )
-        })
+        },
+        pull: () => {
+          markBodyStarted?.()
+          return new Promise<void>(() => undefined)
+        },
+      }),
+      {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
       },
-    } as Response
+    )
   }
   try {
     const fiber = Effect.runFork(processClient.list())

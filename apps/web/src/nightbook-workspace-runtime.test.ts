@@ -4,13 +4,13 @@ import {
   AcquireRevision,
   AssetRevision,
   IdempotencyKey,
-  LibraryAssetDetail as LibraryAssetDetailSchema,
-  LibraryPage as LibraryPageSchema,
-  LibraryQuery as LibraryQuerySchema,
+  LibraryAssetDetail,
+  LibraryPage,
+  LibraryQuery,
   LibraryQueryId,
   LeaseRevision,
-  OpenedProcessingProject as OpenedProcessingProjectSchema,
-  ProcessingProjectEvidence as ProcessingProjectEvidenceSchema,
+  OpenedProcessingProject,
+  ProcessingProjectEvidence,
   ProcessingProjectId,
   ProcessingProjectRevision,
   RunRevision,
@@ -36,21 +36,21 @@ import {
 } from './nightbook-workspace-runtime'
 
 const query = (id: string) =>
-  LibraryQuerySchema.make({
+  LibraryQuery.make({
     queryId: LibraryQueryId.make(id),
     pageSize: 40,
     sort: 'capturedAtDescending',
   })
 
 const page = (id: string, version: number) =>
-  Schema.decodeUnknownSync(LibraryPageSchema)({
+  Schema.decodeUnknownSync(LibraryPage)({
     queryId: id,
     querySnapshotVersion: version,
     results: [],
     catalogChanged: false,
   })
 
-const detail = Schema.decodeUnknownSync(LibraryAssetDetailSchema)({
+const detail = Schema.decodeUnknownSync(LibraryAssetDetail)({
   assetId: 'asset-1',
   revision: 1,
   role: 'original',
@@ -121,7 +121,7 @@ const processingStages = [
 }))
 
 const openedProject = (revision: number) =>
-  Schema.decodeUnknownSync(OpenedProcessingProjectSchema)({
+  Schema.decodeUnknownSync(OpenedProcessingProject)({
     projectId: 'project-1',
     revision,
     name: 'M27',
@@ -135,7 +135,7 @@ const openedProject = (revision: number) =>
   })
 
 const projectEvidence = () =>
-  Schema.decodeUnknownSync(ProcessingProjectEvidenceSchema)({
+  Schema.decodeUnknownSync(ProcessingProjectEvidence)({
     projectId: 'project-1',
     attempts: [],
   })
