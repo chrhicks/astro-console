@@ -41,6 +41,7 @@ import { OriginListener, originListenerLayer } from '../http/origin-listener.ts'
 import { WebHost, webHostLayer } from '../http/web-host.ts'
 import { openOriginDatabase } from '../persistence/database.ts'
 import type {
+  AdmissionRequest,
   AdmissionObservation,
   LocalIdentity,
   RequestAdmission,
@@ -812,8 +813,10 @@ function constructLocalWebService(
 
   const handler = (requestAdmission: RequestAdmission = identityResolver) => {
     const observedAdmission: RequestAdmission = (request) => {
-      const pathname = new URL(request?.url ?? '/', 'http://local').pathname
-      if (!pathname.startsWith('/api/') || pathname.startsWith('/api/health/'))
+      if (
+        !request.path.startsWith('/api/') ||
+        request.path.startsWith('/api/health/')
+      )
         return requestAdmission(request)
       return telemetry.runPromise(
         tracedAdmission(
@@ -1689,7 +1692,12 @@ function constructLocalWebService(
       if (request.method === 'GET' && url.pathname === '/health/live')
         return routes.live(response)
       routes.expireReconnectGrace()
-      const identity = await routes.identityResolver(request)
+      const admissionRequest: AdmissionRequest = {
+        method: request.method ?? 'GET',
+        path: url.pathname,
+        headers: request.headers,
+      }
+      const identity = await routes.identityResolver(admissionRequest)
       if (identity === undefined)
         return routes.unauthenticated(
           response,
@@ -1824,7 +1832,11 @@ function constructLocalWebService(
     Effect.runSync(Scope.close(runtimeScope, Exit.void))
   }
   const projectionIdentity = () => {
-    const identity = identityResolver()
+    const identity = identityResolver({
+      method: 'GET',
+      path: '/api/snapshot',
+      headers: {},
+    })
     return identity instanceof Promise
       ? {
           personId: 'system',

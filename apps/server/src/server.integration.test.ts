@@ -12,7 +12,6 @@ import {
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
-import type { IncomingMessage } from 'node:http'
 import { generateKeyPairSync, sign } from 'node:crypto'
 import { Cause, ConfigProvider, Effect, Exit, Schema } from 'effect'
 import {
@@ -72,6 +71,7 @@ import { alpacaPreflightProvider } from './providers/alpaca-preflight-provider.t
 import { alpacaCameraProvider } from './providers/alpaca-camera-provider.ts'
 import { materializeCapturedFrame } from './services/captured-frame-intake.ts'
 import { createPlateSolveWorker } from './workers/plate-solve-worker.ts'
+import type { AdmissionRequest } from './auth/identity.ts'
 
 function createFixtureService(
   databasePath?: Parameters<typeof createLocalWebService>[0],
@@ -93,6 +93,10 @@ async function bootstrapSnapshot(url: string, init?: RequestInit) {
   const body: unknown = await response.json()
   return Schema.decodeUnknownSync(BootstrapHttpSuccessEnvelope)(body).data
 }
+
+const admissionRequest = (
+  headers: AdmissionRequest['headers'] = {},
+): AdmissionRequest => ({ method: 'GET', path: '/api/snapshot', headers })
 
 function retainedFitsWithHints() {
   const card = (key: string, value: string) =>
@@ -2022,8 +2026,8 @@ test('managed capture persists guarded progress actions, replay, SSE, restart, a
     mkdtempSync(join(tmpdir(), 'astro-managed-capture-')),
     'state.sqlite',
   )
-  const admission = (request?: Pick<IncomingMessage, 'headers'>) =>
-    request?.headers.authorization === 'Bearer phone'
+  const admission = (request: AdmissionRequest) =>
+    request.headers.authorization === 'Bearer phone'
       ? {
           personId: 'owner-chicks',
           clientId: 'phone-owner',
@@ -2133,8 +2137,8 @@ test('Acquire recovery is bounded, reconciled, idempotent, streamed, restart-saf
     mkdtempSync(join(tmpdir(), 'astro-acquire-recovery-')),
     'state.sqlite',
   )
-  const admission = (request?: Pick<IncomingMessage, 'headers'>) =>
-    request?.headers.authorization === 'Bearer phone'
+  const admission = (request: AdmissionRequest) =>
+    request.headers.authorization === 'Bearer phone'
       ? {
           personId: 'owner-chicks',
           clientId: 'phone-owner',
@@ -3603,8 +3607,8 @@ test('expired control requests are removed before projection and grant', async (
     mkdtempSync(join(tmpdir(), 'astro-control-request-expiry-')),
     'state.sqlite',
   )
-  const admission = (request?: Pick<IncomingMessage, 'headers'>) =>
-    request?.headers.authorization === 'Bearer member'
+  const admission = (request: AdmissionRequest) =>
+    request.headers.authorization === 'Bearer member'
       ? {
           personId: 'member',
           clientId: 'desktop-member',
@@ -4108,7 +4112,7 @@ test('origin admission factory consumes decoded configuration', async (t) => {
       ),
     ),
   )
-  const identity = createOriginAdmission(config)()
+  const identity = createOriginAdmission(config)(admissionRequest())
   assert.deepEqual(identity, {
     personId: 'owner-chicks',
     clientId: 'phone-monitor',
@@ -4291,9 +4295,9 @@ test('production admission rechecks normalized bootstrap policy and revokes remo
     observe: (reason) => admissionReasons.push(reason),
   } satisfies Parameters<typeof createProductionAccessAdmission>[0]
   const admitted = createProductionAccessAdmission(config)
-  const request = {
-    headers: { 'cf-access-jwt-assertion': claim('viewer@example.com') },
-  }
+  const request = admissionRequest({
+    'cf-access-jwt-assertion': claim('viewer@example.com'),
+  })
   assert.deepEqual(await admitted(request), {
     personId: 'viewer',
     clientId: 'access:viewer-subject',
@@ -4313,7 +4317,7 @@ test('production admission rechecks normalized bootstrap policy and revokes remo
   )
   const revoked = createProductionAccessAdmission({ ...config, bootstrap: [] })
   assert.equal(await revoked(request), undefined)
-  assert.equal(await admitted({ headers: {} }), undefined)
+  assert.equal(await admitted(admissionRequest()), undefined)
   assert.deepEqual(jwksOutcomes, ['success'])
   assert.deepEqual(admissionReasons, [
     'admitted',
@@ -4391,9 +4395,7 @@ test('production admission reloads a removed membership bootstrap file before th
     }),
   ).toString('base64url')
   const token = `${header}.${payload}.${sign('RSA-SHA256', Buffer.from(`${header}.${payload}`), keys.privateKey).toString('base64url')}`
-  const request = {
-    headers: { 'cf-access-jwt-assertion': token },
-  }
+  const request = admissionRequest({ 'cf-access-jwt-assertion': token })
   assert.equal((await admission(request))?.personId, 'reload-owner')
   unlinkSync(bootstrapPath)
   now += 1_000
@@ -4460,9 +4462,8 @@ test('production Access JWKS admission refreshes by kid, bounds cache use, and f
       { email: 'owner@example.com', personId: 'rotating-owner', role: 'owner' },
     ],
   })
-  const request = (token: string) => ({
-    headers: { 'cf-access-jwt-assertion': token },
-  })
+  const request = (token: string) =>
+    admissionRequest({ 'cf-access-jwt-assertion': token })
   assert.equal(
     (await admission(request(claim('old-kid', oldKeys))))?.personId,
     'rotating-owner',
@@ -5185,8 +5186,21 @@ test('a request query cannot select phone or controller capability', async (t) =
 })
 
 test('separate local owner and remote listeners keep Access clients read-only', async (t) => {
-  const remoteAdmission = (request?: Pick<IncomingMessage, 'headers'>) =>
-    request?.headers.authorization === 'Bearer remote'
+  const admittedRequests: Array<{
+    readonly method: string
+    readonly path: string
+    readonly authorization: string | undefined
+  }> = []
+  const remoteAdmission = (request: AdmissionRequest) => {
+    admittedRequests.push({
+      method: request.method,
+      path: request.path,
+      authorization:
+        typeof request.headers.authorization === 'string'
+          ? request.headers.authorization
+          : undefined,
+    })
+    return request.headers.authorization === 'Bearer remote'
       ? {
           personId: 'viewer-ada',
           clientId: 'access-viewer-ada',
@@ -5194,6 +5208,7 @@ test('separate local owner and remote listeners keep Access clients read-only', 
           capability: 'readOnly' as const,
         }
       : undefined
+  }
   const service = createFixtureService(':memory:', remoteAdmission)
   const remote = await service.listen(0, '127.0.0.1', remoteAdmission)
   const local = await service.listen(
@@ -5208,6 +5223,22 @@ test('separate local owner and remote listeners keep Access clients read-only', 
   })
   const remoteBase = `http://127.0.0.1:${remote.port}`
   const localBase = `http://127.0.0.1:${local.port}`
+  assert.deepEqual(
+    await fetch(`${remoteBase}/health/live`).then((response) =>
+      response.json(),
+    ),
+    { status: 'alive' },
+  )
+  const rejected = await fetch(`${remoteBase}/api/snapshot`)
+  assert.equal(rejected.status, 401)
+  assert.deepEqual(await rejected.json(), {
+    ok: false,
+    failure: {
+      _tag: 'AuthenticationFailure',
+      reason: 'Unauthenticated',
+      summary: 'A verified member identity is required.',
+    },
+  })
   const remoteSnapshot = await bootstrapSnapshot(`${remoteBase}/api/snapshot`, {
     headers: { authorization: 'Bearer remote' },
   })
@@ -5226,6 +5257,23 @@ test('separate local owner and remote listeners keep Access clients read-only', 
   const localSnapshot = await bootstrapSnapshot(`${localBase}/api/snapshot`)
   assert.equal(localSnapshot.membership.role, 'owner')
   assert.equal(localSnapshot.membership.capability, 'controlCapable')
+  assert.deepEqual(admittedRequests, [
+    {
+      method: 'GET',
+      path: '/api/snapshot',
+      authorization: undefined,
+    },
+    {
+      method: 'GET',
+      path: '/api/snapshot',
+      authorization: 'Bearer remote',
+    },
+    {
+      method: 'POST',
+      path: '/api/observe/preflight',
+      authorization: 'Bearer remote',
+    },
+  ])
 })
 
 test('separate remote desktop listener admits shared-control requests while phone remains read-only', async (t) => {

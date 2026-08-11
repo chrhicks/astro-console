@@ -12,10 +12,10 @@ import {
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
-import type { IncomingMessage } from 'node:http'
 import { createHash } from 'node:crypto'
 import { ConfigProvider, Effect, Schema } from 'effect'
 import { createLocalWebService } from '../app/origin-service.ts'
+import type { AdmissionRequest } from '../auth/identity.ts'
 import { openAppOwnedDatabase } from '../persistence/database.ts'
 import { createPublisherWorker } from '../workers/publisher-worker.ts'
 import {
@@ -604,15 +604,15 @@ test('authorized Library downloads issue an Asset-ID grant and redirect without 
     readonly objectKey: string
     readonly expiresAt: string
   }> = []
-  const admission = (request?: Pick<IncomingMessage, 'headers'>) =>
-    request?.headers.authorization === 'Bearer viewer'
+  const admission = (request: AdmissionRequest) =>
+    request.headers.authorization === 'Bearer viewer'
       ? {
           personId: 'viewer',
           clientId: 'viewer-desktop',
           role: 'viewer' as const,
           capability: 'readOnly' as const,
         }
-      : request?.headers.authorization === 'Bearer owner'
+      : request.headers.authorization === 'Bearer owner'
         ? {
             personId: 'owner',
             clientId: 'owner-desktop',

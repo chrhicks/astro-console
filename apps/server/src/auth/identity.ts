@@ -1,5 +1,3 @@
-import type { IncomingMessage } from 'node:http'
-
 export type ClientCapability = 'controlCapable' | 'readOnly'
 
 export type LocalIdentity = {
@@ -21,7 +19,13 @@ export type AdmissionObservation = {
   readonly jwks: (outcome: 'success' | 'failed') => void
 }
 
+export type AdmissionRequest = {
+  readonly method: string
+  readonly path: string
+  readonly headers: Readonly<Record<string, string | Array<string> | undefined>>
+}
+
 export type RequestAdmission = (
-  request?: Pick<IncomingMessage, 'headers' | 'method' | 'url'>,
+  request: AdmissionRequest,
   observation?: AdmissionObservation,
 ) => LocalIdentity | undefined | Promise<LocalIdentity | undefined>

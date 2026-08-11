@@ -456,7 +456,7 @@ test('admission telemetry excludes health and static requests', async () => {
     ':memory:',
     (request, observation) => {
       observed.push({
-        path: new URL(request?.url ?? '/', 'http://local').pathname,
+        path: request.path,
         enabled: observation !== undefined,
       })
       observation?.admission('admitted')
