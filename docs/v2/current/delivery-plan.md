@@ -254,6 +254,13 @@ Result history, internal work ownership, and a Project-only Nightbook UI. The
 retired Processing Session data and models are deleted. A production processor
 adapter remains deferred until a real library is selected.
 
+The accepted follow-on Nightbook workspace runtime deepening is also complete.
+One streamed state and closed intent interface now owns browser loading,
+freshness, cancellation, last-confirmed values, command submission, and
+uncertain-outcome reconciliation across all four workspaces. This is an
+ownership refactor only; service-owned product truth and the promoted Nightbook
+presentation remain unchanged.
+
 5. Repair the scheduled host backup container-name mismatch.
 6. Remove only the unused failed-build and index-download staging copies after
    retaining the deployed release, installed solver indexes, and verified SSD

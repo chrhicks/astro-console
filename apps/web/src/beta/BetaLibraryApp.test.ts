@@ -149,7 +149,6 @@ test('renders one real frame-review task from Library contracts', () => {
       onSelectAsset: () => undefined,
       onReview: async () => undefined,
       onOpenProcess: () => undefined,
-      loadDetail: async () => detail,
     }),
   )
 

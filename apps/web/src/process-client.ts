@@ -25,15 +25,17 @@ export type ProcessingProjectChangeRequest =
   typeof ProcessingProjectChangeRequestSchema.Type
 
 export const processClient = {
-  async list() {
+  async list(signal?: AbortSignal) {
     return request(
       '/api/process/projects',
       ProcessingProjectListResponse,
       ProcessingProjectListSchema,
+      undefined,
+      signal,
     )
   },
 
-  async create(input: CreateProcessingProjectRequest) {
+  async create(input: CreateProcessingProjectRequest, signal?: AbortSignal) {
     const requestBody = Schema.decodeUnknownSync(
       CreateProcessingProjectRequestSchema,
     )(input)
@@ -45,26 +47,31 @@ export const processClient = {
         method: 'POST',
         body: JSON.stringify(requestBody),
       },
+      signal,
     )
   },
 
-  async open(projectId: string) {
+  async open(projectId: string, signal?: AbortSignal) {
     return request(
       `/api/process/projects/${encodeURIComponent(projectId)}`,
       OpenedProcessingProjectResponse,
       OpenedProcessingProjectSchema,
+      undefined,
+      signal,
     )
   },
 
-  async evidence(projectId: string) {
+  async evidence(projectId: string, signal?: AbortSignal) {
     return request(
       `/api/process/projects/${encodeURIComponent(projectId)}/evidence`,
       ProcessingProjectEvidenceResponse,
       ProcessingProjectEvidenceSchema,
+      undefined,
+      signal,
     )
   },
 
-  async change(input: ProcessingProjectChangeRequest) {
+  async change(input: ProcessingProjectChangeRequest, signal?: AbortSignal) {
     const requestBody = Schema.decodeUnknownSync(
       ProcessingProjectChangeRequestSchema,
     )(input)
@@ -73,6 +80,7 @@ export const processClient = {
       ProcessingProjectChangedResponse,
       ProcessingProjectChangedSchema,
       { method: 'PATCH', body: JSON.stringify(requestBody) },
+      signal,
     )
   },
 }
@@ -85,6 +93,7 @@ async function request<
   responseSchema: Response,
   successSchema: Success,
   init?: RequestInit,
+  signal?: AbortSignal,
 ): Promise<Success['Type']> {
   const response = await fetch(path, {
     ...init,
@@ -94,6 +103,7 @@ async function request<
         : { 'content-type': 'application/json' }),
       ...init?.headers,
     },
+    ...(signal === undefined ? {} : { signal }),
   })
   const value: unknown = await response.json().catch(() => undefined)
   const malformed = () =>

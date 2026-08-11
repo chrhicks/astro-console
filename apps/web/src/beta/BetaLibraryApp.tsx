@@ -20,7 +20,7 @@ import {
   type ActionDescriptor,
   type Tone,
 } from '@nightbook/ui'
-import { AssetId, CaptureSetId, IntentId } from '@astro-console/protocol'
+import { AssetId, CaptureSetId } from '@astro-console/protocol'
 import {
   useEffect,
   useMemo,
@@ -34,7 +34,7 @@ import type {
   LibraryQuery,
 } from '../library-client'
 import type { Projection } from '../presentation'
-import { processClient, type ProcessingProjectList } from '../process-client'
+import type { ProcessingProjectList } from '../nightbook-workspace-runtime'
 import { BetaCommandBar, type BetaControlSubmit } from './BetaObserveApp'
 import { nightbookHref } from './route'
 import '@nightbook/ui/styles.css'
@@ -74,13 +74,34 @@ export type BetaLibraryAppProps = {
   detailState?: DetailState
   onQuery?: (query: LibraryQuery) => void
   onSelectAsset: (assetId: string) => void
-  loadDetail?: (assetId: string) => Promise<LibraryAssetDetail>
+  comparison?: {
+    assetId: string | undefined
+    value: LibraryAssetDetail | undefined
+    state: 'loading' | 'unavailable' | undefined
+  }
+  onSelectComparisonAsset?: (assetId: string | undefined) => void
   onReview?: (review: {
     decision: 'accepted' | 'rejected' | 'unreviewed'
     rating?: number
     annotation?: string
   }) => Promise<void>
   onOpenProcess?: (assetId: string) => void
+  processProjects?: ProcessingProjectList
+  onCreateProject?: (
+    name: string,
+    selection: {
+      readonly assetIds: ReadonlyArray<string>
+      readonly captureSetIds: ReadonlyArray<string>
+    },
+  ) => Promise<void>
+  onAddProjectSources?: (
+    projectId: string,
+    expectedProjectRevision: number,
+    selection: {
+      readonly assetIds: ReadonlyArray<string>
+      readonly captureSetIds: ReadonlyArray<string>
+    },
+  ) => Promise<void>
 }
 
 const titleCase = (value: string) =>
@@ -319,17 +340,26 @@ function LibraryCatalog({
         title="Catalog"
         meta={
           page.value
-            ? `${page.value.results.length} loaded records · snapshot ${page.value.querySnapshotVersion}`
+            ? `${page.value.results.length} loaded records · snapshot ${page.value.querySnapshotVersion}${page.message ? ` · ${page.message}` : ''}`
             : (page.message ?? 'Loading Library records.')
         }
         actions={
           <StatusIndicator
-            label={page.value ? 'Service page loaded' : 'Loading'}
-            tone={page.value ? 'positive' : 'neutral'}
+            label={
+              page.value
+                ? page.message
+                  ? 'Last-confirmed page'
+                  : 'Service page loaded'
+                : 'Loading'
+            }
+            tone={
+              page.value ? (page.message ? 'warning' : 'positive') : 'neutral'
+            }
             detail={
-              page.value?.catalogChanged
+              page.message ??
+              (page.value?.catalogChanged
                 ? 'Catalog changed during this query.'
-                : 'Current loaded page'
+                : 'Current loaded page')
             }
           />
         }
@@ -930,8 +960,12 @@ function ReviewTab({
 function CompareTab({
   detail,
   page,
-  loadDetail,
-}: Pick<BetaLibraryAppProps, 'detail' | 'page' | 'loadDetail'>) {
+  comparison,
+  onSelectComparisonAsset,
+}: Pick<
+  BetaLibraryAppProps,
+  'detail' | 'page' | 'comparison' | 'onSelectComparisonAsset'
+>) {
   const peers = useMemo(
     () =>
       (page.value?.results ?? []).filter(
@@ -942,40 +976,16 @@ function CompareTab({
     [detail?.assetId, detail?.comparisonGroupId, page.value],
   )
   const [peerAssetId, setPeerAssetId] = useState<string>()
-  const [peer, setPeer] = useState<LibraryAssetDetail>()
-  const [state, setState] = useState<'loading' | 'unavailable'>()
 
   useEffect(() => {
     setPeerAssetId(peers[0]?.assetId)
-    setPeer(undefined)
-    setState(undefined)
-  }, [detail?.assetId, detail?.comparisonGroupId, peers])
-
-  useEffect(() => {
-    if (!peerAssetId || !loadDetail) {
-      setPeer(undefined)
-      setState(undefined)
-      return
-    }
-    let current = true
-    setPeer(undefined)
-    setState('loading')
-    void loadDetail(peerAssetId).then(
-      (value) => {
-        if (!current) return
-        setPeer(value)
-        setState(undefined)
-      },
-      () => {
-        if (!current) return
-        setPeer(undefined)
-        setState('unavailable')
-      },
-    )
-    return () => {
-      current = false
-    }
-  }, [loadDetail, peerAssetId])
+    onSelectComparisonAsset?.(peers[0]?.assetId)
+  }, [
+    detail?.assetId,
+    detail?.comparisonGroupId,
+    onSelectComparisonAsset,
+    peers,
+  ])
 
   if (!detail) return null
   const inspection = (asset: LibraryAssetDetail) =>
@@ -983,6 +993,8 @@ function CompareTab({
       ? asset.inspection.metrics
       : undefined
   const leftMetrics = inspection(detail)
+  const peer =
+    comparison?.assetId === peerAssetId ? comparison?.value : undefined
   const rightMetrics = peer ? inspection(peer) : undefined
   const pair = (left: string | number, right: string | number | undefined) =>
     `${left} · ${right ?? 'Not loaded'}`
@@ -999,7 +1011,10 @@ function CompareTab({
               tone="quiet"
               aria-pressed={peerAssetId === candidate.assetId}
               title={candidate.assetId}
-              onClick={() => setPeerAssetId(candidate.assetId)}
+              onClick={() => {
+                setPeerAssetId(candidate.assetId)
+                onSelectComparisonAsset?.(candidate.assetId)
+              }}
             >
               {compactAssetId(candidate.assetId)}
             </Button>
@@ -1015,13 +1030,15 @@ function CompareTab({
         <ReviewEvidence detail={peer} monitoringOnly />
       ) : (
         <AttentionCard
-          tone={state === 'unavailable' ? 'warning' : 'neutral'}
+          tone={comparison?.state === 'unavailable' ? 'warning' : 'neutral'}
           statusLabel={
-            state === 'loading' ? 'Loading peer' : 'Peer unavailable'
+            comparison?.state === 'loading'
+              ? 'Loading peer'
+              : 'Peer unavailable'
           }
           title="Select loaded service detail"
           description={
-            state === 'unavailable'
+            comparison?.state === 'unavailable'
               ? 'The selected peer detail could not be loaded.'
               : 'Comparison waits for the selected Library detail.'
           }
@@ -1300,7 +1317,7 @@ export function BetaLibraryPhone({
   page,
 }: Omit<
   BetaLibraryAppProps,
-  'onSelectAsset' | 'onReview' | 'onOpenProcess' | 'loadDetail'
+  'onSelectAsset' | 'onReview' | 'onOpenProcess' | 'onSelectComparisonAsset'
 >) {
   const catalogGroups = useMemo(() => {
     const groups = new Map<string, NonNullable<typeof page.value>['results']>()
@@ -1526,25 +1543,11 @@ export function BetaLibraryApp(props: BetaLibraryAppProps) {
   const [selectedCaptureSetIds, setSelectedCaptureSetIds] = useState<
     ReadonlySet<string>
   >(new Set())
-  const [projects, setProjects] = useState<ReadonlyArray<IntakeProject>>([])
   const [projectName, setProjectName] = useState('New Processing Project')
   const [destination, setDestination] = useState('new')
   const [pending, setPending] = useState(false)
   const [message, setMessage] = useState<string>()
-  useEffect(() => {
-    if (phone) return
-    let current = true
-    void processClient
-      .list()
-      .then((listed) => {
-        if (!current) return
-        setProjects(listed)
-      })
-      .catch(() => current && setMessage('Existing projects are unavailable.'))
-    return () => {
-      current = false
-    }
-  }, [phone])
+  const projects = props.processProjects ?? []
   const toggle = (
     update: (value: ReadonlySet<string>) => void,
     values: ReadonlySet<string>,
@@ -1604,27 +1607,17 @@ export function BetaLibraryApp(props: BetaLibraryAppProps) {
       }
       const accepted =
         destination === 'new'
-          ? processClient.create({
-              name: projectName.trim(),
-              selection,
-              intentId: IntentId.make(crypto.randomUUID()),
-            })
+          ? (props.onCreateProject?.(projectName.trim(), selection) ??
+            Promise.reject(new Error('Project intake unavailable')))
           : project === undefined
             ? Promise.reject(new Error('Project unavailable'))
-            : processClient.change({
-                projectId: project.projectId,
-                expectedProjectRevision: project.revision,
-                intentId: IntentId.make(crypto.randomUUID()),
-                intent: { _tag: 'AddSources', selection },
-              })
+            : (props.onAddProjectSources?.(
+                project.projectId,
+                project.revision,
+                selection,
+              ) ?? Promise.reject(new Error('Project intake unavailable')))
       void accepted
-        .then((result) => {
-          location.assign(
-            nightbookHref(
-              `/process/projects/${encodeURIComponent(result.project.projectId)}`,
-            ),
-          )
-        })
+        .then(() => undefined)
         .catch(() => setMessage('The project intake was not accepted.'))
         .finally(() => setPending(false))
     },

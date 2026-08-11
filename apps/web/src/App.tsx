@@ -1,109 +1,44 @@
-import { Effect, Fiber, Schema, Stream } from 'effect'
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { BootstrapClient } from './bootstrap-client'
+import { Effect, Fiber, Stream } from 'effect'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import {
-  PlanCommandClient,
   type PlanAction,
   type PlanCommandSubmission,
 } from './plan-command-client'
 import {
-  ObserveCommandClient,
   type ObserveAction,
   type ObserveCommandSubmission,
 } from './observe-command-client'
-import {
-  CommandClient,
-  type CommandSubmission,
-  type ControlIntent,
-} from './command-client'
-import {
-  PreflightRefreshClient,
-  type PreflightRefreshSubmission,
-} from './preflight-refresh-client'
+import { type CommandSubmission, type ControlIntent } from './command-client'
+import { type PreflightRefreshSubmission } from './preflight-refresh-client'
 import {
   AssetRevision,
-  AcquireCommandRequest,
-  AcquireCommandResponse,
   IdempotencyKey,
   LibraryQuery as LibraryQuerySchema,
   LibraryQueryId,
   ReviewAssetRequest,
 } from '@astro-console/protocol'
-import { projectBootstrapState } from './bootstrap-projection'
-import { createBootstrapRuntime } from './bootstrap-runtime'
 import { unavailableProjection } from './future-adapter'
 import type { Projection } from './presentation'
 import { parseRoute, routeWorkspace, type Route } from './routes'
 import { nightbookHref } from './beta/route'
 import {
-  LibraryClient,
-  LibraryAssetUnavailable,
-  LibraryNotFound,
-  LibraryUnavailable,
-  createLibraryRuntime,
-  type LibraryClientShape,
+  createNightbookWorkspaceRuntime,
+  NightbookWorkspaceRuntime,
+  type NightbookWorkspaceRuntimeShape,
   type LibraryAssetDetail,
   type LibraryPage,
   type LibraryQuery,
   type ProcessSourceHandoff,
-  type ReviewRequest,
-} from './library-client'
+  type OpenedProcessingProject,
+  type ProcessingProjectEvidence,
+  type ProcessingProjectList,
+} from './nightbook-workspace-runtime'
 
 const currentRoute = () => parseRoute(location.pathname, location.search)
 const BetaObserveApp = lazy(() => import('./beta/BetaObserveApp'))
 const BetaLibraryApp = lazy(() => import('./beta/BetaLibraryApp'))
 const BetaPlanApp = lazy(() => import('./beta/BetaPlanApp'))
 const BetaProcessApp = lazy(() => import('./beta/BetaProcessApp'))
-
-export const startLibraryClientOperation = <Result, Failure>(
-  operation: (client: LibraryClientShape) => Effect.Effect<Result, Failure>,
-) => {
-  const runtime = createLibraryRuntime()
-  let disposing: Promise<void> | undefined
-  const dispose = () => (disposing ??= runtime.dispose())
-  const promise = runtime
-    .runPromise(
-      Effect.gen(function* () {
-        const client = yield* LibraryClient
-        return yield* operation(client)
-      }),
-    )
-    .finally(dispose)
-  return { promise, dispose }
-}
-
-const withLibraryClient = <Result, Failure>(
-  operation: (client: LibraryClientShape) => Effect.Effect<Result, Failure>,
-) => startLibraryClientOperation(operation).promise
-
-const loadLibraryAssetDetail = (assetId: string) =>
-  withLibraryClient((client) => client.detail(assetId))
-
-const reviewLibraryAssetDetail = async (
-  assetId: string,
-  request: ReviewRequest,
-) => withLibraryClient((client) => client.reviewAsset(assetId, request))
-
-export const submitAcquireIntent = async (intent: unknown) => {
-  const request = await Effect.runPromise(
-    Schema.decodeUnknownEffect(AcquireCommandRequest)({ intent }),
-  )
-  const response = await fetch('/api/acquire/commands', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(request),
-  })
-  const result = await Effect.runPromise(
-    Schema.decodeUnknownEffect(AcquireCommandResponse)(
-      await response.json().catch(() => undefined),
-    ),
-  )
-  if (result._tag === 'Accepted') {
-    if (!response.ok) throw new Error('Acquire response status is invalid.')
-    return
-  }
-  throw new Error(result.summary)
-}
 
 export function App() {
   const [projection, setProjection] = useState<Projection>(
@@ -165,13 +100,27 @@ export function App() {
     value: LibraryAssetDetail | undefined
     state: 'loading' | 'not-found' | 'unavailable' | undefined
   }>({ value: undefined, state: undefined })
-  const libraryPageGeneration = useRef(0)
-  const libraryDetailGeneration = useRef(0)
-  const processSourceGeneration = useRef(0)
+  const workspaceRuntime = useRef(createNightbookWorkspaceRuntime())
   const [processSource, setProcessSource] = useState<{
     value: ProcessSourceHandoff | undefined
     state: 'loading' | 'not-found' | 'not-local' | 'unavailable' | undefined
   }>({ value: undefined, state: undefined })
+  const [processWorkspace, setProcessWorkspace] = useState<{
+    projects: ProcessingProjectList
+    project: OpenedProcessingProject | undefined
+    evidence: ProcessingProjectEvidence | undefined
+    state: 'loading' | 'current' | 'unavailable'
+  }>({
+    projects: [],
+    project: undefined,
+    evidence: undefined,
+    state: 'loading',
+  })
+  const [comparison, setComparison] = useState<{
+    assetId: string | undefined
+    value: LibraryAssetDetail | undefined
+    state: 'loading' | 'unavailable' | undefined
+  }>({ assetId: undefined, value: undefined, state: undefined })
   const selectedLibraryAssetId =
     route.kind === 'asset' ? route.assetId : undefined
 
@@ -183,137 +132,67 @@ export function App() {
     return () => removeEventListener('popstate', onPopState)
   }, [])
   useEffect(() => {
-    if (workspace !== 'library') return
-    const generation = ++libraryPageGeneration.current
-    setLibraryPage({
-      value: undefined,
-      message: 'Loading Library records.',
-    })
-    const operation = startLibraryClientOperation((client) =>
-      client.page(libraryQuery),
+    void workspaceRuntime.current.runPromise(
+      Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
+        workspace.submit({ _tag: 'RouteChanged', route, libraryQuery }),
+      ),
     )
-    void operation.promise.then(
-      (result) => {
-        if (generation === libraryPageGeneration.current)
-          setLibraryPage({ value: result, message: undefined })
-      },
-      () => {
-        if (generation === libraryPageGeneration.current)
-          setLibraryPage({
-            value: undefined,
-            message: 'Library evidence is unavailable.',
-          })
-      },
-    )
-    return () => {
-      libraryPageGeneration.current += 1
-      void operation.dispose()
-    }
-  }, [libraryQuery, workspace])
+  }, [libraryQuery, route])
   useEffect(() => {
-    if (selectedLibraryAssetId === undefined) {
-      setLibraryDetail({ value: undefined, state: undefined })
-      return
-    }
-    const generation = ++libraryDetailGeneration.current
-    setLibraryDetail({ value: undefined, state: 'loading' })
-    const operation = startLibraryClientOperation((client) =>
-      client.detail(selectedLibraryAssetId),
-    )
-    void operation.promise.then(
-      (value) => {
-        if (generation === libraryDetailGeneration.current)
-          setLibraryDetail({ value, state: undefined })
-      },
-      (error: unknown) => {
-        if (generation !== libraryDetailGeneration.current) return
-        setLibraryDetail({
-          value: undefined,
-          state:
-            error instanceof LibraryNotFound
-              ? 'not-found'
-              : error instanceof LibraryUnavailable
-                ? 'unavailable'
-                : 'unavailable',
-        })
-      },
-    )
-    return () => {
-      libraryDetailGeneration.current += 1
-      void operation.dispose()
-    }
-  }, [selectedLibraryAssetId])
-  useEffect(() => {
-    if (route.kind !== 'process-source') {
-      setProcessSource({ value: undefined, state: undefined })
-      return
-    }
-    const generation = ++processSourceGeneration.current
-    setProcessSource({ value: undefined, state: 'loading' })
-    const operation = startLibraryClientOperation((client) =>
-      client.processSourceHandoff(route.sourceAssetId),
-    )
-    void operation.promise.then(
-      (value) => {
-        if (generation === processSourceGeneration.current)
-          setProcessSource({ value, state: undefined })
-      },
-      (error: unknown) => {
-        if (generation === processSourceGeneration.current)
-          setProcessSource({
-            value: undefined,
-            state:
-              error instanceof LibraryNotFound
-                ? 'not-found'
-                : error instanceof LibraryAssetUnavailable
-                  ? 'not-local'
-                  : 'unavailable',
-          })
-      },
-    )
-    return () => {
-      processSourceGeneration.current += 1
-      void operation.dispose()
-    }
-  }, [route])
-  useEffect(() => {
-    const runtime = createBootstrapRuntime()
-    setSubmitPlan(
-      () => (action: PlanAction, key: typeof IdempotencyKey.Type) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const client = yield* PlanCommandClient
-            return yield* client.submit(action, key)
-          }),
+    const runtime = workspaceRuntime.current
+    const submit = (
+      intent: Parameters<NightbookWorkspaceRuntimeShape['submit']>[0],
+    ) =>
+      runtime.runPromise(
+        Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
+          workspace.submit(intent),
         ),
+      )
+    const fiber = runtime.runFork(
+      Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
+        workspace.states.pipe(
+          Stream.runForEach((state) =>
+            Effect.sync(() => {
+              setProjection(state.projection)
+              setProjectionReceived(state.projectionReceived)
+              setLibraryPage(state.libraryPage)
+              setLibraryDetail(state.libraryDetail)
+              setProcessSource(state.processSource)
+              setProcessWorkspace(state.process)
+              setComparison(state.comparison)
+            }),
+          ),
+        ),
+      ),
+    )
+    setSubmitPlan(
+      () => async (action: PlanAction, key: typeof IdempotencyKey.Type) => {
+        const result = await submit({ _tag: 'Plan', action, key })
+        if (result._tag !== 'Plan')
+          throw new Error('Plan submission unavailable')
+        return result.result
+      },
     )
     setSubmitObserve(
-      () => (action: ObserveAction, key: typeof IdempotencyKey.Type) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const client = yield* ObserveCommandClient
-            return yield* client.submit(action, key)
-          }),
-        ),
+      () => async (action: ObserveAction, key: typeof IdempotencyKey.Type) => {
+        const result = await submit({ _tag: 'Observe', action, key })
+        if (result._tag !== 'Observe')
+          throw new Error('Observe submission unavailable')
+        return result.result
+      },
     )
-    setSubmitControl(
-      () => (intent: ControlIntent) =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const client = yield* CommandClient
-            return yield* client.submit(intent)
-          }),
-        ),
-    )
-    setRefreshPreflight(
-      () => () =>
-        runtime.runPromise(
-          Effect.gen(function* () {
-            const client = yield* PreflightRefreshClient
-            return yield* client.refresh()
-          }),
-        ),
-    )
+    setSubmitControl(() => async (intent: ControlIntent) => {
+      const result = await submit({ _tag: 'Control', intent })
+      if (result._tag !== 'Control')
+        throw new Error('Control submission unavailable')
+      return result.result
+    })
+    setRefreshPreflight(() => async () => {
+      const result = await submit({ _tag: 'RefreshPreflight' })
+      if (result._tag !== 'Preflight')
+        throw new Error('Preflight refresh unavailable')
+      return result.result
+    })
     setTargetAcquisitionCommand(() => async () => {
       const observe = projectionRef.current.observe
       if (
@@ -321,13 +200,20 @@ export function App() {
         observe.leaseRevision === undefined
       )
         throw new Error('Target acquisition state unavailable')
-      await submitAcquireIntent({
-        _tag: 'CaptureTargetAcquisitionEvidence',
-        expectedLeaseRevision: observe.leaseRevision,
-        expectedRunRevision: observe.source.revision,
-        expectedAcquireRevision: observe.source.acquire.revision,
-        idempotencyKey: crypto.randomUUID(),
+      const result = await submit({
+        _tag: 'Acquire',
+        intent: {
+          _tag: 'CaptureTargetAcquisitionEvidence',
+          expectedLeaseRevision: observe.leaseRevision,
+          expectedRunRevision: observe.source.revision,
+          expectedAcquireRevision: observe.source.acquire.revision,
+          idempotencyKey: crypto.randomUUID(),
+        },
       })
+      if (result._tag !== 'Acquire' || !result.accepted)
+        throw new Error(
+          result._tag === 'Acquire' ? result.message : 'Acquire unavailable',
+        )
     })
     setAcquireRecoveryCommand(
       () =>
@@ -359,7 +245,13 @@ export function App() {
                 }
               : {}),
           }
-          await submitAcquireIntent(intent)
+          const result = await submit({ _tag: 'Acquire', intent })
+          if (result._tag !== 'Acquire' || !result.accepted)
+            throw new Error(
+              result._tag === 'Acquire'
+                ? result.message
+                : 'Acquire unavailable',
+            )
         },
     )
     setApprovePointingCorrection(() => async (proposalId: string) => {
@@ -369,28 +261,22 @@ export function App() {
         observe.leaseRevision === undefined
       )
         throw new Error('Pointing correction state unavailable')
-      await submitAcquireIntent({
-        _tag: 'ApprovePointingCorrection',
-        expectedLeaseRevision: observe.leaseRevision,
-        expectedRunRevision: observe.source.revision,
-        expectedAcquireRevision: observe.source.acquire.revision,
-        proposalId,
-        idempotencyKey: crypto.randomUUID(),
+      const result = await submit({
+        _tag: 'Acquire',
+        intent: {
+          _tag: 'ApprovePointingCorrection',
+          expectedLeaseRevision: observe.leaseRevision,
+          expectedRunRevision: observe.source.revision,
+          expectedAcquireRevision: observe.source.acquire.revision,
+          proposalId,
+          idempotencyKey: crypto.randomUUID(),
+        },
       })
-    })
-    const fiber = runtime.runFork(
-      Effect.gen(function* () {
-        const client = yield* BootstrapClient
-        yield* client.states.pipe(
-          Stream.runForEach((state) =>
-            Effect.sync(() => {
-              setProjection(projectBootstrapState(state))
-              setProjectionReceived(true)
-            }),
-          ),
+      if (result._tag !== 'Acquire' || !result.accepted)
+        throw new Error(
+          result._tag === 'Acquire' ? result.message : 'Acquire unavailable',
         )
-      }),
-    )
+    })
     return () => {
       setSubmitPlan(undefined)
       setSubmitObserve(undefined)
@@ -412,10 +298,6 @@ export function App() {
     requestAnimationFrame(() => document.querySelector('h1')?.focus())
   }, [route])
   const changeLibraryQuery = (query: LibraryQuery) => {
-    setLibraryPage({
-      value: undefined,
-      message: 'Loading Library records.',
-    })
     setLibraryQuery(query)
   }
   const selectNightbookLibraryAsset = (assetId: string) => {
@@ -438,6 +320,13 @@ export function App() {
     history.pushState(null, '', href)
     setRoute(next)
   }
+  const selectComparisonAsset = useCallback((assetId: string | undefined) => {
+    void workspaceRuntime.current.runPromise(
+      Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
+        workspace.submit({ _tag: 'SelectComparisonAsset', assetId }),
+      ),
+    )
+  }, [])
   const reviewLibraryAsset = async (review: {
     decision: 'accepted' | 'rejected' | 'unreviewed'
     rating?: number
@@ -445,21 +334,28 @@ export function App() {
   }) => {
     const detail = libraryDetail.value
     if (!detail) throw new Error('Asset detail is unavailable.')
-    const accepted = await reviewLibraryAssetDetail(
-      detail.assetId,
-      ReviewAssetRequest.make({
-        expectedAssetRevision: detail.revision,
-        expectedReviewRevision: AssetRevision.make(
-          detail.review?.revision ?? 0,
-        ),
-        ...review,
-        idempotencyKey: crypto.randomUUID(),
-      }),
+    const result = await workspaceRuntime.current.runPromise(
+      Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
+        workspace.submit({
+          _tag: 'ReviewLibraryAsset',
+          assetId: detail.assetId,
+          request: ReviewAssetRequest.make({
+            expectedAssetRevision: detail.revision,
+            expectedReviewRevision: AssetRevision.make(
+              detail.review?.revision ?? 0,
+            ),
+            ...review,
+            idempotencyKey: crypto.randomUUID(),
+          }),
+        }),
+      ),
     )
-    setLibraryDetail({
-      value: { ...detail, review: accepted },
-      state: undefined,
-    })
+    if (result._tag !== 'Loaded')
+      throw new Error(
+        result._tag === 'Unavailable'
+          ? result.message
+          : 'The review was not saved.',
+      )
   }
   if (route.kind === 'not-found') return <NotFound />
 
@@ -555,8 +451,47 @@ export function App() {
           {...(projection.shell.readOnly
             ? {}
             : { onReview: reviewLibraryAsset })}
-          loadDetail={loadLibraryAssetDetail}
+          comparison={comparison}
+          onSelectComparisonAsset={selectComparisonAsset}
           onOpenProcess={openNightbookProcess}
+          processProjects={processWorkspace.projects}
+          onCreateProject={async (name, selection) => {
+            const result = await workspaceRuntime.current.runPromise(
+              Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
+                workspace.submit({ _tag: 'CreateProject', name, selection }),
+              ),
+            )
+            if (result._tag !== 'Project')
+              throw new Error('The Project was not created.')
+            location.assign(
+              nightbookHref(
+                `/process/projects/${encodeURIComponent(result.project.projectId)}`,
+              ),
+            )
+          }}
+          onAddProjectSources={async (
+            projectId,
+            expectedProjectRevision,
+            selection,
+          ) => {
+            const result = await workspaceRuntime.current.runPromise(
+              Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
+                workspace.submit({
+                  _tag: 'AddProjectSources',
+                  projectId,
+                  expectedProjectRevision,
+                  selection,
+                }),
+              ),
+            )
+            if (result._tag !== 'Project')
+              throw new Error('The project intake was not accepted.')
+            location.assign(
+              nightbookHref(
+                `/process/projects/${encodeURIComponent(result.project.projectId)}`,
+              ),
+            )
+          }}
         />
       </Suspense>
     )
@@ -585,6 +520,32 @@ export function App() {
           {...(processSource.state === undefined
             ? {}
             : { sourceHandoffState: processSource.state })}
+          process={processWorkspace}
+          onCreateProject={async (name, selection) => {
+            const result = await workspaceRuntime.current.runPromise(
+              Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
+                workspace.submit({ _tag: 'CreateProject', name, selection }),
+              ),
+            )
+            if (result._tag !== 'Project')
+              throw new Error('The Project was not created.')
+            location.assign(
+              nightbookHref(
+                `/process/projects/${encodeURIComponent(result.project.projectId)}`,
+              ),
+            )
+          }}
+          onChangeProject={async (project, intent) => {
+            const result = await workspaceRuntime.current.runPromise(
+              Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
+                workspace.submit({ _tag: 'ChangeProject', project, intent }),
+              ),
+            )
+            if (result._tag !== 'Project')
+              throw new Error(
+                'The Project was reloaded after an uncertain outcome.',
+              )
+          }}
         />
       </Suspense>
     )

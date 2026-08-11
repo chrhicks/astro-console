@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–4 complete locally; Processing Project lifecycle, shared protocol, and origin runtime refactors complete locally**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–4 complete locally; Processing Project lifecycle, shared protocol, origin runtime, and Nightbook workspace runtime refactors complete locally**
 
 ## Current Position
 
@@ -304,6 +304,17 @@ removed. A production-interface integration test covers HTTP, Process work,
 SSE publication, durable restart, and listener shutdown without using origin
 implementation hooks.
 
+The browser now has one deep Nightbook workspace runtime. Presentation callers
+consume one streamed workspace state and submit one closed set of operator
+intents across Plan, Observe, Library, and Process. The module owns bootstrap
+freshness, route loading, cancellation, last-confirmed values, command
+submission, and uncertain-outcome reconciliation. Production HTTP and
+EventSource adapters remain internal to its layer, while deterministic tests
+cross the same public state-and-intent interface through an in-memory remote
+adapter. Explicit Processing Project URLs and client-only stage navigation are
+unchanged. This refactor adds no browser-owned domain truth and no new product
+workflow.
+
 After that simulator proof, an indoor GET-only readiness check reached ASCOM
 Remote at `192.168.4.104:11111`. Management and every device-property envelope
 returned `ErrorNumber: 0`. The configured identities were Telescope 0 `ASI
@@ -463,11 +474,11 @@ covered indoor frame.
 
 ## Next Owner Action
 
-GitHub issues `#2` and `#3`, the shared protocol refocus and origin runtime
-deepening, are complete locally. The remaining architecture frontiers are
-Nightbook workspace runtime depth in `#4`, durable work-claim re-audit in `#5`,
-and the origin integration-test harness in `#6`. Select and integrate a
-real processing library only in a later accepted item; the current deterministic
+GitHub issues `#2`, `#3`, and `#4`, the shared protocol refocus, origin runtime
+deepening, and Nightbook workspace runtime deepening, are complete locally. The
+remaining architecture frontiers are the durable work-claim re-audit in `#5`
+and the origin integration-test harness in `#6`. Select and integrate a real
+processing library only in a later accepted item; the current deterministic
 materializer proves orchestration and evidence, not astronomy processing
 quality. The remaining accepted delivery list continues with the host backup
 repair and owner-observed outdoor Acquire proof when its operating window is

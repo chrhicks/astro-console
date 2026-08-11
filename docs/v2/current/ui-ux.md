@@ -79,7 +79,8 @@ integrated Item 3.5 review is also complete: the retained two-Capture-Set M27
 journey passed functional and Designer review across all six Process stages,
 public Library detail, restart, wide, compact, and read-only phone states. The
 route audit and promotion are complete. The follow-on architecture audit is
-complete, and its shared protocol refocus does not change the visual authority.
+complete, and its shared protocol, origin runtime, and Nightbook workspace
+runtime refactors do not change the visual authority.
 
 - Library selection and whole Capture Set intake must lead to a persistent
   Processing Project, not directly into transient worker progress.

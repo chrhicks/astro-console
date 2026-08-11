@@ -15,7 +15,6 @@ import {
   StepRail,
 } from '@nightbook/ui'
 import {
-  IntentId,
   type ExecutableProcessingStage,
   type ProcessingProjectIntent,
   type ProcessingStageDraftValue,
@@ -28,12 +27,11 @@ import {
   type ChangeEvent,
 } from 'react'
 import type { ProcessSourceHandoff } from '../library-client'
-import {
-  processClient,
-  type OpenedProcessingProject,
-  type ProcessingProjectEvidence,
-  type ProcessingProjectList,
-} from '../process-client'
+import type {
+  OpenedProcessingProject,
+  ProcessingProjectEvidence,
+  ProcessingProjectList,
+} from '../nightbook-workspace-runtime'
 import type { Projection } from '../presentation'
 import { BetaCommandBar, type BetaControlPresentation } from './BetaObserveApp'
 import { nightbookHref } from './route'
@@ -51,6 +49,23 @@ export type BetaProcessAppProps = {
   sourceAssetId?: string | undefined
   sourceHandoff?: ProcessSourceHandoff | undefined
   sourceHandoffState?: HandoffState | undefined
+  process: {
+    projects: ProcessingProjectList
+    project: OpenedProcessingProject | undefined
+    evidence: ProcessingProjectEvidence | undefined
+    state: 'loading' | 'current' | 'unavailable'
+  }
+  onCreateProject: (
+    name: string,
+    selection: {
+      readonly assetIds: ReadonlyArray<string>
+      readonly captureSetIds: ReadonlyArray<string>
+    },
+  ) => Promise<void>
+  onChangeProject: (
+    project: OpenedProcessingProject,
+    intent: ProcessingProjectIntent,
+  ) => Promise<void>
 }
 
 const stages: ReadonlyArray<ViewedStage> = [
@@ -128,69 +143,35 @@ const processControlPresentation = (
 
 export default function BetaProcessApp(props: BetaProcessAppProps) {
   const phone = usePhoneProjection()
-  const [projects, setProjects] = useState<ProcessingProjectList>([])
-  const [project, setProject] = useState<OpenedProcessingProject>()
-  const [evidence, setEvidence] = useState<ProcessingProjectEvidence>()
   const [viewedStage, setViewedStage] = useState<ViewedStage>('Sources')
-  const [state, setState] = useState('Loading Processing Projects')
   const [pending, setPending] = useState<string>()
   const [message, setMessage] = useState<string>()
   const [stretch, setStretch] = useState(0.35)
 
-  const reload = useCallback(async () => {
-    setState('Loading Processing Projects')
-    try {
-      if (props.projectId === undefined) {
-        setProjects(await processClient.list())
-        setProject(undefined)
-        setEvidence(undefined)
-      } else {
-        const [opened, retained] = await Promise.all([
-          processClient.open(props.projectId),
-          processClient.evidence(props.projectId),
-        ])
-        setProject(opened)
-        setEvidence(retained)
-      }
-      setState('Current')
-    } catch {
-      setState('Unavailable')
-    }
-  }, [props.projectId])
-
-  useEffect(() => {
-    let current = true
-    void reload().catch(() => current && setState('Unavailable'))
-    return () => {
-      current = false
-    }
-  }, [reload, props.projection.snapshotVersion])
-
   const change = useCallback(
     async (intent: ProcessingProjectIntent, label: string) => {
-      if (project === undefined || pending !== undefined) return
+      if (props.process.project === undefined || pending !== undefined) return
       setPending(label)
       setMessage(undefined)
       try {
-        const changed = await processClient.change({
-          projectId: project.projectId,
-          expectedProjectRevision: project.revision,
-          intentId: IntentId.make(crypto.randomUUID()),
-          intent,
-        })
-        setProject(changed.project)
-        setEvidence(await processClient.evidence(changed.project.projectId))
+        await props.onChangeProject(props.process.project, intent)
         setMessage(`${label} accepted.`)
       } catch {
         setMessage(`${label} was not accepted. The Project was reloaded.`)
-        await reload()
       } finally {
         setPending(undefined)
       }
     },
-    [pending, project, reload],
+    [pending, props.onChangeProject, props.process.project],
   )
 
+  const { projects, project, evidence } = props.process
+  const state =
+    props.process.state === 'current'
+      ? 'Current'
+      : props.process.state === 'loading'
+        ? 'Loading Processing Projects'
+        : 'Unavailable'
   const authority = processControlPresentation(project, phone)
   return (
     <div
@@ -232,19 +213,10 @@ export default function BetaProcessApp(props: BetaProcessAppProps) {
             if (props.sourceHandoff === undefined) return
             setPending('Creating Project')
             try {
-              const created = await processClient.create({
-                name,
-                selection: {
-                  assetIds: [props.sourceHandoff.sourceAssetId],
-                  captureSetIds: [],
-                },
-                intentId: IntentId.make(crypto.randomUUID()),
+              await props.onCreateProject(name, {
+                assetIds: [props.sourceHandoff.sourceAssetId],
+                captureSetIds: [],
               })
-              location.assign(
-                nightbookHref(
-                  `/process/projects/${encodeURIComponent(created.project.projectId)}`,
-                ),
-              )
             } catch {
               setMessage('The Project was not created.')
               setPending(undefined)
