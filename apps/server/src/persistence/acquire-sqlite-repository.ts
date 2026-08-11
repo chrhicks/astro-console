@@ -183,4 +183,24 @@ export const acquireSqliteRepository = (database: DatabaseSync) => ({
         'INSERT OR REPLACE INTO acquire_receipts (idempotency_key,actor_client_id,response) VALUES (?,?,?)',
       )
       .run(key, clientId, JSON.stringify(response)),
+  applicationReceipt: (key: string, clientId: string) => {
+    const row = Schema.decodeUnknownSync(Schema.optional(StoredReceipt))(
+      database
+        .prepare(
+          'SELECT response FROM acquire_receipts WHERE idempotency_key=? AND actor_client_id=?',
+        )
+        .get(key, clientId),
+    )
+    return row === undefined
+      ? undefined
+      : Schema.decodeUnknownSync(StoredReceiptResponse)(
+          JSON.parse(row.response),
+        ).body
+  },
+  saveApplicationReceipt: (key: string, clientId: string, outcome: unknown) =>
+    database
+      .prepare(
+        'INSERT OR REPLACE INTO acquire_receipts (idempotency_key,actor_client_id,response) VALUES (?,?,?)',
+      )
+      .run(key, clientId, JSON.stringify({ status: 0, body: outcome })),
 })

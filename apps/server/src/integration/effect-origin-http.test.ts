@@ -32,7 +32,6 @@ import {
 import {
   makeOriginHttpApplication,
   listenOriginHttp,
-  type OriginHttpRouteOptions,
 } from '../http/effect-origin-http.ts'
 import type { LocalIdentity, RequestAdmission } from '../auth/identity.ts'
 import {
@@ -68,6 +67,29 @@ import {
   acquireSqliteRepository,
   targetAcquisitionSession,
 } from '../persistence/acquire-sqlite-repository.ts'
+import {
+  AcquireCommandService,
+  acquireCommandServiceLayer,
+  boundedSimulationAcquireOuterTransitionPolicyLayer,
+  standardAcquireOuterTransitionPolicyLayer,
+  unavailableCameraExposureMaterializationLayer,
+  unavailableCameraProviderLayer,
+  unavailablePolarMeasurementProviderLayer,
+  unavailableTargetAcquisitionProviderLayer,
+} from '../services/acquire-command-service.ts'
+import {
+  PreflightCommandService,
+  preflightCommandServiceLayer,
+  unavailableReadOnlyPreflightProviderLayer,
+} from '../services/preflight-command-service.ts'
+import {
+  ReadOnlyPreflightProvider,
+  type ReadOnlyPreflightProviderShape,
+} from '../services/preflight-service.ts'
+import {
+  TargetAcquisitionProvider,
+  type TargetAcquisitionProviderShape,
+} from '../services/target-acquisition-service.ts'
 
 const owner: LocalIdentity = {
   personId: 'owner-person',
@@ -95,6 +117,57 @@ const webFixture = () => {
   return root
 }
 
+const acquireDependenciesLayer = (
+  policy:
+    | typeof standardAcquireOuterTransitionPolicyLayer
+    | typeof boundedSimulationAcquireOuterTransitionPolicyLayer,
+) =>
+  Layer.mergeAll(
+    unavailableCameraProviderLayer,
+    unavailablePolarMeasurementProviderLayer,
+    unavailableTargetAcquisitionProviderLayer,
+    unavailableCameraExposureMaterializationLayer,
+    policy,
+  )
+
+const defaultRouteDependenciesLayer = Layer.merge(
+  acquireDependenciesLayer(standardAcquireOuterTransitionPolicyLayer),
+  unavailableReadOnlyPreflightProviderLayer,
+)
+
+const boundedSimulationRouteDependenciesLayer = Layer.merge(
+  acquireDependenciesLayer(boundedSimulationAcquireOuterTransitionPolicyLayer),
+  unavailableReadOnlyPreflightProviderLayer,
+)
+
+const targetRouteDependenciesLayer = (
+  provider: TargetAcquisitionProviderShape,
+) =>
+  Layer.mergeAll(
+    unavailableCameraProviderLayer,
+    unavailablePolarMeasurementProviderLayer,
+    Layer.succeed(
+      TargetAcquisitionProvider,
+      TargetAcquisitionProvider.of(provider),
+    ),
+    unavailableCameraExposureMaterializationLayer,
+    standardAcquireOuterTransitionPolicyLayer,
+    unavailableReadOnlyPreflightProviderLayer,
+  )
+
+const preflightRouteDependenciesLayer = (
+  provider: ReadOnlyPreflightProviderShape,
+) =>
+  Layer.merge(
+    acquireDependenciesLayer(standardAcquireOuterTransitionPolicyLayer),
+    Layer.succeed(
+      ReadOnlyPreflightProvider,
+      ReadOnlyPreflightProvider.of(provider),
+    ),
+  )
+
+type RouteDependenciesLayer = typeof defaultRouteDependenciesLayer
+
 const makeGraph = (
   webRoot: string,
   observe?: (event: 'acquired' | 'finalized') => void,
@@ -102,7 +175,7 @@ const makeGraph = (
     repository: StateSqliteRepositoryShape,
   ) => ProjectionPublicationShape,
   developmentSimulation?: DevelopmentSimulationConfig,
-  routeOptions?: OriginHttpRouteOptions,
+  routeDependenciesLayer?: RouteDependenciesLayer,
   fixtureDefinitionKind: 'fixture' | 'fake' = 'fixture',
 ) =>
   Effect.gen(function* () {
@@ -157,12 +230,37 @@ const makeGraph = (
         ),
       ),
     )
+    const targetSimulation =
+      developmentSimulation?.launchScenario === 'target-evidence-progression' ||
+      developmentSimulation?.launchScenario === 'solve-success-no-solution'
+    const integrations =
+      routeDependenciesLayer ??
+      (targetSimulation
+        ? boundedSimulationRouteDependenciesLayer
+        : defaultRouteDependenciesLayer)
+    const serviceDependencies = Layer.merge(graphLayer, integrations)
+    const acquireService = Context.get(
+      yield* Layer.build(
+        acquireCommandServiceLayer.pipe(Layer.provide(serviceDependencies)),
+      ),
+      AcquireCommandService,
+    )
+    const preflightService = Context.get(
+      yield* Layer.build(
+        preflightCommandServiceLayer.pipe(Layer.provide(serviceDependencies)),
+      ),
+      PreflightCommandService,
+    )
+    const applicationLayer = Layer.mergeAll(
+      graphLayer,
+      Layer.succeed(AcquireCommandService, acquireService),
+      Layer.succeed(PreflightCommandService, preflightService),
+    )
     const application = yield* makeOriginHttpApplication(
       webRoot,
       developmentSimulation,
-      routeOptions,
     ).pipe(
-      Effect.provide(graphLayer),
+      Effect.provide(applicationLayer),
       Effect.provide(NodeFileSystem.layer),
       Effect.provide(NodePath.layer),
     )
@@ -187,7 +285,7 @@ const withOrigin = (
     readonly bases: Readonly<Record<string, string>>
   }) => Effect.Effect<void, unknown>,
   developmentSimulation?: DevelopmentSimulationConfig,
-  routeOptions?: OriginHttpRouteOptions,
+  routeDependenciesLayer?: RouteDependenciesLayer,
   fixtureDefinitionKind: 'fixture' | 'fake' = 'fixture',
 ) =>
   Effect.runPromise(
@@ -198,7 +296,7 @@ const withOrigin = (
           undefined,
           undefined,
           developmentSimulation,
-          routeOptions,
+          routeDependenciesLayer,
           fixtureDefinitionKind,
         )
         const bound = yield* listenOriginHttp(
@@ -230,21 +328,21 @@ const ownerHeaders = {
 const ownerOrigin = (
   verify: Parameters<typeof withOrigin>[1],
   developmentSimulation?: DevelopmentSimulationConfig,
-  routeOptions?: OriginHttpRouteOptions,
+  routeDependenciesLayer?: RouteDependenciesLayer,
   fixtureDefinitionKind: 'fixture' | 'fake' = 'fixture',
 ) =>
   withOrigin(
     [{ name: 'owner', identity: owner }],
     verify,
     developmentSimulation,
-    routeOptions,
+    routeDependenciesLayer,
     fixtureDefinitionKind,
   )
 
 const ownerViewerOrigin = (
   verify: Parameters<typeof withOrigin>[1],
   developmentSimulation?: DevelopmentSimulationConfig,
-  routeOptions?: OriginHttpRouteOptions,
+  routeDependenciesLayer?: RouteDependenciesLayer,
   fixtureDefinitionKind: 'fixture' | 'fake' = 'fixture',
 ) =>
   withOrigin(
@@ -254,7 +352,7 @@ const ownerViewerOrigin = (
     ],
     verify,
     developmentSimulation,
-    routeOptions,
+    routeDependenciesLayer,
     fixtureDefinitionKind,
   )
 
@@ -765,24 +863,22 @@ test('Observe preflight publishes configured provider truth for its owner', () =
           assert.equal(refreshed.snapshot.verdict, 'ready')
       }),
     undefined,
-    {
-      preflightProvider: {
-        observe: () =>
-          Effect.succeed({
-            observedAt: '2026-08-11T00:00:00.000Z',
-            verdict: 'ready',
-            nextAction: 'Start the accepted run.',
-            checks: [
-              {
-                key: 'camera-connected',
-                state: 'ready',
-                observedAt: '2026-08-11T00:00:00.000Z',
-                reason: 'The configured camera is connected.',
-              },
-            ],
-          }),
-      },
-    },
+    preflightRouteDependenciesLayer({
+      observe: () =>
+        Effect.succeed({
+          observedAt: '2026-08-11T00:00:00.000Z',
+          verdict: 'ready',
+          nextAction: 'Start the accepted run.',
+          checks: [
+            {
+              key: 'camera-connected',
+              state: 'ready',
+              observedAt: '2026-08-11T00:00:00.000Z',
+              reason: 'The configured camera is connected.',
+            },
+          ],
+        }),
+    }),
     'fake',
   ))
 
@@ -819,6 +915,33 @@ test('Acquire rejects malformed command input through the Effect listener', () =
       )
       assert.equal(response.status, 409)
       assert.equal(body._tag, 'Rejected')
+    }),
+  ))
+
+test('Acquire preserves the read-only polar evidence denial', () =>
+  ownerViewerOrigin(({ bases }) =>
+    Effect.gen(function* () {
+      const response = yield* fetchEffect(
+        `${bases.viewer}/api/acquire/commands`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-listener-key': 'viewer',
+          },
+          body: '{}',
+        },
+      )
+      const body = yield* responseJson(response).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(AcquireCommandResponse)),
+      )
+      assert.equal(response.status, 403)
+      assert.equal(body._tag, 'Unavailable')
+      if (body._tag === 'Unavailable')
+        assert.equal(
+          body.summary,
+          'This client is read-only and cannot record polar evidence.',
+        )
     }),
   ))
 
@@ -872,45 +995,43 @@ test('Acquire accepts target evidence once and returns its durable receipt witho
         assert.equal(providerCalls, 1)
       }),
     undefined,
-    {
-      targetAcquisitionProvider: {
-        capture: () =>
-          Effect.sync(() => {
-            providerCalls += 1
-            return {
-              _tag: 'Captured' as const,
-              slewAcknowledgement: {
-                acknowledgedAtEpochMs: 1_722_729_600_000,
-                acknowledgementRef: 'effect-slew-acknowledged',
-              },
-              evidence: {
-                sourceFrameAssetId: 'effect-solved-frame',
-                capturedAtEpochMs: 1_722_729_600_100,
-                solverId: 'effect-test-solver',
-                solverVersion: '1.0.0',
-                result: {
-                  _tag: 'Solved' as const,
-                  desiredCenter: {
-                    rightAscensionDegrees: 299.901,
-                    declinationDegrees: 22.721,
-                  },
-                  solvedCenter: {
-                    rightAscensionDegrees: 299.901,
-                    declinationDegrees: 22.721,
-                  },
-                  correction: {
-                    rightAscensionArcsec: 0,
-                    declinationArcsec: 0,
-                    convention: 'mountRaDec' as const,
-                  },
-                  uncertaintyArcsec: 4,
+    targetRouteDependenciesLayer({
+      capture: () =>
+        Effect.sync(() => {
+          providerCalls += 1
+          return {
+            _tag: 'Captured' as const,
+            slewAcknowledgement: {
+              acknowledgedAtEpochMs: 1_722_729_600_000,
+              acknowledgementRef: 'effect-slew-acknowledged',
+            },
+            evidence: {
+              sourceFrameAssetId: 'effect-solved-frame',
+              capturedAtEpochMs: 1_722_729_600_100,
+              solverId: 'effect-test-solver',
+              solverVersion: '1.0.0',
+              result: {
+                _tag: 'Solved' as const,
+                desiredCenter: {
+                  rightAscensionDegrees: 299.901,
+                  declinationDegrees: 22.721,
                 },
+                solvedCenter: {
+                  rightAscensionDegrees: 299.901,
+                  declinationDegrees: 22.721,
+                },
+                correction: {
+                  rightAscensionArcsec: 0,
+                  declinationArcsec: 0,
+                  convention: 'mountRaDec' as const,
+                },
+                uncertaintyArcsec: 4,
               },
-            }
-          }),
-        correct: () => Effect.die('Correction was not expected'),
-      },
-    },
+            },
+          }
+        }),
+      correct: () => Effect.die('Correction was not expected'),
+    }),
   )
 })
 
@@ -956,16 +1077,14 @@ test('Acquire rejects stale target evidence before provider work', () => {
         assert.equal(providerCalls, 0)
       }),
     undefined,
-    {
-      targetAcquisitionProvider: {
-        capture: () =>
-          Effect.sync(() => {
-            providerCalls += 1
-            return { _tag: 'Aborted' as const, summary: 'Not expected.' }
-          }),
-        correct: () => Effect.die('Correction was not expected'),
-      },
-    },
+    targetRouteDependenciesLayer({
+      capture: () =>
+        Effect.sync(() => {
+          providerCalls += 1
+          return { _tag: 'Aborted' as const, summary: 'Not expected.' }
+        }),
+      correct: () => Effect.die('Correction was not expected'),
+    }),
   )
 })
 
@@ -1055,31 +1174,29 @@ test('Acquire exposes bounded recovery after exhausted solve evidence', () =>
           )
       }),
     undefined,
-    {
-      targetAcquisitionProvider: {
-        capture: (_method, attemptId) =>
-          Effect.succeed({
-            _tag: 'Captured' as const,
-            slewAcknowledgement: {
-              acknowledgedAtEpochMs: 1_722_729_600_000,
-              acknowledgementRef: `effect-${attemptId}-acknowledged`,
+    targetRouteDependenciesLayer({
+      capture: (_method, attemptId) =>
+        Effect.succeed({
+          _tag: 'Captured' as const,
+          slewAcknowledgement: {
+            acknowledgedAtEpochMs: 1_722_729_600_000,
+            acknowledgementRef: `effect-${attemptId}-acknowledged`,
+          },
+          evidence: {
+            sourceFrameAssetId: `effect-${attemptId}-frame`,
+            capturedAtEpochMs: 1_722_729_600_100,
+            solverId: 'effect-test-solver',
+            solverVersion: '1.0.0',
+            result: {
+              _tag: 'NoSolution' as const,
+              category: 'stars-insufficient' as const,
+              retryable: true,
+              diagnosticRef: `effect-${attemptId}-diagnostic`,
             },
-            evidence: {
-              sourceFrameAssetId: `effect-${attemptId}-frame`,
-              capturedAtEpochMs: 1_722_729_600_100,
-              solverId: 'effect-test-solver',
-              solverVersion: '1.0.0',
-              result: {
-                _tag: 'NoSolution' as const,
-                category: 'stars-insufficient' as const,
-                retryable: true,
-                diagnosticRef: `effect-${attemptId}-diagnostic`,
-              },
-            },
-          }),
-        correct: () => Effect.die('Correction was not expected'),
-      },
-    },
+          },
+        }),
+      correct: () => Effect.die('Correction was not expected'),
+    }),
   ))
 
 test('control rejects a read-only request identity', () =>

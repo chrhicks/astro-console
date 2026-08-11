@@ -1,9 +1,8 @@
-import { Context, Effect, Layer } from 'effect'
+import { Effect } from 'effect'
 import { HttpRouter, HttpServerRequest } from 'effect/unstable/http'
 import {
   AcquireCommandService,
-  acquireCommandServiceLayer,
-  type AcquireCommandServiceOptions,
+  AcquireCommandOutcome,
 } from '../../services/acquire-command-service.ts'
 import {
   json,
@@ -11,14 +10,9 @@ import {
   requestJson,
 } from './origin-route-shared.ts'
 
-export type AcquireRouteOptions = AcquireCommandServiceOptions
-
 export const makeAcquireRoutes = Effect.fn('OriginHttp.makeAcquireRoutes')(
-  function* (options: AcquireRouteOptions = {}) {
-    const service = Context.get(
-      yield* Layer.build(acquireCommandServiceLayer(options)),
-      AcquireCommandService,
-    )
+  function* () {
+    const service = yield* AcquireCommandService
     return HttpRouter.add(
       'POST',
       '/api/acquire/commands',
@@ -26,8 +20,16 @@ export const makeAcquireRoutes = Effect.fn('OriginHttp.makeAcquireRoutes')(
         const request = yield* HttpServerRequest.HttpServerRequest
         const identity = yield* OriginRequestIdentity
         const raw = yield* requestJson(request)
-        const result = yield* service.execute(raw, identity)
-        return json(result.status, result.body)
+        const outcome = yield* service.execute(raw, identity)
+        return AcquireCommandOutcome.match(outcome, {
+          ReadOnly: ({ response }) => json(403, response),
+          AcquireAccepted: ({ response }) => json(200, response),
+          AcquireRejected: ({ response }) => json(409, response),
+          AcquireUnavailable: ({ response }) => json(503, response),
+          CameraAccepted: ({ response }) => json(202, response),
+          CameraRejected: ({ response }) => json(409, response),
+          CameraUnavailable: ({ response }) => json(503, response),
+        })
       }),
     )
   },

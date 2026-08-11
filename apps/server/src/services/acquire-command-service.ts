@@ -44,27 +44,95 @@ type CompletedCameraExposureResult =
   | { readonly outcome: 'accepted'; readonly assetId: string }
   | { readonly outcome: 'rejected'; readonly reason: string }
 
-export type AcquireCommandServiceOptions = {
-  readonly cameraProvider?: CameraProviderShape
-  readonly polarMeasurementProvider?: PolarMeasurementProviderShape
-  readonly targetAcquisitionProvider?: TargetAcquisitionProviderShape
-  readonly denyOuterTargetTransitions?: boolean
-  readonly completeCameraExposure?: (
+export interface CameraExposureMaterializationShape {
+  readonly complete: (
     raw: unknown,
   ) => Effect.Effect<CompletedCameraExposureResult, unknown>
 }
 
-export type AcquireHttpResult = {
-  readonly status: number
-  readonly body:
-    typeof AcquireCommandResponse.Type | typeof CameraCommandResponse.Type
-}
+export class CameraExposureMaterialization extends Context.Service<
+  CameraExposureMaterialization,
+  CameraExposureMaterializationShape
+>()('@astro-console/server/CameraExposureMaterialization') {}
+
+export class AcquireOuterTransitionPolicy extends Context.Service<
+  AcquireOuterTransitionPolicy,
+  { readonly denyOuterTargetTransitions: boolean }
+>()('@astro-console/server/AcquireOuterTransitionPolicy') {}
+
+const unavailableProvider = 'No configured Acquire provider is available.'
+
+export const unavailableCameraProviderLayer = Layer.succeed(
+  CameraProvider,
+  CameraProvider.of({
+    startExposure: () => Effect.fail(unavailableProvider),
+    abortExposure: () => Effect.fail(unavailableProvider),
+    readState: () => Effect.fail(unavailableProvider),
+  }),
+)
+
+export const unavailablePolarMeasurementProviderLayer = Layer.succeed(
+  PolarMeasurementProvider,
+  PolarMeasurementProvider.of({
+    measure: () => Effect.fail(unavailableProvider),
+  }),
+)
+
+export const unavailableTargetAcquisitionProviderLayer = Layer.succeed(
+  TargetAcquisitionProvider,
+  TargetAcquisitionProvider.of({
+    capture: () => Effect.fail(unavailableProvider),
+    correct: () => Effect.fail(unavailableProvider),
+    frame: () => Effect.fail(unavailableProvider),
+  }),
+)
+
+export const unavailableCameraExposureMaterializationLayer = Layer.succeed(
+  CameraExposureMaterialization,
+  CameraExposureMaterialization.of({
+    complete: () =>
+      Effect.succeed({
+        outcome: 'rejected',
+        reason: 'MaterializationFailed',
+      }),
+  }),
+)
+
+export const standardAcquireOuterTransitionPolicyLayer = Layer.succeed(
+  AcquireOuterTransitionPolicy,
+  AcquireOuterTransitionPolicy.of({ denyOuterTargetTransitions: false }),
+)
+
+export const boundedSimulationAcquireOuterTransitionPolicyLayer = Layer.succeed(
+  AcquireOuterTransitionPolicy,
+  AcquireOuterTransitionPolicy.of({ denyOuterTargetTransitions: true }),
+)
+
+export const AcquireCommandOutcome = Schema.TaggedUnion({
+  ReadOnly: { response: AcquireCommandResponse.cases.Unavailable },
+  AcquireAccepted: { response: AcquireCommandResponse.cases.Accepted },
+  AcquireRejected: { response: AcquireCommandResponse.cases.Rejected },
+  AcquireUnavailable: { response: AcquireCommandResponse.cases.Unavailable },
+  CameraAccepted: {
+    response: Schema.Union([
+      CameraCommandResponse.cases.Accepted,
+      CameraCommandResponse.cases.Completed,
+    ]),
+  },
+  CameraRejected: { response: CameraCommandResponse.cases.Rejected },
+  CameraUnavailable: {
+    response: Schema.Union([
+      CameraCommandResponse.cases.Rejected,
+      CameraCommandResponse.cases.Unavailable,
+    ]),
+  },
+})
 
 export interface AcquireCommandServiceShape {
   readonly execute: (
     raw: unknown,
     identity: LocalIdentity,
-  ) => Effect.Effect<AcquireHttpResult, unknown>
+  ) => Effect.Effect<typeof AcquireCommandOutcome.Type, unknown>
 }
 
 export class AcquireCommandService extends Context.Service<
@@ -72,59 +140,61 @@ export class AcquireCommandService extends Context.Service<
   AcquireCommandServiceShape
 >()('@astro-console/server/AcquireCommandService') {}
 
-export const acquireCommandServiceLayer = (
-  options: AcquireCommandServiceOptions = {},
-) =>
-  Layer.effect(
-    AcquireCommandService,
-    Effect.gen(function* () {
-      const { database } = yield* OriginDatabase
-      const repository = yield* StateSqliteRepository
-      const publication = yield* ProjectionPublication
-      const acquireRepository = acquireSqliteRepository(database)
+export const acquireCommandServiceLayer = Layer.effect(
+  AcquireCommandService,
+  Effect.gen(function* () {
+    const { database } = yield* OriginDatabase
+    const repository = yield* StateSqliteRepository
+    const publication = yield* ProjectionPublication
+    const cameraProvider = yield* CameraProvider
+    const polarMeasurementProvider = yield* PolarMeasurementProvider
+    const targetAcquisitionProvider = yield* TargetAcquisitionProvider
+    const materialization = yield* CameraExposureMaterialization
+    const policy = yield* AcquireOuterTransitionPolicy
+    const acquireRepository = acquireSqliteRepository(database)
 
-      return AcquireCommandService.of({
-        execute: Effect.fn('AcquireCommandService.execute')(
-          function* (raw, identity) {
-            if (identity.capability !== 'controlCapable')
-              return {
-                status: 403,
-                body: AcquireCommandResponse.cases.Unavailable.make({
-                  summary:
-                    'This client is read-only and cannot record Acquire evidence.',
-                }),
-              }
+    return AcquireCommandService.of({
+      execute: Effect.fn('AcquireCommandService.execute')(
+        function* (raw, identity) {
+          if (identity.capability !== 'controlCapable')
+            return AcquireCommandOutcome.cases.ReadOnly.make({
+              response: AcquireCommandResponse.cases.Unavailable.make({
+                summary:
+                  'This client is read-only and cannot record polar evidence.',
+              }),
+            })
 
-            const camera = Schema.decodeUnknownOption(CameraCommandRequest)(raw)
-            if (Option.isSome(camera))
-              return yield* executeCamera(
-                camera.value,
-                raw,
-                identity,
-                database,
-                repository,
-                acquireRepository,
-                publication.publish,
-                options,
-              )
-
-            const decoded = Schema.decodeUnknownOption(AcquireCommandRequest)(
+          const camera = Schema.decodeUnknownOption(CameraCommandRequest)(raw)
+          if (Option.isSome(camera))
+            return yield* executeCamera(
+              camera.value,
               raw,
-            )
-            return yield* executeAcquire(
-              raw,
-              decoded,
               identity,
+              database,
               repository,
               acquireRepository,
               publication.publish,
-              options,
+              cameraProvider,
+              materialization,
             )
-          },
-        ),
-      })
-    }),
-  )
+
+          const decoded = Schema.decodeUnknownOption(AcquireCommandRequest)(raw)
+          return yield* executeAcquire(
+            raw,
+            decoded,
+            identity,
+            repository,
+            acquireRepository,
+            publication.publish,
+            polarMeasurementProvider,
+            targetAcquisitionProvider,
+            policy,
+          )
+        },
+      ),
+    })
+  }),
+)
 
 type AcquireRepository = ReturnType<typeof acquireSqliteRepository>
 type Publish = (cursor: number) => Effect.Effect<void, unknown>
@@ -138,19 +208,15 @@ const executeCamera = Effect.fn('AcquireCommandService.executeCamera')(
     repository: StateSqliteRepositoryShape,
     acquireRepository: AcquireRepository,
     publish: Publish,
-    options: AcquireCommandServiceOptions,
+    cameraProvider: CameraProviderShape,
+    materialization: CameraExposureMaterializationShape,
   ) {
-    const prior = acquireRepository.receipt(
+    const prior = acquireRepository.applicationReceipt(
       camera.intent.idempotencyKey,
       identity.clientId,
     )
     if (prior !== undefined)
-      return {
-        status: prior.status,
-        body: yield* Schema.decodeUnknownEffect(CameraCommandResponse)(
-          prior.body,
-        ),
-      }
+      return yield* Schema.decodeUnknownEffect(AcquireCommandOutcome)(prior)
 
     const current = repository.state()
     if (
@@ -158,25 +224,23 @@ const executeCamera = Effect.fn('AcquireCommandService.executeCamera')(
       camera.intent.expectedLeaseRevision !== current.control.revision ||
       camera.intent.expectedRunRevision !== current.run.revision
     )
-      return {
-        status: 409,
-        body: CameraCommandResponse.cases.Rejected.make({
+      return AcquireCommandOutcome.cases.CameraRejected.make({
+        response: CameraCommandResponse.cases.Rejected.make({
           summary:
             'The control lease or active run changed. Read the current Observe projection.',
         }),
-      }
+      })
     if (
       current.run.preflight?.checks.some(
         (check) => check.key === 'camera-connected' && check.state === 'ready',
       ) !== true
     )
-      return {
-        status: 409,
-        body: CameraCommandResponse.cases.Rejected.make({
+      return AcquireCommandOutcome.cases.CameraRejected.make({
+        response: CameraCommandResponse.cases.Rejected.make({
           summary:
             'Current camera connection truth is not ready. Refresh preflight before any camera command.',
         }),
-      }
+      })
 
     if (
       CameraCommandRequest.fields.intent.guards.CompleteCameraExposure(
@@ -188,78 +252,79 @@ const executeCamera = Effect.fn('AcquireCommandService.executeCamera')(
         current.run.sourceDefinitionId,
       )
       if (equipment === undefined)
-        return {
-          status: 409,
-          body: CameraCommandResponse.cases.Rejected.make({
+        return AcquireCommandOutcome.cases.CameraRejected.make({
+          response: CameraCommandResponse.cases.Rejected.make({
             summary:
               'The accepted run definition cannot supply capture equipment identity.',
           }),
-        }
-      const pending = CameraCommandResponse.cases.Unavailable.make({
-        summary:
-          'The camera image read outcome is not yet known. It will not replay.',
+        })
+      const pending = AcquireCommandOutcome.cases.CameraUnavailable.make({
+        response: CameraCommandResponse.cases.Unavailable.make({
+          summary:
+            'The camera image read outcome is not yet known. It will not replay.',
+        }),
       })
-      acquireRepository.saveReceipt(
+      acquireRepository.saveApplicationReceipt(
         camera.intent.idempotencyKey,
         identity.clientId,
-        { status: 503, body: pending },
+        pending,
       )
-      const completed =
-        options.completeCameraExposure === undefined
-          ? ({ outcome: 'rejected', reason: 'MaterializationFailed' } as const)
-          : yield* options.completeCameraExposure({
-              assetId: `asset-capture-${camera.intent.idempotencyKey}`,
-              frameId: camera.intent.frameId,
-              capturedAt: camera.intent.capturedAt,
-              equipment,
-              capture: {
-                exposureSeconds: camera.intent.exposureSeconds,
-                filter: camera.intent.filter,
-                binning: camera.intent.binning,
-                frameType: camera.intent.frameType,
-              },
-              lineage: {
-                runId: current.run.id,
-                sequenceId: 'camera-exposure',
-                acquisitionId: 'camera-exposure',
-              },
-              idempotencyKey: camera.intent.idempotencyKey,
-            })
-      const body =
+      const completed = yield* materialization.complete({
+        assetId: `asset-capture-${camera.intent.idempotencyKey}`,
+        frameId: camera.intent.frameId,
+        capturedAt: camera.intent.capturedAt,
+        equipment,
+        capture: {
+          exposureSeconds: camera.intent.exposureSeconds,
+          filter: camera.intent.filter,
+          binning: camera.intent.binning,
+          frameType: camera.intent.frameType,
+        },
+        lineage: {
+          runId: current.run.id,
+          sequenceId: 'camera-exposure',
+          acquisitionId: 'camera-exposure',
+        },
+        idempotencyKey: camera.intent.idempotencyKey,
+      })
+      const outcome =
         completed.outcome === 'accepted'
-          ? CameraCommandResponse.cases.Completed.make({
-              assetId: completed.assetId,
+          ? AcquireCommandOutcome.cases.CameraAccepted.make({
+              response: CameraCommandResponse.cases.Completed.make({
+                assetId: completed.assetId,
+              }),
             })
-          : CameraCommandResponse.cases.Unavailable.make({
-              summary: 'The completed camera image could not be retained.',
+          : AcquireCommandOutcome.cases.CameraUnavailable.make({
+              response: CameraCommandResponse.cases.Unavailable.make({
+                summary: 'The completed camera image could not be retained.',
+              }),
             })
-      const status = completed.outcome === 'accepted' ? 202 : 503
-      acquireRepository.saveReceipt(
+      acquireRepository.saveApplicationReceipt(
         camera.intent.idempotencyKey,
         identity.clientId,
-        { status, body },
+        outcome,
       )
-      return { status, body }
+      return outcome
     }
 
-    const pending = CameraCommandResponse.cases.Unavailable.make({
-      summary:
-        'The camera command outcome is not yet known. Refresh its state; it will not replay.',
+    const pending = AcquireCommandOutcome.cases.CameraUnavailable.make({
+      response: CameraCommandResponse.cases.Unavailable.make({
+        summary:
+          'The camera command outcome is not yet known. Refresh its state; it will not replay.',
+      }),
     })
-    acquireRepository.saveReceipt(
+    acquireRepository.saveApplicationReceipt(
       camera.intent.idempotencyKey,
       identity.clientId,
-      { status: 503, body: pending },
+      pending,
     )
     const result = yield* executeCameraCommand(raw).pipe(
-      options.cameraProvider === undefined
-        ? (effect) => effect
-        : Effect.provideService(CameraProvider, options.cameraProvider),
+      Effect.provideService(CameraProvider, cameraProvider),
     )
-    const outcome = Match.value(result).pipe(
+    const command = Match.value(result).pipe(
       Match.when({ _tag: 'Observed' }, (observed) => ({
         observed: true as const,
-        body: CameraCommandResponse.cases.Accepted.make({
+        response: CameraCommandResponse.cases.Accepted.make({
           observation: observed.observation,
         }),
         observation: observed.observation,
@@ -267,60 +332,66 @@ const executeCamera = Effect.fn('AcquireCommandService.executeCamera')(
       })),
       Match.when({ _tag: 'Rejected' }, (rejected) => ({
         observed: false as const,
-        body: CameraCommandResponse.cases.Rejected.make({
+        response: CameraCommandResponse.cases.Rejected.make({
           summary: rejected.summary,
         }),
         summary: rejected.summary,
       })),
       Match.orElse((unavailable) => ({
         observed: false as const,
-        body: CameraCommandResponse.cases.Unavailable.make({
+        response: CameraCommandResponse.cases.Unavailable.make({
           summary: unavailable.summary,
         }),
         summary: unavailable.summary,
       })),
     )
-    const status = outcome.observed ? 202 : 503
     const observedAt = new Date().toISOString()
     const previous = current.run.preflight
     const preflight = Schema.decodeUnknownSync(PreflightSnapshot)({
       observedAt,
-      verdict: outcome.observed
+      verdict: command.observed
         ? (previous?.verdict ?? 'unknown')
         : 'unavailable',
-      nextAction: outcome.observed
+      nextAction: command.observed
         ? (previous?.nextAction ??
           'Camera state was read after the command acknowledgement.')
         : 'Restore the camera provider, then refresh its state. The command will not replay.',
       checks: previous?.checks ?? [
         {
           key: 'camera-provider',
-          state: outcome.observed ? 'unknown' : 'unavailable',
+          state: command.observed ? 'unknown' : 'unavailable',
           observedAt,
-          reason: outcome.observed
+          reason: command.observed
             ? 'No prior full rig inventory is available.'
-            : outcome.summary,
+            : command.summary,
         },
       ],
       ...(previous?.rig === undefined ? {} : { rig: previous.rig }),
-      camera: outcome.observed
-        ? outcome.observation
+      camera: command.observed
+        ? command.observation
         : { observedAt, cameraState: 'unknown' },
     })
     const persisted = repository.persistPreflight(preflight)
     yield* publish(persisted.cursor)
-    if (outcome.observed)
+    if (command.observed)
       database
         .prepare(
           'INSERT OR REPLACE INTO camera_observations (run_id,observation) VALUES (?,?)',
         )
-        .run(current.run.id, JSON.stringify(outcome.observation))
-    acquireRepository.saveReceipt(
+        .run(current.run.id, JSON.stringify(command.observation))
+    const outcome = command.observed
+      ? AcquireCommandOutcome.cases.CameraAccepted.make({
+          response: command.response,
+        })
+      : AcquireCommandOutcome.cases.CameraUnavailable.make({
+          response: command.response,
+        })
+    acquireRepository.saveApplicationReceipt(
       camera.intent.idempotencyKey,
       identity.clientId,
-      { status, body: outcome.body },
+      outcome,
     )
-    return { status, body: outcome.body }
+    return outcome
   },
 )
 
@@ -332,20 +403,17 @@ const executeAcquire = Effect.fn('AcquireCommandService.executeAcquire')(
     repository: StateSqliteRepositoryShape,
     acquireRepository: AcquireRepository,
     publish: Publish,
-    options: AcquireCommandServiceOptions,
+    polarMeasurementProvider: PolarMeasurementProviderShape,
+    targetAcquisitionProvider: TargetAcquisitionProviderShape,
+    policy: { readonly denyOuterTargetTransitions: boolean },
   ) {
     if (Option.isSome(decoded)) {
-      const prior = acquireRepository.receipt(
+      const prior = acquireRepository.applicationReceipt(
         decoded.value.intent.idempotencyKey,
         identity.clientId,
       )
       if (prior !== undefined)
-        return {
-          status: prior.status,
-          body: yield* Schema.decodeUnknownEffect(AcquireCommandResponse)(
-            prior.body,
-          ),
-        }
+        return yield* Schema.decodeUnknownEffect(AcquireCommandOutcome)(prior)
       const current = repository.state()
       if (
         current.run === null ||
@@ -353,43 +421,43 @@ const executeAcquire = Effect.fn('AcquireCommandService.executeAcquire')(
           current.control.revision ||
         decoded.value.intent.expectedRunRevision !== current.run.revision
       )
-        return {
-          status: 409,
-          body: AcquireCommandResponse.cases.Rejected.make({
+        return AcquireCommandOutcome.cases.AcquireRejected.make({
+          response: AcquireCommandResponse.cases.Rejected.make({
             summary:
               'The control lease or active run changed. Read the current Observe projection.',
             snapshot: yield* repository.bootstrapSnapshot(identity),
           }),
-        }
+        })
       const acquire = acquireRepository.current(current.run.id)
       if (
         acquire === undefined ||
         decoded.value.intent.expectedAcquireRevision !== acquire.revision
       )
-        return {
-          status: 409,
-          body: AcquireCommandResponse.cases.Rejected.make({
+        return AcquireCommandOutcome.cases.AcquireRejected.make({
+          response: AcquireCommandResponse.cases.Rejected.make({
             summary:
               'Target evidence changed. Read the current Observe projection.',
             snapshot: yield* repository.bootstrapSnapshot(identity),
           }),
-        }
+        })
       if (
-        options.denyOuterTargetTransitions === true &&
+        policy.denyOuterTargetTransitions &&
         (AcquireIntent.guards.SkipAcquireTarget(decoded.value.intent) ||
           AcquireIntent.guards.AbortAcquire(decoded.value.intent))
       ) {
-        const denied = AcquireCommandResponse.cases.Rejected.make({
-          summary:
-            'This bounded target simulation does not implement an outer-run Skip or Abort transition.',
-          snapshot: yield* repository.bootstrapSnapshot(identity),
+        const denied = AcquireCommandOutcome.cases.AcquireRejected.make({
+          response: AcquireCommandResponse.cases.Rejected.make({
+            summary:
+              'This bounded target simulation does not implement an outer-run Skip or Abort transition.',
+            snapshot: yield* repository.bootstrapSnapshot(identity),
+          }),
         })
-        acquireRepository.saveReceipt(
+        acquireRepository.saveApplicationReceipt(
           decoded.value.intent.idempotencyKey,
           identity.clientId,
-          { status: 409, body: denied },
+          denied,
         )
-        return { status: 409, body: denied }
+        return denied
       }
       const providerEffect =
         (AcquireIntent.guards.CaptureTargetAcquisitionEvidence(
@@ -399,14 +467,16 @@ const executeAcquire = Effect.fn('AcquireCommandService.executeAcquire')(
         (AcquireIntent.guards.ApprovePointingCorrection(decoded.value.intent) &&
           acquire.pendingCorrectionProposal !== null)
       if (providerEffect) {
-        const pending = AcquireCommandResponse.cases.Unavailable.make({
-          summary:
-            'This provider work is in progress. Reconcile current Acquire evidence; it will not replay.',
+        const pending = AcquireCommandOutcome.cases.AcquireUnavailable.make({
+          response: AcquireCommandResponse.cases.Unavailable.make({
+            summary:
+              'This provider work is in progress. Reconcile current Acquire evidence; it will not replay.',
+          }),
         })
-        acquireRepository.saveReceipt(
+        acquireRepository.saveApplicationReceipt(
           decoded.value.intent.idempotencyKey,
           identity.clientId,
-          { status: 503, body: pending },
+          pending,
         )
       }
     }
@@ -426,40 +496,41 @@ const executeAcquire = Effect.fn('AcquireCommandService.executeAcquire')(
     const result: PolarCommandResult | TargetAcquisitionCommandResult =
       yield* program.pipe(
         Effect.provideService(AcquirePersistence, persistence),
-        options.polarMeasurementProvider === undefined
-          ? (effect) => effect
-          : Effect.provideService(
-              PolarMeasurementProvider,
-              options.polarMeasurementProvider,
-            ),
-        options.targetAcquisitionProvider === undefined
-          ? (effect) => effect
-          : Effect.provideService(
-              TargetAcquisitionProvider,
-              options.targetAcquisitionProvider,
-            ),
+        Effect.provideService(
+          PolarMeasurementProvider,
+          polarMeasurementProvider,
+        ),
+        Effect.provideService(
+          TargetAcquisitionProvider,
+          targetAcquisitionProvider,
+        ),
       )
     return yield* Match.value(result).pipe(
       Match.tag('Committed', (committed) =>
         Effect.gen(function* () {
           yield* publish(committed.cursor)
-          const body = AcquireCommandResponse.cases.Accepted.make({
-            snapshot: yield* repository.bootstrapSnapshot(identity),
+          const outcome = AcquireCommandOutcome.cases.AcquireAccepted.make({
+            response: AcquireCommandResponse.cases.Accepted.make({
+              snapshot: yield* repository.bootstrapSnapshot(identity),
+            }),
           })
           if (Option.isSome(decoded))
-            acquireRepository.saveReceipt(
+            acquireRepository.saveApplicationReceipt(
               decoded.value.intent.idempotencyKey,
               identity.clientId,
-              { status: 200, body },
+              outcome,
             )
-          return { status: 200, body }
+          return outcome
         }),
       ),
       Match.tag('Unavailable', ({ summary }) =>
-        Effect.succeed({
-          status: 503,
-          body: AcquireCommandResponse.cases.Unavailable.make({ summary }),
-        }),
+        Effect.succeed(
+          AcquireCommandOutcome.cases.AcquireUnavailable.make({
+            response: AcquireCommandResponse.cases.Unavailable.make({
+              summary,
+            }),
+          }),
+        ),
       ),
       Match.tags({
         Rejected: ({ summary }) =>
@@ -478,10 +549,14 @@ const rejectedAcquireResult = (
   identity: LocalIdentity,
 ) =>
   repository.bootstrapSnapshot(identity).pipe(
-    Effect.map((snapshot) => ({
-      status: 409,
-      body: AcquireCommandResponse.cases.Rejected.make({ summary, snapshot }),
-    })),
+    Effect.map((snapshot) =>
+      AcquireCommandOutcome.cases.AcquireRejected.make({
+        response: AcquireCommandResponse.cases.Rejected.make({
+          summary,
+          snapshot,
+        }),
+      }),
+    ),
   )
 
 function isTargetIntent(intent: typeof AcquireIntent.Type) {

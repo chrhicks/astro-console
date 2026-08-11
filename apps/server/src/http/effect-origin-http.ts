@@ -36,19 +36,11 @@ import {
 import { responseHeaders } from './response.ts'
 import type { DevelopmentSimulationConfig } from './development-simulation.ts'
 import { makeControlRoutes } from './routes/control-routes.ts'
-import {
-  makeAcquireRoutes,
-  type AcquireRouteOptions,
-} from './routes/acquire-routes.ts'
+import { makeAcquireRoutes } from './routes/acquire-routes.ts'
 import { json, OriginRequestIdentity } from './routes/origin-route-shared.ts'
-import {
-  makeObserveRoutes,
-  type ObserveRouteOptions,
-} from './routes/observe-routes.ts'
+import { makeObserveRoutes } from './routes/observe-routes.ts'
 import { makePlanRoutes } from './routes/plan-routes.ts'
 import { makeSimulationRoutes } from './routes/simulation-routes.ts'
-
-export type OriginHttpRouteOptions = ObserveRouteOptions & AcquireRouteOptions
 
 class OriginRequestAdmission extends Context.Service<
   OriginRequestAdmission,
@@ -200,7 +192,6 @@ const eventsResponse = (
 export const makeOriginHttpApplication = (
   webRoot: string,
   developmentSimulation?: DevelopmentSimulationConfig,
-  routeOptions: OriginHttpRouteOptions = {},
 ) =>
   Effect.gen(function* () {
     const repository = yield* StateSqliteRepository
@@ -208,14 +199,8 @@ export const makeOriginHttpApplication = (
     const web = yield* makeWebResponse(webRoot)
     const planRoutes = yield* makePlanRoutes()
     const controlRoutes = yield* makeControlRoutes()
-    const observeRoutes = yield* makeObserveRoutes(routeOptions)
-    const acquireRoutes = yield* makeAcquireRoutes({
-      ...routeOptions,
-      denyOuterTargetTransitions:
-        developmentSimulation?.launchScenario ===
-          'target-evidence-progression' ||
-        developmentSimulation?.launchScenario === 'solve-success-no-solution',
-    })
+    const observeRoutes = yield* makeObserveRoutes()
+    const acquireRoutes = yield* makeAcquireRoutes()
     const simulationRoutes = makeSimulationRoutes(developmentSimulation)
 
     const live = HttpRouter.add(
