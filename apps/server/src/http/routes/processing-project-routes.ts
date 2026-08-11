@@ -62,7 +62,7 @@ export const processingProjectRouteCompatibilityResponse = (
   )
   if (!collection && !requestPath.startsWith('/api/process/projects/'))
     return undefined
-  if (detail || evidence) {
+  if (detail || (evidence && method === 'GET')) {
     const suffix = evidence ? '/evidence' : ''
     const encoded = requestPath.slice(
       '/api/process/projects/'.length,

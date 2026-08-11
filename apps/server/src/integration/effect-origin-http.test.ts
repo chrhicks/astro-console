@@ -1334,6 +1334,32 @@ test('Processing Project routes preserve method, path, and change-body compatibi
         'InvalidInput',
       )
 
+      const malformedEvidenceHead = yield* fetchEffect(
+        `${bases.owner}/api/process/projects/%/evidence`,
+        { method: 'HEAD', headers },
+      )
+      assert.equal(malformedEvidenceHead.status, 404)
+      assert.equal(
+        malformedEvidenceHead.headers.get('content-type'),
+        'application/json; charset=utf-8',
+      )
+      const malformedEvidencePost = yield* fetchEffect(
+        `${bases.owner}/api/process/projects/%/evidence`,
+        { method: 'POST', headers },
+      )
+      assert.equal(malformedEvidencePost.status, 404)
+      assert.deepEqual(
+        yield* responseJson(malformedEvidencePost).pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(ProcessingProjectHttpFailure),
+          ),
+        ),
+        {
+          _tag: 'ProjectRouteNotFound',
+          message: 'The Processing Project route does not exist.',
+        },
+      )
+
       const encodedProjectId = yield* fetchEffect(
         `${bases.owner}/api/process/projects/%2F`,
         { headers },
