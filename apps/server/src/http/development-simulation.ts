@@ -1,4 +1,9 @@
 import { readFileSync } from 'node:fs'
+import { Effect, Schema } from 'effect'
+import {
+  DevelopmentSimulationControlRequest,
+  DevelopmentSimulationProjection,
+} from '@astro-console/protocol'
 import type { LocalIdentity } from '../auth/identity.ts'
 import {
   alpacaSimulationScenarios,
@@ -32,68 +37,17 @@ type SimulatorSnapshot = {
   readonly commandLog: ReadonlyArray<unknown>
 }
 
-export type DevelopmentSimulationProjection = {
-  readonly mode: 'alpaca'
-  readonly notice: 'SIMULATION · NOT LIVE HARDWARE'
-  readonly scenario: AlpacaSimulationScenario
-  readonly launchScenario: AlpacaSimulationScenario
-  readonly scenarios: typeof alpacaSimulationScenarios
-  readonly provenance: {
-    readonly provider: 'Astro Console Alpaca development simulator'
-    readonly transport: 'Server-mediated loopback'
-  }
-  readonly clock: {
-    readonly nowMs: number
-    readonly generation: number
-  }
-  readonly camera: {
-    readonly phase: 'idle' | 'exposing' | 'reading'
-    readonly imageReady: boolean
-  }
-  readonly evidence: {
-    readonly sequenceLength: number
-    readonly framesServed: number
-    readonly lastFrame: DevelopmentSimulationFrame | null
-    readonly nextFrame: DevelopmentSimulationFrame | null
-  }
-  readonly commandCount: number
-  readonly guide: DevelopmentSimulationScenarioGuide
-}
-
-export type DevelopmentSimulationScenarioGuide = {
-  readonly summary: string
-  readonly driver:
-    | {
-        readonly _tag: 'Available'
-        readonly action:
-          'refresh-preflight' | 'capture-test-frame' | 'target-acquire'
-        readonly label: string
-      }
-    | { readonly _tag: 'Unavailable'; readonly reason: string }
-}
-
-export type DevelopmentSimulationFrame = SimulatorFrame & {
-  readonly sha256?: string
-  readonly capture:
-    | {
-        readonly _tag: 'Available'
-        readonly exposureSeconds: 15 | 120
-        readonly capturedAt: string
-        readonly filter: 'None'
-        readonly binning: 1
-        readonly frameType: 'light'
-      }
-    | { readonly _tag: 'Unavailable'; readonly reason: string }
-}
-
-export type DevelopmentSimulationControl =
-  | { readonly action: 'select'; readonly scenario: AlpacaSimulationScenario }
-  | { readonly action: 'reset' }
-  | { readonly action: 'advance'; readonly milliseconds: number }
+type DevelopmentSimulationProjectionValue =
+  typeof DevelopmentSimulationProjection.Type
+type DevelopmentSimulationScenarioGuide =
+  DevelopmentSimulationProjectionValue['guide']
+type DevelopmentSimulationFrame = NonNullable<
+  DevelopmentSimulationProjectionValue['evidence']['nextFrame']
+>
 
 export async function readDevelopmentSimulation(
   config: DevelopmentSimulationConfig,
-): Promise<DevelopmentSimulationProjection> {
+): Promise<typeof DevelopmentSimulationProjection.Type> {
   const response = await fetch(`${config.origin}/__sim/state`)
   if (!response.ok) throw new Error('The development simulator is unavailable.')
   return projectSnapshot(config, simulatorSnapshot(await response.json()))
@@ -103,14 +57,18 @@ export async function controlDevelopmentSimulation(
   config: DevelopmentSimulationConfig,
   identity: LocalIdentity,
   raw: unknown,
-): Promise<DevelopmentSimulationProjection> {
+): Promise<typeof DevelopmentSimulationProjection.Type> {
   if (identity.capability !== 'controlCapable')
     throw new DevelopmentSimulationControlRejected(
       403,
       'Desktop control is required for simulation controls.',
     )
   const current = await readDevelopmentSimulation(config)
-  const control = simulationControl(raw)
+  const control = await Effect.runPromise(
+    Schema.decodeUnknownEffect(DevelopmentSimulationControlRequest)(raw).pipe(
+      Effect.mapError(() => invalidControl()),
+    ),
+  )
   const request =
     control.action === 'select' || control.action === 'reset'
       ? {
@@ -144,28 +102,6 @@ export class DevelopmentSimulationControlRejected extends Error {
     super(message)
     this.status = status
   }
-}
-
-function simulationControl(value: unknown): DevelopmentSimulationControl {
-  if (typeof value !== 'object' || value === null || !('action' in value))
-    throw invalidControl()
-  if (value.action === 'reset') return { action: 'reset' }
-  if (
-    value.action === 'select' &&
-    'scenario' in value &&
-    isScenario(value.scenario)
-  )
-    return { action: 'select', scenario: value.scenario }
-  if (
-    value.action === 'advance' &&
-    'milliseconds' in value &&
-    typeof value.milliseconds === 'number' &&
-    Number.isFinite(value.milliseconds) &&
-    value.milliseconds > 0 &&
-    value.milliseconds <= 180_000
-  )
-    return { action: 'advance', milliseconds: value.milliseconds }
-  throw invalidControl()
 }
 
 function invalidControl() {
@@ -239,7 +175,7 @@ function isNullableFrame(value: unknown): value is SimulatorFrame | null {
 function projectSnapshot(
   config: DevelopmentSimulationConfig,
   snapshot: SimulatorSnapshot,
-): DevelopmentSimulationProjection {
+): typeof DevelopmentSimulationProjection.Type {
   return {
     mode: 'alpaca',
     notice: 'SIMULATION · NOT LIVE HARDWARE',

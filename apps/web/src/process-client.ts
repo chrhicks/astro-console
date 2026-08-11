@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Effect, Schema } from 'effect'
 import {
   CreateProcessingProjectRequest as CreateProcessingProjectRequestSchema,
   OpenedProcessingProjectResponse,
@@ -96,16 +96,32 @@ async function request<
     },
   })
   const value: unknown = await response.json().catch(() => undefined)
-  const decoded = Schema.decodeUnknownSync(responseSchema)(value)
+  const malformed = () =>
+    new ProcessingProjectRequestError(response.status, {
+      _tag: 'MalformedResponse',
+    })
+  const decoded = await Effect.runPromise(
+    Schema.decodeUnknownEffect(responseSchema)(value).pipe(
+      Effect.mapError(malformed),
+    ),
+  )
   if (Schema.is(ProcessingProjectHttpFailure)(decoded))
     throw new ProcessingProjectRequestError(response.status, decoded)
-  return Schema.decodeUnknownSync(successSchema)(decoded)
+  return Effect.runPromise(
+    Schema.decodeUnknownEffect(successSchema)(decoded).pipe(
+      Effect.mapError(malformed),
+    ),
+  )
 }
+
+export type ProcessingProjectOperationFailure =
+  | typeof ProcessingProjectHttpFailure.Type
+  | { readonly _tag: 'MalformedResponse' }
 
 export class ProcessingProjectRequestError extends Error {
   constructor(
     readonly status: number,
-    readonly detail: typeof ProcessingProjectHttpFailure.Type,
+    readonly detail: ProcessingProjectOperationFailure,
   ) {
     super('The Processing Project request was not accepted.')
   }

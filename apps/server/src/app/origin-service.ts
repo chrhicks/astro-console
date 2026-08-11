@@ -16,6 +16,9 @@ import { join } from 'node:path'
 import {
   BootstrapHttpSuccessEnvelope,
   CommandHttpFailureEnvelope,
+  DevelopmentSimulationControlFailure,
+  DevelopmentSimulationProjection,
+  DevelopmentSimulationUnavailable,
   RefreshPreflightResponse,
 } from '@astro-console/protocol'
 import {
@@ -896,16 +899,22 @@ export function createLocalWebService(
                 return json(
                   response,
                   200,
-                  await readDevelopmentSimulation(developmentSimulation),
+                  Schema.encodeSync(DevelopmentSimulationProjection)(
+                    await readDevelopmentSimulation(developmentSimulation),
+                  ),
                 )
               } catch {
-                return json(response, 503, {
-                  mode: 'alpaca',
-                  notice: 'SIMULATION · NOT LIVE HARDWARE',
-                  state: 'unavailable',
-                  launchScenario: developmentSimulation.launchScenario,
-                  message: 'The development simulator is unavailable.',
-                })
+                return json(
+                  response,
+                  503,
+                  DevelopmentSimulationUnavailable.make({
+                    mode: 'alpaca',
+                    notice: 'SIMULATION · NOT LIVE HARDWARE',
+                    state: 'unavailable',
+                    launchScenario: developmentSimulation.launchScenario,
+                    message: 'The development simulator is unavailable.',
+                  }),
+                )
               }
             },
             simulationControl: async (
@@ -917,10 +926,12 @@ export function createLocalWebService(
                 return json(
                   response,
                   200,
-                  await controlDevelopmentSimulation(
-                    developmentSimulation,
-                    identity,
-                    await body(request),
+                  Schema.encodeSync(DevelopmentSimulationProjection)(
+                    await controlDevelopmentSimulation(
+                      developmentSimulation,
+                      identity,
+                      await body(request),
+                    ),
                   ),
                 )
               } catch (cause) {
@@ -928,18 +939,22 @@ export function createLocalWebService(
                   cause instanceof DevelopmentSimulationControlRejected
                     ? cause
                     : undefined
-                return json(response, rejected?.status ?? 503, {
-                  outcome: 'rejected',
-                  reason:
-                    rejected?.status === 403
-                      ? 'ControlRequired'
-                      : rejected?.status === 400
-                        ? 'InvalidInput'
-                        : 'SimulatorUnavailable',
-                  message:
-                    rejected?.message ??
-                    'The development simulator is unavailable.',
-                })
+                return json(
+                  response,
+                  rejected?.status ?? 503,
+                  DevelopmentSimulationControlFailure.make({
+                    outcome: 'rejected',
+                    reason:
+                      rejected?.status === 403
+                        ? 'ControlRequired'
+                        : rejected?.status === 400
+                          ? 'InvalidInput'
+                          : 'SimulatorUnavailable',
+                    message:
+                      rejected?.message ??
+                      'The development simulator is unavailable.',
+                  }),
+                )
               }
             },
           }),

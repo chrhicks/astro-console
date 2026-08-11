@@ -3,10 +3,14 @@ import test from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import {
+  DevelopmentSimulationControlFailure,
+  DevelopmentSimulationUnavailable,
+  type DevelopmentSimulationProjection,
+} from '@astro-console/protocol'
+import {
   DevelopmentSimulationSurface,
   readSimulationProjection,
   sendSimulationControl,
-  type DevelopmentSimulationProjection,
 } from './development-simulation'
 
 const projection: DevelopmentSimulationProjection = {
@@ -91,6 +95,52 @@ test('normal runtime absence does not create a simulation projection', async () 
   globalThis.fetch = () => Promise.resolve(new Response('{}', { status: 404 }))
   try {
     assert.deepEqual(await readSimulationProjection(), { _tag: 'absent' })
+  } finally {
+    globalThis.fetch = previousFetch
+  }
+})
+
+test('simulation client decodes typed failures and rejects malformed control responses', async () => {
+  const previousFetch = globalThis.fetch
+  try {
+    globalThis.fetch = () => Promise.resolve(Response.json({ malformed: true }))
+    assert.deepEqual(await readSimulationProjection(), { _tag: 'absent' })
+    await assert.rejects(
+      () => sendSimulationControl({ action: 'reset' }),
+      /Simulation control is unavailable/,
+    )
+
+    globalThis.fetch = () =>
+      Promise.resolve(
+        Response.json(
+          DevelopmentSimulationUnavailable.make({
+            mode: 'alpaca',
+            notice: 'SIMULATION · NOT LIVE HARDWARE',
+            state: 'unavailable',
+            launchScenario: 'exposure-success',
+            message: 'The development simulator is unavailable.',
+          }),
+          { status: 503 },
+        ),
+      )
+    const unavailable = await readSimulationProjection()
+    assert.equal(unavailable._tag, 'unavailable')
+
+    globalThis.fetch = () =>
+      Promise.resolve(
+        Response.json(
+          DevelopmentSimulationControlFailure.make({
+            outcome: 'rejected',
+            reason: 'ControlRequired',
+            message: 'Desktop control is required.',
+          }),
+          { status: 403 },
+        ),
+      )
+    await assert.rejects(
+      () => sendSimulationControl({ action: 'reset' }),
+      /Desktop control is required/,
+    )
   } finally {
     globalThis.fetch = previousFetch
   }

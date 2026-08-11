@@ -296,6 +296,76 @@ test('keeps a not-local Process source distinct from missing and service failure
   )
 })
 
+test('maps every Library route failure for detail and Process source', async () => {
+  const cases: ReadonlyArray<{
+    failure: typeof LibraryRouteFailure.Type
+    detail: 'not-found' | 'unavailable'
+    process: 'not-found' | 'not-local' | 'unavailable'
+  }> = [
+    {
+      failure: LibraryRouteFailure.cases.InvalidInput.make({
+        message: 'Invalid Library input.',
+      }),
+      detail: 'unavailable',
+      process: 'unavailable',
+    },
+    {
+      failure: LibraryRouteFailure.cases.AssetNotFound.make({}),
+      detail: 'not-found',
+      process: 'not-found',
+    },
+    {
+      failure: LibraryRouteFailure.cases.AssetUnavailable.make({
+        message: 'Asset is not local.',
+      }),
+      detail: 'unavailable',
+      process: 'not-local',
+    },
+    {
+      failure: LibraryRouteFailure.cases.LibraryUnavailable.make({}),
+      detail: 'unavailable',
+      process: 'unavailable',
+    },
+  ]
+
+  for (const routeCase of cases) {
+    const provideFailure = Layer.succeed(
+      LibraryTransport,
+      LibraryTransport.of({
+        loadPage: () => Effect.die('unused'),
+        loadDetail: () => Effect.succeed(routeCase.failure),
+        loadProcessSourceHandoff: () => Effect.succeed(routeCase.failure),
+        reviewAsset: unusedReview,
+      }),
+    )
+    const run = (operation: 'detail' | 'process') =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const client = yield* LibraryClient
+          return operation === 'detail'
+            ? yield* client.detail('asset-1')
+            : yield* client.processSourceHandoff('asset-1')
+        }).pipe(Effect.provide(layer), Effect.provide(provideFailure)),
+      )
+    await assert.rejects(
+      () => run('detail'),
+      (error: unknown) =>
+        routeCase.detail === 'not-found'
+          ? error instanceof LibraryNotFound
+          : error instanceof LibraryUnavailable,
+    )
+    await assert.rejects(
+      () => run('process'),
+      (error: unknown) =>
+        routeCase.process === 'not-found'
+          ? error instanceof LibraryNotFound
+          : routeCase.process === 'not-local'
+            ? error instanceof LibraryAssetUnavailable
+            : error instanceof LibraryUnavailable,
+    )
+  }
+})
+
 test('decodes Library route failures and rejects malformed page responses', async () => {
   await assert.rejects(
     () =>

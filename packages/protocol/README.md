@@ -6,7 +6,8 @@ remote-but-owned HTTP and SSE seam:
 
 - stable wire identities and primitives;
 - HTTP request, response, and failure schemas;
-- bootstrap and SSE projection schemas; and
+- bootstrap and SSE projection schemas;
+- development-only simulation HTTP schemas; and
 - wire notices and focused validation tests.
 
 It does not own aggregate state, authority, eligibility, transitions, receipts,

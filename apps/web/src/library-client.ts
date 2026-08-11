@@ -285,23 +285,28 @@ const libraryPageFailure = () =>
   new LibraryUnavailable({ reason: 'The Library page could not be read.' })
 
 const libraryDetailFailure = (failure: typeof LibraryRouteFailure.Type) =>
-  failure._tag === 'AssetNotFound'
-    ? new LibraryNotFound()
-    : new LibraryUnavailable({
-        reason:
-          failure._tag === 'InvalidInput'
-            ? failure.message
-            : 'The Library detail could not be read.',
-      })
+  LibraryRouteFailure.match<LibraryNotFound | LibraryUnavailable>(failure, {
+    InvalidInput: ({ message }) => new LibraryUnavailable({ reason: message }),
+    AssetNotFound: () => new LibraryNotFound(),
+    AssetUnavailable: () =>
+      new LibraryUnavailable({
+        reason: 'The Library detail could not be read.',
+      }),
+    LibraryUnavailable: () =>
+      new LibraryUnavailable({
+        reason: 'The Library detail could not be read.',
+      }),
+  })
 
 const processSourceFailure = (failure: typeof LibraryRouteFailure.Type) =>
-  failure._tag === 'AssetNotFound'
-    ? new LibraryNotFound()
-    : failure._tag === 'AssetUnavailable'
-      ? new LibraryAssetUnavailable()
-      : new LibraryUnavailable({
-          reason:
-            failure._tag === 'InvalidInput'
-              ? failure.message
-              : 'The Process source handoff could not be read.',
-        })
+  LibraryRouteFailure.match<
+    LibraryNotFound | LibraryAssetUnavailable | LibraryUnavailable
+  >(failure, {
+    InvalidInput: ({ message }) => new LibraryUnavailable({ reason: message }),
+    AssetNotFound: () => new LibraryNotFound(),
+    AssetUnavailable: () => new LibraryAssetUnavailable(),
+    LibraryUnavailable: () =>
+      new LibraryUnavailable({
+        reason: 'The Process source handoff could not be read.',
+      }),
+  })

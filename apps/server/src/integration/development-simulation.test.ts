@@ -2,6 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createServer } from 'node:http'
 import { ConfigProvider, Effect, Schema } from 'effect'
+import {
+  DevelopmentSimulationControlFailure,
+  DevelopmentSimulationProjection,
+  DevelopmentSimulationUnavailable,
+} from '@astro-console/protocol'
 import { RunExecutionContext } from '../services/run-domain.ts'
 import { createLocalWebService } from '../app/origin-service.ts'
 import { originServerConfig } from '../config/environment-config.ts'
@@ -203,12 +208,15 @@ test('origin projects and controls loopback simulation without exposing its cont
     await simulatorListener.close()
   })
 
-  let projection = await fetch(`${origin}/api/simulation`).then((response) =>
-    response.json(),
+  let projection = Schema.decodeUnknownSync(DevelopmentSimulationProjection)(
+    await fetch(`${origin}/api/simulation`).then((response) => response.json()),
   )
   assert.equal(projection.notice, 'SIMULATION · NOT LIVE HARDWARE')
   assert.equal(projection.scenario, 'exposure-success')
-  assert.equal(projection.evidence.nextFrame.filename, 'm101-good-light.fits')
+  const initialFrame = projection.evidence.nextFrame
+  if (initialFrame === null)
+    throw new Error('The exposure simulation has no next frame.')
+  assert.equal(initialFrame.filename, 'm101-good-light.fits')
   assert.deepEqual(projection.guide, {
     summary:
       'One 15-second M101 exposure reaches Verify with a retained Library original and preview.',
@@ -219,10 +227,10 @@ test('origin projects and controls loopback simulation without exposing its cont
     },
   })
   assert.equal(
-    projection.evidence.nextFrame.sha256,
+    initialFrame.sha256,
     '3d4abc598e2168bddf9d43d7ce9acad788e5c288a7e6bc211013eea31d9d9e24',
   )
-  assert.deepEqual(projection.evidence.nextFrame.capture, {
+  assert.deepEqual(initialFrame.capture, {
     _tag: 'Available',
     exposureSeconds: 15,
     capturedAt: '2026-06-22T02:38:07.417Z',
@@ -260,7 +268,10 @@ test('origin projects and controls loopback simulation without exposing its cont
     /Restart with npm run dev:sim:inspect -- --scenario=focus-quality-degradation/,
   )
   assert.equal(projection.clock.nowMs, 0)
-  assert.deepEqual(projection.evidence.nextFrame.capture, {
+  const focusFrame = projection.evidence.nextFrame
+  if (focusFrame === null)
+    throw new Error('The focus simulation has no next frame.')
+  assert.deepEqual(focusFrame.capture, {
     _tag: 'Available',
     exposureSeconds: 120,
     capturedAt: '2026-08-07T04:05:52.458Z',
@@ -321,7 +332,12 @@ test('read-only clients can inspect but cannot control development simulation', 
     body: JSON.stringify({ action: 'reset' }),
   })
   assert.equal(response.status, 403)
-  assert.equal((await response.json()).reason, 'ControlRequired')
+  assert.equal(
+    Schema.decodeUnknownSync(DevelopmentSimulationControlFailure)(
+      await response.json(),
+    ).reason,
+    'ControlRequired',
+  )
 })
 
 test('origin keeps explicit simulation context when the simulator is malformed or unavailable', async (t) => {
@@ -369,13 +385,18 @@ test('origin keeps explicit simulation context when the simulator is malformed o
 
   let response = await fetch(`${origin}/api/simulation`)
   assert.equal(response.status, 503)
-  assert.deepEqual(await response.json(), {
-    mode: 'alpaca',
-    notice: 'SIMULATION · NOT LIVE HARDWARE',
-    state: 'unavailable',
-    launchScenario: 'exposure-success',
-    message: 'The development simulator is unavailable.',
-  })
+  assert.deepEqual(
+    Schema.decodeUnknownSync(DevelopmentSimulationUnavailable)(
+      await response.json(),
+    ),
+    {
+      mode: 'alpaca',
+      notice: 'SIMULATION · NOT LIVE HARDWARE',
+      state: 'unavailable',
+      launchScenario: 'exposure-success',
+      message: 'The development simulator is unavailable.',
+    },
+  )
 
   await new Promise<void>((resolve, reject) =>
     malformed.close((error) =>
@@ -384,7 +405,12 @@ test('origin keeps explicit simulation context when the simulator is malformed o
   )
   response = await fetch(`${origin}/api/simulation`)
   assert.equal(response.status, 503)
-  assert.equal((await response.json()).state, 'unavailable')
+  assert.equal(
+    Schema.decodeUnknownSync(DevelopmentSimulationUnavailable)(
+      await response.json(),
+    ).state,
+    'unavailable',
+  )
 })
 
 async function post(origin: string, body: object) {
@@ -394,5 +420,7 @@ async function post(origin: string, body: object) {
     body: JSON.stringify(body),
   })
   assert.equal(response.status, 200)
-  return response.json()
+  return Schema.decodeUnknownSync(DevelopmentSimulationProjection)(
+    await response.json(),
+  )
 }

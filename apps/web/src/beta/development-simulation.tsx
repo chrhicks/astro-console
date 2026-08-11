@@ -9,84 +9,31 @@ import {
   StatusIndicator,
   type FlyoutTriggerProps,
 } from '@nightbook/ui'
+import { Effect, Schema } from 'effect'
+import {
+  DevelopmentSimulationControlRequest,
+  DevelopmentSimulationFailure,
+  DevelopmentSimulationProjection,
+  DevelopmentSimulationResponse,
+  DevelopmentSimulationScenario,
+  DevelopmentSimulationUnavailable,
+} from '@astro-console/protocol'
 import { useEffect, useState, type ChangeEvent } from 'react'
 import { nightbookHref } from './route'
 
-export type DevelopmentSimulationFrame = {
-  readonly id: string
-  readonly filename: string
-  readonly purpose: string
-  readonly sha256?: string
-  readonly capture:
-    | {
-        readonly _tag: 'Available'
-        readonly exposureSeconds: number
-        readonly capturedAt: string
-        readonly filter: string
-        readonly binning: number
-        readonly frameType: 'light' | 'dark' | 'flat' | 'bias'
-      }
-    | { readonly _tag: 'Unavailable'; readonly reason: string }
-}
-
-export type DevelopmentSimulationProjection = {
-  readonly mode: 'alpaca'
-  readonly notice: 'SIMULATION · NOT LIVE HARDWARE'
-  readonly scenario: string
-  readonly launchScenario: string
-  readonly scenarios: readonly string[]
-  readonly provenance: {
-    readonly provider: string
-    readonly transport: string
-  }
-  readonly clock: { readonly nowMs: number; readonly generation: number }
-  readonly camera: {
-    readonly phase: 'idle' | 'exposing' | 'reading'
-    readonly imageReady: boolean
-  }
-  readonly evidence: {
-    readonly sequenceLength: number
-    readonly framesServed: number
-    readonly lastFrame: DevelopmentSimulationFrame | null
-    readonly nextFrame: DevelopmentSimulationFrame | null
-  }
-  readonly commandCount: number
-  readonly guide: {
-    readonly summary: string
-    readonly driver:
-      | {
-          readonly _tag: 'Available'
-          readonly action:
-            | 'refresh-preflight'
-            | 'capture-test-frame'
-            | 'target-acquire'
-          readonly label: string
-        }
-      | { readonly _tag: 'Unavailable'; readonly reason: string }
-  }
-}
-
-type UnavailableSimulation = {
-  readonly mode: 'alpaca'
-  readonly notice: 'SIMULATION · NOT LIVE HARDWARE'
-  readonly state: 'unavailable'
-  readonly launchScenario: string
-  readonly message: string
-}
+type SimulationProjection = typeof DevelopmentSimulationProjection.Type
+type UnavailableSimulation = typeof DevelopmentSimulationUnavailable.Type
 
 type SimulationState =
   | { readonly _tag: 'loading' }
   | { readonly _tag: 'absent' }
   | {
       readonly _tag: 'available'
-      readonly projection: DevelopmentSimulationProjection
+      readonly projection: SimulationProjection
     }
   | { readonly _tag: 'unavailable'; readonly value: UnavailableSimulation }
 
-type SimulationControl =
-  | { readonly action: 'select'; readonly scenario: string }
-  | { readonly action: 'reset' }
-  | { readonly action: 'advance'; readonly milliseconds: number }
+type SimulationControl = typeof DevelopmentSimulationControlRequest.Type
 
 let knownSimulationState: Exclude<
   SimulationState,
@@ -97,24 +44,47 @@ export async function readSimulationProjection(): Promise<SimulationState> {
   const response = await fetch('/api/simulation')
   if (response.status === 404) return { _tag: 'absent' }
   const value: unknown = await response.json().catch(() => undefined)
-  if (response.ok && isProjection(value))
-    return { _tag: 'available', projection: value }
-  if (isUnavailable(value)) return { _tag: 'unavailable', value }
+  const decoded = await Effect.runPromise(
+    Schema.decodeUnknownEffect(DevelopmentSimulationResponse)(value),
+  ).catch(() => undefined)
+  if (
+    response.ok &&
+    decoded !== undefined &&
+    Schema.is(DevelopmentSimulationProjection)(decoded)
+  )
+    return { _tag: 'available', projection: decoded }
+  if (
+    decoded !== undefined &&
+    Schema.is(DevelopmentSimulationUnavailable)(decoded)
+  )
+    return { _tag: 'unavailable', value: decoded }
   return { _tag: 'absent' }
 }
 
 export async function sendSimulationControl(
   control: SimulationControl,
-): Promise<DevelopmentSimulationProjection> {
+): Promise<SimulationProjection> {
+  const request = await Effect.runPromise(
+    Schema.decodeUnknownEffect(DevelopmentSimulationControlRequest)(control),
+  )
   const response = await fetch('/api/simulation', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(control),
+    body: JSON.stringify(request),
   })
   const value: unknown = await response.json().catch(() => undefined)
-  if (!response.ok || !isProjection(value))
-    throw new Error(simulationFailureMessage(value))
-  return value
+  const decoded = await Effect.runPromise(
+    Schema.decodeUnknownEffect(DevelopmentSimulationResponse)(value),
+  ).catch(() => undefined)
+  if (
+    response.ok &&
+    decoded !== undefined &&
+    Schema.is(DevelopmentSimulationProjection)(decoded)
+  )
+    return decoded
+  if (decoded !== undefined && Schema.is(DevelopmentSimulationFailure)(decoded))
+    throw new Error(decoded.message)
+  throw new Error('Simulation control is unavailable.')
 }
 
 export function DevelopmentSimulationStrip({
@@ -153,9 +123,7 @@ export function DevelopmentSimulationSurface({
 }: {
   state: Exclude<SimulationState, { readonly _tag: 'loading' | 'absent' }>
   readOnly: boolean
-  control?: (
-    value: SimulationControl,
-  ) => Promise<DevelopmentSimulationProjection>
+  control?: (value: SimulationControl) => Promise<SimulationProjection>
 }) {
   const [current, setCurrent] = useState(state)
   const [selectedScenario, setSelectedScenario] = useState(
@@ -226,9 +194,12 @@ export function DevelopmentSimulationSurface({
             <Select
               value={selectedScenario}
               disabled={pending}
-              onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                setSelectedScenario(event.target.value)
-              }
+              onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                if (
+                  Schema.is(DevelopmentSimulationScenario)(event.target.value)
+                )
+                  setSelectedScenario(event.target.value)
+              }}
             >
               {projection.scenarios.map((value) => (
                 <option value={value} key={value}>
@@ -401,166 +372,9 @@ function elapsed(nowMs: number) {
   return `T+${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 }
 
-function isProjection(
-  value: unknown,
-): value is DevelopmentSimulationProjection {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'mode' in value &&
-    value.mode === 'alpaca' &&
-    'notice' in value &&
-    value.notice === 'SIMULATION · NOT LIVE HARDWARE' &&
-    'scenario' in value &&
-    typeof value.scenario === 'string' &&
-    'launchScenario' in value &&
-    typeof value.launchScenario === 'string' &&
-    'scenarios' in value &&
-    Array.isArray(value.scenarios) &&
-    value.scenarios.every((scenario) => typeof scenario === 'string') &&
-    'provenance' in value &&
-    hasStringFields(value.provenance, ['provider', 'transport']) &&
-    'clock' in value &&
-    hasNumberFields(value.clock, ['nowMs', 'generation']) &&
-    'camera' in value &&
-    isCamera(value.camera) &&
-    'evidence' in value &&
-    isEvidence(value.evidence) &&
-    'commandCount' in value &&
-    typeof value.commandCount === 'number' &&
-    'guide' in value &&
-    isScenarioGuide(value.guide)
-  )
-}
-
-function isScenarioGuide(value: unknown) {
-  if (
-    typeof value !== 'object' ||
-    value === null ||
-    !hasStringFields(value, ['summary']) ||
-    !('driver' in value) ||
-    typeof value.driver !== 'object' ||
-    value.driver === null ||
-    !('_tag' in value.driver)
-  )
-    return false
-  if (value.driver._tag === 'Unavailable')
-    return hasStringFields(value.driver, ['reason'])
-  return (
-    value.driver._tag === 'Available' &&
-    'action' in value.driver &&
-    hasStringFields(value.driver, ['action', 'label']) &&
-    (value.driver.action === 'refresh-preflight' ||
-      value.driver.action === 'capture-test-frame' ||
-      value.driver.action === 'target-acquire')
-  )
-}
-
-function scenarioStatus(projection: DevelopmentSimulationProjection) {
+function scenarioStatus(projection: SimulationProjection) {
   const driver = projection.guide.driver
   return driver._tag === 'Available'
     ? `${projection.guide.summary} Continue through Plan and Observe. Load selects simulator state only.`
     : `${projection.guide.summary} ${driver.reason}`
-}
-
-function isUnavailable(value: unknown): value is UnavailableSimulation {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'mode' in value &&
-    value.mode === 'alpaca' &&
-    'notice' in value &&
-    value.notice === 'SIMULATION · NOT LIVE HARDWARE' &&
-    'state' in value &&
-    value.state === 'unavailable' &&
-    'launchScenario' in value &&
-    typeof value.launchScenario === 'string' &&
-    'message' in value &&
-    typeof value.message === 'string'
-  )
-}
-
-function isCamera(value: unknown) {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'phase' in value &&
-    (value.phase === 'idle' ||
-      value.phase === 'exposing' ||
-      value.phase === 'reading') &&
-    'imageReady' in value &&
-    typeof value.imageReady === 'boolean'
-  )
-}
-
-function isEvidence(value: unknown) {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    hasNumberFields(value, ['sequenceLength', 'framesServed']) &&
-    'lastFrame' in value &&
-    isNullableFrame(value.lastFrame) &&
-    'nextFrame' in value &&
-    isNullableFrame(value.nextFrame)
-  )
-}
-
-function isNullableFrame(value: unknown) {
-  return value === null || isFrame(value)
-}
-
-function isFrame(value: unknown) {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    hasStringFields(value, ['id', 'filename', 'purpose']) &&
-    (!('sha256' in value) || typeof value.sha256 === 'string') &&
-    'capture' in value &&
-    isCapture(value.capture)
-  )
-}
-
-function isCapture(value: unknown) {
-  if (typeof value !== 'object' || value === null || !('_tag' in value))
-    return false
-  if (value._tag === 'Unavailable')
-    return 'reason' in value && typeof value.reason === 'string'
-  return (
-    value._tag === 'Available' &&
-    'exposureSeconds' in value &&
-    typeof value.exposureSeconds === 'number' &&
-    'capturedAt' in value &&
-    typeof value.capturedAt === 'string' &&
-    'filter' in value &&
-    typeof value.filter === 'string' &&
-    'binning' in value &&
-    typeof value.binning === 'number' &&
-    'frameType' in value &&
-    (value.frameType === 'light' ||
-      value.frameType === 'dark' ||
-      value.frameType === 'flat' ||
-      value.frameType === 'bias')
-  )
-}
-
-function hasStringFields(value: unknown, fields: readonly string[]) {
-  if (typeof value !== 'object' || value === null) return false
-  const record = value as Record<string, unknown>
-  return fields.every((field) => typeof record[field] === 'string')
-}
-
-function hasNumberFields(value: unknown, fields: readonly string[]) {
-  if (typeof value !== 'object' || value === null) return false
-  const record = value as Record<string, unknown>
-  return fields.every((field) => typeof record[field] === 'number')
-}
-
-function simulationFailureMessage(value: unknown) {
-  if (typeof value !== 'object' || value === null)
-    return 'Simulation control is unavailable.'
-  if ('message' in value && typeof value.message === 'string')
-    return value.message
-  if ('summary' in value && typeof value.summary === 'string')
-    return value.summary
-  return 'Simulation control is unavailable.'
 }

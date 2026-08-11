@@ -108,7 +108,12 @@ test('decodes Processing Project failures and rejects malformed JSON responses',
     )
 
     globalThis.fetch = async () => Response.json({ projectId: 'incomplete' })
-    await assert.rejects(() => processClient.evidence('project-1'))
+    await assert.rejects(
+      () => processClient.evidence('project-1'),
+      (error: unknown) =>
+        error instanceof ProcessingProjectRequestError &&
+        error.detail._tag === 'MalformedResponse',
+    )
   } finally {
     globalThis.fetch = originalFetch
   }
