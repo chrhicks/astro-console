@@ -110,7 +110,7 @@ export const planCommandFromRequest = Effect.fnUntraced(
 const sqliteObservePersistenceLayer = (
   runRepository: RunSqliteRepositoryShape,
   stateRepository: StateSqliteRepositoryShape,
-  publish: (type: string, cursor: number) => void,
+  publish: (type: string, cursor: number) => Effect.Effect<void, unknown>,
 ) =>
   observePersistenceLayer({
     pause: (intent, identity) =>
@@ -156,11 +156,7 @@ const sqliteObservePersistenceLayer = (
         }),
       ),
     snapshot: (identity) => stateRepository.bootstrapSnapshot(identity),
-    publish: (type, cursor) =>
-      Effect.try({
-        try: () => publish(type, cursor),
-        catch: (cause) => cause,
-      }),
+    publish,
   })
 
 const sqliteCommandTransaction = <A, E>(effect: Effect.Effect<A, E>) =>
@@ -171,7 +167,7 @@ export const observeCommandFromRequest = Effect.fnUntraced(
     runRepository: RunSqliteRepositoryShape,
     stateRepository: StateSqliteRepositoryShape,
     identity: LocalIdentity,
-    publish: (type: string, cursor: number) => void,
+    publish: (type: string, cursor: number) => Effect.Effect<void, unknown>,
   ) {
     void runRepository
     void stateRepository

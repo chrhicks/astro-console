@@ -46,7 +46,7 @@ export const makeObserveRoutes = Effect.fn('OriginHttp.makeObserveRoutes')(
           runRepository,
           repository,
           identity,
-          (_type, cursor) => Effect.runSync(publication.publish(cursor)),
+          (_type, cursor) => publication.publish(cursor),
         ).pipe(
           Effect.catchTags({
             'Server.ObserveCommandInputInvalid': () =>

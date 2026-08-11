@@ -1224,7 +1224,8 @@ function constructLocalWebService(
             runRepository,
             stateRepository,
             identity,
-            publishDomainProjection,
+            (type, cursor) =>
+              Effect.sync(() => publishDomainProjection(type, cursor)),
           ).pipe(
             Effect.catchTags({
               'Server.ObserveCommandInputInvalid': () =>

@@ -36,6 +36,10 @@ import {
 import { responseHeaders } from './response.ts'
 import type { DevelopmentSimulationConfig } from './development-simulation.ts'
 import { makeControlRoutes } from './routes/control-routes.ts'
+import {
+  makeAcquireRoutes,
+  type AcquireRouteOptions,
+} from './routes/acquire-routes.ts'
 import { json, OriginRequestIdentity } from './routes/origin-route-shared.ts'
 import {
   makeObserveRoutes,
@@ -43,6 +47,8 @@ import {
 } from './routes/observe-routes.ts'
 import { makePlanRoutes } from './routes/plan-routes.ts'
 import { makeSimulationRoutes } from './routes/simulation-routes.ts'
+
+export type OriginHttpRouteOptions = ObserveRouteOptions & AcquireRouteOptions
 
 class OriginRequestAdmission extends Context.Service<
   OriginRequestAdmission,
@@ -194,7 +200,7 @@ const eventsResponse = (
 export const makeOriginHttpApplication = (
   webRoot: string,
   developmentSimulation?: DevelopmentSimulationConfig,
-  observeOptions?: ObserveRouteOptions,
+  routeOptions: OriginHttpRouteOptions = {},
 ) =>
   Effect.gen(function* () {
     const repository = yield* StateSqliteRepository
@@ -202,7 +208,14 @@ export const makeOriginHttpApplication = (
     const web = yield* makeWebResponse(webRoot)
     const planRoutes = yield* makePlanRoutes()
     const controlRoutes = yield* makeControlRoutes()
-    const observeRoutes = yield* makeObserveRoutes(observeOptions)
+    const observeRoutes = yield* makeObserveRoutes(routeOptions)
+    const acquireRoutes = yield* makeAcquireRoutes({
+      ...routeOptions,
+      denyOuterTargetTransitions:
+        developmentSimulation?.launchScenario ===
+          'target-evidence-progression' ||
+        developmentSimulation?.launchScenario === 'solve-success-no-solution',
+    })
     const simulationRoutes = makeSimulationRoutes(developmentSimulation)
 
     const live = HttpRouter.add(
@@ -269,6 +282,7 @@ export const makeOriginHttpApplication = (
         planRoutes,
         controlRoutes,
         observeRoutes,
+        acquireRoutes,
         ...simulationRoutes,
         events,
         apiNotFound,
