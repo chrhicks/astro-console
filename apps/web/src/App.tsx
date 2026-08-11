@@ -12,26 +12,22 @@ import { type CommandSubmission, type ControlIntent } from './command-client'
 import { type PreflightRefreshSubmission } from './preflight-refresh-client'
 import {
   AssetRevision,
+  AssetId,
   IdempotencyKey,
+  LeaseRevision,
   LibraryQuery as LibraryQuerySchema,
   LibraryQueryId,
   ReviewAssetRequest,
 } from '@astro-console/protocol'
-import { unavailableProjection } from './future-adapter'
-import type { Projection } from './presentation'
 import { parseRoute, routeWorkspace, type Route } from './routes'
 import { nightbookHref } from './beta/route'
 import {
   createNightbookWorkspaceRuntime,
+  initialNightbookWorkspaceState,
   NightbookWorkspaceRuntime,
   type NightbookWorkspaceRuntimeShape,
-  type LibraryAssetDetail,
-  type LibraryPage,
   type LibraryQuery,
-  type ProcessSourceHandoff,
-  type OpenedProcessingProject,
-  type ProcessingProjectEvidence,
-  type ProcessingProjectList,
+  type NightbookWorkspaceState,
 } from './nightbook-workspace-runtime'
 
 const currentRoute = () => parseRoute(location.pathname, location.search)
@@ -41,13 +37,14 @@ const BetaPlanApp = lazy(() => import('./beta/BetaPlanApp'))
 const BetaProcessApp = lazy(() => import('./beta/BetaProcessApp'))
 
 export function App() {
-  const [projection, setProjection] = useState<Projection>(
-    unavailableProjection,
+  const workspaceRuntime = useRef(createNightbookWorkspaceRuntime())
+  const [workspaceState, setWorkspaceState] = useState<NightbookWorkspaceState>(
+    initialNightbookWorkspaceState,
   )
+  const projection = workspaceState.projection
   const projectionRef = useRef(projection)
   projectionRef.current = projection
   const [route, setRoute] = useState<Route>(currentRoute)
-  const [projectionReceived, setProjectionReceived] = useState(false)
   const [submitPlan, setSubmitPlan] = useState<
     | ((
         action: PlanAction,
@@ -92,35 +89,14 @@ export function App() {
       sort: 'capturedAtDescending',
     }),
   )
-  const [libraryPage, setLibraryPage] = useState<{
-    value: LibraryPage | undefined
-    message: string | undefined
-  }>({ value: undefined, message: undefined })
-  const [libraryDetail, setLibraryDetail] = useState<{
-    value: LibraryAssetDetail | undefined
-    state: 'loading' | 'not-found' | 'unavailable' | undefined
-  }>({ value: undefined, state: undefined })
-  const workspaceRuntime = useRef(createNightbookWorkspaceRuntime())
-  const [processSource, setProcessSource] = useState<{
-    value: ProcessSourceHandoff | undefined
-    state: 'loading' | 'not-found' | 'not-local' | 'unavailable' | undefined
-  }>({ value: undefined, state: undefined })
-  const [processWorkspace, setProcessWorkspace] = useState<{
-    projects: ProcessingProjectList
-    project: OpenedProcessingProject | undefined
-    evidence: ProcessingProjectEvidence | undefined
-    state: 'loading' | 'current' | 'unavailable'
-  }>({
-    projects: [],
-    project: undefined,
-    evidence: undefined,
-    state: 'loading',
-  })
-  const [comparison, setComparison] = useState<{
-    assetId: string | undefined
-    value: LibraryAssetDetail | undefined
-    state: 'loading' | 'unavailable' | undefined
-  }>({ assetId: undefined, value: undefined, state: undefined })
+  const {
+    projectionReceived,
+    libraryPage,
+    libraryDetail,
+    processSource,
+    process: processWorkspace,
+    comparison,
+  } = workspaceState
   const selectedLibraryAssetId =
     route.kind === 'asset' ? route.assetId : undefined
 
@@ -152,15 +128,7 @@ export function App() {
       Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
         workspace.states.pipe(
           Stream.runForEach((state) =>
-            Effect.sync(() => {
-              setProjection(state.projection)
-              setProjectionReceived(state.projectionReceived)
-              setLibraryPage(state.libraryPage)
-              setLibraryDetail(state.libraryDetail)
-              setProcessSource(state.processSource)
-              setProcessWorkspace(state.process)
-              setComparison(state.comparison)
-            }),
+            Effect.sync(() => setWorkspaceState(state)),
           ),
         ),
       ),
@@ -204,10 +172,10 @@ export function App() {
         _tag: 'Acquire',
         intent: {
           _tag: 'CaptureTargetAcquisitionEvidence',
-          expectedLeaseRevision: observe.leaseRevision,
+          expectedLeaseRevision: LeaseRevision.make(observe.leaseRevision),
           expectedRunRevision: observe.source.revision,
           expectedAcquireRevision: observe.source.acquire.revision,
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: IdempotencyKey.make(crypto.randomUUID()),
         },
       })
       if (result._tag !== 'Acquire' || !result.accepted)
@@ -229,22 +197,26 @@ export function App() {
             observe.leaseRevision === undefined
           )
             throw new Error('Acquire recovery state unavailable')
-          const intent = {
-            _tag: action,
-            expectedLeaseRevision: observe.leaseRevision,
+          const expected = {
+            expectedLeaseRevision: LeaseRevision.make(observe.leaseRevision),
             expectedRunRevision: observe.source.revision,
             expectedAcquireRevision: observe.source.acquire.revision,
-            idempotencyKey: crypto.randomUUID(),
-            ...(action === 'RetryPlateSolveWithParameters'
+            idempotencyKey: IdempotencyKey.make(crypto.randomUUID()),
+          }
+          const intent =
+            action === 'RetryPlateSolveWithParameters'
               ? {
+                  _tag: action,
+                  ...expected,
                   parameters: {
                     exposureSeconds: 15,
                     binning: 1,
                     solverProfile: 'deep-sky-plate-solve',
                   },
                 }
-              : {}),
-          }
+              : action === 'SkipAcquireTarget'
+                ? { _tag: action, ...expected }
+                : { _tag: action, ...expected }
           const result = await submit({ _tag: 'Acquire', intent })
           if (result._tag !== 'Acquire' || !result.accepted)
             throw new Error(
@@ -265,11 +237,11 @@ export function App() {
         _tag: 'Acquire',
         intent: {
           _tag: 'ApprovePointingCorrection',
-          expectedLeaseRevision: observe.leaseRevision,
+          expectedLeaseRevision: LeaseRevision.make(observe.leaseRevision),
           expectedRunRevision: observe.source.revision,
           expectedAcquireRevision: observe.source.acquire.revision,
           proposalId,
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: IdempotencyKey.make(crypto.randomUUID()),
         },
       })
       if (result._tag !== 'Acquire' || !result.accepted)
@@ -300,7 +272,7 @@ export function App() {
   const changeLibraryQuery = (query: LibraryQuery) => {
     setLibraryQuery(query)
   }
-  const selectNightbookLibraryAsset = (assetId: string) => {
+  const selectNightbookLibraryAsset = (assetId: typeof AssetId.Type) => {
     const path = `/library/assets/${encodeURIComponent(assetId)}`
     const href = nightbookHref(path, location.search)
     const url = new URL(href, location.origin)
@@ -309,7 +281,7 @@ export function App() {
     history.pushState(null, '', href)
     setRoute(next)
   }
-  const openNightbookProcess = (assetId: string) => {
+  const openNightbookProcess = (assetId: typeof AssetId.Type) => {
     const href = nightbookHref(
       `/process?sourceAssetId=${encodeURIComponent(assetId)}`,
       location.search,
@@ -320,13 +292,16 @@ export function App() {
     history.pushState(null, '', href)
     setRoute(next)
   }
-  const selectComparisonAsset = useCallback((assetId: string | undefined) => {
-    void workspaceRuntime.current.runPromise(
-      Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
-        workspace.submit({ _tag: 'SelectComparisonAsset', assetId }),
-      ),
-    )
-  }, [])
+  const selectComparisonAsset = useCallback(
+    (assetId: typeof AssetId.Type | undefined) => {
+      void workspaceRuntime.current.runPromise(
+        Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
+          workspace.submit({ _tag: 'SelectComparisonAsset', assetId }),
+        ),
+      )
+    },
+    [],
+  )
   const reviewLibraryAsset = async (review: {
     decision: 'accepted' | 'rejected' | 'unreviewed'
     rating?: number

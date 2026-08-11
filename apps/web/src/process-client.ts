@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect'
+import { Schema } from 'effect'
 import {
   CreateProcessingProjectRequest as CreateProcessingProjectRequestSchema,
   OpenedProcessingProjectResponse,
@@ -11,6 +11,7 @@ import {
   OpenedProcessingProject as OpenedProcessingProjectSchema,
   ProcessingProjectEvidence as ProcessingProjectEvidenceSchema,
   ProcessingProjectChanged as ProcessingProjectChangedSchema,
+  ProcessingProjectId,
 } from '@astro-console/protocol'
 
 export type ProcessingProjectList = typeof ProcessingProjectListSchema.Type
@@ -51,7 +52,7 @@ export const processClient = {
     )
   },
 
-  async open(projectId: string, signal?: AbortSignal) {
+  async open(projectId: typeof ProcessingProjectId.Type, signal?: AbortSignal) {
     return request(
       `/api/process/projects/${encodeURIComponent(projectId)}`,
       OpenedProcessingProjectResponse,
@@ -61,7 +62,10 @@ export const processClient = {
     )
   },
 
-  async evidence(projectId: string, signal?: AbortSignal) {
+  async evidence(
+    projectId: typeof ProcessingProjectId.Type,
+    signal?: AbortSignal,
+  ) {
     return request(
       `/api/process/projects/${encodeURIComponent(projectId)}/evidence`,
       ProcessingProjectEvidenceResponse,
@@ -110,18 +114,16 @@ async function request<
     new ProcessingProjectRequestError(response.status, {
       _tag: 'MalformedResponse',
     })
-  const decoded = await Effect.runPromise(
-    Schema.decodeUnknownEffect(responseSchema)(value).pipe(
-      Effect.mapError(malformed),
-    ),
-  )
+  const decoded = await Schema.decodeUnknownPromise(responseSchema)(
+    value,
+  ).catch(() => {
+    throw malformed()
+  })
   if (Schema.is(ProcessingProjectHttpFailure)(decoded))
     throw new ProcessingProjectRequestError(response.status, decoded)
-  return Effect.runPromise(
-    Schema.decodeUnknownEffect(successSchema)(decoded).pipe(
-      Effect.mapError(malformed),
-    ),
-  )
+  return Schema.decodeUnknownPromise(successSchema)(decoded).catch(() => {
+    throw malformed()
+  })
 }
 
 export type ProcessingProjectOperationFailure =

@@ -38,7 +38,7 @@ import {
   layer as libraryClientLayer,
 } from './library-client'
 
-const clientLayer = (
+export const makeBootstrapClientLayer = (
   snapshotTransportLayer: Layer.Layer<SnapshotTransport>,
   eventStreamLayer: Layer.Layer<EventStream>,
   commandTransportLayer: Layer.Layer<CommandTransport>,
@@ -93,7 +93,7 @@ export const makeBootstrapRuntime = (
   preflightRefreshTransportLayer: Layer.Layer<PreflightRefreshTransport> = browserPreflightRefreshTransportLayer,
 ) =>
   ManagedRuntime.make(
-    clientLayer(
+    makeBootstrapClientLayer(
       snapshotTransportLayer,
       eventStreamLayer,
       commandTransportLayer,
@@ -112,3 +112,12 @@ export const createBootstrapRuntime = () =>
     browserObserveCommandTransportLayer,
     browserPreflightRefreshTransportLayer,
   )
+
+export const browserBootstrapClientLayer = makeBootstrapClientLayer(
+  browserSnapshotTransportLayer,
+  browserEventStreamLayer.pipe(Layer.provide(browserEventSourceFactoryLayer)),
+  browserCommandTransportLayer,
+  browserPlanCommandTransportLayer,
+  browserObserveCommandTransportLayer,
+  browserPreflightRefreshTransportLayer,
+)

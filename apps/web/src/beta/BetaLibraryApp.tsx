@@ -20,7 +20,12 @@ import {
   type ActionDescriptor,
   type Tone,
 } from '@nightbook/ui'
-import { AssetId, CaptureSetId } from '@astro-console/protocol'
+import {
+  AssetId,
+  CaptureSetId,
+  ProcessingProjectId,
+  ProcessingProjectRevision,
+} from '@astro-console/protocol'
 import {
   useEffect,
   useMemo,
@@ -64,7 +69,7 @@ export type BetaLibraryAppProps = {
   projection: Projection
   loading: boolean
   submitControl?: BetaControlSubmit
-  assetId?: string
+  assetId?: typeof AssetId.Type
   page: {
     readonly query: LibraryQuery
     readonly value?: LibraryPage
@@ -73,33 +78,33 @@ export type BetaLibraryAppProps = {
   detail?: LibraryAssetDetail
   detailState?: DetailState
   onQuery?: (query: LibraryQuery) => void
-  onSelectAsset: (assetId: string) => void
+  onSelectAsset: (assetId: typeof AssetId.Type) => void
   comparison?: {
-    assetId: string | undefined
+    assetId: typeof AssetId.Type | undefined
     value: LibraryAssetDetail | undefined
     state: 'loading' | 'unavailable' | undefined
   }
-  onSelectComparisonAsset?: (assetId: string | undefined) => void
+  onSelectComparisonAsset?: (assetId: typeof AssetId.Type | undefined) => void
   onReview?: (review: {
     decision: 'accepted' | 'rejected' | 'unreviewed'
     rating?: number
     annotation?: string
   }) => Promise<void>
-  onOpenProcess?: (assetId: string) => void
+  onOpenProcess?: (assetId: typeof AssetId.Type) => void
   processProjects?: ProcessingProjectList
   onCreateProject?: (
     name: string,
     selection: {
-      readonly assetIds: ReadonlyArray<string>
-      readonly captureSetIds: ReadonlyArray<string>
+      readonly assetIds: ReadonlyArray<typeof AssetId.Type>
+      readonly captureSetIds: ReadonlyArray<typeof CaptureSetId.Type>
     },
   ) => Promise<void>
   onAddProjectSources?: (
-    projectId: string,
-    expectedProjectRevision: number,
+    projectId: typeof ProcessingProjectId.Type,
+    expectedProjectRevision: typeof ProcessingProjectRevision.Type,
     selection: {
-      readonly assetIds: ReadonlyArray<string>
-      readonly captureSetIds: ReadonlyArray<string>
+      readonly assetIds: ReadonlyArray<typeof AssetId.Type>
+      readonly captureSetIds: ReadonlyArray<typeof CaptureSetId.Type>
     },
   ) => Promise<void>
 }
@@ -194,7 +199,7 @@ function AssetNavigator({
   selectedAssetId,
   onSelectAsset,
 }: Pick<BetaLibraryAppProps, 'page' | 'onSelectAsset'> & {
-  selectedAssetId: string | undefined
+  selectedAssetId: typeof AssetId.Type | undefined
 }) {
   const assets = page.value?.results ?? []
   if (assets.length === 0)
@@ -208,7 +213,10 @@ function AssetNavigator({
   )
   const previous = position > 0 ? assets[position - 1] : undefined
   const next = position >= 0 ? assets[position + 1] : undefined
-  const follow = (event: MouseEvent<HTMLAnchorElement>, assetId: string) => {
+  const follow = (
+    event: MouseEvent<HTMLAnchorElement>,
+    assetId: typeof AssetId.Type,
+  ) => {
     if (
       event.defaultPrevented ||
       event.metaKey ||
@@ -308,7 +316,10 @@ function LibraryCatalog({
       ])
     return [...grouped.entries()]
   }, [page.value])
-  const follow = (event: MouseEvent<HTMLAnchorElement>, assetId: string) => {
+  const follow = (
+    event: MouseEvent<HTMLAnchorElement>,
+    assetId: typeof AssetId.Type,
+  ) => {
     if (
       event.defaultPrevented ||
       event.metaKey ||

@@ -12,6 +12,7 @@ import {
 import {
   AcquireCommandRequest,
   AcquireCommandResponse,
+  AcquireIntent,
   AssetId,
   CaptureSetId,
   IdempotencyKey,
@@ -21,7 +22,7 @@ import {
   type ProcessingProjectIntent,
 } from '@astro-console/protocol'
 import { BootstrapClient, type BootstrapClientState } from './bootstrap-client'
-import { createBootstrapRuntime } from './bootstrap-runtime'
+import { browserBootstrapClientLayer } from './bootstrap-runtime'
 import {
   CommandClient,
   type CommandSubmission,
@@ -32,7 +33,6 @@ import {
   LibraryClient,
   LibraryAssetUnavailable,
   LibraryNotFound,
-  createLibraryRuntime,
   type LibraryAssetDetail,
   type LibraryClientShape,
   type LibraryPage,
@@ -76,6 +76,12 @@ export type {
   ProcessingProjectList,
 }
 
+export type AcquireCommandIntent = typeof AcquireIntent.Type
+export type NightbookProjectSelection = {
+  readonly assetIds: ReadonlyArray<typeof AssetId.Type>
+  readonly captureSetIds: ReadonlyArray<typeof CaptureSetId.Type>
+}
+
 type LibraryDetailState = 'loading' | 'not-found' | 'unavailable'
 type SourceState = 'loading' | 'not-found' | 'not-local' | 'unavailable'
 type ProcessState = 'loading' | 'current' | 'unavailable'
@@ -102,7 +108,7 @@ export type NightbookWorkspaceState = {
     readonly state: ProcessState
   }
   readonly comparison: {
-    readonly assetId: string | undefined
+    readonly assetId: typeof AssetId.Type | undefined
     readonly value: LibraryAssetDetail | undefined
     readonly state: 'loading' | 'unavailable' | undefined
   }
@@ -114,7 +120,7 @@ export type NightbookWorkspaceIntent = Data.TaggedEnum<{
     readonly libraryQuery: LibraryQuery
   }
   ReviewLibraryAsset: {
-    readonly assetId: string
+    readonly assetId: typeof AssetId.Type
     readonly request: ReviewRequest
   }
   Control: { readonly intent: ControlIntent }
@@ -127,24 +133,18 @@ export type NightbookWorkspaceIntent = Data.TaggedEnum<{
     readonly key: typeof IdempotencyKey.Type
   }
   RefreshPreflight: { readonly _never?: never }
-  Acquire: { readonly intent: unknown }
+  Acquire: { readonly intent: AcquireCommandIntent }
   SelectComparisonAsset: {
-    readonly assetId: string | undefined
+    readonly assetId: typeof AssetId.Type | undefined
   }
   CreateProject: {
     readonly name: string
-    readonly selection: {
-      readonly assetIds: ReadonlyArray<string>
-      readonly captureSetIds: ReadonlyArray<string>
-    }
+    readonly selection: NightbookProjectSelection
   }
   AddProjectSources: {
-    readonly projectId: string
-    readonly expectedProjectRevision: number
-    readonly selection: {
-      readonly assetIds: ReadonlyArray<string>
-      readonly captureSetIds: ReadonlyArray<string>
-    }
+    readonly projectId: typeof ProcessingProjectId.Type
+    readonly expectedProjectRevision: typeof ProcessingProjectRevision.Type
+    readonly selection: NightbookProjectSelection
   }
   ChangeProject: {
     readonly project: OpenedProcessingProject
@@ -169,10 +169,33 @@ export type NightbookWorkspaceSubmission = Data.TaggedEnum<{
 export const NightbookWorkspaceSubmission =
   Data.taggedEnum<NightbookWorkspaceSubmission>()
 
+type ProjectChangeAttempt = Data.TaggedEnum<{
+  Changed: { readonly project: OpenedProcessingProject }
+  Failed: { readonly _never?: never }
+}>
+
+const ProjectChangeAttempt = Data.taggedEnum<ProjectChangeAttempt>()
+
+const NightbookWorkspaceRemoteOperation = Schema.Literals([
+  'acquire',
+  'page',
+  'detail',
+  'process-source',
+  'review',
+  'list-projects',
+  'open-project',
+  'project-evidence',
+  'create-project',
+  'change-project',
+  'add-project-sources',
+])
+type NightbookWorkspaceRemoteOperation =
+  typeof NightbookWorkspaceRemoteOperation.Type
+
 export class NightbookWorkspaceRemoteFailure extends Schema.TaggedErrorClass<NightbookWorkspaceRemoteFailure>()(
   'NightbookWorkspaceRemoteFailure',
   {
-    operation: Schema.String,
+    operation: NightbookWorkspaceRemoteOperation,
     reason: Schema.Literals(['not-found', 'not-local', 'unavailable']),
     message: Schema.String,
   },
@@ -192,19 +215,19 @@ export interface NightbookWorkspaceRemoteShape {
   ) => Effect.Effect<ObserveCommandSubmission>
   readonly refreshPreflight: () => Effect.Effect<PreflightRefreshSubmission>
   readonly acquire: (
-    intent: unknown,
+    intent: AcquireCommandIntent,
   ) => Effect.Effect<void, NightbookWorkspaceRemoteFailure>
   readonly page: (
     query: LibraryQuery,
   ) => Effect.Effect<LibraryPage, NightbookWorkspaceRemoteFailure>
   readonly detail: (
-    assetId: string,
+    assetId: typeof AssetId.Type,
   ) => Effect.Effect<LibraryAssetDetail, NightbookWorkspaceRemoteFailure>
   readonly processSource: (
-    assetId: string,
+    assetId: typeof AssetId.Type,
   ) => Effect.Effect<ProcessSourceHandoff, NightbookWorkspaceRemoteFailure>
   readonly review: (
-    assetId: string,
+    assetId: typeof AssetId.Type,
     request: ReviewRequest,
   ) => Effect.Effect<
     LibraryAssetDetail['review'],
@@ -215,29 +238,23 @@ export interface NightbookWorkspaceRemoteShape {
     NightbookWorkspaceRemoteFailure
   >
   readonly openProject: (
-    projectId: string,
+    projectId: typeof ProcessingProjectId.Type,
   ) => Effect.Effect<OpenedProcessingProject, NightbookWorkspaceRemoteFailure>
   readonly projectEvidence: (
-    projectId: string,
+    projectId: typeof ProcessingProjectId.Type,
   ) => Effect.Effect<ProcessingProjectEvidence, NightbookWorkspaceRemoteFailure>
   readonly createProject: (
     name: string,
-    selection: {
-      readonly assetIds: ReadonlyArray<string>
-      readonly captureSetIds: ReadonlyArray<string>
-    },
+    selection: NightbookProjectSelection,
   ) => Effect.Effect<OpenedProcessingProject, NightbookWorkspaceRemoteFailure>
   readonly changeProject: (
     project: OpenedProcessingProject,
     intent: ProcessingProjectIntent,
   ) => Effect.Effect<OpenedProcessingProject, NightbookWorkspaceRemoteFailure>
   readonly addProjectSources: (
-    projectId: string,
-    expectedProjectRevision: number,
-    selection: {
-      readonly assetIds: ReadonlyArray<string>
-      readonly captureSetIds: ReadonlyArray<string>
-    },
+    projectId: typeof ProcessingProjectId.Type,
+    expectedProjectRevision: typeof ProcessingProjectRevision.Type,
+    selection: NightbookProjectSelection,
   ) => Effect.Effect<OpenedProcessingProject, NightbookWorkspaceRemoteFailure>
 }
 
@@ -258,7 +275,7 @@ export class NightbookWorkspaceRuntime extends Context.Service<
   NightbookWorkspaceRuntimeShape
 >()('@astro-console/web/NightbookWorkspaceRuntime') {}
 
-const initialState: NightbookWorkspaceState = {
+export const initialNightbookWorkspaceState: NightbookWorkspaceState = {
   projection: unavailableProjection,
   projectionReceived: false,
   libraryPage: { value: undefined, message: undefined },
@@ -277,7 +294,7 @@ const unavailable = (message: string) =>
   NightbookWorkspaceSubmission.Unavailable({ message })
 
 const remoteFailure = (
-  operation: string,
+  operation: NightbookWorkspaceRemoteOperation,
   reason: 'not-found' | 'not-local' | 'unavailable' = 'unavailable',
   message = 'The Nightbook workspace remote is unavailable.',
 ) =>
@@ -287,7 +304,10 @@ const remoteFailure = (
     message,
   })
 
-const libraryRemoteFailure = (operation: string, cause: unknown) =>
+const libraryRemoteFailure = (
+  operation: NightbookWorkspaceRemoteOperation,
+  cause: unknown,
+) =>
   cause instanceof LibraryNotFound
     ? remoteFailure(operation, 'not-found')
     : cause instanceof LibraryAssetUnavailable
@@ -299,8 +319,9 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
   Effect.gen(function* () {
     const remote = yield* NightbookWorkspaceRemote
     const scope = yield* Effect.scope
-    const state =
-      yield* SubscriptionRef.make<NightbookWorkspaceState>(initialState)
+    const state = yield* SubscriptionRef.make<NightbookWorkspaceState>(
+      initialNightbookWorkspaceState,
+    )
     let routeGeneration = 0
     let pageFiber: Fiber.Fiber<void> | undefined
     let detailFiber: Fiber.Fiber<void> | undefined
@@ -343,7 +364,7 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
         ),
         Effect.asVoid,
       )
-    const loadDetail = (assetId: string, generation: number) =>
+    const loadDetail = (assetId: typeof AssetId.Type, generation: number) =>
       remote.detail(assetId).pipe(
         Effect.tap((value) =>
           generation === routeGeneration
@@ -367,7 +388,7 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
         ),
         Effect.asVoid,
       )
-    const loadComparison = (assetId: string, generation: number) =>
+    const loadComparison = (assetId: typeof AssetId.Type, generation: number) =>
       remote.detail(assetId).pipe(
         Effect.tap((value) =>
           generation === routeGeneration
@@ -394,7 +415,7 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
         ),
         Effect.asVoid,
       )
-    const loadSource = (assetId: string, generation: number) =>
+    const loadSource = (assetId: typeof AssetId.Type, generation: number) =>
       remote.processSource(assetId).pipe(
         Effect.tap((value) =>
           generation === routeGeneration
@@ -465,6 +486,47 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
             : Effect.void,
         ),
         Effect.asVoid,
+      )
+    const readProjectPair = (projectId: typeof ProcessingProjectId.Type) =>
+      Effect.all(
+        {
+          project: remote.openProject(projectId),
+          evidence: remote.projectEvidence(projectId),
+        },
+        { concurrency: 'unbounded' },
+      )
+    const publishProjectPair = (pair: {
+      readonly project: OpenedProcessingProject
+      readonly evidence: ProcessingProjectEvidence
+    }) =>
+      set((current) => ({
+        ...current,
+        process: {
+          ...current.process,
+          project: pair.project,
+          evidence: pair.evidence,
+          state: 'current',
+        },
+      }))
+    const reconcileProjectPair = (
+      projectId: typeof ProcessingProjectId.Type,
+      message: string,
+    ) =>
+      readProjectPair(projectId).pipe(
+        Effect.tap(publishProjectPair),
+        Effect.as(unavailable(message)),
+        Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
+          set((current) => ({
+            ...current,
+            process: { ...current.process, state: 'unavailable' },
+          })).pipe(
+            Effect.as(
+              unavailable(
+                'The Project outcome is uncertain. Reload current Project truth before another change.',
+              ),
+            ),
+          ),
+        ),
       )
     const routeChanged = (route: Route, libraryQuery: LibraryQuery) =>
       Effect.gen(function* () {
@@ -675,7 +737,34 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
             ),
             Effect.as(NightbookWorkspaceSubmission.Loaded({})),
             Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
-              Effect.succeed(unavailable('The review was not saved.')),
+              remote.detail(assetId).pipe(
+                Effect.tap((value) =>
+                  set((current) => ({
+                    ...current,
+                    libraryDetail: { value, state: undefined },
+                  })),
+                ),
+                Effect.as(
+                  unavailable(
+                    'The review outcome was reloaded from current Library truth.',
+                  ),
+                ),
+                Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
+                  set((current) => ({
+                    ...current,
+                    libraryDetail: {
+                      value: current.libraryDetail.value,
+                      state: 'unavailable',
+                    },
+                  })).pipe(
+                    Effect.as(
+                      unavailable(
+                        'The review outcome is uncertain. Reload current Library truth before another review.',
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
         SelectComparisonAsset: ({ assetId }) =>
@@ -715,48 +804,79 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
               NightbookWorkspaceSubmission.Project({ project }),
             ),
             Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
-              Effect.succeed(unavailable('The Project was not created.')),
-            ),
-          ),
-        ChangeProject: ({ project: selected, intent }) =>
-          remote.changeProject(selected, intent).pipe(
-            Effect.flatMap((project) =>
-              remote.projectEvidence(project.projectId).pipe(
-                Effect.tap((evidence) =>
+              remote.listProjects().pipe(
+                Effect.tap((projects) =>
                   set((current) => ({
                     ...current,
                     process: {
                       ...current.process,
-                      project,
-                      evidence,
+                      projects,
                       state: 'current',
                     },
                   })),
                 ),
-                Effect.as(NightbookWorkspaceSubmission.Project({ project })),
-              ),
-            ),
-            Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
-              remote.openProject(selected.projectId).pipe(
-                Effect.tap((project) =>
-                  set((current) => ({
-                    ...current,
-                    process: { ...current.process, project },
-                  })),
-                ),
                 Effect.as(
                   unavailable(
-                    'The Project was reloaded after an uncertain outcome.',
+                    'Project intake was reconciled with the current Project list.',
                   ),
                 ),
                 Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
-                  Effect.succeed(
-                    unavailable(
-                      'The Project outcome is uncertain. Reload current Project truth before another change.',
+                  set((current) => ({
+                    ...current,
+                    process: { ...current.process, state: 'unavailable' },
+                  })).pipe(
+                    Effect.as(
+                      unavailable(
+                        'Project intake is uncertain. Reload current Project truth before another intake.',
+                      ),
                     ),
                   ),
                 ),
               ),
+            ),
+          ),
+        ChangeProject: ({ project: selected, intent }) =>
+          remote.changeProject(selected, intent).pipe(
+            Effect.map((project) => ProjectChangeAttempt.Changed({ project })),
+            Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
+              Effect.succeed(ProjectChangeAttempt.Failed({})),
+            ),
+            Effect.flatMap((attempt) =>
+              ProjectChangeAttempt.$match(attempt, {
+                Failed: () =>
+                  reconcileProjectPair(
+                    selected.projectId,
+                    'The Project was reloaded after an uncertain outcome.',
+                  ),
+                Changed: ({ project }) =>
+                  remote.projectEvidence(project.projectId).pipe(
+                    Effect.map((evidence) => ({ project, evidence })),
+                    Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
+                      readProjectPair(project.projectId),
+                    ),
+                    Effect.tap(publishProjectPair),
+                    Effect.map(({ project: confirmed }) =>
+                      NightbookWorkspaceSubmission.Project({
+                        project: confirmed,
+                      }),
+                    ),
+                    Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
+                      set((current) => ({
+                        ...current,
+                        process: {
+                          ...current.process,
+                          state: 'unavailable',
+                        },
+                      })).pipe(
+                        Effect.as(
+                          unavailable(
+                            'The Project outcome is uncertain. Reload current Project truth before another change.',
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              }),
             ),
           ),
         AddProjectSources: ({
@@ -771,8 +891,9 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
                 NightbookWorkspaceSubmission.Project({ project }),
               ),
               Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
-                Effect.succeed(
-                  unavailable('The project intake was not accepted.'),
+                reconcileProjectPair(
+                  projectId,
+                  'Project intake was reconciled with current Project truth.',
                 ),
               ),
             ),
@@ -785,81 +906,49 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
   }),
 )
 
-const runLibrary = <Result, Failure>(
-  operationName: string,
-  operation: (client: LibraryClientShape) => Effect.Effect<Result, Failure>,
-) =>
-  Effect.tryPromise({
-    try: (signal) => {
-      const runtime = createLibraryRuntime()
-      const dispose = () => runtime.dispose()
-      return runtime
-        .runPromise(
-          Effect.gen(function* () {
-            return yield* operation(yield* LibraryClient)
-          }),
-          { signal },
-        )
-        .finally(dispose)
-    },
-    catch: (cause) => libraryRemoteFailure(operationName, cause),
-  })
-
 export const productionNightbookWorkspaceRemoteLayer = Layer.effect(
   NightbookWorkspaceRemote,
   Effect.gen(function* () {
-    const runtime = createBootstrapRuntime()
-    yield* Effect.addFinalizer(() => Effect.promise(() => runtime.dispose()))
-    const clients = yield* Effect.promise(() =>
-      runtime.runPromise(
-        Effect.gen(function* () {
-          return {
-            bootstrap: yield* BootstrapClient,
-            command: yield* CommandClient,
-            plan: yield* PlanCommandClient,
-            observe: yield* ObserveCommandClient,
-            preflight: yield* PreflightRefreshClient,
-          }
-        }),
-      ),
-    )
+    const bootstrap = yield* BootstrapClient
+    const command = yield* CommandClient
+    const plan = yield* PlanCommandClient
+    const observe = yield* ObserveCommandClient
+    const preflight = yield* PreflightRefreshClient
+    const library = yield* LibraryClient
     return NightbookWorkspaceRemote.of({
-      states: clients.bootstrap.states,
-      refresh: () =>
-        Effect.promise(() => runtime.runPromise(clients.bootstrap.refresh())),
-      control: (intent) =>
-        Effect.promise(() =>
-          runtime.runPromise(clients.command.submit(intent)),
-        ),
-      plan: (action, key) =>
-        Effect.promise(() =>
-          runtime.runPromise(clients.plan.submit(action, key)),
-        ),
-      observe: (action, key) =>
-        Effect.promise(() =>
-          runtime.runPromise(clients.observe.submit(action, key)),
-        ),
-      refreshPreflight: () =>
-        Effect.promise(() => runtime.runPromise(clients.preflight.refresh())),
-      acquire: (intent) =>
-        Effect.tryPromise({
-          try: (signal) => submitAcquireIntent(intent, signal),
-          catch: (cause) =>
-            cause instanceof NightbookWorkspaceRemoteFailure
-              ? cause
-              : remoteFailure('acquire'),
-        }),
-      page: (query) => runLibrary('page', (library) => library.page(query)),
+      states: bootstrap.states,
+      refresh: bootstrap.refresh,
+      control: command.submit,
+      plan: plan.submit,
+      observe: observe.submit,
+      refreshPreflight: preflight.refresh,
+      acquire: submitAcquireIntent,
+      page: (query) =>
+        library
+          .page(query)
+          .pipe(
+            Effect.mapError((cause) => libraryRemoteFailure('page', cause)),
+          ),
       detail: (assetId) =>
-        runLibrary('detail', (library) => library.detail(assetId)),
+        library
+          .detail(assetId)
+          .pipe(
+            Effect.mapError((cause) => libraryRemoteFailure('detail', cause)),
+          ),
       processSource: (assetId) =>
-        runLibrary('process-source', (library) =>
-          library.processSourceHandoff(assetId),
-        ),
+        library
+          .processSourceHandoff(assetId)
+          .pipe(
+            Effect.mapError((cause) =>
+              libraryRemoteFailure('process-source', cause),
+            ),
+          ),
       review: (assetId, request) =>
-        runLibrary('review', (library) =>
-          library.reviewAsset(assetId, request),
-        ),
+        library
+          .reviewAsset(assetId, request)
+          .pipe(
+            Effect.mapError((cause) => libraryRemoteFailure('review', cause)),
+          ),
       listProjects: () =>
         Effect.tryPromise({
           try: (signal) => processClient.list(signal),
@@ -882,14 +971,7 @@ export const productionNightbookWorkspaceRemoteLayer = Layer.effect(
               await processClient.create(
                 {
                   name,
-                  selection: {
-                    assetIds: selection.assetIds.map((assetId) =>
-                      AssetId.make(assetId),
-                    ),
-                    captureSetIds: selection.captureSetIds.map((captureSetId) =>
-                      CaptureSetId.make(captureSetId),
-                    ),
-                  },
+                  selection,
                   intentId: IntentId.make(crypto.randomUUID()),
                 },
                 signal,
@@ -919,21 +1001,12 @@ export const productionNightbookWorkspaceRemoteLayer = Layer.effect(
             (
               await processClient.change(
                 {
-                  projectId: ProcessingProjectId.make(projectId),
-                  expectedProjectRevision: ProcessingProjectRevision.make(
-                    expectedProjectRevision,
-                  ),
+                  projectId,
+                  expectedProjectRevision,
                   intentId: IntentId.make(crypto.randomUUID()),
                   intent: {
                     _tag: 'AddSources',
-                    selection: {
-                      assetIds: selection.assetIds.map((assetId) =>
-                        AssetId.make(assetId),
-                      ),
-                      captureSetIds: selection.captureSetIds.map(
-                        (captureSetId) => CaptureSetId.make(captureSetId),
-                      ),
-                    },
+                    selection,
                   },
                 },
                 signal,
@@ -948,31 +1021,48 @@ export const productionNightbookWorkspaceRemoteLayer = Layer.effect(
 export const createNightbookWorkspaceRuntime = () =>
   ManagedRuntime.make(
     nightbookWorkspaceRuntimeLayer.pipe(
-      Layer.provide(productionNightbookWorkspaceRemoteLayer),
+      Layer.provide(
+        productionNightbookWorkspaceRemoteLayer.pipe(
+          Layer.provide(browserBootstrapClientLayer),
+        ),
+      ),
     ),
   )
 
-const submitAcquireIntent = async (intent: unknown, signal?: AbortSignal) => {
-  const request = await Effect.runPromise(
-    Schema.decodeUnknownEffect(AcquireCommandRequest)({ intent }),
-  )
-  const response = await fetch('/api/acquire/commands', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(request),
-    ...(signal === undefined ? {} : { signal }),
-  })
-  const result = await Effect.runPromise(
-    Schema.decodeUnknownEffect(AcquireCommandResponse)(
-      await response.json().catch(() => undefined),
-    ),
-  )
-  if (result._tag === 'Accepted' && response.ok) return
-  if (result._tag === 'Accepted')
-    throw remoteFailure(
-      'acquire',
-      'unavailable',
-      'Acquire response status is invalid.',
+const submitAcquireIntent = Effect.fn('NightbookWorkspaceRemote.acquire')(
+  function* (intent: AcquireCommandIntent) {
+    const request = yield* Schema.decodeUnknownEffect(AcquireCommandRequest)({
+      intent,
+    }).pipe(Effect.mapError(() => remoteFailure('acquire')))
+    const response = yield* Effect.tryPromise({
+      try: async (signal) => {
+        const fetched = await fetch('/api/acquire/commands', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(request),
+          signal,
+        })
+        return {
+          ok: fetched.ok,
+          body: await fetched.json().catch(() => undefined),
+        }
+      },
+      catch: () => remoteFailure('acquire'),
+    })
+    const result = yield* Schema.decodeUnknownEffect(AcquireCommandResponse)(
+      response.body,
+    ).pipe(Effect.mapError(() => remoteFailure('acquire')))
+    if (result._tag === 'Accepted' && response.ok) return
+    if (result._tag === 'Accepted')
+      return yield* Effect.fail(
+        remoteFailure(
+          'acquire',
+          'unavailable',
+          'Acquire response status is invalid.',
+        ),
+      )
+    return yield* Effect.fail(
+      remoteFailure('acquire', 'unavailable', result.summary),
     )
-  throw remoteFailure('acquire', 'unavailable', result.summary)
-}
+  },
+)

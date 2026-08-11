@@ -1,12 +1,19 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  AcquireRevision,
+  AssetRevision,
+  IdempotencyKey,
   LibraryAssetDetail as LibraryAssetDetailSchema,
   LibraryPage as LibraryPageSchema,
   LibraryQuery as LibraryQuerySchema,
   LibraryQueryId,
+  LeaseRevision,
+  OpenedProcessingProject as OpenedProcessingProjectSchema,
+  ProcessingProjectEvidence as ProcessingProjectEvidenceSchema,
   ProcessingProjectId,
   ProcessingProjectRevision,
+  RunRevision,
 } from '@astro-console/protocol'
 import {
   Deferred,
@@ -20,9 +27,9 @@ import {
 import {
   NightbookWorkspaceRemote,
   NightbookWorkspaceRemoteFailure,
+  NightbookWorkspaceIntent,
   NightbookWorkspaceRuntime,
   nightbookWorkspaceRuntimeLayer,
-  type NightbookWorkspaceIntent,
   type NightbookWorkspaceRemoteShape,
   type NightbookWorkspaceState,
   type ProcessingProjectList,
@@ -67,7 +74,73 @@ const projects = (id: string): ProcessingProjectList => [
   },
 ]
 
-const failure = (operation: string) =>
+const processingStages = [
+  {
+    stage: 'Calibration',
+    draft: {
+      revision: 0,
+      value: { _tag: 'Calibration', settings: [], overrides: [] },
+      canUndo: false,
+      canRedo: false,
+    },
+  },
+  {
+    stage: 'Registration',
+    draft: {
+      revision: 0,
+      value: { _tag: 'Registration', settings: [], inclusions: [] },
+      canUndo: false,
+      canRedo: false,
+    },
+  },
+  {
+    stage: 'Stacking',
+    draft: {
+      revision: 0,
+      value: { _tag: 'Stacking', settings: [], frameChoices: [] },
+      canUndo: false,
+      canRedo: false,
+    },
+  },
+  {
+    stage: 'Develop',
+    draft: {
+      revision: 0,
+      value: {
+        _tag: 'Develop',
+        operation: { _tag: 'Stretch', method: 'asinh', amount: 0.35 },
+      },
+      canUndo: false,
+      canRedo: false,
+    },
+  },
+].map((stage) => ({
+  ...stage,
+  resultHistory: { canUndo: false, canRedo: false },
+  run: { _tag: 'Unavailable', reason: 'CurrentUpstreamResultRequired' },
+}))
+
+const openedProject = (revision: number) =>
+  Schema.decodeUnknownSync(OpenedProcessingProjectSchema)({
+    projectId: 'project-1',
+    revision,
+    name: 'M27',
+    authority: { _tag: 'Allowed' },
+    sources: [],
+    warnings: [],
+    stages: processingStages,
+    savedAssetIds: [],
+    createdAt: '2026-08-11T00:00:00.000Z',
+    updatedAt: `2026-08-11T00:00:0${revision}.000Z`,
+  })
+
+const projectEvidence = () =>
+  Schema.decodeUnknownSync(ProcessingProjectEvidenceSchema)({
+    projectId: 'project-1',
+    attempts: [],
+  })
+
+const failure = (operation: NightbookWorkspaceRemoteFailure['operation']) =>
   new NightbookWorkspaceRemoteFailure({
     operation,
     reason: 'unavailable',
@@ -133,6 +206,30 @@ const waitFor = (
     ),
   )
 
+test('constructs closed Acquire and branded resource intents', () => {
+  const acquire = NightbookWorkspaceIntent.Acquire({
+    intent: {
+      _tag: 'AbortAcquire',
+      expectedLeaseRevision: LeaseRevision.make(1),
+      expectedRunRevision: RunRevision.make(1),
+      expectedAcquireRevision: AcquireRevision.make(1),
+      idempotencyKey: IdempotencyKey.make('abort-typed'),
+    },
+  })
+  const comparison = NightbookWorkspaceIntent.SelectComparisonAsset({
+    assetId: detail.assetId,
+  })
+  const intake = NightbookWorkspaceIntent.AddProjectSources({
+    projectId: ProcessingProjectId.make('project-typed'),
+    expectedProjectRevision: ProcessingProjectRevision.make(1),
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+
+  assert.equal(acquire.intent._tag, 'AbortAcquire')
+  assert.equal(comparison.assetId, detail.assetId)
+  assert.equal(intake.projectId, 'project-typed')
+})
+
 test('reconciles an uncertain Acquire outcome once without replaying it', async () => {
   let submissions = 0
   let refreshes = 0
@@ -148,7 +245,13 @@ test('reconciles an uncertain Acquire outcome once without replaying it', async 
 
   const result = await submit(runtime, {
     _tag: 'Acquire',
-    intent: { _tag: 'AbortAcquire' },
+    intent: {
+      _tag: 'AbortAcquire',
+      expectedLeaseRevision: LeaseRevision.make(1),
+      expectedRunRevision: RunRevision.make(1),
+      expectedAcquireRevision: AcquireRevision.make(1),
+      idempotencyKey: IdempotencyKey.make('abort-1'),
+    },
   })
   await runtime.dispose()
 
@@ -312,7 +415,10 @@ test('retains last-confirmed Library and Process values while reload fails', asy
   let processCalls = 0
   const confirmedPage = page('confirmed', 7)
   const confirmedProjects = projects('confirmed-project')
-  const reloadFailure = (started: Deferred.Deferred<void>, operation: string) =>
+  const reloadFailure = (
+    started: Deferred.Deferred<void>,
+    operation: NightbookWorkspaceRemoteFailure['operation'],
+  ) =>
     Deferred.succeed(started, undefined).pipe(
       Effect.andThen(Deferred.await(releaseReloads)),
       Effect.andThen(Effect.fail(failure(operation))),
@@ -384,4 +490,208 @@ test('retains last-confirmed Library and Process values while reload fails', asy
   assert.equal(failed.libraryPage.value?.querySnapshotVersion, 7)
   assert.equal(failed.libraryDetail.value?.assetId, detail.assetId)
   assert.equal(failed.process.projects[0]?.projectId, 'confirmed-project')
+})
+
+test('publishes a matched Process pair when post-change evidence needs reconciliation', async () => {
+  const confirmed = openedProject(1)
+  const changed = openedProject(2)
+  const confirmedEvidence = projectEvidence()
+  const changedEvidence = projectEvidence()
+  let openCalls = 0
+  let evidenceCalls = 0
+  let changeCalls = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      openProject: () =>
+        Effect.succeed(++openCalls === 1 ? confirmed : changed),
+      projectEvidence: () => {
+        evidenceCalls += 1
+        if (evidenceCalls === 1) return Effect.succeed(confirmedEvidence)
+        if (evidenceCalls === 2) return Effect.fail(failure('project-evidence'))
+        return Effect.succeed(changedEvidence)
+      },
+      changeProject: () =>
+        Effect.sync(() => {
+          changeCalls += 1
+          return changed
+        }),
+    }),
+  )
+
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'process-project', projectId: confirmed.projectId },
+    libraryQuery: query('process'),
+  })
+  await waitFor(
+    runtime,
+    (state) =>
+      state.process.project?.revision === confirmed.revision &&
+      state.process.evidence === confirmedEvidence,
+  )
+  const result = await submit(runtime, {
+    _tag: 'ChangeProject',
+    project: confirmed,
+    intent: { _tag: 'UndoDraft', stage: 'Calibration' },
+  })
+  const reconciled = await waitFor(
+    runtime,
+    (state) =>
+      state.process.project?.revision === changed.revision &&
+      state.process.evidence === changedEvidence,
+  )
+  await runtime.dispose()
+
+  assert.equal(result._tag, 'Project')
+  assert.equal(reconciled.process.project, changed)
+  assert.equal(reconciled.process.evidence, changedEvidence)
+  assert.equal(changeCalls, 1)
+  assert.equal(openCalls, 2)
+  assert.equal(evidenceCalls, 3)
+})
+
+test('retains the last-confirmed Process pair when changed evidence stays unavailable', async () => {
+  const confirmed = openedProject(1)
+  const changed = openedProject(2)
+  const confirmedEvidence = projectEvidence()
+  let evidenceCalls = 0
+  let changeCalls = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      openProject: () =>
+        Effect.succeed(evidenceCalls === 0 ? confirmed : changed),
+      projectEvidence: () =>
+        ++evidenceCalls === 1
+          ? Effect.succeed(confirmedEvidence)
+          : Effect.fail(failure('project-evidence')),
+      changeProject: () =>
+        Effect.sync(() => {
+          changeCalls += 1
+          return changed
+        }),
+    }),
+  )
+
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'process-project', projectId: confirmed.projectId },
+    libraryQuery: query('process'),
+  })
+  await waitFor(runtime, (state) => state.process.state === 'current')
+  const result = await submit(runtime, {
+    _tag: 'ChangeProject',
+    project: confirmed,
+    intent: { _tag: 'UndoDraft', stage: 'Calibration' },
+  })
+  const unavailableState = await waitFor(
+    runtime,
+    (state) => state.process.state === 'unavailable',
+  )
+  await runtime.dispose()
+
+  assert.equal(result._tag, 'Unavailable')
+  assert.equal(unavailableState.process.project, confirmed)
+  assert.equal(unavailableState.process.evidence, confirmedEvidence)
+  assert.equal(changeCalls, 1)
+  assert.equal(evidenceCalls, 3)
+})
+
+test('reconciles Review and Project intake failures through reads without replay', async () => {
+  const confirmedProject = openedProject(1)
+  const confirmedEvidence = projectEvidence()
+  let reviewCalls = 0
+  let createCalls = 0
+  let addCalls = 0
+  let detailReads = 0
+  let listReads = 0
+  let projectReads = 0
+  let evidenceReads = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      review: () =>
+        Effect.sync(() => void (reviewCalls += 1)).pipe(
+          Effect.andThen(Effect.fail(failure('review'))),
+        ),
+      detail: () =>
+        Effect.sync(() => {
+          detailReads += 1
+          return detail
+        }),
+      createProject: () =>
+        Effect.sync(() => void (createCalls += 1)).pipe(
+          Effect.andThen(Effect.fail(failure('create-project'))),
+        ),
+      listProjects: () =>
+        Effect.sync(() => {
+          listReads += 1
+          return projects('project-1')
+        }),
+      addProjectSources: () =>
+        Effect.sync(() => void (addCalls += 1)).pipe(
+          Effect.andThen(Effect.fail(failure('add-project-sources'))),
+        ),
+      openProject: () =>
+        Effect.sync(() => {
+          projectReads += 1
+          return confirmedProject
+        }),
+      projectEvidence: () =>
+        Effect.sync(() => {
+          evidenceReads += 1
+          return confirmedEvidence
+        }),
+    }),
+  )
+
+  const reviewResult = await submit(runtime, {
+    _tag: 'ReviewLibraryAsset',
+    assetId: detail.assetId,
+    request: {
+      expectedAssetRevision: detail.revision,
+      expectedReviewRevision: AssetRevision.make(0),
+      decision: 'accepted',
+      idempotencyKey: 'review-1',
+    },
+  })
+  const reviewState = await waitFor(
+    runtime,
+    (state) => state.libraryDetail.value === detail,
+  )
+  const createResult = await submit(runtime, {
+    _tag: 'CreateProject',
+    name: 'M27',
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+  const listState = await waitFor(
+    runtime,
+    (state) => state.process.projects[0]?.projectId === 'project-1',
+  )
+  const addResult = await submit(runtime, {
+    _tag: 'AddProjectSources',
+    projectId: confirmedProject.projectId,
+    expectedProjectRevision: confirmedProject.revision,
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+  const pairState = await waitFor(
+    runtime,
+    (state) =>
+      state.process.project === confirmedProject &&
+      state.process.evidence === confirmedEvidence,
+  )
+  await runtime.dispose()
+
+  assert.equal(reviewResult._tag, 'Unavailable')
+  assert.equal(createResult._tag, 'Unavailable')
+  assert.equal(addResult._tag, 'Unavailable')
+  assert.equal(reviewState.libraryDetail.value, detail)
+  assert.equal(listState.process.projects[0]?.projectId, 'project-1')
+  assert.equal(pairState.process.project, confirmedProject)
+  assert.equal(pairState.process.evidence, confirmedEvidence)
+  assert.equal(reviewCalls, 1)
+  assert.equal(createCalls, 1)
+  assert.equal(addCalls, 1)
+  assert.equal(detailReads, 1)
+  assert.equal(listReads, 1)
+  assert.equal(projectReads, 1)
+  assert.equal(evidenceReads, 1)
 })

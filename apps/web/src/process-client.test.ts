@@ -53,8 +53,8 @@ test('uses explicit Processing Project routes and does not replay changes', asyn
   }
   try {
     await processClient.list()
-    await processClient.open('project-1')
-    await processClient.evidence('project-1')
+    await processClient.open(ProcessingProjectId.make('project-1'))
+    await processClient.evidence(ProcessingProjectId.make('project-1'))
     await processClient.create({
       name: 'M27',
       selection: { assetIds: [AssetId.make('asset-1')], captureSetIds: [] },
@@ -100,7 +100,7 @@ test('decodes Processing Project failures and rejects malformed JSON responses',
         { status: 404 },
       )
     await assert.rejects(
-      () => processClient.open('missing-project'),
+      () => processClient.open(ProcessingProjectId.make('missing-project')),
       (error: unknown) =>
         error instanceof ProcessingProjectRequestError &&
         error.detail._tag === 'DomainRejected' &&
@@ -109,7 +109,7 @@ test('decodes Processing Project failures and rejects malformed JSON responses',
 
     globalThis.fetch = async () => Response.json({ projectId: 'incomplete' })
     await assert.rejects(
-      () => processClient.evidence('project-1'),
+      () => processClient.evidence(ProcessingProjectId.make('project-1')),
       (error: unknown) =>
         error instanceof ProcessingProjectRequestError &&
         error.detail._tag === 'MalformedResponse',

@@ -15,7 +15,10 @@ import {
   StepRail,
 } from '@nightbook/ui'
 import {
+  AssetId,
+  CaptureSetId,
   type ExecutableProcessingStage,
+  ProcessingProjectId,
   type ProcessingProjectIntent,
   type ProcessingStageDraftValue,
 } from '@astro-console/protocol'
@@ -45,8 +48,8 @@ type HandoffState = 'loading' | 'not-found' | 'not-local' | 'unavailable'
 export type BetaProcessAppProps = {
   projection: Projection
   loading: boolean
-  projectId?: string | undefined
-  sourceAssetId?: string | undefined
+  projectId?: typeof ProcessingProjectId.Type | undefined
+  sourceAssetId?: typeof AssetId.Type | undefined
   sourceHandoff?: ProcessSourceHandoff | undefined
   sourceHandoffState?: HandoffState | undefined
   process: {
@@ -58,8 +61,8 @@ export type BetaProcessAppProps = {
   onCreateProject: (
     name: string,
     selection: {
-      readonly assetIds: ReadonlyArray<string>
-      readonly captureSetIds: ReadonlyArray<string>
+      readonly assetIds: ReadonlyArray<typeof AssetId.Type>
+      readonly captureSetIds: ReadonlyArray<typeof CaptureSetId.Type>
     },
   ) => Promise<void>
   onChangeProject: (
