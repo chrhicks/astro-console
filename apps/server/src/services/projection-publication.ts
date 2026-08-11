@@ -1,15 +1,12 @@
-import type { IncomingMessage, ServerResponse } from 'node:http'
-import { Context, Effect, Layer } from 'effect'
+import type { BootstrapSseEventEnvelope } from '@astro-console/protocol'
+import { Context, Effect, Layer, Queue, Schedule, Stream } from 'effect'
 import type { LocalIdentity } from '../auth/identity.ts'
 
 export interface ProjectionPublicationShape {
-  readonly publish: (type: string, cursor: number) => Effect.Effect<void>
+  readonly publish: (cursor: number) => Effect.Effect<void>
   readonly stream: (
-    request: IncomingMessage,
-    response: ServerResponse,
     identity: LocalIdentity,
-  ) => Effect.Effect<void>
-  readonly close: () => Effect.Effect<void>
+  ) => Stream.Stream<BootstrapSseEventEnvelope>
 }
 
 export class ProjectionPublication extends Context.Service<
@@ -20,111 +17,86 @@ export class ProjectionPublication extends Context.Service<
 export const projectionPublicationLayer = (dependencies: {
   readonly expire: () => void
   readonly currentCursor: () => number
-  readonly eventFor: (identity: LocalIdentity) => string
+  readonly eventFor: (identity: LocalIdentity) => BootstrapSseEventEnvelope
   readonly controllerConnected: (identity: LocalIdentity) => void
   readonly controllerDisconnected: (identity: LocalIdentity) => void
-  readonly responseHeaders: (contentType: string) => Record<string, string>
-  readonly observe?: (
-    event: 'connect' | 'disconnect' | 'publish' | 'writeFailure',
-  ) => void
+  readonly observe?: (event: 'connect' | 'disconnect' | 'publish') => void
 }) =>
   Layer.effect(
     ProjectionPublication,
-    Effect.sync(() => {
-      const listeners = new Map<ServerResponse, LocalIdentity>()
+    Effect.gen(function* () {
+      type Subscription = {
+        readonly identity: LocalIdentity
+        readonly queue: Queue.Queue<BootstrapSseEventEnvelope>
+      }
+
+      const subscriptions = new Map<number, Subscription>()
       const controllerStreams = new Map<string, number>()
-      const heartbeats = new Map<
-        ServerResponse,
-        ReturnType<typeof setTimeout>
-      >()
+      let nextSubscriptionId = 0
       let emittedCursor = 0
-      let closed = false
-      const publish = (type: string, cursor: number) =>
-        Effect.sync(() => {
-          void type
-          if (closed) return
-          emittedCursor = Math.max(emittedCursor, cursor)
-          for (const [response, identity] of listeners)
-            try {
-              response.write(dependencies.eventFor(identity))
-            } catch (cause) {
-              dependencies.observe?.('writeFailure')
-              throw cause
-            }
-          dependencies.observe?.('publish')
-        })
-      let poll: ReturnType<typeof setTimeout> | undefined
-      const schedulePoll = () => {
-        poll = setTimeout(() => {
-          if (closed) return
-          dependencies.expire()
-          const cursor = dependencies.currentCursor()
-          if (cursor > emittedCursor) {
-            emittedCursor = cursor
-            Effect.runSync(publish('ProjectionChanged', cursor))
-          }
-          schedulePoll()
-        }, 250)
-        poll.unref()
-      }
-      schedulePoll()
-      const scheduleHeartbeat = (response: ServerResponse) => {
-        const heartbeat = setTimeout(() => {
-          if (closed || !listeners.has(response)) return
-          response.write(`: heartbeat\n\n`)
-          scheduleHeartbeat(response)
-        }, 15_000)
-        heartbeat.unref()
-        heartbeats.set(response, heartbeat)
-      }
-      const stream = (
-        request: IncomingMessage,
-        response: ServerResponse,
-        identity: LocalIdentity,
-      ) =>
-        Effect.sync(() => {
-          if (closed) return
-          const streamCount = controllerStreams.get(identity.clientId) ?? 0
-          if (streamCount === 0) dependencies.controllerConnected(identity)
-          controllerStreams.set(identity.clientId, streamCount + 1)
-          response.writeHead(200, {
-            ...dependencies.responseHeaders('text/event-stream'),
-            connection: 'keep-alive',
-          })
-          try {
-            response.write(dependencies.eventFor(identity))
-          } catch (cause) {
-            dependencies.observe?.('writeFailure')
-            throw cause
-          }
-          listeners.set(response, identity)
-          dependencies.observe?.('connect')
-          scheduleHeartbeat(response)
-          request.on('close', () => {
-            if (closed) return
-            const heartbeat = heartbeats.get(response)
-            if (heartbeat !== undefined) clearTimeout(heartbeat)
-            heartbeats.delete(response)
-            listeners.delete(response)
-            dependencies.observe?.('disconnect')
-            const remaining =
-              (controllerStreams.get(identity.clientId) ?? 1) - 1
-            if (remaining <= 0) {
-              controllerStreams.delete(identity.clientId)
-              dependencies.controllerDisconnected(identity)
-            } else controllerStreams.set(identity.clientId, remaining)
-          })
-        })
-      const close = () =>
-        Effect.sync(() => {
-          if (closed) return
-          closed = true
-          if (poll !== undefined) clearTimeout(poll)
-          for (const heartbeat of heartbeats.values()) clearTimeout(heartbeat)
-          heartbeats.clear()
-          listeners.clear()
-          controllerStreams.clear()
-        })
-      return ProjectionPublication.of({ publish, stream, close })
+
+      const publish = Effect.fn('ProjectionPublication.publish')(function* (
+        cursor: number,
+      ) {
+        emittedCursor = Math.max(emittedCursor, cursor)
+        yield* Effect.forEach(
+          subscriptions.values(),
+          ({ identity, queue }) =>
+            Queue.offer(queue, dependencies.eventFor(identity)),
+          { discard: true },
+        )
+        dependencies.observe?.('publish')
+      })
+
+      const stream = (identity: LocalIdentity) =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const queue = yield* Queue.unbounded<BootstrapSseEventEnvelope>()
+            const subscriptionId = nextSubscriptionId
+            nextSubscriptionId += 1
+            yield* Effect.acquireRelease(
+              Effect.sync(() => {
+                const streamCount =
+                  controllerStreams.get(identity.clientId) ?? 0
+                if (streamCount === 0)
+                  dependencies.controllerConnected(identity)
+                controllerStreams.set(identity.clientId, streamCount + 1)
+                subscriptions.set(subscriptionId, { identity, queue })
+                dependencies.observe?.('connect')
+              }).pipe(
+                Effect.andThen(
+                  Effect.sync(() => dependencies.eventFor(identity)).pipe(
+                    Effect.flatMap((event) => Queue.offer(queue, event)),
+                  ),
+                ),
+              ),
+              () =>
+                Effect.sync(() => {
+                  subscriptions.delete(subscriptionId)
+                  dependencies.observe?.('disconnect')
+                  const remaining =
+                    (controllerStreams.get(identity.clientId) ?? 1) - 1
+                  if (remaining <= 0) {
+                    controllerStreams.delete(identity.clientId)
+                    dependencies.controllerDisconnected(identity)
+                  } else controllerStreams.set(identity.clientId, remaining)
+                }).pipe(Effect.andThen(Queue.shutdown(queue))),
+            )
+            return Stream.fromQueue(queue)
+          }),
+        )
+
+      const poll = Effect.sync(() => {
+        dependencies.expire()
+        return dependencies.currentCursor()
+      }).pipe(
+        Effect.flatMap((cursor) =>
+          cursor > emittedCursor ? publish(cursor) : Effect.void,
+        ),
+        Effect.repeat(Schedule.spaced('250 millis')),
+      )
+      yield* poll.pipe(Effect.forkScoped)
+
+      return ProjectionPublication.of({ publish, stream })
     }),
   )

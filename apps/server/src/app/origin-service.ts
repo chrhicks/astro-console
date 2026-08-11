@@ -1,6 +1,8 @@
 import {
+  Context,
   Effect,
   Exit,
+  Layer,
   ManagedRuntime,
   Match,
   Schedule,
@@ -38,6 +40,7 @@ import {
   type PreflightProviderConfig,
 } from '../config/environment-config.ts'
 import { OriginListener, originListenerLayer } from '../http/origin-listener.ts'
+import { serveProjectionSse } from '../http/projection-sse.ts'
 import { WebHost, webHostLayer } from '../http/web-host.ts'
 import { openOriginDatabase } from '../persistence/database.ts'
 import type {
@@ -591,44 +594,49 @@ function constructLocalWebService(
   const originListener = Effect.runSync(
     OriginListener.pipe(Effect.provide(originListenerLayer)),
   )
+  let closed = false
   const telemetry = options.telemetry ?? defaultOriginTelemetry
+  const observeProjectionPublication = (
+    event: 'connect' | 'disconnect' | 'publish' | 'writeFailure',
+  ) => {
+    options.observeProjectionPublication?.(event)
+    telemetry.runSync(
+      recordOperationalEvent({
+        scope: 'projection',
+        operation: `sse.${event}`,
+        outcome: event === 'writeFailure' ? 'failed' : 'success',
+      }),
+    )
+  }
   const projectionPublication = Effect.runSync(
-    ProjectionPublication.pipe(
-      Effect.provide(
+    Scope.provide(
+      Layer.build(
         projectionPublicationLayer({
           expire: () => stateRepository.expireReconnectGrace(),
           currentCursor: () => stateRepository.state().eventCursor,
-          eventFor: (identity) => stateRepository.sseProjection(identity),
+          eventFor: (identity) => stateRepository.projectionEvent(identity),
           controllerConnected: (identity) =>
             stateRepository.controllerConnected(identity),
-          controllerDisconnected: (identity) =>
-            stateRepository.controllerDisconnected(identity),
-          responseHeaders,
-          observe: (event) => {
-            options.observeProjectionPublication?.(event)
-            telemetry.runSync(
-              recordOperationalEvent({
-                scope: 'projection',
-                operation: `sse.${event}`,
-                outcome: event === 'writeFailure' ? 'failed' : 'success',
-              }),
-            )
+          controllerDisconnected: (identity) => {
+            if (!closed) stateRepository.controllerDisconnected(identity)
           },
+          observe: observeProjectionPublication,
         }),
+      ).pipe(
+        Effect.map((context) => Context.get(context, ProjectionPublication)),
       ),
+      runtimeScope,
     ),
-  )
-  Effect.runSync(
-    Scope.addFinalizer(runtimeScope, projectionPublication.close()),
   )
   const libraryPreview = createLibraryPreviewHandler(
     options.frameInspectionStorage?.previewsRoot ??
       options.previewRoot ??
       './.astro-server/previews',
   )
-  let closed = false
-  const publish = (type: string, cursor: number) =>
-    Effect.runSync(projectionPublication.publish(type, cursor))
+  const publish = (type: string, cursor: number) => {
+    void type
+    Effect.runSync(projectionPublication.publish(cursor))
+  }
   const publishProcessingProjection = () => {
     const cursor = stateRepository.advanceProjectionCursor()
     publish('ProcessingProjected', cursor)
@@ -883,7 +891,15 @@ function constructLocalWebService(
             tracedProjectionDelivery(
               response,
               'sse.open',
-              projectionPublication.stream(request, response, identity),
+              serveProjectionSse({
+                request,
+                response,
+                responseHeaders: responseHeaders('text/event-stream'),
+                events: projectionPublication.stream(identity),
+                scope: runtimeScope,
+                observeWriteFailure: () =>
+                  observeProjectionPublication('writeFailure'),
+              }),
               () =>
                 identity.capability === 'controlCapable'
                   ? stateRepository.state().control.state
