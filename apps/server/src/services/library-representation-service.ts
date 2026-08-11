@@ -184,6 +184,8 @@ export const libraryRepresentationServiceLayer = Layer.effect(
         if (configuredStorage !== undefined) {
           const detail = yield* library.detail(assetId).pipe(Effect.result)
           if (Result.isFailure(detail)) {
+            if (configuredGrants === undefined)
+              return LibraryDownloadOutcome.Unavailable({})
             return Match.value(detail.failure).pipe(
               Match.when({ _tag: 'Server.LibraryInputInvalid' }, () =>
                 LibraryDownloadOutcome.InvalidInput({}),

@@ -19,18 +19,24 @@ const ReviewRow = Schema.Struct({ revision: Schema.Int, review: Schema.String })
 const StateValueRow = Schema.Struct({ value: Schema.String })
 
 export const LibraryReviewOutcome = Schema.TaggedUnion({
-  ReadOnly: { response: ReviewAssetResponse },
   Accepted: { response: ReviewAssetResponse },
   NotFound: { response: ReviewAssetResponse },
   Conflict: { response: ReviewAssetResponse },
   Unavailable: { response: ReviewAssetResponse },
 })
 
+export const LibraryReviewAuthorization = Schema.TaggedUnion({
+  Authorized: {},
+  ReadOnly: { response: ReviewAssetResponse },
+})
+
 export interface LibraryReviewServiceShape {
+  readonly authorize: (
+    identity: LocalIdentity,
+  ) => Effect.Effect<typeof LibraryReviewAuthorization.Type>
   readonly review: (
     assetId: string,
     input: typeof ReviewAssetRequest.Type,
-    identity: LocalIdentity,
   ) => Effect.Effect<typeof LibraryReviewOutcome.Type>
 }
 
@@ -48,16 +54,23 @@ export const libraryReviewServiceLayer = Layer.effect(
     const { database } = yield* OriginDatabase
     const publication = yield* ProjectionPublication
 
+    const authorize = Effect.fn('LibraryReviewService.authorize')(function* (
+      identity: LocalIdentity,
+    ) {
+      return identity.role === 'owner' &&
+        identity.capability === 'controlCapable'
+        ? LibraryReviewAuthorization.cases.Authorized.make({})
+        : LibraryReviewAuthorization.cases.ReadOnly.make({
+            response: rejected(
+              ReviewAssetFailure.cases.ClientReadOnly.make({}),
+            ),
+          })
+    })
+
     const review = Effect.fn('LibraryReviewService.review')(function* (
       assetId: string,
       input: typeof ReviewAssetRequest.Type,
-      identity: LocalIdentity,
     ) {
-      if (identity.role !== 'owner' || identity.capability !== 'controlCapable')
-        return LibraryReviewOutcome.cases.ReadOnly.make({
-          response: rejected(ReviewAssetFailure.cases.ClientReadOnly.make({})),
-        })
-
       const stored = yield* Effect.try({
         try: () => {
           const row = Schema.decodeUnknownSync(Schema.optional(ReviewAssetRow))(
@@ -219,6 +232,6 @@ export const libraryReviewServiceLayer = Layer.effect(
       )
     })
 
-    return LibraryReviewService.of({ review })
+    return LibraryReviewService.of({ authorize, review })
   }),
 )

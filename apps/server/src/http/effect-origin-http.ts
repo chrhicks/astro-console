@@ -42,8 +42,8 @@ import { makeObserveRoutes } from './routes/observe-routes.ts'
 import { makePlanRoutes } from './routes/plan-routes.ts'
 import { makeSimulationRoutes } from './routes/simulation-routes.ts'
 import {
+  libraryRouteCompatibilityResponse,
   makeLibraryRoutes,
-  malformedLibraryAssetPathResponse,
 } from './routes/library-routes.ts'
 
 class OriginRequestAdmission extends Context.Service<
@@ -303,16 +303,19 @@ export const makeOriginHttpApplication = (
       const identity = yield* Effect.promise(async () =>
         admission(admissionRequest),
       )
-      const malformedLibraryPath = malformedLibraryAssetPathResponse(
+      if (identity === undefined)
+        return yield* unauthenticated(request.method, requestPath)
+      const libraryCompatibility = libraryRouteCompatibilityResponse(
         request.method,
         requestPath,
+        identity,
       )
-      return identity === undefined
-        ? yield* unauthenticated(request.method, requestPath)
-        : (malformedLibraryPath ??
-            (yield* routes.pipe(
-              Effect.provideService(OriginRequestIdentity, identity),
-            )))
+      return (
+        libraryCompatibility ??
+        (yield* routes.pipe(
+          Effect.provideService(OriginRequestIdentity, identity),
+        ))
+      )
     })
   })
 

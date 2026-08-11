@@ -19,6 +19,7 @@ import {
   LibraryService,
 } from '../../services/library-service.ts'
 import {
+  LibraryReviewAuthorization,
   LibraryReviewOutcome,
   LibraryReviewService,
 } from '../../services/library-review-service.ts'
@@ -34,12 +35,18 @@ import {
   LibraryRepresentationService,
 } from '../../services/library-representation-service.ts'
 import { responseHeaders } from '../response.ts'
+import type { LocalIdentity } from '../../auth/identity.ts'
 
 const invalidInput = LibraryRouteFailure.cases.InvalidInput.make({
   message: 'The service could not read that action.',
 })
 const assetNotFound = LibraryRouteFailure.cases.AssetNotFound.make({})
 const libraryUnavailable = LibraryRouteFailure.cases.LibraryUnavailable.make({})
+const apiNotFound = {
+  outcome: 'rejected',
+  reason: 'InvalidInput',
+  message: 'The service could not read that action.',
+} as const
 
 const decodedAssetId = (value: string | undefined) => {
   try {
@@ -59,10 +66,18 @@ const requestAssetId = (
   ).exec(path)?.[1]
 }
 
-export const malformedLibraryAssetPathResponse = (
+export const libraryRouteCompatibilityResponse = (
   method: string,
   requestPath: string,
+  identity: LocalIdentity,
 ) => {
+  const libraryGetPath =
+    requestPath === '/api/library' ||
+    requestPath === '/api/observe/live-frame' ||
+    /^\/api\/library\/assets\/[^/]+(?:\/(?:preview|download|process-source))?$/.test(
+      requestPath,
+    )
+  if (method === 'HEAD' && libraryGetPath) return json(404, apiNotFound)
   if (!requestPath.startsWith('/api/library/assets/')) return undefined
   const review = method === 'POST' && requestPath.endsWith('/review')
   if (method !== 'GET' && !review) return undefined
@@ -80,9 +95,16 @@ export const malformedLibraryAssetPathResponse = (
   if (/^[A-Za-z0-9-]+$/.test(decoded)) return undefined
   if (review)
     return json(
-      404,
+      identity.role !== 'owner' || identity.capability !== 'controlCapable'
+        ? 403
+        : 400,
       ReviewAssetResponse.cases.Rejected.make({
-        failure: ReviewAssetFailure.cases.AssetNotFound.make({}),
+        failure:
+          identity.role !== 'owner' || identity.capability !== 'controlCapable'
+            ? ReviewAssetFailure.cases.ClientReadOnly.make({})
+            : ReviewAssetFailure.cases.InvalidInput.make({
+                message: 'The service could not read that review action.',
+              }),
       }),
     )
   return suffix === '/preview' || suffix === '/download'
@@ -205,30 +227,35 @@ export const makeLibraryRoutes = Effect.fn('OriginHttp.makeLibraryRoutes')(
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
         const identity = yield* OriginRequestIdentity
-        const raw = yield* requestJson(request)
-        const input = yield* Schema.decodeUnknownEffect(ReviewAssetRequest)(
-          raw,
-        ).pipe(Effect.option)
-        if (Option.isNone(input))
-          return json(
-            400,
-            ReviewAssetResponse.cases.Rejected.make({
-              failure: ReviewAssetFailure.cases.InvalidInput.make({
-                message: 'The service could not read that review action.',
-              }),
+        const authorization = yield* reviews.authorize(identity)
+        return yield* LibraryReviewAuthorization.match(authorization, {
+          ReadOnly: ({ response }) => Effect.succeed(json(403, response)),
+          Authorized: () =>
+            Effect.gen(function* () {
+              const raw = yield* requestJson(request)
+              const input = yield* Schema.decodeUnknownEffect(
+                ReviewAssetRequest,
+              )(raw).pipe(Effect.option)
+              if (Option.isNone(input))
+                return json(
+                  400,
+                  ReviewAssetResponse.cases.Rejected.make({
+                    failure: ReviewAssetFailure.cases.InvalidInput.make({
+                      message: 'The service could not read that review action.',
+                    }),
+                  }),
+                )
+              const outcome = yield* reviews.review(
+                decodedAssetId(requestAssetId(request, '/review')),
+                input.value,
+              )
+              return LibraryReviewOutcome.match(outcome, {
+                Accepted: ({ response }) => json(200, response),
+                NotFound: ({ response }) => json(404, response),
+                Conflict: ({ response }) => json(409, response),
+                Unavailable: ({ response }) => json(503, response),
+              })
             }),
-          )
-        const outcome = yield* reviews.review(
-          decodedAssetId(requestAssetId(request, '/review')),
-          input.value,
-          identity,
-        )
-        return LibraryReviewOutcome.match(outcome, {
-          ReadOnly: ({ response }) => json(403, response),
-          Accepted: ({ response }) => json(200, response),
-          NotFound: ({ response }) => json(404, response),
-          Conflict: ({ response }) => json(409, response),
-          Unavailable: ({ response }) => json(503, response),
         })
       }),
     )

@@ -1077,6 +1077,34 @@ test('Library review preserves owner authority, revisions, idempotency, and proj
       assert.equal(denied._tag, 'Rejected')
       if (denied._tag === 'Rejected')
         assert.equal(denied.failure._tag, 'ClientReadOnly')
+      const deniedMalformedResponse = yield* submit(bases.viewer, {
+        decision: 'accepted',
+      })
+      const deniedMalformed = yield* responseJson(deniedMalformedResponse).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(ReviewAssetResponse)),
+      )
+      assert.equal(deniedMalformedResponse.status, 403)
+      assert.equal(deniedMalformed._tag, 'Rejected')
+      if (deniedMalformed._tag === 'Rejected')
+        assert.equal(deniedMalformed.failure._tag, 'ClientReadOnly')
+      const deniedMalformedPathResponse = yield* fetchEffect(
+        `${bases.viewer}/api/library/assets/%/review`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-listener-key': 'viewer',
+          },
+          body: JSON.stringify({ decision: 'accepted' }),
+        },
+      )
+      const deniedMalformedPath = yield* responseJson(
+        deniedMalformedPathResponse,
+      ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(ReviewAssetResponse)))
+      assert.equal(deniedMalformedPathResponse.status, 403)
+      assert.equal(deniedMalformedPath._tag, 'Rejected')
+      if (deniedMalformedPath._tag === 'Rejected')
+        assert.equal(deniedMalformedPath.failure._tag, 'ClientReadOnly')
 
       const acceptedResponse = yield* submit(bases.owner, request)
       const accepted = yield* responseJson(acceptedResponse).pipe(
@@ -1158,6 +1186,22 @@ test('Library preview and local download preserve bounded immutable representati
         join(graph.originalsRoot, 'asset-m27-001.fits'),
         originalBytes,
       )
+
+      const previewHead = yield* fetchEffect(
+        `${bases.owner}/api/library/assets/asset-m27-001/preview`,
+        { method: 'HEAD', headers: { 'x-listener-key': 'owner' } },
+      )
+      assert.equal(previewHead.status, 404)
+      assert.equal(
+        previewHead.headers.get('content-type'),
+        'application/json; charset=utf-8',
+      )
+
+      const downloadHead = yield* fetchEffect(
+        `${bases.owner}/api/library/assets/asset-m27-001/download`,
+        { method: 'HEAD', headers: { 'x-listener-key': 'owner' } },
+      )
+      assert.equal(downloadHead.status, 404)
 
       const preview = yield* fetchEffect(
         `${bases.owner}/api/library/assets/asset-m27-001/preview`,
@@ -1241,6 +1285,16 @@ test('Library published download preserves the bounded grant redirect', () => {
             '2026-08-11T00:00:00.000Z',
             'published/run-m27-001/finals/asset-m27-001.fits',
           )
+        const head = yield* fetchEffect(
+          `${bases.owner}/api/library/assets/asset-m27-001/download`,
+          {
+            method: 'HEAD',
+            headers: { 'x-listener-key': 'owner' },
+            redirect: 'manual',
+          },
+        )
+        assert.equal(head.status, 404)
+        assert.equal(issued.length, 0)
         const response = yield* fetchEffect(
           `${bases.owner}/api/library/assets/asset-m27-001/download`,
           {
@@ -1280,6 +1334,25 @@ test('Library routes preserve bounded input and truthful failure envelopes', () 
   ownerOrigin(({ bases }) =>
     Effect.gen(function* () {
       const headers = { 'x-listener-key': 'owner' }
+      const headPaths = [
+        '/api/library',
+        '/api/library/assets/asset-m27-001',
+        '/api/library/assets/asset-m27-001/preview',
+        '/api/library/assets/asset-m27-001/download',
+        '/api/library/assets/asset-m27-001/process-source',
+        '/api/observe/live-frame',
+      ]
+      for (const path of headPaths) {
+        const response = yield* fetchEffect(`${bases.owner}${path}`, {
+          method: 'HEAD',
+          headers,
+        })
+        assert.equal(response.status, 404, path)
+        assert.equal(
+          response.headers.get('content-type'),
+          'application/json; charset=utf-8',
+        )
+      }
       const invalidPage = yield* fetchEffect(
         `${bases.owner}/api/library?pageSize=101&sort=capturedAtDescending`,
         { headers },
@@ -1352,13 +1425,13 @@ test('Library routes preserve bounded input and truthful failure envelopes', () 
           }),
         },
       )
-      assert.equal(malformedReviewPath.status, 404)
+      assert.equal(malformedReviewPath.status, 400)
       const malformedReviewBody = yield* responseJson(malformedReviewPath).pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(ReviewAssetResponse)),
       )
       assert.equal(malformedReviewBody._tag, 'Rejected')
       if (malformedReviewBody._tag === 'Rejected')
-        assert.equal(malformedReviewBody.failure._tag, 'AssetNotFound')
+        assert.equal(malformedReviewBody.failure._tag, 'InvalidInput')
 
       const unavailablePreview = yield* fetchEffect(
         `${bases.owner}/api/library/assets/asset-m27-001/preview`,
@@ -1374,12 +1447,16 @@ test('Library routes preserve bounded input and truthful failure envelopes', () 
         `${bases.owner}/api/library/assets/asset-m27-999/download`,
         { headers },
       )
-      assert.equal(missingDownload.status, 404)
+      assert.equal(missingDownload.status, 503)
+      assert.deepEqual(yield* responseJson(missingDownload), {
+        outcome: 'rejected',
+        reason: 'DownloadUnavailable',
+      })
       const invalidDownload = yield* fetchEffect(
         `${bases.owner}/api/library/assets/not-an-asset/download`,
         { headers },
       )
-      assert.equal(invalidDownload.status, 400)
+      assert.equal(invalidDownload.status, 503)
     }),
   ))
 
