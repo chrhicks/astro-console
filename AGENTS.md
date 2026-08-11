@@ -73,10 +73,8 @@ We try to use what is available in the `executor` MCP when possible, its a way f
 
 ### Continuum
 
-The `continuum` mcp (thru executor) allows you to do
-
-- manage memory - use this frequently. It's the only way for you to remember things in the future: decisions, learnings, gotchas, troubleshooting, changelogs, etc.
-- tasks - a way to keep track of your work. For capturing requirements for yourself or subagents you invoke. Think typical project management stuff like: Epics, Tasks, Plans, Checklists, etc.
+Use the `continuum` MCP through Executor for durable project memory: decisions,
+learnings, gotchas, troubleshooting notes, and changelogs.
 
 ### LED Panel - Communicating current activity
 
@@ -86,6 +84,18 @@ The `led-panel` mcp (through executor) allows you communicate to an LED Panel (c
 - what you are a subagent is currently working on (persistent, dismissable) - think planning -> executing -> step 1 -> step N -> finalizing -> alert user
 - to get the users attention (persistent, dismissible, audio)
 - otherwise use it for fun whenever you fancy you could do something creative/playful with it throughout your work
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in this repository's GitHub Issues using the `gh` CLI. See
+`docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+This repository uses a single-context domain layout. See
+`docs/agents/domain.md`.
 
 ## Local Web Dev Inspection
 
