@@ -1,3 +1,3 @@
-import { startOrigin } from './app/origin-service.ts'
+import { startOrigin } from './app/origin-runtime.ts'
 
 void startOrigin()

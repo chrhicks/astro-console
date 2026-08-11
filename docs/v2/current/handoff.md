@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–4 complete locally; Processing Project lifecycle refactor and shared protocol refocus complete locally**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–4 complete locally; Processing Project lifecycle, shared protocol, and origin runtime refactors complete locally**
 
 ## Current Position
 
@@ -294,6 +294,16 @@ and presentation behavior stay in the web application. The former Gate
 simulations, fixtures, and harness-only helpers are removed; current proof runs
 through production lifecycle interfaces and actual web clients.
 
+The origin now has one deep Effect runtime module. Its one caller operation,
+`listen`, turns reviewed configuration and explicit provider adapter factories
+into the complete configured listener set. Layer acquisition creates the origin;
+runtime-scope disposal closes listeners, worker fibers, projection publication,
+Processing Project resources, SQLite, and telemetry. HTTP dispatch is local to
+the origin implementation, and the former 28-callback forwarding router is
+removed. A production-interface integration test covers HTTP, Process work,
+SSE publication, durable restart, and listener shutdown without using origin
+implementation hooks.
+
 After that simulator proof, an indoor GET-only readiness check reached ASCOM
 Remote at `192.168.4.104:11111`. Management and every device-property envelope
 returned `ErrorNumber: 0`. The configured identities were Telescope 0 `ASI
@@ -395,8 +405,8 @@ snapshot-gap recovery. Simulation and Library review controls follow the fresh
 held desktop lease, not whether Plan or Observe happens to have another eligible
 action, so moving between workspaces does not make the controller read-only.
 
-Current automated proof is green: protocol 3/3, server 163 passed with 9
-existing skips, and web 109/109. Functional browser proof covered the normal
+Current automated proof is green: protocol 4/4, server 177/177, and web
+117/117. Functional browser proof covered the normal
 Plan-to-Verify workflow,
 fresh acceptance projection, restart/no-replay, abort and reconciliation
 states. It also covered explicit Project intake and routing, client-only stage
@@ -453,10 +463,10 @@ covered indoor frame.
 
 ## Next Owner Action
 
-GitHub issue `#2`, the shared protocol refocus, is complete locally. The
-remaining architecture frontiers are origin runtime depth in `#3`, Nightbook
-workspace runtime depth in `#4`, durable work-claim re-audit in `#5`, and the
-origin integration-test harness in `#6`. Select and integrate a
+GitHub issues `#2` and `#3`, the shared protocol refocus and origin runtime
+deepening, are complete locally. The remaining architecture frontiers are
+Nightbook workspace runtime depth in `#4`, durable work-claim re-audit in `#5`,
+and the origin integration-test harness in `#6`. Select and integrate a
 real processing library only in a later accepted item; the current deterministic
 materializer proves orchestration and evidence, not astronomy processing
 quality. The remaining accepted delivery list continues with the host backup

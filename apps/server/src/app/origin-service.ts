@@ -1,7 +1,6 @@
 import {
   Effect,
   Exit,
-  Fiber,
   ManagedRuntime,
   Match,
   Schedule,
@@ -34,13 +33,10 @@ import {
   type FrameInspectionStorage,
 } from '../services/frame-inspection.ts'
 import type { DownloadGrantIssuer } from '../storage/r2-download-grant.ts'
-import { configuredDownloadGrantIssuer } from '../config/download-grant-config.ts'
 import {
-  originServerConfig,
   type OriginServerConfig,
   type PreflightProviderConfig,
 } from '../config/environment-config.ts'
-import { runExecutable } from './executable.ts'
 import { OriginListener, originListenerLayer } from '../http/origin-listener.ts'
 import { WebHost, webHostLayer } from '../http/web-host.ts'
 import { openOriginDatabase } from '../persistence/database.ts'
@@ -63,7 +59,6 @@ import {
 } from '../services/projection-publication.ts'
 import { controlCommandFromEnvelope } from '../persistence/control-sqlite-repository.ts'
 import { installPublishedLibraryFixture } from '../persistence/library-sqlite-repository.ts'
-import { createOriginRouter } from '../http/origin-router.ts'
 import { handleProcessingProjectsHttp } from '../http/processing-project-handlers.ts'
 import {
   initializeRuntimeState,
@@ -118,15 +113,12 @@ import {
   refreshPreflight,
   type ReadOnlyPreflightProviderShape,
 } from '../services/preflight-service.ts'
-import { alpacaPreflightProvider } from '../providers/alpaca-preflight-provider.ts'
-import { alpacaCameraProvider } from '../providers/alpaca-camera-provider.ts'
 import {
   CameraProvider,
   executeCameraCommand,
   type CameraProviderShape,
 } from '../services/camera-command-service.ts'
 import {
-  createOriginTelemetry,
   defaultOriginTelemetry,
   tracedHttpRequest,
   type OriginTelemetry,
@@ -142,12 +134,7 @@ import {
 import { tracedExecutorWork } from '../observability/executor-telemetry.ts'
 import { tracedProjectionDelivery } from '../observability/projection-telemetry.ts'
 import { recordOperationalEvent } from '../observability/operational-telemetry.ts'
-import {
-  recordAdmissionDecision,
-  recordJwksRefresh,
-  tracedAdmission,
-} from '../observability/admission-telemetry.ts'
-import { tracedStartup } from '../observability/startup-telemetry.ts'
+import { tracedAdmission } from '../observability/admission-telemetry.ts'
 import {
   tracedFrameInspection,
   tracedFrameIntake,
@@ -261,6 +248,13 @@ export function createLocalWebService(
   } = {},
 ) {
   const database = openOriginDatabase(databasePath)
+  const runtimeScope = Effect.runSync(Scope.make())
+  Effect.runSync(
+    Scope.addFinalizer(
+      runtimeScope,
+      Effect.sync(() => database.close()),
+    ),
+  )
   if (options.fixture !== undefined) {
     installM27Fixture(
       database,
@@ -280,6 +274,9 @@ export function createLocalWebService(
     )
   const processingProjects = ManagedRuntime.make(
     processingProjectLifecycleLayer(database),
+  )
+  Effect.runSync(
+    Scope.addFinalizer(runtimeScope, processingProjects.disposeEffect),
   )
   const processingProjectsHttp = (
     response: ServerResponse,
@@ -595,6 +592,9 @@ export function createLocalWebService(
       ),
     ),
   )
+  Effect.runSync(
+    Scope.addFinalizer(runtimeScope, projectionPublication.close()),
+  )
   const libraryPreview = createLibraryPreviewHandler(
     options.frameInspectionStorage?.previewsRoot ??
       options.previewRoot ??
@@ -607,18 +607,21 @@ export function createLocalWebService(
     const cursor = stateRepository.advanceProjectionCursor()
     publish('ProcessingProjected', cursor)
   }
-  const processingProjectNoticeFiber = processingProjects.runFork(
-    Effect.flatMap(ProcessingProjectLifecycle, (lifecycle) =>
-      lifecycle
-        .changes({
-          personId: 'system',
-          clientId: 'processing-project-notices',
-          role: 'owner',
-          capability: 'controlCapable',
-        })
-        .pipe(
-          Stream.runForEach(() => Effect.sync(publishProcessingProjection)),
-        ),
+  processingProjects.runSync(
+    Effect.forkIn(
+      Effect.flatMap(ProcessingProjectLifecycle, (lifecycle) =>
+        lifecycle
+          .changes({
+            personId: 'system',
+            clientId: 'processing-project-notices',
+            role: 'owner',
+            capability: 'controlCapable',
+          })
+          .pipe(
+            Stream.runForEach(() => Effect.sync(publishProcessingProjection)),
+          ),
+      ),
+      runtimeScope,
     ),
   )
   const runExecutor =
@@ -668,20 +671,21 @@ export function createLocalWebService(
                   telemetry.runSync(recordSqliteBacklog(backlog, count)),
               }),
         })
-  const runExecutorFiber =
-    runExecutor === undefined
-      ? undefined
-      : Effect.runFork(
-          Effect.tryPromise({
-            try: () => runExecutor.pass(),
-            catch: (cause) => cause,
-          }).pipe(
-            Effect.catch((cause) =>
-              Effect.logError('RunExecutor.pass failed', cause),
-            ),
-            Effect.repeat(Schedule.spaced('250 millis')),
+  if (runExecutor !== undefined)
+    Effect.runSync(
+      Effect.forkIn(
+        Effect.tryPromise({
+          try: () => runExecutor.pass(),
+          catch: (cause) => cause,
+        }).pipe(
+          Effect.catch((cause) =>
+            Effect.logError('RunExecutor.pass failed', cause),
           ),
-        )
+          Effect.repeat(Schedule.spaced('250 millis')),
+        ),
+        runtimeScope,
+      ),
+    )
   const processWorkWorker = createProcessWorkWorker({
     outputRoot:
       options.processWorkRoot ??
@@ -715,17 +719,18 @@ export function createLocalWebService(
       publishProcessingProjection()
     return result
   }
-  const processWorkFiber =
-    options.processWorkAutoRun === false
-      ? undefined
-      : Effect.runFork(
-          Effect.sync(processWorkPass).pipe(
-            Effect.catch((cause) =>
-              Effect.logError('ProcessWorkWorker.pass failed', cause),
-            ),
-            Effect.repeat(Schedule.spaced('250 millis')),
+  if (options.processWorkAutoRun !== false)
+    Effect.runSync(
+      Effect.forkIn(
+        Effect.sync(processWorkPass).pipe(
+          Effect.catch((cause) =>
+            Effect.logError('ProcessWorkWorker.pass failed', cause),
           ),
-        )
+          Effect.repeat(Schedule.spaced('250 millis')),
+        ),
+        runtimeScope,
+      ),
+    )
   const targetAcquisitionProvider =
     options.targetAcquisitionProvider ??
     (options.configuredTargetProvider !== undefined &&
@@ -795,12 +800,13 @@ export function createLocalWebService(
         ),
       )
     }
-    return createOriginRouter({
+    const routes = {
       identityResolver: observedAdmission,
       expireReconnectGrace: () => stateRepository.expireReconnectGrace(),
-      live: (response) => json(response, 200, { status: 'alive' }),
+      live: (response: ServerResponse) =>
+        json(response, 200, { status: 'alive' }),
       unauthenticated,
-      snapshot: (response, identity) =>
+      snapshot: (response: ServerResponse, identity: LocalIdentity) =>
         void telemetry.runSync(
           tracedHttpRequest(
             response,
@@ -827,12 +833,17 @@ export function createLocalWebService(
             ),
           ),
         ),
-      ready: (response) => json(response, 200, stateRepository.readiness()),
-      operations: (response, identity) =>
+      ready: (response: ServerResponse) =>
+        json(response, 200, stateRepository.readiness()),
+      operations: (response: ServerResponse, identity: LocalIdentity) =>
         isOwner(identity)
           ? json(response, 200, stateRepository.operations())
           : json(response, 403, reject('OwnerRequired').body),
-      events: (request, response, identity) =>
+      events: (
+        request: IncomingMessage,
+        response: ServerResponse,
+        identity: LocalIdentity,
+      ) =>
         void telemetry.runSync(
           tracedHttpRequest(
             response,
@@ -852,7 +863,11 @@ export function createLocalWebService(
             ),
           ),
         ),
-      control: (response, identity, request) =>
+      control: (
+        response: ServerResponse,
+        identity: LocalIdentity,
+        request: IncomingMessage,
+      ) =>
         runHttp(
           response,
           {
@@ -958,7 +973,7 @@ export function createLocalWebService(
               }
             },
           }),
-      planWorkspace: (response) =>
+      planWorkspace: (response: ServerResponse) =>
         runHttp(
           response,
           {
@@ -970,7 +985,12 @@ export function createLocalWebService(
             Effect.sync(() => workspace(response, database, 'plan')),
           ),
         ),
-      processingProjects: (response, identity, request, url) =>
+      processingProjects: (
+        response: ServerResponse,
+        identity: LocalIdentity,
+        request: IncomingMessage,
+        url: URL,
+      ) =>
         runHttp(
           response,
           {
@@ -995,7 +1015,7 @@ export function createLocalWebService(
             ),
           ),
         ),
-      libraryPage: (response, url) =>
+      libraryPage: (response: ServerResponse, url: URL) =>
         runHttp(
           response,
           { method: 'GET', route: '/api/library', workspace: 'library' },
@@ -1006,7 +1026,7 @@ export function createLocalWebService(
             () => stateRepository.state().snapshotVersion,
           ),
         ),
-      libraryDownload: (response, url) =>
+      libraryDownload: (response: ServerResponse, url: URL) =>
         downloadAsset(
           response,
           database,
@@ -1015,7 +1035,7 @@ export function createLocalWebService(
           () => stateRepository.state().snapshotVersion,
           options.capturedFrameStorage?.originalsRoot,
         ),
-      libraryDetail: (response, encodedAssetId) =>
+      libraryDetail: (response: ServerResponse, encodedAssetId: string) =>
         runHttp(
           response,
           {
@@ -1030,7 +1050,11 @@ export function createLocalWebService(
             () => stateRepository.state().snapshotVersion,
           ),
         ),
-      libraryPreview: (response, encodedAssetId, identity) =>
+      libraryPreview: (
+        response: ServerResponse,
+        encodedAssetId: string,
+        identity: LocalIdentity,
+      ) =>
         libraryPreview(
           response,
           database,
@@ -1038,7 +1062,10 @@ export function createLocalWebService(
           identity,
           () => stateRepository.state().snapshotVersion,
         ),
-      libraryProcessSource: (response, encodedAssetId) =>
+      libraryProcessSource: (
+        response: ServerResponse,
+        encodedAssetId: string,
+      ) =>
         runHttp(
           response,
           {
@@ -1053,7 +1080,10 @@ export function createLocalWebService(
             () => stateRepository.state().snapshotVersion,
           ),
         ),
-      observeLiveFrameReview: (response, identity) =>
+      observeLiveFrameReview: (
+        response: ServerResponse,
+        identity: LocalIdentity,
+      ) =>
         observeLiveFrameReview(
           response,
           database,
@@ -1069,7 +1099,12 @@ export function createLocalWebService(
                 ),
             ),
         ),
-      libraryReview: (response, identity, request, encodedAssetId) =>
+      libraryReview: (
+        response: ServerResponse,
+        identity: LocalIdentity,
+        request: IncomingMessage,
+        encodedAssetId: string,
+      ) =>
         runHttp(
           response,
           {
@@ -1091,7 +1126,11 @@ export function createLocalWebService(
             ),
           ),
         ),
-      planCommand: (response, identity, request) =>
+      planCommand: (
+        response: ServerResponse,
+        identity: LocalIdentity,
+        request: IncomingMessage,
+      ) =>
         runHttp(
           response,
           {
@@ -1118,7 +1157,11 @@ export function createLocalWebService(
             Effect.map(({ status, body }) => json(response, status, body)),
           ),
         ),
-      observeCommand: (response, identity, request) =>
+      observeCommand: (
+        response: ServerResponse,
+        identity: LocalIdentity,
+        request: IncomingMessage,
+      ) =>
         runHttp(
           response,
           {
@@ -1145,7 +1188,11 @@ export function createLocalWebService(
             Effect.map(({ status, body }) => json(response, status, body)),
           ),
         ),
-      refreshPreflight: async (response, identity, request) => {
+      refreshPreflight: async (
+        response: ServerResponse,
+        identity: LocalIdentity,
+        request: IncomingMessage,
+      ) => {
         if (identity.capability !== 'controlCapable')
           return json(
             response,
@@ -1200,7 +1247,11 @@ export function createLocalWebService(
           ),
         )
       },
-      polarCommand: async (response, identity, request) => {
+      polarCommand: async (
+        response: ServerResponse,
+        identity: LocalIdentity,
+        request: IncomingMessage,
+      ) => {
         if (identity.capability !== 'controlCapable')
           return json(
             response,
@@ -1597,17 +1648,130 @@ export function createLocalWebService(
           identity,
         )
       },
-      webAsset: (response, pathname) =>
+      webAsset: (response: ServerResponse, pathname: string) =>
         Effect.runSync(webHost.asset(response, pathname, responseHeaders)),
-      webRoute: (response, pathname) =>
+      webRoute: (response: ServerResponse, pathname: string) =>
         Effect.runSync(webHost.route(response, pathname, responseHeaders)),
-      apiNotFound: (response) =>
+      apiNotFound: (response: ServerResponse) =>
         json(response, 404, reject('InvalidInput').body),
-      notFound: (response) =>
+      notFound: (response: ServerResponse) =>
         response
           .writeHead(404, responseHeaders('text/plain; charset=utf-8'))
           .end(),
-    })
+    }
+    return async (request: IncomingMessage, response: ServerResponse) => {
+      const url = new URL(request.url ?? '/', 'http://local')
+      if (request.method === 'GET' && url.pathname === '/health/live')
+        return routes.live(response)
+      routes.expireReconnectGrace()
+      const identity = await routes.identityResolver(request)
+      if (identity === undefined)
+        return routes.unauthenticated(
+          response,
+          request.method ?? 'GET',
+          url.pathname,
+        )
+      if (request.method === 'GET' && url.pathname === '/api/snapshot')
+        return routes.snapshot(response, identity)
+      if (request.method === 'GET' && url.pathname === '/api/health/ready')
+        return routes.ready(response)
+      if (request.method === 'GET' && url.pathname === '/api/health/operations')
+        return routes.operations(response, identity)
+      if (request.method === 'GET' && url.pathname === '/api/events')
+        return routes.events(request, response, identity)
+      if (request.method === 'POST' && url.pathname === '/api/commands/control')
+        return routes.control(response, identity, request)
+      if (
+        request.method === 'GET' &&
+        url.pathname === '/api/simulation' &&
+        routes.simulationProjection !== undefined
+      )
+        return routes.simulationProjection(response)
+      if (
+        request.method === 'POST' &&
+        url.pathname === '/api/simulation' &&
+        routes.simulationControl !== undefined
+      )
+        return routes.simulationControl(response, identity, request)
+      if (request.method === 'GET' && url.pathname === '/api/workspaces/plan')
+        return routes.planWorkspace(response)
+      if (
+        url.pathname === '/api/process/projects' ||
+        url.pathname.startsWith('/api/process/projects/')
+      )
+        return routes.processingProjects(response, identity, request, url)
+      if (request.method === 'GET' && url.pathname === '/api/library')
+        return routes.libraryPage(response, url)
+      if (
+        request.method === 'GET' &&
+        url.pathname === '/api/observe/live-frame'
+      )
+        return routes.observeLiveFrameReview(response, identity)
+      if (
+        request.method === 'GET' &&
+        url.pathname.startsWith('/api/library/assets/') &&
+        url.pathname.endsWith('/download')
+      )
+        return routes.libraryDownload(response, url)
+      if (
+        request.method === 'GET' &&
+        url.pathname.startsWith('/api/library/assets/') &&
+        url.pathname.endsWith('/process-source')
+      )
+        return routes.libraryProcessSource(
+          response,
+          url.pathname.slice(
+            '/api/library/assets/'.length,
+            -'/process-source'.length,
+          ),
+        )
+      if (
+        request.method === 'GET' &&
+        url.pathname.startsWith('/api/library/assets/') &&
+        url.pathname.endsWith('/preview')
+      )
+        return routes.libraryPreview(
+          response,
+          url.pathname.slice('/api/library/assets/'.length, -'/preview'.length),
+          identity,
+        )
+      if (
+        request.method === 'GET' &&
+        url.pathname.startsWith('/api/library/assets/')
+      )
+        return routes.libraryDetail(
+          response,
+          url.pathname.slice('/api/library/assets/'.length),
+        )
+      if (
+        request.method === 'POST' &&
+        url.pathname.startsWith('/api/library/assets/') &&
+        url.pathname.endsWith('/review')
+      )
+        return routes.libraryReview(
+          response,
+          identity,
+          request,
+          url.pathname.slice('/api/library/assets/'.length, -'/review'.length),
+        )
+      if (request.method === 'POST' && url.pathname === '/api/plan/commands')
+        return routes.planCommand(response, identity, request)
+      if (request.method === 'POST' && url.pathname === '/api/observe/commands')
+        return routes.observeCommand(response, identity, request)
+      if (
+        request.method === 'POST' &&
+        url.pathname === '/api/observe/preflight'
+      )
+        return routes.refreshPreflight(response, identity, request)
+      if (request.method === 'POST' && url.pathname === '/api/acquire/commands')
+        return routes.polarCommand(response, identity, request)
+      if (request.method === 'GET' && routes.webAsset(response, url.pathname))
+        return
+      if (request.method === 'GET' && routes.webRoute(response, url.pathname))
+        return
+      if (url.pathname.startsWith('/api/')) return routes.apiNotFound(response)
+      return routes.notFound(response)
+    }
   }
   const listen = async (
     port = 0,
@@ -1632,14 +1796,7 @@ export function createLocalWebService(
   const close = () => {
     if (closed) return
     closed = true
-    if (runExecutorFiber !== undefined)
-      Effect.runSync(Fiber.interrupt(runExecutorFiber))
-    if (processWorkFiber !== undefined)
-      Effect.runSync(Fiber.interrupt(processWorkFiber))
-    Effect.runSync(Fiber.interrupt(processingProjectNoticeFiber))
-    Effect.runSync(processingProjects.disposeEffect)
-    Effect.runSync(projectionPublication.close())
-    database.close()
+    Effect.runSync(Scope.close(runtimeScope, Exit.void))
   }
   const projectionIdentity = () => {
     const identity = identityResolver()
@@ -2119,217 +2276,3 @@ export const createLocalOwnerAdmission = (): RequestAdmission =>
     role: 'owner',
     capability: 'controlCapable',
   })
-export const startOrigin = () =>
-  runExecutable('origin server', async () => {
-    const telemetry = createOriginTelemetry()
-    const listeners: Array<{ readonly close: () => Promise<void> }> = []
-    let service: ReturnType<typeof createLocalWebService> | undefined
-    try {
-      await telemetry.initialize()
-      const config = await telemetry.runPromise(
-        tracedStartup('config.decode', originServerConfig),
-      )
-      const admissionObservability: AdmissionObservation = {
-        admission: (reason) =>
-          telemetry.runSync(recordAdmissionDecision(reason)),
-        jwks: (outcome) => telemetry.runSync(recordJwksRefresh(outcome)),
-      }
-      const admission = createRemoteReadOnlyAdmission(config)
-      const issuer = configuredDownloadGrantIssuer(config.downloadGrant)
-      const createdService = telemetry.runSync(
-        tracedStartup(
-          'service.create',
-          Effect.sync(() =>
-            createLocalWebService(
-              config.runtime.databasePath,
-              admission,
-              undefined,
-              issuer === undefined ? undefined : { issuer },
-              {
-                ...(config.fixture === undefined
-                  ? {}
-                  : { fixture: config.fixture }),
-                ...(config.preflightProvider === undefined
-                  ? {}
-                  : {
-                      preflightProvider: alpacaPreflightProvider(
-                        config.preflightProvider,
-                      ),
-                      ...(config.preflightProvider.devices.camera === undefined
-                        ? {}
-                        : {
-                            cameraProvider: alpacaCameraProvider(
-                              config.preflightProvider,
-                            ),
-                            runExecutorProviderOrigin: new URL(
-                              `http://${config.preflightProvider.host}:${config.preflightProvider.port}`,
-                            ).origin,
-                            ...(config.preflightProvider.devices.camera
-                              .uniqueId === undefined
-                              ? {}
-                              : {
-                                  runExecutionContext: RunExecutionContext.make(
-                                    {
-                                      rigId: config.preflightProvider.rigId,
-                                      cameraDeviceId:
-                                        config.preflightProvider.devices.camera
-                                          .uniqueId,
-                                      ...(config.preflightProvider.devices
-                                        .telescope?.uniqueId === undefined
-                                        ? {}
-                                        : {
-                                            mountDeviceId:
-                                              config.preflightProvider.devices
-                                                .telescope.uniqueId,
-                                            ...(config.preflightProvider
-                                              .site === undefined
-                                              ? config.simulation === undefined
-                                                ? {}
-                                                : {
-                                                    latitudeDegrees: 39.755,
-                                                    longitudeDegrees:
-                                                      -74.2677777778,
-                                                    elevationMeters: 0,
-                                                  }
-                                              : config.preflightProvider.site),
-                                          }),
-                                      completionBehavior: 'hold',
-                                      unsafeBehavior: 'pauseAndPark',
-                                    },
-                                  ),
-                                }),
-                          }),
-                    }),
-                webDistPath: config.runtime.webDistPath,
-                previewRoot: config.runtime.previewRoot,
-                capturedFrameStorage: {
-                  originalsRoot: config.runtime.originalsRoot,
-                },
-                frameInspectionStorage: {
-                  originalsRoot: config.runtime.originalsRoot,
-                  previewsRoot: config.runtime.previewRoot,
-                },
-                plateSolveWorker: {
-                  originalsRoot: config.runtime.originalsRoot,
-                  executable: config.plateSolve.executable,
-                  indexesRoot: config.plateSolve.indexesRoot,
-                  timeoutMs: config.plateSolve.timeoutMs,
-                  solverVersion: config.plateSolve.solverVersion,
-                  scaleLowDeg: config.plateSolve.scaleLowDeg,
-                  scaleHighDeg: config.plateSolve.scaleHighDeg,
-                  searchRadiusDeg: config.plateSolve.searchRadiusDeg,
-                },
-                ...(config.simulation === undefined &&
-                config.preflightProvider?.site !== undefined &&
-                config.preflightProvider.devices.camera?.uniqueId !==
-                  undefined &&
-                config.preflightProvider.devices.telescope?.uniqueId !==
-                  undefined
-                  ? { configuredTargetProvider: config.preflightProvider }
-                  : {}),
-                ...(config.simulation === undefined
-                  ? {}
-                  : { simulation: config.simulation }),
-                telemetry,
-                admissionObservability,
-              },
-            ),
-          ),
-        ),
-      )
-      service = createdService
-      const remote = await telemetry.runPromise(
-        tracedStartup(
-          'listener.bind',
-          Effect.promise(() =>
-            createdService.listen(config.runtime.port, config.runtime.host),
-          ),
-        ),
-      )
-      listeners.push(remote)
-      if (config.admission.mode === 'development') {
-        console.log(
-          `Astro Console ${config.runtime.release}: http://127.0.0.1:${remote.port}`,
-        )
-        installOriginShutdown(service, telemetry, [remote])
-        return
-      }
-      const localOwnerPort = config.runtime.localOwnerPort
-      if (localOwnerPort === undefined)
-        throw new Error('Production origin requires ASTRO_LOCAL_OWNER_PORT')
-      const local = await telemetry.runPromise(
-        tracedStartup(
-          'listener.bind',
-          Effect.promise(() =>
-            createdService.listen(
-              localOwnerPort,
-              config.runtime.host,
-              createLocalOwnerAdmission(),
-            ),
-          ),
-        ),
-      )
-      listeners.push(local)
-      const remoteDesktop =
-        config.runtime.remoteDesktopPort === undefined
-          ? undefined
-          : await telemetry.runPromise(
-              tracedStartup(
-                'listener.bind',
-                Effect.promise(() =>
-                  createdService.listen(
-                    config.runtime.remoteDesktopPort,
-                    config.runtime.host,
-                    createRemoteDesktopAdmission(config),
-                  ),
-                ),
-              ),
-            )
-      if (remoteDesktop !== undefined) listeners.push(remoteDesktop)
-      console.log(
-        `Astro Console ${config.runtime.release}: remote phone http://${config.runtime.host}:${remote.port};${remoteDesktop === undefined ? '' : ` remote desktop http://${config.runtime.host}:${remoteDesktop.port};`} local owner http://${config.runtime.host}:${local.port}`,
-      )
-      installOriginShutdown(
-        createdService,
-        telemetry,
-        remoteDesktop === undefined
-          ? [remote, local]
-          : [remote, local, remoteDesktop],
-      )
-    } catch (cause) {
-      await Promise.allSettled(listeners.map((listener) => listener.close()))
-      try {
-        service?.close()
-      } finally {
-        await telemetry.dispose()
-      }
-      throw cause
-    }
-  })
-
-function installOriginShutdown(
-  service: ReturnType<typeof createLocalWebService>,
-  telemetry: OriginTelemetry,
-  listeners: ReadonlyArray<{ readonly close: () => Promise<void> }>,
-) {
-  let closing = false
-  const close = async () => {
-    if (closing) return
-    closing = true
-    await Promise.allSettled(listeners.map((listener) => listener.close()))
-    try {
-      service.close()
-    } finally {
-      await telemetry.runPromise(
-        recordOperationalEvent({
-          scope: 'startup',
-          operation: 'shutdown',
-          outcome: 'stopped',
-        }),
-      )
-      await telemetry.dispose()
-    }
-  }
-  process.once('SIGINT', () => void close())
-  process.once('SIGTERM', () => void close())
-}
