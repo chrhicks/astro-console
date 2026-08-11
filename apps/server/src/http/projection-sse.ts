@@ -2,6 +2,18 @@ import type { BootstrapSseEventEnvelope } from '@astro-console/protocol'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Effect, Fiber, Scope, Stream } from 'effect'
 
+interface ProjectionSseWritable {
+  readonly write: (payload: string) => boolean
+  readonly once: {
+    (event: 'drain' | 'close', listener: () => void): unknown
+    (event: 'error', listener: (cause: Error) => void): unknown
+  }
+  readonly off: {
+    (event: 'drain' | 'close', listener: () => void): unknown
+    (event: 'error', listener: (cause: Error) => void): unknown
+  }
+}
+
 export const encodeProjectionSseEvent = (event: BootstrapSseEventEnvelope) =>
   `id: ${event.id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`
 
@@ -11,6 +23,44 @@ export const projectionHeartbeat = <E, R>(
   Effect.sleep('15 seconds').pipe(
     Effect.andThen(write(': heartbeat\n\n')),
     Effect.forever,
+  )
+
+const waitForDrain = (response: ProjectionSseWritable) =>
+  Effect.callback<void, unknown>((resume) => {
+    const cleanup = () => {
+      response.off('drain', onDrain)
+      response.off('error', onError)
+      response.off('close', onClose)
+    }
+    const onDrain = () => {
+      cleanup()
+      resume(Effect.void)
+    }
+    const onError = (cause: Error) => {
+      cleanup()
+      resume(Effect.fail(cause))
+    }
+    const onClose = () => {
+      cleanup()
+      resume(Effect.fail(new Error('SSE response closed before drain')))
+    }
+    response.once('drain', onDrain)
+    response.once('error', onError)
+    response.once('close', onClose)
+    return Effect.sync(cleanup)
+  })
+
+export const writeProjectionSsePayload = (
+  response: ProjectionSseWritable,
+  payload: string,
+) =>
+  Effect.try({
+    try: () => response.write(payload),
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.flatMap((accepted) =>
+      accepted ? Effect.void : waitForDrain(response),
+    ),
   )
 
 export const serveProjectionSse = (input: {
@@ -27,12 +77,8 @@ export const serveProjectionSse = (input: {
       connection: 'keep-alive',
     })
     const write = (payload: string) =>
-      Effect.try({
-        try: () => input.response.write(payload),
-        catch: (cause) => cause,
-      }).pipe(
+      writeProjectionSsePayload(input.response, payload).pipe(
         Effect.tapError(() => Effect.sync(input.observeWriteFailure)),
-        Effect.asVoid,
       )
     const connection = Effect.gen(function* () {
       yield* projectionHeartbeat(write).pipe(Effect.forkScoped)

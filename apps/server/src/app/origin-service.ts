@@ -633,13 +633,17 @@ function constructLocalWebService(
       options.previewRoot ??
       './.astro-server/previews',
   )
-  const publish = (type: string, cursor: number) => {
-    void type
+  const publishProjection = (cursor: number) =>
     Effect.runSync(projectionPublication.publish(cursor))
-  }
+
+  // Existing domain persistence and worker ports also report the durable
+  // event type. This ticket keeps that audit contract at the adapter seam;
+  // the projection stream deliberately publishes one closed wire event.
+  const publishDomainProjection = (_durableEventType: string, cursor: number) =>
+    publishProjection(cursor)
   const publishProcessingProjection = () => {
     const cursor = stateRepository.advanceProjectionCursor()
-    publish('ProcessingProjected', cursor)
+    publishProjection(cursor)
   }
   processingProjects.runSync(
     Effect.forkIn(
@@ -682,7 +686,7 @@ function constructLocalWebService(
           ...(options.frameInspectionStorage === undefined
             ? {}
             : { frameInspectionStorage: options.frameInspectionStorage }),
-          publish,
+          publish: publishDomainProjection,
           ...(options.telemetry === undefined
             ? {}
             : {
@@ -780,7 +784,7 @@ function constructLocalWebService(
           ...(options.frameInspectionStorage === undefined
             ? {}
             : { frameInspectionStorage: options.frameInspectionStorage }),
-          publish,
+          publish: publishDomainProjection,
         })
       : undefined) ??
     (options.simulation !== undefined &&
@@ -796,7 +800,7 @@ function constructLocalWebService(
           ...(options.frameInspectionStorage === undefined
             ? {}
             : { frameInspectionStorage: options.frameInspectionStorage }),
-          publish,
+          publish: publishDomainProjection,
         })
       : undefined) ??
     (options.fixture === 'target-deep-sky' ||
@@ -925,7 +929,7 @@ function constructLocalWebService(
             database,
             stateRepository,
             identity,
-            publish,
+            publishDomainProjection,
           ).pipe(
             Effect.catchTags({
               'Server.CommandInputInvalid': () =>
@@ -1187,7 +1191,7 @@ function constructLocalWebService(
             runRepository,
             stateRepository,
             identity,
-            publish,
+            publishDomainProjection,
           ).pipe(
             Effect.catchTags({
               'Server.PlanCommandInputInvalid': () =>
@@ -1218,7 +1222,7 @@ function constructLocalWebService(
             runRepository,
             stateRepository,
             identity,
-            publish,
+            publishDomainProjection,
           ).pipe(
             Effect.catchTags({
               'Server.ObserveCommandInputInvalid': () =>
@@ -1275,7 +1279,7 @@ function constructLocalWebService(
           ).pipe(
             Effect.map((result) => {
               if ('response' in result) {
-                publish('PreflightRefreshed', result.cursor)
+                publishProjection(result.cursor)
                 return RefreshPreflightResponse.match(result.response, {
                   Refreshed: (body) => json(response, 200, body),
                   Rejected: (body) => json(response, 409, body),
@@ -1497,7 +1501,7 @@ function constructLocalWebService(
               : { observedAt, cameraState: 'unknown' },
           })
           const persisted = stateRepository.persistPreflight(preflight)
-          publish('CameraObservationRecorded', persisted.cursor)
+          publishProjection(persisted.cursor)
           if (cameraOutcome.observed) {
             database
               .prepare(
@@ -1671,7 +1675,7 @@ function constructLocalWebService(
             ),
           )
         if ('cursor' in result) {
-          publish('AcquireEvidenceUpdated', result.cursor)
+          publishProjection(result.cursor)
           const resultBody = AcquireCommandResponse.cases.Accepted.make({
             snapshot: Effect.runSync(
               stateRepository.bootstrapSnapshot(identity),
@@ -1907,8 +1911,7 @@ function constructLocalWebService(
         ),
       ),
     )
-    if (result.outcome === 'accepted')
-      publish('CapturedFrameMaterialized', result.cursor)
+    if (result.outcome === 'accepted') publishProjection(result.cursor)
     return result
   }
   const ingestCompletedCameraExposure = async (raw: unknown) => {
@@ -2000,14 +2003,12 @@ function constructLocalWebService(
         ),
       ),
     )
-    if (result.outcome === 'recorded')
-      publish('AcquireEvidenceUpdated', result.cursor)
+    if (result.outcome === 'recorded') publishProjection(result.cursor)
     return result
   }
   const advanceFakeRun = () => {
     const result = runRepository.advance(projectionIdentity())
-    if (result?.event !== undefined)
-      publish(result.event.type, result.event.cursor)
+    if (result?.event !== undefined) publishProjection(result.event.cursor)
     return result?.body
   }
   return {

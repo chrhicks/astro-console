@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import test from 'node:test'
 import { Effect, Fiber, Queue } from 'effect'
 import { TestClock } from 'effect/testing'
 import { createLocalWebService } from '../app/origin-service.ts'
-import { projectionHeartbeat } from '../http/projection-sse.ts'
+import {
+  projectionHeartbeat,
+  writeProjectionSsePayload,
+} from '../http/projection-sse.ts'
+import { makeLatestProjectionQueue } from '../services/projection-publication.ts'
 
 const decoder = new TextDecoder()
 
@@ -132,6 +137,57 @@ test('HTTP heartbeat work is simultaneous and stops on interruption', async () =
         assert.equal(yield* Queue.size(writes), 0)
       }),
     ).pipe(Effect.provide(TestClock.layer())),
+  )
+})
+
+test('slow projection subscribers coalesce pending updates to the latest cursor', async () => {
+  const queue = Effect.runSync(makeLatestProjectionQueue<number>())
+  Effect.runSync(Queue.offer(queue, 1))
+  Effect.runSync(Queue.offer(queue, 2))
+  Effect.runSync(Queue.offer(queue, 3))
+
+  assert.equal(Effect.runSync(Queue.size(queue)), 1)
+  assert.equal(Effect.runSync(Queue.take(queue)), 3)
+})
+
+test('HTTP writes wait for drain and remove listeners when interrupted', async () => {
+  class BackpressuredResponse extends EventEmitter {
+    readonly payloads: Array<string> = []
+    writable = false
+
+    write(payload: string) {
+      this.payloads.push(payload)
+      return this.writable
+    }
+  }
+
+  const response = new BackpressuredResponse()
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const drained = yield* writeProjectionSsePayload(
+          response,
+          'first',
+        ).pipe(Effect.forkScoped)
+        yield* Effect.yieldNow
+        assert.equal(response.listenerCount('drain'), 1)
+        response.emit('drain')
+        yield* Fiber.join(drained)
+        assert.deepEqual(response.payloads, ['first'])
+        assert.equal(response.listenerCount('drain'), 0)
+
+        const interrupted = yield* writeProjectionSsePayload(
+          response,
+          'second',
+        ).pipe(Effect.forkScoped)
+        yield* Effect.yieldNow
+        assert.equal(response.listenerCount('drain'), 1)
+        yield* Fiber.interrupt(interrupted)
+        assert.equal(response.listenerCount('drain'), 0)
+        assert.equal(response.listenerCount('error'), 0)
+        assert.equal(response.listenerCount('close'), 0)
+      }),
+    ),
   )
 })
 

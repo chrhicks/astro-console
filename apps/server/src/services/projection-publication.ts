@@ -14,6 +14,13 @@ export class ProjectionPublication extends Context.Service<
   ProjectionPublicationShape
 >()('@astro-console/server/ProjectionPublication') {}
 
+/**
+ * A projection event contains the complete current snapshot and cursor. A slow
+ * subscriber can recover from the latest event, so one pending update is
+ * sufficient and older pending updates are replaced.
+ */
+export const makeLatestProjectionQueue = <A>() => Queue.sliding<A>(1)
+
 export const projectionPublicationLayer = (dependencies: {
   readonly expire: () => void
   readonly currentCursor: () => number
@@ -51,25 +58,27 @@ export const projectionPublicationLayer = (dependencies: {
       const stream = (identity: LocalIdentity) =>
         Stream.unwrap(
           Effect.gen(function* () {
-            const queue = yield* Queue.unbounded<BootstrapSseEventEnvelope>()
+            const queue =
+              yield* makeLatestProjectionQueue<BootstrapSseEventEnvelope>()
             const subscriptionId = nextSubscriptionId
             nextSubscriptionId += 1
-            yield* Effect.acquireRelease(
+            const initial = yield* Effect.acquireRelease(
               Effect.sync(() => {
                 const streamCount =
                   controllerStreams.get(identity.clientId) ?? 0
                 if (streamCount === 0)
                   dependencies.controllerConnected(identity)
                 controllerStreams.set(identity.clientId, streamCount + 1)
+                const current = dependencies.eventFor(identity)
+
+                // A PubSub value would have to be one shared envelope. These
+                // envelopes are identity-specific and must be frozen at
+                // publication time, so each subscriber owns one latest-value
+                // queue instead of rebuilding state later from a shared cursor.
                 subscriptions.set(subscriptionId, { identity, queue })
                 dependencies.observe?.('connect')
-              }).pipe(
-                Effect.andThen(
-                  Effect.sync(() => dependencies.eventFor(identity)).pipe(
-                    Effect.flatMap((event) => Queue.offer(queue, event)),
-                  ),
-                ),
-              ),
+                return current
+              }),
               () =>
                 Effect.sync(() => {
                   subscriptions.delete(subscriptionId)
@@ -82,7 +91,9 @@ export const projectionPublicationLayer = (dependencies: {
                   } else controllerStreams.set(identity.clientId, remaining)
                 }).pipe(Effect.andThen(Queue.shutdown(queue))),
             )
-            return Stream.fromQueue(queue)
+            return Stream.make(initial).pipe(
+              Stream.concat(Stream.fromQueue(queue)),
+            )
           }),
         )
 
