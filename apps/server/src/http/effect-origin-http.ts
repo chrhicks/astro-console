@@ -37,6 +37,10 @@ import { responseHeaders } from './response.ts'
 import type { DevelopmentSimulationConfig } from './development-simulation.ts'
 import { makeControlRoutes } from './routes/control-routes.ts'
 import { json, OriginRequestIdentity } from './routes/origin-route-shared.ts'
+import {
+  makeObserveRoutes,
+  type ObserveRouteOptions,
+} from './routes/observe-routes.ts'
 import { makePlanRoutes } from './routes/plan-routes.ts'
 import { makeSimulationRoutes } from './routes/simulation-routes.ts'
 
@@ -190,6 +194,7 @@ const eventsResponse = (
 export const makeOriginHttpApplication = (
   webRoot: string,
   developmentSimulation?: DevelopmentSimulationConfig,
+  observeOptions?: ObserveRouteOptions,
 ) =>
   Effect.gen(function* () {
     const repository = yield* StateSqliteRepository
@@ -197,6 +202,7 @@ export const makeOriginHttpApplication = (
     const web = yield* makeWebResponse(webRoot)
     const planRoutes = yield* makePlanRoutes()
     const controlRoutes = yield* makeControlRoutes()
+    const observeRoutes = yield* makeObserveRoutes(observeOptions)
     const simulationRoutes = makeSimulationRoutes(developmentSimulation)
 
     const live = HttpRouter.add(
@@ -262,6 +268,7 @@ export const makeOriginHttpApplication = (
         operations,
         planRoutes,
         controlRoutes,
+        observeRoutes,
         ...simulationRoutes,
         events,
         apiNotFound,

@@ -24,6 +24,9 @@ import {
   DevelopmentSimulationProjection,
   PlanWorkspaceProjection,
   PlanCommandResponse,
+  ObserveCommandResponse,
+  ObserveLiveFrameReview,
+  RefreshPreflightResponse,
 } from '@astro-console/protocol'
 import {
   makeOriginHttpApplication,
@@ -59,6 +62,7 @@ import {
 import { reject } from '../http/origin-handlers.ts'
 import type { DevelopmentSimulationConfig } from '../http/development-simulation.ts'
 import { createAlpacaSimulator } from '../simulator/alpaca-simulator.ts'
+import type { ObserveRouteOptions } from '../http/routes/observe-routes.ts'
 
 const owner: LocalIdentity = {
   personId: 'owner-person',
@@ -93,12 +97,14 @@ const makeGraph = (
     repository: StateSqliteRepositoryShape,
   ) => ProjectionPublicationShape,
   developmentSimulation?: DevelopmentSimulationConfig,
+  observeOptions?: ObserveRouteOptions,
+  fixtureDefinitionKind: 'fixture' | 'fake' = 'fixture',
 ) =>
   Effect.gen(function* () {
     observe?.('acquired')
     const database = openOriginDatabase(':memory:')
     initializeRuntimeState(database)
-    installM27Fixture(database)
+    installM27Fixture(database, fixtureDefinitionKind)
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         database.close()
@@ -149,6 +155,7 @@ const makeGraph = (
     const application = yield* makeOriginHttpApplication(
       webRoot,
       developmentSimulation,
+      observeOptions,
     ).pipe(
       Effect.provide(graphLayer),
       Effect.provide(NodeFileSystem.layer),
@@ -169,6 +176,8 @@ const withOrigin = (
     readonly bases: Readonly<Record<string, string>>
   }) => Effect.Effect<void, unknown>,
   developmentSimulation?: DevelopmentSimulationConfig,
+  observeOptions?: ObserveRouteOptions,
+  fixtureDefinitionKind: 'fixture' | 'fake' = 'fixture',
 ) =>
   Effect.runPromise(
     Effect.scoped(
@@ -178,6 +187,8 @@ const withOrigin = (
           undefined,
           undefined,
           developmentSimulation,
+          observeOptions,
+          fixtureDefinitionKind,
         )
         const bound = yield* listenOriginHttp(
           graph.application,
@@ -208,16 +219,22 @@ const ownerHeaders = {
 const ownerOrigin = (
   verify: Parameters<typeof withOrigin>[1],
   developmentSimulation?: DevelopmentSimulationConfig,
+  observeOptions?: ObserveRouteOptions,
+  fixtureDefinitionKind: 'fixture' | 'fake' = 'fixture',
 ) =>
   withOrigin(
     [{ name: 'owner', identity: owner }],
     verify,
     developmentSimulation,
+    observeOptions,
+    fixtureDefinitionKind,
   )
 
 const ownerViewerOrigin = (
   verify: Parameters<typeof withOrigin>[1],
   developmentSimulation?: DevelopmentSimulationConfig,
+  observeOptions?: ObserveRouteOptions,
+  fixtureDefinitionKind: 'fixture' | 'fake' = 'fixture',
 ) =>
   withOrigin(
     [
@@ -226,6 +243,8 @@ const ownerViewerOrigin = (
     ],
     verify,
     developmentSimulation,
+    observeOptions,
+    fixtureDefinitionKind,
   )
 
 const fetchEffect = (url: string, init?: RequestInit) =>
@@ -557,6 +576,215 @@ test('Plan starts a revision-bound accepted Run through the Effect listener', ()
       assert.equal(response.status, 202, JSON.stringify(body))
       assert.equal(body._tag, 'Accepted')
       assert.equal(body.snapshot.activeRun._tag, 'Active')
+    }),
+  ))
+
+test('Observe rejects malformed command input through the Effect listener', () =>
+  ownerOrigin(({ bases }) =>
+    Effect.gen(function* () {
+      const response = yield* fetchEffect(
+        `${bases.owner}/api/observe/commands`,
+        {
+          method: 'POST',
+          headers: ownerHeaders,
+          body: '{}',
+        },
+      )
+      assert.equal(response.status, 400)
+      const body = yield* Effect.promise(() => response.json()).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(ObserveCommandResponse)),
+      )
+      assert.equal(body._tag, 'Rejected')
+    }),
+  ))
+
+test('Observe accepts a fresh pause and rejects its stale replay through the Effect listener', () =>
+  ownerOrigin(({ graph, bases }) =>
+    Effect.gen(function* () {
+      graph.repository.commit({
+        leaseRevision: 1,
+        leaseHolder: owner.clientId,
+        leaseState: 'held',
+        reconnectGraceUntil: null,
+      })
+      const before = yield* fetchEffect(`${bases.owner}/api/snapshot`, {
+        headers: { 'x-listener-key': 'owner' },
+      }).pipe(
+        Effect.flatMap(responseJson),
+        Effect.flatMap(
+          Schema.decodeUnknownEffect(BootstrapHttpSuccessEnvelope),
+        ),
+      )
+      if (before.data.plan === undefined)
+        return yield* Effect.die('Expected fixture Plan')
+      const started = yield* fetchEffect(`${bases.owner}/api/plan/commands`, {
+        method: 'POST',
+        headers: ownerHeaders,
+        body: JSON.stringify({
+          intent: {
+            _tag: 'StartAcceptedRun',
+            planId: before.data.plan.planId,
+            expectedPlanRevision: before.data.plan.revision,
+            expectedLeaseRevision: before.data.control.revision,
+            idempotencyKey: 'effect-observe-start-001',
+          },
+        }),
+      }).pipe(
+        Effect.flatMap(responseJson),
+        Effect.flatMap(Schema.decodeUnknownEffect(PlanCommandResponse)),
+      )
+      if (
+        started._tag !== 'Accepted' ||
+        started.snapshot.activeRun._tag !== 'Active'
+      )
+        return yield* Effect.die('Expected active fixture Run')
+      const intent = {
+        _tag: 'PauseRun',
+        expectedLeaseRevision: started.snapshot.control.revision,
+        expectedRunRevision: started.snapshot.activeRun.run.revision,
+        idempotencyKey: 'effect-observe-pause-001',
+      }
+      const acceptedResponse = yield* fetchEffect(
+        `${bases.owner}/api/observe/commands`,
+        {
+          method: 'POST',
+          headers: ownerHeaders,
+          body: JSON.stringify({ intent }),
+        },
+      )
+      const accepted = yield* responseJson(acceptedResponse).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(ObserveCommandResponse)),
+      )
+      assert.equal(acceptedResponse.status, 202)
+      assert.equal(accepted._tag, 'Accepted')
+
+      const replayResponse = yield* fetchEffect(
+        `${bases.owner}/api/observe/commands`,
+        {
+          method: 'POST',
+          headers: ownerHeaders,
+          body: JSON.stringify({
+            intent: {
+              ...intent,
+              idempotencyKey: 'effect-observe-pause-002',
+            },
+          }),
+        },
+      )
+      const replay = yield* responseJson(replayResponse).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(ObserveCommandResponse)),
+      )
+      assert.equal(replayResponse.status, 409)
+      assert.equal(replay._tag, 'Rejected')
+    }),
+  ))
+
+test('Observe preflight preserves request-local authority and provider truth', () =>
+  ownerViewerOrigin(
+    ({ graph, bases }) =>
+      Effect.gen(function* () {
+        graph.repository.commit({
+          leaseRevision: 1,
+          leaseHolder: owner.clientId,
+          leaseState: 'held',
+          reconnectGraceUntil: null,
+        })
+        const before = yield* fetchEffect(`${bases.owner}/api/snapshot`, {
+          headers: { 'x-listener-key': 'owner' },
+        }).pipe(
+          Effect.flatMap(responseJson),
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(BootstrapHttpSuccessEnvelope),
+          ),
+        )
+        if (before.data.plan === undefined)
+          return yield* Effect.die('Expected fixture Plan')
+        const started = yield* fetchEffect(`${bases.owner}/api/plan/commands`, {
+          method: 'POST',
+          headers: ownerHeaders,
+          body: JSON.stringify({
+            intent: {
+              _tag: 'StartAcceptedRun',
+              planId: before.data.plan.planId,
+              expectedPlanRevision: before.data.plan.revision,
+              expectedLeaseRevision: before.data.control.revision,
+              idempotencyKey: 'effect-preflight-start-001',
+            },
+          }),
+        }).pipe(
+          Effect.flatMap(responseJson),
+          Effect.flatMap(Schema.decodeUnknownEffect(PlanCommandResponse)),
+        )
+        if (
+          started._tag !== 'Accepted' ||
+          started.snapshot.activeRun._tag !== 'Active'
+        )
+          return yield* Effect.die('Expected active fixture Run')
+        const requestBody = JSON.stringify({
+          runId: started.snapshot.activeRun.run.runId,
+          expectedRunRevision: started.snapshot.activeRun.run.revision,
+        })
+        const viewerResponse = yield* fetchEffect(
+          `${bases.viewer}/api/observe/preflight`,
+          {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-listener-key': 'viewer',
+            },
+            body: requestBody,
+          },
+        )
+        assert.equal(viewerResponse.status, 403)
+
+        const ownerResponse = yield* fetchEffect(
+          `${bases.owner}/api/observe/preflight`,
+          { method: 'POST', headers: ownerHeaders, body: requestBody },
+        )
+        const refreshed = yield* responseJson(ownerResponse).pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(RefreshPreflightResponse)),
+        )
+        assert.equal(ownerResponse.status, 200)
+        assert.equal(refreshed._tag, 'Refreshed')
+        if (refreshed._tag === 'Refreshed')
+          assert.equal(refreshed.snapshot.verdict, 'ready')
+      }),
+    undefined,
+    {
+      preflightProvider: {
+        observe: () =>
+          Effect.succeed({
+            observedAt: '2026-08-11T00:00:00.000Z',
+            verdict: 'ready',
+            nextAction: 'Start the accepted run.',
+            checks: [
+              {
+                key: 'camera-connected',
+                state: 'ready',
+                observedAt: '2026-08-11T00:00:00.000Z',
+                reason: 'The configured camera is connected.',
+              },
+            ],
+          }),
+      },
+    },
+    'fake',
+  ))
+
+test('Observe live-frame review returns typed current identity projection truth', () =>
+  ownerOrigin(({ bases }) =>
+    Effect.gen(function* () {
+      const response = yield* fetchEffect(
+        `${bases.owner}/api/observe/live-frame`,
+        { headers: { 'x-listener-key': 'owner' } },
+      )
+      const review = yield* responseJson(response).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(ObserveLiveFrameReview)),
+      )
+      assert.equal(response.status, 200)
+      assert.equal(review._tag, 'Unavailable')
+      if (review._tag === 'Unavailable')
+        assert.equal(review.reason, 'NoCurrentFrame')
     }),
   ))
 
