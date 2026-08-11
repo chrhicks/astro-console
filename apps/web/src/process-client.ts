@@ -56,63 +56,7 @@ const requestError = (
 const malformedRequest = (status = 0) =>
   requestError(status, { _tag: 'MalformedResponse' })
 
-export const processClient = {
-  list: () =>
-    request(
-      '/api/process/projects',
-      ProcessingProjectListResponse,
-      ProcessingProjectListSchema,
-    ),
-
-  create: (input: CreateProcessingProjectRequest) =>
-    Schema.decodeUnknownEffect(CreateProcessingProjectRequestSchema)(
-      input,
-    ).pipe(
-      Effect.mapError(() => malformedRequest()),
-      Effect.flatMap((requestBody) =>
-        request(
-          '/api/process/projects',
-          ProcessingProjectChangedResponse,
-          ProcessingProjectChangedSchema,
-          {
-            method: 'POST',
-            body: JSON.stringify(requestBody),
-          },
-        ),
-      ),
-    ),
-
-  open: (projectId: typeof ProcessingProjectId.Type) =>
-    request(
-      `/api/process/projects/${encodeURIComponent(projectId)}`,
-      OpenedProcessingProjectResponse,
-      OpenedProcessingProjectSchema,
-    ),
-
-  evidence: (projectId: typeof ProcessingProjectId.Type) =>
-    request(
-      `/api/process/projects/${encodeURIComponent(projectId)}/evidence`,
-      ProcessingProjectEvidenceResponse,
-      ProcessingProjectEvidenceSchema,
-    ),
-
-  change: (input: ProcessingProjectChangeRequest) =>
-    Schema.decodeUnknownEffect(ProcessingProjectChangeRequestSchema)(
-      input,
-    ).pipe(
-      Effect.mapError(() => malformedRequest()),
-      Effect.flatMap((requestBody) =>
-        request(
-          `/api/process/projects/${encodeURIComponent(input.projectId)}`,
-          ProcessingProjectChangedResponse,
-          ProcessingProjectChangedSchema,
-          { method: 'PATCH', body: JSON.stringify(requestBody) },
-        ),
-      ),
-    ),
-}
-
-const request = <
+const request = Effect.fn('ProcessClient.request')(function* <
   Response extends Schema.Top & Schema.ConstraintDecoder<unknown>,
   Success extends Schema.Top & Schema.ConstraintDecoder<unknown>,
 >(
@@ -120,35 +64,94 @@ const request = <
   responseSchema: Response,
   successSchema: Success,
   init?: RequestInit,
-): Effect.Effect<Success['Type'], ProcessingProjectRequestError> =>
-  Effect.gen(function* () {
-    const response = yield* Effect.tryPromise({
-      try: (signal) =>
-        fetch(path, {
-          ...init,
-          headers: {
-            ...(init?.body === undefined
-              ? {}
-              : { 'content-type': 'application/json' }),
-            ...init?.headers,
-          },
-          signal,
-        }),
-      catch: () =>
-        requestError(0, {
-          _tag: 'TransportUnavailable',
-        }),
-    })
-    const value: unknown = yield* Effect.tryPromise({
-      try: () => response.json(),
-      catch: () => malformedRequest(response.status),
-    })
-    const decoded = yield* Schema.decodeUnknownEffect(responseSchema)(
-      value,
-    ).pipe(Effect.mapError(() => malformedRequest(response.status)))
-    if (Schema.is(ProcessingProjectHttpFailure)(decoded))
-      return yield* Effect.fail(requestError(response.status, decoded))
-    return yield* Schema.decodeUnknownEffect(successSchema)(decoded).pipe(
-      Effect.mapError(() => malformedRequest(response.status)),
-    )
+) {
+  const response = yield* Effect.tryPromise({
+    try: async (signal) => {
+      const fetched = await fetch(path, {
+        ...init,
+        headers: {
+          ...(init?.body === undefined
+            ? {}
+            : { 'content-type': 'application/json' }),
+          ...init?.headers,
+        },
+        signal,
+      })
+      return {
+        status: fetched.status,
+        value: (await fetched.json()) as unknown,
+      }
+    },
+    catch: () =>
+      requestError(0, {
+        _tag: 'TransportUnavailable',
+      }),
   })
+  const decoded = yield* Schema.decodeUnknownEffect(responseSchema)(
+    response.value,
+  ).pipe(Effect.mapError(() => malformedRequest(response.status)))
+  if (Schema.is(ProcessingProjectHttpFailure)(decoded))
+    return yield* Effect.fail(requestError(response.status, decoded))
+  return yield* Schema.decodeUnknownEffect(successSchema)(decoded).pipe(
+    Effect.mapError(() => malformedRequest(response.status)),
+  )
+})
+
+export const processClient = {
+  list: Effect.fn('ProcessClient.list')(() =>
+    request(
+      '/api/process/projects',
+      ProcessingProjectListResponse,
+      ProcessingProjectListSchema,
+    ),
+  ),
+
+  create: Effect.fn('ProcessClient.create')(function* (
+    input: CreateProcessingProjectRequest,
+  ) {
+    const requestBody = yield* Schema.decodeUnknownEffect(
+      CreateProcessingProjectRequestSchema,
+    )(input).pipe(Effect.mapError(() => malformedRequest()))
+    return yield* request(
+      '/api/process/projects',
+      ProcessingProjectChangedResponse,
+      ProcessingProjectChangedSchema,
+      {
+        method: 'POST',
+        body: JSON.stringify(requestBody),
+      },
+    )
+  }),
+
+  open: Effect.fn('ProcessClient.open')(
+    (projectId: typeof ProcessingProjectId.Type) =>
+      request(
+        `/api/process/projects/${encodeURIComponent(projectId)}`,
+        OpenedProcessingProjectResponse,
+        OpenedProcessingProjectSchema,
+      ),
+  ),
+
+  evidence: Effect.fn('ProcessClient.evidence')(
+    (projectId: typeof ProcessingProjectId.Type) =>
+      request(
+        `/api/process/projects/${encodeURIComponent(projectId)}/evidence`,
+        ProcessingProjectEvidenceResponse,
+        ProcessingProjectEvidenceSchema,
+      ),
+  ),
+
+  change: Effect.fn('ProcessClient.change')(function* (
+    input: ProcessingProjectChangeRequest,
+  ) {
+    const requestBody = yield* Schema.decodeUnknownEffect(
+      ProcessingProjectChangeRequestSchema,
+    )(input).pipe(Effect.mapError(() => malformedRequest()))
+    return yield* request(
+      `/api/process/projects/${encodeURIComponent(input.projectId)}`,
+      ProcessingProjectChangedResponse,
+      ProcessingProjectChangedSchema,
+      { method: 'PATCH', body: JSON.stringify(requestBody) },
+    )
+  }),
+}

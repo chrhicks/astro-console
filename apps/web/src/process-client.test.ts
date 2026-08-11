@@ -134,34 +134,39 @@ test('decodes Processing Project failures and rejects malformed JSON responses',
   }
 })
 
-test('aborts an in-flight Process request when its Effect is interrupted', async () => {
+test('aborts a Process response body when its Effect is interrupted', async () => {
   const originalFetch = globalThis.fetch
   let signal: AbortSignal | undefined
-  let markStarted: (() => void) | undefined
+  let markBodyStarted: (() => void) | undefined
   let markAborted: (() => void) | undefined
-  const started = new Promise<void>((resolve) => {
-    markStarted = resolve
+  const bodyStarted = new Promise<void>((resolve) => {
+    markBodyStarted = resolve
   })
   const aborted = new Promise<void>((resolve) => {
     markAborted = resolve
   })
-  globalThis.fetch = (_input, init) => {
+  globalThis.fetch = async (_input, init) => {
     signal = init?.signal ?? undefined
-    markStarted?.()
-    return new Promise<Response>((_resolve, reject) => {
-      signal?.addEventListener(
-        'abort',
-        () => {
-          markAborted?.()
-          reject(new DOMException('Aborted', 'AbortError'))
-        },
-        { once: true },
-      )
-    })
+    return {
+      status: 200,
+      json: () => {
+        markBodyStarted?.()
+        return new Promise<unknown>((_resolve, reject) => {
+          signal?.addEventListener(
+            'abort',
+            () => {
+              markAborted?.()
+              reject(new DOMException('Aborted', 'AbortError'))
+            },
+            { once: true },
+          )
+        })
+      },
+    } as Response
   }
   try {
     const fiber = Effect.runFork(processClient.list())
-    await started
+    await bodyStarted
     await Effect.runPromise(Fiber.interrupt(fiber))
     await aborted
     assert.equal(signal?.aborted, true)

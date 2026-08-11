@@ -105,6 +105,12 @@ const foldWorkspaceSubmission = <Result,>(
       applySubmissionHandler(handlers.Unavailable, value, value.message),
   })
 
+const acceptedAcquireSubmission: SubmissionHandlers<void> = {
+  Acquire: ({ accepted, message }) => {
+    if (!accepted) throw new Error(message ?? 'Acquire unavailable')
+  },
+}
+
 export function App() {
   const workspaceRuntime = useRef(createNightbookWorkspaceRuntime())
   const [workspaceState, setWorkspaceState] = useState<NightbookWorkspaceState>(
@@ -243,11 +249,7 @@ export function App() {
           idempotencyKey: IdempotencyKey.make(crypto.randomUUID()),
         }),
       })
-      return foldWorkspaceSubmission(result, {
-        Acquire: ({ accepted, message }) => {
-          if (!accepted) throw new Error(message ?? 'Acquire unavailable')
-        },
-      })
+      return foldWorkspaceSubmission(result, acceptedAcquireSubmission)
     })
     setAcquireRecoveryCommand(
       () =>
@@ -283,11 +285,7 @@ export function App() {
                 ? AcquireIntent.cases.SkipAcquireTarget.make(expected)
                 : AcquireIntent.cases.AbortAcquire.make(expected)
           const result = await submitWorkspace({ _tag: 'Acquire', intent })
-          return foldWorkspaceSubmission(result, {
-            Acquire: ({ accepted, message }) => {
-              if (!accepted) throw new Error(message ?? 'Acquire unavailable')
-            },
-          })
+          return foldWorkspaceSubmission(result, acceptedAcquireSubmission)
         },
     )
     setApprovePointingCorrection(() => async (proposalId: string) => {
@@ -307,11 +305,7 @@ export function App() {
           idempotencyKey: IdempotencyKey.make(crypto.randomUUID()),
         }),
       })
-      return foldWorkspaceSubmission(result, {
-        Acquire: ({ accepted, message }) => {
-          if (!accepted) throw new Error(message ?? 'Acquire unavailable')
-        },
-      })
+      return foldWorkspaceSubmission(result, acceptedAcquireSubmission)
     })
     return () => {
       setSubmitPlan(undefined)
