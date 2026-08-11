@@ -38,11 +38,14 @@ import type { DevelopmentSimulationConfig } from './development-simulation.ts'
 import { makeControlRoutes } from './routes/control-routes.ts'
 import { makeAcquireRoutes } from './routes/acquire-routes.ts'
 import { json, OriginRequestIdentity } from './routes/origin-route-shared.ts'
-import { makeObserveRoutes } from './routes/observe-routes.ts'
+import {
+  makeObserveRoutes,
+  observeRouteCompatibilityResponse,
+} from './routes/observe-routes.ts'
 import { makePlanRoutes } from './routes/plan-routes.ts'
 import { makeSimulationRoutes } from './routes/simulation-routes.ts'
 import {
-  libraryRouteCompatibilityResponse,
+  makeLibraryRouteCompatibility,
   makeLibraryRoutes,
 } from './routes/library-routes.ts'
 
@@ -207,6 +210,7 @@ export const makeOriginHttpApplication = (
     const acquireRoutes = yield* makeAcquireRoutes()
     const simulationRoutes = makeSimulationRoutes(developmentSimulation)
     const libraryRoutes = yield* makeLibraryRoutes()
+    const libraryRouteCompatibility = yield* makeLibraryRouteCompatibility()
 
     const live = HttpRouter.add(
       'GET',
@@ -305,12 +309,17 @@ export const makeOriginHttpApplication = (
       )
       if (identity === undefined)
         return yield* unauthenticated(request.method, requestPath)
-      const libraryCompatibility = libraryRouteCompatibilityResponse(
+      const observeCompatibility = observeRouteCompatibilityResponse(
+        request.method,
+        requestPath,
+      )
+      const libraryCompatibility = yield* libraryRouteCompatibility(
         request.method,
         requestPath,
         identity,
       )
       return (
+        observeCompatibility ??
         libraryCompatibility ??
         (yield* routes.pipe(
           Effect.provideService(OriginRequestIdentity, identity),

@@ -20,6 +20,20 @@ import {
   requestJson,
 } from './origin-route-shared.ts'
 
+const apiNotFound = {
+  outcome: 'rejected',
+  reason: 'InvalidInput',
+  message: 'The service could not read that action.',
+} as const
+
+export const observeRouteCompatibilityResponse = (
+  method: string,
+  requestPath: string,
+) =>
+  method === 'HEAD' && requestPath === '/api/observe/live-frame'
+    ? json(404, apiNotFound)
+    : undefined
+
 export const makeObserveRoutes = Effect.fn('OriginHttp.makeObserveRoutes')(
   function* () {
     const { database } = yield* OriginDatabase

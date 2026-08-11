@@ -182,11 +182,13 @@ export const libraryRepresentationServiceLayer = Layer.effect(
     const download = Effect.fn('LibraryRepresentationService.download')(
       function* (assetId: string) {
         if (configuredStorage !== undefined) {
-          const detail = yield* library.detail(assetId).pipe(Effect.result)
-          if (Result.isFailure(detail)) {
+          const representation = yield* library
+            .representation(assetId)
+            .pipe(Effect.result)
+          if (Result.isFailure(representation)) {
             if (configuredGrants === undefined)
               return LibraryDownloadOutcome.Unavailable({})
-            return Match.value(detail.failure).pipe(
+            return Match.value(representation.failure).pipe(
               Match.when({ _tag: 'Server.LibraryInputInvalid' }, () =>
                 LibraryDownloadOutcome.InvalidInput({}),
               ),
@@ -196,10 +198,10 @@ export const libraryRepresentationServiceLayer = Layer.effect(
               Match.orElse(() => LibraryDownloadOutcome.Unavailable({})),
             )
           }
-          if (detail.success.availability === 'availableLocally') {
+          if (representation.success.availability === 'availableLocally') {
             const path = join(
               configuredStorage.originalsRoot,
-              `${assetId}.${detail.success.format}`,
+              `${assetId}.${representation.success.format}`,
             )
             const bytes = yield* Effect.tryPromise({
               try: async () => {
@@ -214,7 +216,7 @@ export const libraryRepresentationServiceLayer = Layer.effect(
               onSome: (value) =>
                 LibraryDownloadOutcome.Local({
                   assetId,
-                  format: detail.success.format,
+                  format: representation.success.format,
                   bytes: value,
                 }),
               onNone: () => LibraryDownloadOutcome.Unavailable({}),

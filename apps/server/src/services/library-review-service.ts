@@ -19,6 +19,7 @@ const ReviewRow = Schema.Struct({ revision: Schema.Int, review: Schema.String })
 const StateValueRow = Schema.Struct({ value: Schema.String })
 
 export const LibraryReviewOutcome = Schema.TaggedUnion({
+  ReadOnly: { response: ReviewAssetResponse },
   Accepted: { response: ReviewAssetResponse },
   NotFound: { response: ReviewAssetResponse },
   Conflict: { response: ReviewAssetResponse },
@@ -37,6 +38,7 @@ export interface LibraryReviewServiceShape {
   readonly review: (
     assetId: string,
     input: typeof ReviewAssetRequest.Type,
+    identity: LocalIdentity,
   ) => Effect.Effect<typeof LibraryReviewOutcome.Type>
 }
 
@@ -70,7 +72,13 @@ export const libraryReviewServiceLayer = Layer.effect(
     const review = Effect.fn('LibraryReviewService.review')(function* (
       assetId: string,
       input: typeof ReviewAssetRequest.Type,
+      identity: LocalIdentity,
     ) {
+      const authorization = yield* authorize(identity)
+      if (LibraryReviewAuthorization.guards.ReadOnly(authorization))
+        return LibraryReviewOutcome.cases.ReadOnly.make({
+          response: authorization.response,
+        })
       const stored = yield* Effect.try({
         try: () => {
           const row = Schema.decodeUnknownSync(Schema.optional(ReviewAssetRow))(

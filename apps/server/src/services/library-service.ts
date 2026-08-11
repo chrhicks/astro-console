@@ -6,6 +6,11 @@ import {
   ProcessSourceHandoff,
 } from '@astro-console/protocol'
 
+export const LibraryRepresentationFacts = Schema.Struct({
+  format: LibraryAssetDetail.fields.format,
+  availability: LibraryAssetDetail.fields.availability,
+})
+
 export class LibraryInputInvalid extends Schema.TaggedErrorClass<LibraryInputInvalid>()(
   'Server.LibraryInputInvalid',
   {},
@@ -31,6 +36,12 @@ export interface LibraryPersistenceShape {
     assetId: string,
   ) => Effect.Effect<
     typeof LibraryAssetDetail.Type,
+    LibraryInputInvalid | LibraryAssetNotFound | LibraryPersistenceUnavailable
+  >
+  readonly representation: (
+    assetId: string,
+  ) => Effect.Effect<
+    typeof LibraryRepresentationFacts.Type,
     LibraryInputInvalid | LibraryAssetNotFound | LibraryPersistenceUnavailable
   >
   readonly processSource: (

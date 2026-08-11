@@ -1229,6 +1229,12 @@ test('Library preview and local download preserve bounded immutable representati
         reason: 'PreviewRefreshLimited',
       })
 
+      graph.database
+        .prepare(
+          "UPDATE library_assets SET detail=? WHERE asset_id='asset-m27-001'",
+        )
+        .run('{corrupt-detail-json')
+
       const download = yield* fetchEffect(
         `${bases.owner}/api/library/assets/asset-m27-001/download`,
         { headers: { 'x-listener-key': 'owner' } },
@@ -1239,6 +1245,10 @@ test('Library preview and local download preserve bounded immutable representati
       assert.equal(
         download.headers.get('content-disposition'),
         'attachment; filename="asset-m27-001.fits"',
+      )
+      assert.equal(
+        download.headers.get('content-length'),
+        String(originalBytes.byteLength),
       )
       assert.deepEqual(
         new Uint8Array(yield* Effect.promise(() => download.arrayBuffer())),
@@ -1255,25 +1265,11 @@ test('Library published download preserves the bounded grant redirect', () => {
   return ownerOrigin(
     ({ graph, bases }) =>
       Effect.gen(function* () {
-        const stored = Schema.decodeUnknownSync(
-          Schema.Struct({ detail: Schema.String }),
-        )(
-          graph.database
-            .prepare(
-              "SELECT detail FROM library_assets WHERE asset_id='asset-m27-001'",
-            )
-            .get(),
-        )
         graph.database
           .prepare(
             "UPDATE library_assets SET availability='published',detail=? WHERE asset_id='asset-m27-001'",
           )
-          .run(
-            JSON.stringify({
-              ...JSON.parse(stored.detail),
-              availability: 'published',
-            }),
-          )
+          .run('{corrupt-detail-json')
         graph.database
           .prepare(
             'INSERT INTO asset_publications (asset_id,checksum,state,updated_at,object_key) VALUES (?,?,?,?,?)',

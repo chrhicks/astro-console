@@ -66,51 +66,56 @@ const requestAssetId = (
   ).exec(path)?.[1]
 }
 
-export const libraryRouteCompatibilityResponse = (
-  method: string,
-  requestPath: string,
-  identity: LocalIdentity,
-) => {
-  const libraryGetPath =
-    requestPath === '/api/library' ||
-    requestPath === '/api/observe/live-frame' ||
-    /^\/api\/library\/assets\/[^/]+(?:\/(?:preview|download|process-source))?$/.test(
-      requestPath,
+export const makeLibraryRouteCompatibility = Effect.fn(
+  'OriginHttp.makeLibraryRouteCompatibility',
+)(function* () {
+  const reviews = yield* LibraryReviewService
+  return Effect.fn('OriginHttp.libraryRouteCompatibility')(function* (
+    method: string,
+    requestPath: string,
+    identity: LocalIdentity,
+  ) {
+    const libraryGetPath =
+      requestPath === '/api/library' ||
+      /^\/api\/library\/assets\/[^/]+(?:\/(?:preview|download|process-source))?$/.test(
+        requestPath,
+      )
+    if (method === 'HEAD' && libraryGetPath) return json(404, apiNotFound)
+    if (!requestPath.startsWith('/api/library/assets/')) return undefined
+    const review = method === 'POST' && requestPath.endsWith('/review')
+    if (method !== 'GET' && !review) return undefined
+    const suffix = [
+      '/preview',
+      '/download',
+      '/process-source',
+      ...(review ? ['/review'] : []),
+    ].find((value) => requestPath.endsWith(value))
+    const encoded = requestPath.slice(
+      '/api/library/assets/'.length,
+      suffix === undefined ? undefined : -suffix.length,
     )
-  if (method === 'HEAD' && libraryGetPath) return json(404, apiNotFound)
-  if (!requestPath.startsWith('/api/library/assets/')) return undefined
-  const review = method === 'POST' && requestPath.endsWith('/review')
-  if (method !== 'GET' && !review) return undefined
-  const suffix = [
-    '/preview',
-    '/download',
-    '/process-source',
-    ...(review ? ['/review'] : []),
-  ].find((value) => requestPath.endsWith(value))
-  const encoded = requestPath.slice(
-    '/api/library/assets/'.length,
-    suffix === undefined ? undefined : -suffix.length,
-  )
-  const decoded = decodedAssetId(encoded)
-  if (/^[A-Za-z0-9-]+$/.test(decoded)) return undefined
-  if (review)
-    return json(
-      identity.role !== 'owner' || identity.capability !== 'controlCapable'
-        ? 403
-        : 400,
-      ReviewAssetResponse.cases.Rejected.make({
-        failure:
-          identity.role !== 'owner' || identity.capability !== 'controlCapable'
-            ? ReviewAssetFailure.cases.ClientReadOnly.make({})
-            : ReviewAssetFailure.cases.InvalidInput.make({
+    const decoded = decodedAssetId(encoded)
+    if (/^[A-Za-z0-9-]+$/.test(decoded)) return undefined
+    if (review) {
+      const authorization = yield* reviews.authorize(identity)
+      return LibraryReviewAuthorization.match(authorization, {
+        ReadOnly: ({ response }) => json(403, response),
+        Authorized: () =>
+          json(
+            400,
+            ReviewAssetResponse.cases.Rejected.make({
+              failure: ReviewAssetFailure.cases.InvalidInput.make({
                 message: 'The service could not read that review action.',
               }),
-      }),
-    )
-  return suffix === '/preview' || suffix === '/download'
-    ? json(400, { outcome: 'rejected', reason: 'InvalidInput' })
-    : json(400, invalidInput)
-}
+            }),
+          ),
+      })
+    }
+    return suffix === '/preview' || suffix === '/download'
+      ? json(400, { outcome: 'rejected', reason: 'InvalidInput' })
+      : json(400, invalidInput)
+  })
+})
 
 const decodeLibraryQuery = (request: HttpServerRequest.HttpServerRequest) => {
   const url = new URL(request.url, 'http://local')
@@ -248,8 +253,10 @@ export const makeLibraryRoutes = Effect.fn('OriginHttp.makeLibraryRoutes')(
               const outcome = yield* reviews.review(
                 decodedAssetId(requestAssetId(request, '/review')),
                 input.value,
+                identity,
               )
               return LibraryReviewOutcome.match(outcome, {
+                ReadOnly: ({ response }) => json(403, response),
                 Accepted: ({ response }) => json(200, response),
                 NotFound: ({ response }) => json(404, response),
                 Conflict: ({ response }) => json(409, response),

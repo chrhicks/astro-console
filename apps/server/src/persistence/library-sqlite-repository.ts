@@ -12,6 +12,7 @@ import {
   LibraryAssetUnavailable,
   LibraryInputInvalid,
   LibraryPersistenceUnavailable,
+  LibraryRepresentationFacts,
   libraryPersistenceLayer,
   libraryServiceLayer,
 } from '../services/library-service.ts'
@@ -213,6 +214,26 @@ export const sqliteLibraryServiceLayer = (
             ...detail,
             actions: libraryActions(detail.availability, publication),
           }).pipe(Effect.mapError(() => new LibraryPersistenceUnavailable()))
+        }),
+        representation: Effect.fnUntraced(function* (assetId) {
+          yield* libraryAssetId(assetId)
+          const raw = yield* Effect.try({
+            try: () =>
+              db
+                .prepare(
+                  'SELECT format,availability FROM library_assets WHERE asset_id=?',
+                )
+                .get(assetId),
+            catch: () => new LibraryPersistenceUnavailable(),
+          })
+          const facts = yield* Schema.decodeUnknownEffect(
+            Schema.optional(LibraryRepresentationFacts),
+          )(raw).pipe(
+            Effect.mapError(() => new LibraryPersistenceUnavailable()),
+          )
+          if (facts === undefined)
+            return yield* Effect.fail(new LibraryAssetNotFound())
+          return facts
         }),
         processSource: Effect.fnUntraced(function* (assetId) {
           const detail = yield* libraryStoredDetail(db, assetId, false)
