@@ -950,70 +950,55 @@ export const productionNightbookWorkspaceRemoteLayer = Layer.effect(
             Effect.mapError((cause) => libraryRemoteFailure('review', cause)),
           ),
       listProjects: () =>
-        Effect.tryPromise({
-          try: (signal) => processClient.list(signal),
-          catch: () => remoteFailure('list-projects'),
-        }),
+        processClient
+          .list()
+          .pipe(Effect.mapError(() => remoteFailure('list-projects'))),
       openProject: (projectId) =>
-        Effect.tryPromise({
-          try: (signal) => processClient.open(projectId, signal),
-          catch: () => remoteFailure('open-project'),
-        }),
+        processClient
+          .open(projectId)
+          .pipe(Effect.mapError(() => remoteFailure('open-project'))),
       projectEvidence: (projectId) =>
-        Effect.tryPromise({
-          try: (signal) => processClient.evidence(projectId, signal),
-          catch: () => remoteFailure('project-evidence'),
-        }),
+        processClient
+          .evidence(projectId)
+          .pipe(Effect.mapError(() => remoteFailure('project-evidence'))),
       createProject: (name, selection) =>
-        Effect.tryPromise({
-          try: async (signal) =>
-            (
-              await processClient.create(
-                {
-                  name,
-                  selection,
-                  intentId: IntentId.make(crypto.randomUUID()),
-                },
-                signal,
-              )
-            ).project,
-          catch: () => remoteFailure('create-project'),
-        }),
+        processClient
+          .create({
+            name,
+            selection,
+            intentId: IntentId.make(crypto.randomUUID()),
+          })
+          .pipe(
+            Effect.map((changed) => changed.project),
+            Effect.mapError(() => remoteFailure('create-project')),
+          ),
       changeProject: (project, intent) =>
-        Effect.tryPromise({
-          try: async (signal) =>
-            (
-              await processClient.change(
-                {
-                  projectId: project.projectId,
-                  expectedProjectRevision: project.revision,
-                  intentId: IntentId.make(crypto.randomUUID()),
-                  intent,
-                },
-                signal,
-              )
-            ).project,
-          catch: () => remoteFailure('change-project'),
-        }),
+        processClient
+          .change({
+            projectId: project.projectId,
+            expectedProjectRevision: project.revision,
+            intentId: IntentId.make(crypto.randomUUID()),
+            intent,
+          })
+          .pipe(
+            Effect.map((changed) => changed.project),
+            Effect.mapError(() => remoteFailure('change-project')),
+          ),
       addProjectSources: (projectId, expectedProjectRevision, selection) =>
-        Effect.tryPromise({
-          try: async (signal) =>
-            (
-              await processClient.change(
-                {
-                  projectId,
-                  expectedProjectRevision,
-                  intentId: IntentId.make(crypto.randomUUID()),
-                  intent: {
-                    _tag: 'AddSources',
-                    selection,
-                  },
-                },
-                signal,
-              )
-            ).project,
-          catch: () => remoteFailure('add-project-sources'),
-        }),
+        processClient
+          .change({
+            projectId,
+            expectedProjectRevision,
+            intentId: IntentId.make(crypto.randomUUID()),
+            intent: {
+              _tag: 'AddSources',
+              selection,
+            },
+          })
+          .pipe(
+            Effect.map((changed) => changed.project),
+            Effect.mapError(() => remoteFailure('add-project-sources')),
+          ),
     } satisfies NightbookWorkspaceRemoteShape)
   }),
 )
@@ -1052,17 +1037,21 @@ const submitAcquireIntent = Effect.fn('NightbookWorkspaceRemote.acquire')(
     const result = yield* Schema.decodeUnknownEffect(AcquireCommandResponse)(
       response.body,
     ).pipe(Effect.mapError(() => remoteFailure('acquire')))
-    if (result._tag === 'Accepted' && response.ok) return
-    if (result._tag === 'Accepted')
-      return yield* Effect.fail(
-        remoteFailure(
-          'acquire',
-          'unavailable',
-          'Acquire response status is invalid.',
-        ),
-      )
-    return yield* Effect.fail(
-      remoteFailure('acquire', 'unavailable', result.summary),
-    )
+    return yield* AcquireCommandResponse.match(result, {
+      Accepted: () =>
+        response.ok
+          ? Effect.void
+          : Effect.fail(
+              remoteFailure(
+                'acquire',
+                'unavailable',
+                'Acquire response status is invalid.',
+              ),
+            ),
+      Rejected: ({ summary }) =>
+        Effect.fail(remoteFailure('acquire', 'unavailable', summary)),
+      Unavailable: ({ summary }) =>
+        Effect.fail(remoteFailure('acquire', 'unavailable', summary)),
+    })
   },
 )

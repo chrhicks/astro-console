@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Effect, Schema } from 'effect'
 import {
   CreateProcessingProjectRequest as CreateProcessingProjectRequestSchema,
   OpenedProcessingProjectResponse,
@@ -25,71 +25,94 @@ export type CreateProcessingProjectRequest =
 export type ProcessingProjectChangeRequest =
   typeof ProcessingProjectChangeRequestSchema.Type
 
+const ProcessingProjectClientFailureDetail = Schema.Union([
+  ProcessingProjectHttpFailure,
+  Schema.TaggedStruct('MalformedResponse', {}),
+  Schema.TaggedStruct('TransportUnavailable', {}),
+])
+
+export type ProcessingProjectOperationFailure =
+  typeof ProcessingProjectClientFailureDetail.Type
+
+export class ProcessingProjectRequestError extends Schema.TaggedErrorClass<ProcessingProjectRequestError>()(
+  'Web.ProcessingProjectRequestError',
+  {
+    status: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    detail: ProcessingProjectClientFailureDetail,
+    message: Schema.String,
+  },
+) {}
+
+const requestError = (
+  status: number,
+  detail: ProcessingProjectOperationFailure,
+) =>
+  new ProcessingProjectRequestError({
+    status,
+    detail,
+    message: 'The Processing Project request was not accepted.',
+  })
+
+const malformedRequest = (status = 0) =>
+  requestError(status, { _tag: 'MalformedResponse' })
+
 export const processClient = {
-  async list(signal?: AbortSignal) {
-    return request(
+  list: () =>
+    request(
       '/api/process/projects',
       ProcessingProjectListResponse,
       ProcessingProjectListSchema,
-      undefined,
-      signal,
-    )
-  },
+    ),
 
-  async create(input: CreateProcessingProjectRequest, signal?: AbortSignal) {
-    const requestBody = Schema.decodeUnknownSync(
-      CreateProcessingProjectRequestSchema,
-    )(input)
-    return request(
-      '/api/process/projects',
-      ProcessingProjectChangedResponse,
-      ProcessingProjectChangedSchema,
-      {
-        method: 'POST',
-        body: JSON.stringify(requestBody),
-      },
-      signal,
-    )
-  },
+  create: (input: CreateProcessingProjectRequest) =>
+    Schema.decodeUnknownEffect(CreateProcessingProjectRequestSchema)(
+      input,
+    ).pipe(
+      Effect.mapError(() => malformedRequest()),
+      Effect.flatMap((requestBody) =>
+        request(
+          '/api/process/projects',
+          ProcessingProjectChangedResponse,
+          ProcessingProjectChangedSchema,
+          {
+            method: 'POST',
+            body: JSON.stringify(requestBody),
+          },
+        ),
+      ),
+    ),
 
-  async open(projectId: typeof ProcessingProjectId.Type, signal?: AbortSignal) {
-    return request(
+  open: (projectId: typeof ProcessingProjectId.Type) =>
+    request(
       `/api/process/projects/${encodeURIComponent(projectId)}`,
       OpenedProcessingProjectResponse,
       OpenedProcessingProjectSchema,
-      undefined,
-      signal,
-    )
-  },
+    ),
 
-  async evidence(
-    projectId: typeof ProcessingProjectId.Type,
-    signal?: AbortSignal,
-  ) {
-    return request(
+  evidence: (projectId: typeof ProcessingProjectId.Type) =>
+    request(
       `/api/process/projects/${encodeURIComponent(projectId)}/evidence`,
       ProcessingProjectEvidenceResponse,
       ProcessingProjectEvidenceSchema,
-      undefined,
-      signal,
-    )
-  },
+    ),
 
-  async change(input: ProcessingProjectChangeRequest, signal?: AbortSignal) {
-    const requestBody = Schema.decodeUnknownSync(
-      ProcessingProjectChangeRequestSchema,
-    )(input)
-    return request(
-      `/api/process/projects/${encodeURIComponent(input.projectId)}`,
-      ProcessingProjectChangedResponse,
-      ProcessingProjectChangedSchema,
-      { method: 'PATCH', body: JSON.stringify(requestBody) },
-      signal,
-    )
-  },
+  change: (input: ProcessingProjectChangeRequest) =>
+    Schema.decodeUnknownEffect(ProcessingProjectChangeRequestSchema)(
+      input,
+    ).pipe(
+      Effect.mapError(() => malformedRequest()),
+      Effect.flatMap((requestBody) =>
+        request(
+          `/api/process/projects/${encodeURIComponent(input.projectId)}`,
+          ProcessingProjectChangedResponse,
+          ProcessingProjectChangedSchema,
+          { method: 'PATCH', body: JSON.stringify(requestBody) },
+        ),
+      ),
+    ),
 }
 
-async function request<
+const request = <
   Response extends Schema.Top & Schema.ConstraintDecoder<unknown>,
   Success extends Schema.Top & Schema.ConstraintDecoder<unknown>,
 >(
@@ -97,44 +120,35 @@ async function request<
   responseSchema: Response,
   successSchema: Success,
   init?: RequestInit,
-  signal?: AbortSignal,
-): Promise<Success['Type']> {
-  const response = await fetch(path, {
-    ...init,
-    headers: {
-      ...(init?.body === undefined
-        ? {}
-        : { 'content-type': 'application/json' }),
-      ...init?.headers,
-    },
-    ...(signal === undefined ? {} : { signal }),
-  })
-  const value: unknown = await response.json().catch(() => undefined)
-  const malformed = () =>
-    new ProcessingProjectRequestError(response.status, {
-      _tag: 'MalformedResponse',
+): Effect.Effect<Success['Type'], ProcessingProjectRequestError> =>
+  Effect.gen(function* () {
+    const response = yield* Effect.tryPromise({
+      try: (signal) =>
+        fetch(path, {
+          ...init,
+          headers: {
+            ...(init?.body === undefined
+              ? {}
+              : { 'content-type': 'application/json' }),
+            ...init?.headers,
+          },
+          signal,
+        }),
+      catch: () =>
+        requestError(0, {
+          _tag: 'TransportUnavailable',
+        }),
     })
-  const decoded = await Schema.decodeUnknownPromise(responseSchema)(
-    value,
-  ).catch(() => {
-    throw malformed()
+    const value: unknown = yield* Effect.tryPromise({
+      try: () => response.json(),
+      catch: () => malformedRequest(response.status),
+    })
+    const decoded = yield* Schema.decodeUnknownEffect(responseSchema)(
+      value,
+    ).pipe(Effect.mapError(() => malformedRequest(response.status)))
+    if (Schema.is(ProcessingProjectHttpFailure)(decoded))
+      return yield* Effect.fail(requestError(response.status, decoded))
+    return yield* Schema.decodeUnknownEffect(successSchema)(decoded).pipe(
+      Effect.mapError(() => malformedRequest(response.status)),
+    )
   })
-  if (Schema.is(ProcessingProjectHttpFailure)(decoded))
-    throw new ProcessingProjectRequestError(response.status, decoded)
-  return Schema.decodeUnknownPromise(successSchema)(decoded).catch(() => {
-    throw malformed()
-  })
-}
-
-export type ProcessingProjectOperationFailure =
-  | typeof ProcessingProjectHttpFailure.Type
-  | { readonly _tag: 'MalformedResponse' }
-
-export class ProcessingProjectRequestError extends Error {
-  constructor(
-    readonly status: number,
-    readonly detail: ProcessingProjectOperationFailure,
-  ) {
-    super('The Processing Project request was not accepted.')
-  }
-}

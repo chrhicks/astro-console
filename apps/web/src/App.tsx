@@ -11,6 +11,7 @@ import {
 import { type CommandSubmission, type ControlIntent } from './command-client'
 import { type PreflightRefreshSubmission } from './preflight-refresh-client'
 import {
+  AcquireIntent,
   AssetRevision,
   AssetId,
   IdempotencyKey,
@@ -25,8 +26,10 @@ import {
   createNightbookWorkspaceRuntime,
   initialNightbookWorkspaceState,
   NightbookWorkspaceRuntime,
-  type NightbookWorkspaceRuntimeShape,
+  NightbookWorkspaceSubmission,
   type LibraryQuery,
+  type NightbookProjectSelection,
+  type NightbookWorkspaceIntent,
   type NightbookWorkspaceState,
 } from './nightbook-workspace-runtime'
 
@@ -35,6 +38,72 @@ const BetaObserveApp = lazy(() => import('./beta/BetaObserveApp'))
 const BetaLibraryApp = lazy(() => import('./beta/BetaLibraryApp'))
 const BetaPlanApp = lazy(() => import('./beta/BetaPlanApp'))
 const BetaProcessApp = lazy(() => import('./beta/BetaProcessApp'))
+
+type SubmissionHandlers<Result> = {
+  readonly [Tag in NightbookWorkspaceSubmission['_tag']]?: (
+    submission: Extract<NightbookWorkspaceSubmission, { readonly _tag: Tag }>,
+  ) => Result
+}
+
+const applySubmissionHandler = <Result, Submission>(
+  handler: ((submission: Submission) => Result) | undefined,
+  submission: Submission,
+  fallback: string,
+): Result => {
+  if (handler === undefined) throw new Error(fallback)
+  return handler(submission)
+}
+
+const foldWorkspaceSubmission = <Result,>(
+  submission: NightbookWorkspaceSubmission,
+  handlers: SubmissionHandlers<Result>,
+) =>
+  NightbookWorkspaceSubmission.$match(submission, {
+    Loaded: (value) =>
+      applySubmissionHandler(
+        handlers.Loaded,
+        value,
+        'Workspace load result is unavailable.',
+      ),
+    Control: (value) =>
+      applySubmissionHandler(
+        handlers.Control,
+        value,
+        'Control submission is unavailable.',
+      ),
+    Plan: (value) =>
+      applySubmissionHandler(
+        handlers.Plan,
+        value,
+        'Plan submission is unavailable.',
+      ),
+    Observe: (value) =>
+      applySubmissionHandler(
+        handlers.Observe,
+        value,
+        'Observe submission is unavailable.',
+      ),
+    Preflight: (value) =>
+      applySubmissionHandler(
+        handlers.Preflight,
+        value,
+        'Preflight refresh is unavailable.',
+      ),
+    Acquire: (value) =>
+      applySubmissionHandler(
+        handlers.Acquire,
+        value,
+        'Acquire submission is unavailable.',
+      ),
+    Project: (value) =>
+      applySubmissionHandler(
+        handlers.Project,
+        value,
+        'Project submission is unavailable.',
+      ),
+    Unavailable: (value) =>
+      applySubmissionHandler(handlers.Unavailable, value, value.message),
+  })
 
 export function App() {
   const workspaceRuntime = useRef(createNightbookWorkspaceRuntime())
@@ -99,6 +168,15 @@ export function App() {
   } = workspaceState
   const selectedLibraryAssetId =
     route.kind === 'asset' ? route.assetId : undefined
+  const submitWorkspace = useCallback(
+    (intent: NightbookWorkspaceIntent) =>
+      workspaceRuntime.current.runPromise(
+        Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
+          workspace.submit(intent),
+        ),
+      ),
+    [],
+  )
 
   useEffect(() => {
     const onPopState = () => {
@@ -108,22 +186,10 @@ export function App() {
     return () => removeEventListener('popstate', onPopState)
   }, [])
   useEffect(() => {
-    void workspaceRuntime.current.runPromise(
-      Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
-        workspace.submit({ _tag: 'RouteChanged', route, libraryQuery }),
-      ),
-    )
-  }, [libraryQuery, route])
+    void submitWorkspace({ _tag: 'RouteChanged', route, libraryQuery })
+  }, [libraryQuery, route, submitWorkspace])
   useEffect(() => {
     const runtime = workspaceRuntime.current
-    const submit = (
-      intent: Parameters<NightbookWorkspaceRuntimeShape['submit']>[0],
-    ) =>
-      runtime.runPromise(
-        Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
-          workspace.submit(intent),
-        ),
-      )
     const fiber = runtime.runFork(
       Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
         workspace.states.pipe(
@@ -135,31 +201,31 @@ export function App() {
     )
     setSubmitPlan(
       () => async (action: PlanAction, key: typeof IdempotencyKey.Type) => {
-        const result = await submit({ _tag: 'Plan', action, key })
-        if (result._tag !== 'Plan')
-          throw new Error('Plan submission unavailable')
-        return result.result
+        return foldWorkspaceSubmission(
+          await submitWorkspace({ _tag: 'Plan', action, key }),
+          { Plan: ({ result }) => result },
+        )
       },
     )
     setSubmitObserve(
       () => async (action: ObserveAction, key: typeof IdempotencyKey.Type) => {
-        const result = await submit({ _tag: 'Observe', action, key })
-        if (result._tag !== 'Observe')
-          throw new Error('Observe submission unavailable')
-        return result.result
+        return foldWorkspaceSubmission(
+          await submitWorkspace({ _tag: 'Observe', action, key }),
+          { Observe: ({ result }) => result },
+        )
       },
     )
     setSubmitControl(() => async (intent: ControlIntent) => {
-      const result = await submit({ _tag: 'Control', intent })
-      if (result._tag !== 'Control')
-        throw new Error('Control submission unavailable')
-      return result.result
+      return foldWorkspaceSubmission(
+        await submitWorkspace({ _tag: 'Control', intent }),
+        { Control: ({ result }) => result },
+      )
     })
     setRefreshPreflight(() => async () => {
-      const result = await submit({ _tag: 'RefreshPreflight' })
-      if (result._tag !== 'Preflight')
-        throw new Error('Preflight refresh unavailable')
-      return result.result
+      return foldWorkspaceSubmission(
+        await submitWorkspace({ _tag: 'RefreshPreflight' }),
+        { Preflight: ({ result }) => result },
+      )
     })
     setTargetAcquisitionCommand(() => async () => {
       const observe = projectionRef.current.observe
@@ -168,20 +234,20 @@ export function App() {
         observe.leaseRevision === undefined
       )
         throw new Error('Target acquisition state unavailable')
-      const result = await submit({
+      const result = await submitWorkspace({
         _tag: 'Acquire',
-        intent: {
-          _tag: 'CaptureTargetAcquisitionEvidence',
+        intent: AcquireIntent.cases.CaptureTargetAcquisitionEvidence.make({
           expectedLeaseRevision: LeaseRevision.make(observe.leaseRevision),
           expectedRunRevision: observe.source.revision,
           expectedAcquireRevision: observe.source.acquire.revision,
           idempotencyKey: IdempotencyKey.make(crypto.randomUUID()),
+        }),
+      })
+      return foldWorkspaceSubmission(result, {
+        Acquire: ({ accepted, message }) => {
+          if (!accepted) throw new Error(message ?? 'Acquire unavailable')
         },
       })
-      if (result._tag !== 'Acquire' || !result.accepted)
-        throw new Error(
-          result._tag === 'Acquire' ? result.message : 'Acquire unavailable',
-        )
     })
     setAcquireRecoveryCommand(
       () =>
@@ -205,25 +271,23 @@ export function App() {
           }
           const intent =
             action === 'RetryPlateSolveWithParameters'
-              ? {
-                  _tag: action,
+              ? AcquireIntent.cases.RetryPlateSolveWithParameters.make({
                   ...expected,
                   parameters: {
                     exposureSeconds: 15,
                     binning: 1,
                     solverProfile: 'deep-sky-plate-solve',
                   },
-                }
+                })
               : action === 'SkipAcquireTarget'
-                ? { _tag: action, ...expected }
-                : { _tag: action, ...expected }
-          const result = await submit({ _tag: 'Acquire', intent })
-          if (result._tag !== 'Acquire' || !result.accepted)
-            throw new Error(
-              result._tag === 'Acquire'
-                ? result.message
-                : 'Acquire unavailable',
-            )
+                ? AcquireIntent.cases.SkipAcquireTarget.make(expected)
+                : AcquireIntent.cases.AbortAcquire.make(expected)
+          const result = await submitWorkspace({ _tag: 'Acquire', intent })
+          return foldWorkspaceSubmission(result, {
+            Acquire: ({ accepted, message }) => {
+              if (!accepted) throw new Error(message ?? 'Acquire unavailable')
+            },
+          })
         },
     )
     setApprovePointingCorrection(() => async (proposalId: string) => {
@@ -233,21 +297,21 @@ export function App() {
         observe.leaseRevision === undefined
       )
         throw new Error('Pointing correction state unavailable')
-      const result = await submit({
+      const result = await submitWorkspace({
         _tag: 'Acquire',
-        intent: {
-          _tag: 'ApprovePointingCorrection',
+        intent: AcquireIntent.cases.ApprovePointingCorrection.make({
           expectedLeaseRevision: LeaseRevision.make(observe.leaseRevision),
           expectedRunRevision: observe.source.revision,
           expectedAcquireRevision: observe.source.acquire.revision,
           proposalId,
           idempotencyKey: IdempotencyKey.make(crypto.randomUUID()),
+        }),
+      })
+      return foldWorkspaceSubmission(result, {
+        Acquire: ({ accepted, message }) => {
+          if (!accepted) throw new Error(message ?? 'Acquire unavailable')
         },
       })
-      if (result._tag !== 'Acquire' || !result.accepted)
-        throw new Error(
-          result._tag === 'Acquire' ? result.message : 'Acquire unavailable',
-        )
     })
     return () => {
       setSubmitPlan(undefined)
@@ -261,7 +325,7 @@ export function App() {
         .runPromise(Fiber.interrupt(fiber))
         .then(() => runtime.dispose())
     }
-  }, [])
+  }, [submitWorkspace])
   useEffect(() => {
     if (initialRoute.current) {
       initialRoute.current = false
@@ -294,13 +358,9 @@ export function App() {
   }
   const selectComparisonAsset = useCallback(
     (assetId: typeof AssetId.Type | undefined) => {
-      void workspaceRuntime.current.runPromise(
-        Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
-          workspace.submit({ _tag: 'SelectComparisonAsset', assetId }),
-        ),
-      )
+      void submitWorkspace({ _tag: 'SelectComparisonAsset', assetId })
     },
-    [],
+    [submitWorkspace],
   )
   const reviewLibraryAsset = async (review: {
     decision: 'accepted' | 'rejected' | 'unreviewed'
@@ -309,29 +369,38 @@ export function App() {
   }) => {
     const detail = libraryDetail.value
     if (!detail) throw new Error('Asset detail is unavailable.')
-    const result = await workspaceRuntime.current.runPromise(
-      Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
-        workspace.submit({
-          _tag: 'ReviewLibraryAsset',
-          assetId: detail.assetId,
-          request: ReviewAssetRequest.make({
-            expectedAssetRevision: detail.revision,
-            expectedReviewRevision: AssetRevision.make(
-              detail.review?.revision ?? 0,
-            ),
-            ...review,
-            idempotencyKey: crypto.randomUUID(),
-          }),
-        }),
-      ),
-    )
-    if (result._tag !== 'Loaded')
-      throw new Error(
-        result._tag === 'Unavailable'
-          ? result.message
-          : 'The review was not saved.',
-      )
+    const result = await submitWorkspace({
+      _tag: 'ReviewLibraryAsset',
+      assetId: detail.assetId,
+      request: ReviewAssetRequest.make({
+        expectedAssetRevision: detail.revision,
+        expectedReviewRevision: AssetRevision.make(
+          detail.review?.revision ?? 0,
+        ),
+        ...review,
+        idempotencyKey: crypto.randomUUID(),
+      }),
+    })
+    return foldWorkspaceSubmission(result, { Loaded: () => undefined })
   }
+  const createProject = useCallback(
+    async (name: string, selection: NightbookProjectSelection) => {
+      const project = foldWorkspaceSubmission(
+        await submitWorkspace({
+          _tag: 'CreateProject',
+          name,
+          selection,
+        }),
+        { Project: ({ project }) => project },
+      )
+      location.assign(
+        nightbookHref(
+          `/process/projects/${encodeURIComponent(project.projectId)}`,
+        ),
+      )
+    },
+    [submitWorkspace],
+  )
   if (route.kind === 'not-found') return <NotFound />
 
   if (workspace === 'observe')
@@ -430,40 +499,24 @@ export function App() {
           onSelectComparisonAsset={selectComparisonAsset}
           onOpenProcess={openNightbookProcess}
           processProjects={processWorkspace.projects}
-          onCreateProject={async (name, selection) => {
-            const result = await workspaceRuntime.current.runPromise(
-              Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
-                workspace.submit({ _tag: 'CreateProject', name, selection }),
-              ),
-            )
-            if (result._tag !== 'Project')
-              throw new Error('The Project was not created.')
-            location.assign(
-              nightbookHref(
-                `/process/projects/${encodeURIComponent(result.project.projectId)}`,
-              ),
-            )
-          }}
+          onCreateProject={createProject}
           onAddProjectSources={async (
             projectId,
             expectedProjectRevision,
             selection,
           ) => {
-            const result = await workspaceRuntime.current.runPromise(
-              Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
-                workspace.submit({
-                  _tag: 'AddProjectSources',
-                  projectId,
-                  expectedProjectRevision,
-                  selection,
-                }),
-              ),
+            const project = foldWorkspaceSubmission(
+              await submitWorkspace({
+                _tag: 'AddProjectSources',
+                projectId,
+                expectedProjectRevision,
+                selection,
+              }),
+              { Project: ({ project }) => project },
             )
-            if (result._tag !== 'Project')
-              throw new Error('The project intake was not accepted.')
             location.assign(
               nightbookHref(
-                `/process/projects/${encodeURIComponent(result.project.projectId)}`,
+                `/process/projects/${encodeURIComponent(project.projectId)}`,
               ),
             )
           }}
@@ -496,30 +549,16 @@ export function App() {
             ? {}
             : { sourceHandoffState: processSource.state })}
           process={processWorkspace}
-          onCreateProject={async (name, selection) => {
-            const result = await workspaceRuntime.current.runPromise(
-              Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
-                workspace.submit({ _tag: 'CreateProject', name, selection }),
-              ),
-            )
-            if (result._tag !== 'Project')
-              throw new Error('The Project was not created.')
-            location.assign(
-              nightbookHref(
-                `/process/projects/${encodeURIComponent(result.project.projectId)}`,
-              ),
-            )
-          }}
+          onCreateProject={createProject}
           onChangeProject={async (project, intent) => {
-            const result = await workspaceRuntime.current.runPromise(
-              Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
-                workspace.submit({ _tag: 'ChangeProject', project, intent }),
-              ),
+            foldWorkspaceSubmission(
+              await submitWorkspace({
+                _tag: 'ChangeProject',
+                project,
+                intent,
+              }),
+              { Project: () => undefined },
             )
-            if (result._tag !== 'Project')
-              throw new Error(
-                'The Project was reloaded after an uncertain outcome.',
-              )
           }}
         />
       </Suspense>

@@ -7,6 +7,7 @@ import {
   ProcessingProjectHttpFailure,
   ProcessingProjectRevision,
 } from '@astro-console/protocol'
+import { Effect, Fiber } from 'effect'
 import { ProcessingProjectRequestError, processClient } from './process-client'
 
 test('uses explicit Processing Project routes and does not replay changes', async () => {
@@ -52,20 +53,28 @@ test('uses explicit Processing Project routes and does not replay changes', asyn
     return Response.json({}, { status: 404 })
   }
   try {
-    await processClient.list()
-    await processClient.open(ProcessingProjectId.make('project-1'))
-    await processClient.evidence(ProcessingProjectId.make('project-1'))
-    await processClient.create({
-      name: 'M27',
-      selection: { assetIds: [AssetId.make('asset-1')], captureSetIds: [] },
-      intentId: IntentId.make('intent-create'),
-    })
-    await processClient.change({
-      projectId: ProcessingProjectId.make('project-1'),
-      expectedProjectRevision: ProcessingProjectRevision.make(1),
-      intentId: IntentId.make('intent-change'),
-      intent: { _tag: 'UndoDraft', stage: 'Calibration' },
-    })
+    await Effect.runPromise(processClient.list())
+    await Effect.runPromise(
+      processClient.open(ProcessingProjectId.make('project-1')),
+    )
+    await Effect.runPromise(
+      processClient.evidence(ProcessingProjectId.make('project-1')),
+    )
+    await Effect.runPromise(
+      processClient.create({
+        name: 'M27',
+        selection: { assetIds: [AssetId.make('asset-1')], captureSetIds: [] },
+        intentId: IntentId.make('intent-create'),
+      }),
+    )
+    await Effect.runPromise(
+      processClient.change({
+        projectId: ProcessingProjectId.make('project-1'),
+        expectedProjectRevision: ProcessingProjectRevision.make(1),
+        intentId: IntentId.make('intent-change'),
+        intent: { _tag: 'UndoDraft', stage: 'Calibration' },
+      }),
+    )
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -100,7 +109,10 @@ test('decodes Processing Project failures and rejects malformed JSON responses',
         { status: 404 },
       )
     await assert.rejects(
-      () => processClient.open(ProcessingProjectId.make('missing-project')),
+      () =>
+        Effect.runPromise(
+          processClient.open(ProcessingProjectId.make('missing-project')),
+        ),
       (error: unknown) =>
         error instanceof ProcessingProjectRequestError &&
         error.detail._tag === 'DomainRejected' &&
@@ -109,11 +121,50 @@ test('decodes Processing Project failures and rejects malformed JSON responses',
 
     globalThis.fetch = async () => Response.json({ projectId: 'incomplete' })
     await assert.rejects(
-      () => processClient.evidence(ProcessingProjectId.make('project-1')),
+      () =>
+        Effect.runPromise(
+          processClient.evidence(ProcessingProjectId.make('project-1')),
+        ),
       (error: unknown) =>
         error instanceof ProcessingProjectRequestError &&
         error.detail._tag === 'MalformedResponse',
     )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('aborts an in-flight Process request when its Effect is interrupted', async () => {
+  const originalFetch = globalThis.fetch
+  let signal: AbortSignal | undefined
+  let markStarted: (() => void) | undefined
+  let markAborted: (() => void) | undefined
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve
+  })
+  const aborted = new Promise<void>((resolve) => {
+    markAborted = resolve
+  })
+  globalThis.fetch = (_input, init) => {
+    signal = init?.signal ?? undefined
+    markStarted?.()
+    return new Promise<Response>((_resolve, reject) => {
+      signal?.addEventListener(
+        'abort',
+        () => {
+          markAborted?.()
+          reject(new DOMException('Aborted', 'AbortError'))
+        },
+        { once: true },
+      )
+    })
+  }
+  try {
+    const fiber = Effect.runFork(processClient.list())
+    await started
+    await Effect.runPromise(Fiber.interrupt(fiber))
+    await aborted
+    assert.equal(signal?.aborted, true)
   } finally {
     globalThis.fetch = originalFetch
   }
