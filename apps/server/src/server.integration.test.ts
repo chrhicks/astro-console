@@ -26,9 +26,11 @@ import {
   ObserveCommandResponse,
   PlanCommandResponse,
   ProcessSourceHandoff,
+  ProcessSourceHandoffResponse,
   OpenedProcessingProject,
   ProcessingProjectChanged,
   ProcessingProjectEvidence,
+  ProcessingProjectHttpFailure,
   PreflightSnapshot,
   RefreshPreflightResponse,
   ReviewAssetResponse,
@@ -3968,20 +3970,24 @@ test('Processing Project HTTP accepts explicit Project changes and exposes settl
     body: '{}',
   })
   assert.equal(malformedResponse.status, 400)
-  assert.deepEqual(await malformedResponse.json(), {
-    _tag: 'InvalidInput',
-    message: 'The service could not read the Processing Project request.',
-  })
+  assert.equal(
+    Schema.decodeUnknownSync(ProcessingProjectHttpFailure)(
+      await malformedResponse.json(),
+    )._tag,
+    'InvalidInput',
+  )
   const oversizedResponse = await fetch(`${base}/api/process/projects`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ payload: 'x'.repeat(16_385) }),
   })
   assert.equal(oversizedResponse.status, 413)
-  assert.deepEqual(await oversizedResponse.json(), {
-    _tag: 'RequestTooLarge',
-    message: 'The Processing Project request is too large.',
-  })
+  assert.equal(
+    Schema.decodeUnknownSync(ProcessingProjectHttpFailure)(
+      await oversizedResponse.json(),
+    )._tag,
+    'RequestTooLarge',
+  )
   const createdResponse = await fetch(`${base}/api/process/projects`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -4741,8 +4747,7 @@ test('Library detail uses stable identities and snapshot delivery remains catalo
   const malformedPath = await fetch(`${base}/api/library/assets/%`)
   assert.equal(malformedPath.status, 400)
   assert.deepEqual(await malformedPath.json(), {
-    outcome: 'rejected',
-    reason: 'InvalidInput',
+    _tag: 'InvalidInput',
     message: 'The service could not read that action.',
   })
   assert.equal(
@@ -4756,10 +4761,7 @@ test('Library detail uses stable identities and snapshot delivery remains catalo
     .run()
   const corrupt = await fetch(`${base}/api/library/assets/asset-m27-001`)
   assert.equal(corrupt.status, 503)
-  assert.deepEqual(await corrupt.json(), {
-    outcome: 'rejected',
-    reason: 'LibraryUnavailable',
-  })
+  assert.deepEqual(await corrupt.json(), { _tag: 'LibraryUnavailable' })
   const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
   assert.equal(snapshot.activeRun._tag, 'None')
   assert.equal(JSON.stringify(snapshot).includes('asset-m27-'), false)
@@ -4896,10 +4898,18 @@ test('authenticated workspace projections preserve future intent, bounded Librar
   )
   assert.equal(unavailable.status, 409)
   assert.deepEqual(await unavailable.json(), {
-    outcome: 'rejected',
-    reason: 'AssetUnavailable',
+    _tag: 'AssetUnavailable',
     message:
       'This asset is temporarily unavailable and cannot open in Process.',
+  })
+  const malformed = await fetch(`${base}/api/library/assets/%/process-source`)
+  assert.equal(malformed.status, 400)
+  const malformedBody = Schema.decodeUnknownSync(ProcessSourceHandoffResponse)(
+    await malformed.json(),
+  )
+  assert.deepEqual(malformedBody, {
+    _tag: 'InvalidInput',
+    message: 'The service could not read that action.',
   })
   service.database
     .prepare("UPDATE library_assets SET detail='{}' WHERE asset_id=?")
@@ -5515,19 +5525,6 @@ async function startFixtureRun(base: string, idempotencyKey: string) {
   return bootstrapSnapshot(`${base}/api/snapshot`)
 }
 
-async function runSimultaneously<Result>(
-  operations: ReadonlyArray<() => Promise<Result>>,
-) {
-  let release: (() => void) | undefined
-  const gate = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  const pending = operations.map((operation) => gate.then(operation))
-  if (release === undefined) throw new Error('Concurrent request gate failed')
-  release()
-  return Promise.all(pending)
-}
-
 test('simultaneous Control acquisition accepts exactly one owner transition', async (t) => {
   const service = createFixtureService(':memory:', (request) => {
     const token = request?.headers.authorization
@@ -5547,33 +5544,34 @@ test('simultaneous Control acquisition accepts exactly one owner transition', as
     service.close()
   })
 
-  const responses = await runSimultaneously([
-    () =>
-      fetch(`${base}/api/commands/control`, {
-        method: 'POST',
-        headers: { authorization: 'Bearer alpha' },
-        body: JSON.stringify({
-          commandId: 'simultaneous-control-alpha',
-          command: {
-            _tag: 'TakeControl',
-            expectedLeaseRevision: 1,
-            idempotencyKey: 'simultaneous-control-alpha',
-          },
-        }),
+  // The origin and SQLite lifecycle accept each request synchronously on one
+  // JavaScript thread. Concurrent arrivals therefore have no in-transaction
+  // interleaving: one transaction wins and the next observes its revision.
+  const responses = await Promise.all([
+    fetch(`${base}/api/commands/control`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer alpha' },
+      body: JSON.stringify({
+        commandId: 'simultaneous-control-alpha',
+        command: {
+          _tag: 'TakeControl',
+          expectedLeaseRevision: 1,
+          idempotencyKey: 'simultaneous-control-alpha',
+        },
       }),
-    () =>
-      fetch(`${base}/api/commands/control`, {
-        method: 'POST',
-        headers: { authorization: 'Bearer beta' },
-        body: JSON.stringify({
-          commandId: 'simultaneous-control-beta',
-          command: {
-            _tag: 'TakeControl',
-            expectedLeaseRevision: 1,
-            idempotencyKey: 'simultaneous-control-beta',
-          },
-        }),
+    }),
+    fetch(`${base}/api/commands/control`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer beta' },
+      body: JSON.stringify({
+        commandId: 'simultaneous-control-beta',
+        command: {
+          _tag: 'TakeControl',
+          expectedLeaseRevision: 1,
+          idempotencyKey: 'simultaneous-control-beta',
+        },
       }),
+    }),
   ])
   assert.deepEqual(
     responses.map((response) => response.status).sort(),
@@ -5597,6 +5595,22 @@ test('simultaneous Control acquisition accepts exactly one owner transition', as
         .get(),
     ).count,
     1,
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database
+        .prepare('SELECT count(*) AS count FROM control_command_receipts')
+        .get(),
+    ).count,
+    1,
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+    ).count,
+    0,
   )
   const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`, {
     headers: { authorization: 'Bearer alpha' },
@@ -5627,17 +5641,15 @@ test('simultaneous conflicting Run starts accept exactly one lifecycle transitio
     expectedPlanRevision: initial.plan.revision,
     expectedLeaseRevision: initial.control.revision,
   }
-  const responses = await runSimultaneously([
-    () =>
-      submitPlan(base, {
-        ...intent,
-        idempotencyKey: 'simultaneous-run-start-alpha',
-      }),
-    () =>
-      submitPlan(base, {
-        ...intent,
-        idempotencyKey: 'simultaneous-run-start-beta',
-      }),
+  const responses = await Promise.all([
+    submitPlan(base, {
+      ...intent,
+      idempotencyKey: 'simultaneous-run-start-alpha',
+    }),
+    submitPlan(base, {
+      ...intent,
+      idempotencyKey: 'simultaneous-run-start-beta',
+    }),
   ])
   assert.deepEqual(
     responses.map(({ response }) => response.status).sort(),
@@ -5651,6 +5663,22 @@ test('simultaneous conflicting Run starts accept exactly one lifecycle transitio
         .get(),
     ).count,
     1,
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database
+        .prepare('SELECT count(*) AS count FROM run_start_receipts')
+        .get(),
+    ).count,
+    1,
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+    ).count,
+    0,
   )
   assert.equal(
     (await bootstrapSnapshot(`${base}/api/snapshot`)).activeRun._tag,
@@ -5672,21 +5700,19 @@ test('simultaneous pause and stop accept exactly one Run transition', async (t) 
   const expectedRunRevision = started.observe.revision
   const expectedLeaseRevision = started.control.revision
 
-  const responses = await runSimultaneously([
-    () =>
-      submitObserve(base, {
-        _tag: 'PauseRun',
-        expectedLeaseRevision,
-        expectedRunRevision,
-        idempotencyKey: 'simultaneous-run-pause',
-      }),
-    () =>
-      submitObserve(base, {
-        _tag: 'StopRun',
-        expectedLeaseRevision,
-        expectedRunRevision,
-        idempotencyKey: 'simultaneous-run-stop',
-      }),
+  const responses = await Promise.all([
+    submitObserve(base, {
+      _tag: 'PauseRun',
+      expectedLeaseRevision,
+      expectedRunRevision,
+      idempotencyKey: 'simultaneous-run-pause',
+    }),
+    submitObserve(base, {
+      _tag: 'StopRun',
+      expectedLeaseRevision,
+      expectedRunRevision,
+      idempotencyKey: 'simultaneous-run-stop',
+    }),
   ])
   assert.deepEqual(
     responses.map(({ response }) => response.status).sort(),
@@ -5702,6 +5728,22 @@ test('simultaneous pause and stop accept exactly one Run transition', async (t) 
         .get(),
     ).count,
     1,
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database
+        .prepare('SELECT count(*) AS count FROM run_intervention_receipts')
+        .get(),
+    ).count,
+    1,
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+    ).count,
+    0,
   )
   const settled = await bootstrapSnapshot(`${base}/api/snapshot`)
   assert.equal(settled.observe?.revision, expectedRunRevision + 1)
@@ -5770,17 +5812,15 @@ test('simultaneous Run mutation apply requests accept exactly one preview settle
     expectedLeaseRevision: started.control.revision,
     expectedRunRevision: started.activeRun.run.revision,
   }
-  const responses = await runSimultaneously([
-    () =>
-      submitPlan(base, {
-        ...apply,
-        idempotencyKey: 'simultaneous-mutation-apply-alpha',
-      }),
-    () =>
-      submitPlan(base, {
-        ...apply,
-        idempotencyKey: 'simultaneous-mutation-apply-beta',
-      }),
+  const responses = await Promise.all([
+    submitPlan(base, {
+      ...apply,
+      idempotencyKey: 'simultaneous-mutation-apply-alpha',
+    }),
+    submitPlan(base, {
+      ...apply,
+      idempotencyKey: 'simultaneous-mutation-apply-beta',
+    }),
   ])
   assert.deepEqual(
     responses.map(({ response }) => response.status).sort(),
@@ -5796,6 +5836,22 @@ test('simultaneous Run mutation apply requests accept exactly one preview settle
         .get(),
     ).count,
     1,
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database
+        .prepare('SELECT count(*) AS count FROM run_intervention_receipts')
+        .get(),
+    ).count,
+    1,
+  )
+  assert.equal(
+    databaseRow(
+      CountRow,
+      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+    ).count,
+    0,
   )
   const settled = await bootstrapSnapshot(`${base}/api/snapshot`)
   assert.equal(

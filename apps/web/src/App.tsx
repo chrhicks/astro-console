@@ -1,4 +1,4 @@
-import { Effect, Fiber, Stream } from 'effect'
+import { Effect, Fiber, Schema, Stream } from 'effect'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { BootstrapClient } from './bootstrap-client'
 import {
@@ -22,6 +22,8 @@ import {
 } from './preflight-refresh-client'
 import {
   AssetRevision,
+  AcquireCommandRequest,
+  AcquireCommandResponse,
   IdempotencyKey,
   LibraryQuery as LibraryQuerySchema,
   LibraryQueryId,
@@ -39,6 +41,7 @@ import {
   LibraryNotFound,
   LibraryUnavailable,
   createLibraryRuntime,
+  type LibraryClientShape,
   type LibraryAssetDetail,
   type LibraryPage,
   type LibraryQuery,
@@ -52,35 +55,54 @@ const BetaLibraryApp = lazy(() => import('./beta/BetaLibraryApp'))
 const BetaPlanApp = lazy(() => import('./beta/BetaPlanApp'))
 const BetaProcessApp = lazy(() => import('./beta/BetaProcessApp'))
 
-const loadLibraryAssetDetail = async (assetId: string) => {
+export const startLibraryClientOperation = <Result, Failure>(
+  operation: (client: LibraryClientShape) => Effect.Effect<Result, Failure>,
+) => {
   const runtime = createLibraryRuntime()
-  try {
-    return await runtime.runPromise(
+  let disposing: Promise<void> | undefined
+  const dispose = () => (disposing ??= runtime.dispose())
+  const promise = runtime
+    .runPromise(
       Effect.gen(function* () {
         const client = yield* LibraryClient
-        return yield* client.detail(assetId)
+        return yield* operation(client)
       }),
     )
-  } finally {
-    await runtime.dispose()
-  }
+    .finally(dispose)
+  return { promise, dispose }
 }
+
+const withLibraryClient = <Result, Failure>(
+  operation: (client: LibraryClientShape) => Effect.Effect<Result, Failure>,
+) => startLibraryClientOperation(operation).promise
+
+const loadLibraryAssetDetail = (assetId: string) =>
+  withLibraryClient((client) => client.detail(assetId))
 
 const reviewLibraryAssetDetail = async (
   assetId: string,
   request: ReviewRequest,
-) => {
-  const runtime = createLibraryRuntime()
-  try {
-    return await runtime.runPromise(
-      Effect.gen(function* () {
-        const client = yield* LibraryClient
-        return yield* client.reviewAsset(assetId, request)
-      }),
-    )
-  } finally {
-    await runtime.dispose()
+) => withLibraryClient((client) => client.reviewAsset(assetId, request))
+
+export const submitAcquireIntent = async (intent: unknown) => {
+  const request = await Effect.runPromise(
+    Schema.decodeUnknownEffect(AcquireCommandRequest)({ intent }),
+  )
+  const response = await fetch('/api/acquire/commands', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  const result = await Effect.runPromise(
+    Schema.decodeUnknownEffect(AcquireCommandResponse)(
+      await response.json().catch(() => undefined),
+    ),
+  )
+  if (result._tag === 'Accepted') {
+    if (!response.ok) throw new Error('Acquire response status is invalid.')
+    return
   }
+  throw new Error(result.summary)
 }
 
 export function App() {
@@ -162,34 +184,30 @@ export function App() {
   }, [])
   useEffect(() => {
     if (workspace !== 'library') return
-    const runtime = createLibraryRuntime()
     const generation = ++libraryPageGeneration.current
     setLibraryPage({
       value: undefined,
       message: 'Loading Library records.',
     })
-    const load = async () => {
-      try {
-        const result = await runtime.runPromise(
-          Effect.gen(function* () {
-            const client = yield* LibraryClient
-            return yield* client.page(libraryQuery)
-          }),
-        )
+    const operation = startLibraryClientOperation((client) =>
+      client.page(libraryQuery),
+    )
+    void operation.promise.then(
+      (result) => {
         if (generation === libraryPageGeneration.current)
           setLibraryPage({ value: result, message: undefined })
-      } catch {
+      },
+      () => {
         if (generation === libraryPageGeneration.current)
           setLibraryPage({
             value: undefined,
             message: 'Library evidence is unavailable.',
           })
-      }
-    }
-    void load()
+      },
+    )
     return () => {
       libraryPageGeneration.current += 1
-      void runtime.dispose()
+      void operation.dispose()
     }
   }, [libraryQuery, workspace])
   useEffect(() => {
@@ -197,37 +215,32 @@ export function App() {
       setLibraryDetail({ value: undefined, state: undefined })
       return
     }
-    const runtime = createLibraryRuntime()
     const generation = ++libraryDetailGeneration.current
     setLibraryDetail({ value: undefined, state: 'loading' })
-    void runtime
-      .runPromise(
-        Effect.gen(function* () {
-          const client = yield* LibraryClient
-          return yield* client.detail(selectedLibraryAssetId)
-        }),
-      )
-      .then(
-        (value) => {
-          if (generation === libraryDetailGeneration.current)
-            setLibraryDetail({ value, state: undefined })
-        },
-        (error: unknown) => {
-          if (generation !== libraryDetailGeneration.current) return
-          setLibraryDetail({
-            value: undefined,
-            state:
-              error instanceof LibraryNotFound
-                ? 'not-found'
-                : error instanceof LibraryUnavailable
-                  ? 'unavailable'
-                  : 'unavailable',
-          })
-        },
-      )
+    const operation = startLibraryClientOperation((client) =>
+      client.detail(selectedLibraryAssetId),
+    )
+    void operation.promise.then(
+      (value) => {
+        if (generation === libraryDetailGeneration.current)
+          setLibraryDetail({ value, state: undefined })
+      },
+      (error: unknown) => {
+        if (generation !== libraryDetailGeneration.current) return
+        setLibraryDetail({
+          value: undefined,
+          state:
+            error instanceof LibraryNotFound
+              ? 'not-found'
+              : error instanceof LibraryUnavailable
+                ? 'unavailable'
+                : 'unavailable',
+        })
+      },
+    )
     return () => {
       libraryDetailGeneration.current += 1
-      void runtime.dispose()
+      void operation.dispose()
     }
   }, [selectedLibraryAssetId])
   useEffect(() => {
@@ -235,37 +248,32 @@ export function App() {
       setProcessSource({ value: undefined, state: undefined })
       return
     }
-    const runtime = createLibraryRuntime()
     const generation = ++processSourceGeneration.current
     setProcessSource({ value: undefined, state: 'loading' })
-    void runtime
-      .runPromise(
-        Effect.gen(function* () {
-          const client = yield* LibraryClient
-          return yield* client.processSourceHandoff(route.sourceAssetId)
-        }),
-      )
-      .then(
-        (value) => {
-          if (generation === processSourceGeneration.current)
-            setProcessSource({ value, state: undefined })
-        },
-        (error: unknown) => {
-          if (generation === processSourceGeneration.current)
-            setProcessSource({
-              value: undefined,
-              state:
-                error instanceof LibraryNotFound
-                  ? 'not-found'
-                  : error instanceof LibraryAssetUnavailable
-                    ? 'not-local'
-                    : 'unavailable',
-            })
-        },
-      )
+    const operation = startLibraryClientOperation((client) =>
+      client.processSourceHandoff(route.sourceAssetId),
+    )
+    void operation.promise.then(
+      (value) => {
+        if (generation === processSourceGeneration.current)
+          setProcessSource({ value, state: undefined })
+      },
+      (error: unknown) => {
+        if (generation === processSourceGeneration.current)
+          setProcessSource({
+            value: undefined,
+            state:
+              error instanceof LibraryNotFound
+                ? 'not-found'
+                : error instanceof LibraryAssetUnavailable
+                  ? 'not-local'
+                  : 'unavailable',
+          })
+      },
+    )
     return () => {
       processSourceGeneration.current += 1
-      void runtime.dispose()
+      void operation.dispose()
     }
   }, [route])
   useEffect(() => {
@@ -313,20 +321,13 @@ export function App() {
         observe.leaseRevision === undefined
       )
         throw new Error('Target acquisition state unavailable')
-      const response = await fetch('/api/acquire/commands', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          intent: {
-            _tag: 'CaptureTargetAcquisitionEvidence',
-            expectedLeaseRevision: observe.leaseRevision,
-            expectedRunRevision: observe.source.revision,
-            expectedAcquireRevision: observe.source.acquire.revision,
-            idempotencyKey: crypto.randomUUID(),
-          },
-        }),
+      await submitAcquireIntent({
+        _tag: 'CaptureTargetAcquisitionEvidence',
+        expectedLeaseRevision: observe.leaseRevision,
+        expectedRunRevision: observe.source.revision,
+        expectedAcquireRevision: observe.source.acquire.revision,
+        idempotencyKey: crypto.randomUUID(),
       })
-      if (!response.ok) throw new Error('Target acquisition command rejected')
     })
     setAcquireRecoveryCommand(
       () =>
@@ -358,12 +359,7 @@ export function App() {
                 }
               : {}),
           }
-          const response = await fetch('/api/acquire/commands', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ intent }),
-          })
-          if (!response.ok) throw new Error('Acquire recovery command rejected')
+          await submitAcquireIntent(intent)
         },
     )
     setApprovePointingCorrection(() => async (proposalId: string) => {
@@ -373,21 +369,14 @@ export function App() {
         observe.leaseRevision === undefined
       )
         throw new Error('Pointing correction state unavailable')
-      const response = await fetch('/api/acquire/commands', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          intent: {
-            _tag: 'ApprovePointingCorrection',
-            expectedLeaseRevision: observe.leaseRevision,
-            expectedRunRevision: observe.source.revision,
-            expectedAcquireRevision: observe.source.acquire.revision,
-            proposalId,
-            idempotencyKey: crypto.randomUUID(),
-          },
-        }),
+      await submitAcquireIntent({
+        _tag: 'ApprovePointingCorrection',
+        expectedLeaseRevision: observe.leaseRevision,
+        expectedRunRevision: observe.source.revision,
+        expectedAcquireRevision: observe.source.acquire.revision,
+        proposalId,
+        idempotencyKey: crypto.randomUUID(),
       })
-      if (!response.ok) throw new Error('Pointing correction rejected')
     })
     const fiber = runtime.runFork(
       Effect.gen(function* () {

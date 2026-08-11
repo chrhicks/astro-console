@@ -3,10 +3,15 @@ import { Effect, Schema } from 'effect'
 import {
   CreateProcessingProjectRequest,
   ExecutableProcessingStage,
+  OpenedProcessingProjectResponse,
   ProcessingProjectChangeRequest,
+  ProcessingProjectChangedResponse,
   ProcessingProjectError,
+  ProcessingProjectEvidenceResponse,
   ProcessingProjectEvidenceQuery,
   ProcessingProjectId,
+  ProcessingProjectHttpFailure,
+  ProcessingProjectListResponse,
 } from '@astro-console/protocol'
 import type { LocalIdentity } from '../auth/identity.ts'
 import {
@@ -42,65 +47,121 @@ export const handleProcessingProjectsHttp = Effect.fn(
 
   const route = Effect.gen(function* () {
     if (request.method === 'GET' && url.pathname === '/api/process/projects')
-      return json(response, 200, yield* lifecycle.list(identity))
+      return json(
+        response,
+        200,
+        Schema.encodeSync(ProcessingProjectListResponse)(
+          yield* lifecycle.list(identity),
+        ),
+      )
 
     if (request.method === 'POST' && url.pathname === '/api/process/projects') {
       const input = yield* decodeCreateRequest(request)
-      return json(response, 201, yield* lifecycle.create(identity, input))
+      return json(
+        response,
+        201,
+        Schema.encodeSync(ProcessingProjectChangedResponse)(
+          yield* lifecycle.create(identity, input),
+        ),
+      )
     }
 
     const evidenceMatch = evidencePath.exec(url.pathname)
     if (request.method === 'GET' && evidenceMatch !== null) {
       const query = yield* decodeEvidenceQuery(evidenceMatch[1], url)
-      return json(response, 200, yield* lifecycle.evidence(identity, query))
+      return json(
+        response,
+        200,
+        Schema.encodeSync(ProcessingProjectEvidenceResponse)(
+          yield* lifecycle.evidence(identity, query),
+        ),
+      )
     }
 
     const projectMatch = projectPath.exec(url.pathname)
     if (projectMatch !== null) {
       const projectId = yield* decodeProjectId(projectMatch[1])
       if (request.method === 'GET')
-        return json(response, 200, yield* lifecycle.open(identity, projectId))
+        return json(
+          response,
+          200,
+          Schema.encodeSync(OpenedProcessingProjectResponse)(
+            yield* lifecycle.open(identity, projectId),
+          ),
+        )
       if (request.method === 'PATCH') {
         const input = yield* decodeChangeRequest(request)
         if (input.projectId !== projectId)
           return yield* Effect.fail(new ProcessingProjectInputInvalid())
-        return json(response, 200, yield* lifecycle.change(identity, input))
+        return json(
+          response,
+          200,
+          Schema.encodeSync(ProcessingProjectChangedResponse)(
+            yield* lifecycle.change(identity, input),
+          ),
+        )
       }
     }
 
-    return json(response, 404, {
-      _tag: 'ProjectRouteNotFound',
-      message: 'The Processing Project route does not exist.',
-    })
+    return json(
+      response,
+      404,
+      ProcessingProjectHttpFailure.cases.ProjectRouteNotFound.make({
+        message: 'The Processing Project route does not exist.',
+      }),
+    )
   })
 
   return yield* route.pipe(
     Effect.catch((error) => {
       if (Schema.is(ProcessingProjectRejected)(error))
         return Effect.sync(() =>
-          json(response, processingErrorStatus(error.error), error.error),
+          json(
+            response,
+            processingErrorStatus(error.error),
+            Schema.encodeSync(ProcessingProjectHttpFailure)(
+              ProcessingProjectHttpFailure.cases.DomainRejected.make({
+                error: error.error,
+              }),
+            ),
+          ),
         )
       if (Schema.is(ProcessingProjectInputInvalid)(error))
         return Effect.sync(() =>
-          json(response, 400, {
-            _tag: 'InvalidInput',
-            message:
-              'The service could not read the Processing Project request.',
-          }),
+          json(
+            response,
+            400,
+            Schema.encodeSync(ProcessingProjectHttpFailure)(
+              ProcessingProjectHttpFailure.cases.InvalidInput.make({
+                message:
+                  'The service could not read the Processing Project request.',
+              }),
+            ),
+          ),
         )
       if (Schema.is(ProcessingProjectBodyTooLarge)(error))
         return Effect.sync(() =>
-          json(response, 413, {
-            _tag: 'RequestTooLarge',
-            message: 'The Processing Project request is too large.',
-          }),
+          json(
+            response,
+            413,
+            Schema.encodeSync(ProcessingProjectHttpFailure)(
+              ProcessingProjectHttpFailure.cases.RequestTooLarge.make({
+                message: 'The Processing Project request is too large.',
+              }),
+            ),
+          ),
         )
       if (Schema.is(ProcessingProjectPersistenceUnavailable)(error))
         return Effect.sync(() =>
-          json(response, 503, {
-            _tag: 'ServiceUnavailable',
-            message: 'Processing Project persistence is unavailable.',
-          }),
+          json(
+            response,
+            503,
+            Schema.encodeSync(ProcessingProjectHttpFailure)(
+              ProcessingProjectHttpFailure.cases.ServiceUnavailable.make({
+                message: 'Processing Project persistence is unavailable.',
+              }),
+            ),
+          ),
         )
       return Effect.fail(error)
     }),

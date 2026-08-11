@@ -29,30 +29,30 @@ package exports generated `dist` files.
 Issue #2 classified every module exported by the former
 `@astro-console/v2-contracts` root before the prototype harness was removed.
 
-| Former root module          | Classification                            | Disposition                                                                                                                                 |
-| --------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `acquire`                   | mixed shared protocol and server domain   | Retained only wire projection fields; aggregate state and transitions moved to the Acquire lifecycle.                                       |
-| `acquire-command`           | shared protocol                           | Retained as request and response schemas.                                                                                                   |
-| `camera-command`            | shared protocol                           | Retained as request, response, and observation schemas.                                                                                     |
-| `commands`                  | shared protocol                           | Retained as the generic command wire union; policy helpers were removed.                                                                    |
-| `client`                    | browser runtime                           | Removed; cursor and connection behavior is tested through the web bootstrap client.                                                         |
-| `control`                   | server domain                             | Removed; production authority and transitions stay in the Control lifecycle.                                                                |
-| `events`                    | mixed server domain and browser runtime   | Removed; server events stay with their lifecycle and SSE cursor policy stays in the web bootstrap client.                                   |
-| `failures`                  | shared protocol                           | Retained as serialized command and operation failures.                                                                                      |
-| `gate`                      | server domain                             | Removed; production lifecycle interfaces own authority and eligibility.                                                                     |
-| `idempotency`               | server domain                             | Removed; production lifecycle receipts own idempotency.                                                                                     |
-| `asset-domain`              | mixed shared protocol and server domain   | Retained only Library wire review and inspection schemas; intake and asset decisions stay in the server.                                    |
-| `bootstrap`                 | mixed shared protocol and browser runtime | Retained only structured bootstrap and SSE schemas; presentation helpers moved to the web presentation module.                              |
-| `bootstrap-fixtures`        | test-only                                 | Moved to the web test runtime.                                                                                                              |
-| `processing-project-domain` | mixed shared protocol and server domain   | Retained only Project requests, projections, evidence, notices, and errors; aggregate state and transitions moved to the Project lifecycle. |
-| `processing-pressure`       | unused server prototype                   | Deleted; it was not used by the production lifecycle.                                                                                       |
-| `plan-command`              | shared protocol                           | Retained as request and response schemas.                                                                                                   |
-| `observe-command`           | shared protocol                           | Retained as request and response schemas.                                                                                                   |
-| `observe`                   | shared protocol                           | Retained as the Observe projection schema.                                                                                                  |
-| `primitives`                | shared protocol                           | Retained stable wire identities and constrained values; freshness helper objects were removed.                                              |
-| `snapshots`                 | shared protocol                           | Retained actual Acquire and Library HTTP projection schemas; legacy aggregate projection helpers were removed.                              |
-| `run`                       | server domain                             | Removed; accepted Run codecs stay with the Run lifecycle.                                                                                   |
-| `preflight`                 | shared protocol                           | Retained as Preflight request, response, and projection schemas.                                                                            |
+| Former root module          | Classification                            | Disposition                                                                                                                                  |
+| --------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `acquire`                   | mixed shared protocol and server domain   | Retained only wire projection fields; aggregate state and transitions moved to the Acquire lifecycle.                                        |
+| `acquire-command`           | shared protocol                           | Retained as request and response schemas.                                                                                                    |
+| `camera-command`            | shared protocol                           | Retained as request, response, and observation schemas.                                                                                      |
+| `commands`                  | shared protocol                           | Retained only the five Control variants used by the generic command route; other live routes use their focused request and response schemas. |
+| `client`                    | browser runtime                           | Removed; cursor and connection behavior is tested through the web bootstrap client.                                                          |
+| `control`                   | server domain                             | Removed; production authority and transitions stay in the Control lifecycle.                                                                 |
+| `events`                    | mixed server domain and browser runtime   | Removed; server events stay with their lifecycle and SSE cursor policy stays in the web bootstrap client.                                    |
+| `failures`                  | shared protocol                           | Retained as serialized command and operation failures.                                                                                       |
+| `gate`                      | server domain                             | Removed; production lifecycle interfaces own authority and eligibility.                                                                      |
+| `idempotency`               | server domain                             | Removed; production lifecycle receipts own idempotency.                                                                                      |
+| `asset-domain`              | mixed shared protocol and server domain   | Retained only Library wire review and inspection schemas; intake and asset decisions stay in the server.                                     |
+| `bootstrap`                 | mixed shared protocol and browser runtime | Retained only structured bootstrap and SSE schemas; presentation helpers moved to the web presentation module.                               |
+| `bootstrap-fixtures`        | test-only                                 | Moved to the web test runtime.                                                                                                               |
+| `processing-project-domain` | mixed shared protocol and server domain   | Retained only Project requests, projections, evidence, notices, and errors; aggregate state and transitions moved to the Project lifecycle.  |
+| `processing-pressure`       | unused server prototype                   | Deleted; it was not used by the production lifecycle.                                                                                        |
+| `plan-command`              | shared protocol                           | Retained as request and response schemas.                                                                                                    |
+| `observe-command`           | shared protocol                           | Retained as request and response schemas.                                                                                                    |
+| `observe`                   | shared protocol                           | Retained as the Observe projection schema.                                                                                                   |
+| `primitives`                | shared protocol                           | Retained stable wire identities and constrained values; freshness helper objects were removed.                                               |
+| `snapshots`                 | shared protocol                           | Retained actual Acquire and Library HTTP projection schemas; legacy aggregate projection helpers were removed.                               |
+| `run`                       | server domain                             | Removed; accepted Run codecs stay with the Run lifecycle.                                                                                    |
+| `preflight`                 | shared protocol                           | Retained as Preflight request, response, and projection schemas.                                                                             |
 
 ## Production proof replacement
 

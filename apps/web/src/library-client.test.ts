@@ -4,6 +4,7 @@ import {
   LibraryQuery as LibraryQuerySchema,
   LibraryCursor,
   LibraryQueryId,
+  LibraryRouteFailure,
   ReviewAssetFailure,
   ReviewAssetRequest,
   ReviewAssetResponse,
@@ -66,6 +67,8 @@ const handoff = {
   },
 }
 
+const unusedReview = () => Effect.die('unused')
+
 test('encodes bounded Library query parameters', () => {
   assert.equal(
     libraryPagePath(query),
@@ -87,6 +90,7 @@ test('decodes a typed Library detail', async () => {
             loadPage: () => Effect.die('unused'),
             loadDetail: () => Effect.succeed(detail),
             loadProcessSourceHandoff: () => Effect.succeed(handoff),
+            reviewAsset: unusedReview,
           }),
         ),
       ),
@@ -115,6 +119,7 @@ test('keeps detail not-found and unavailable failures distinct', async () => {
                   loadPage: () => Effect.die('unused'),
                   loadDetail: () => Effect.fail(failure),
                   loadProcessSourceHandoff: () => Effect.die('unused'),
+                  reviewAsset: unusedReview,
                 }),
               ),
             ),
@@ -142,6 +147,7 @@ test('decodes a direct Process source handoff without a session', async () => {
             loadPage: () => Effect.die('unused'),
             loadDetail: () => Effect.die('unused'),
             loadProcessSourceHandoff: () => Effect.succeed(handoff),
+            reviewAsset: unusedReview,
           }),
         ),
       ),
@@ -253,6 +259,7 @@ test('keeps Process source route failures unavailable', async () => {
                 loadDetail: () => Effect.die('unused'),
                 loadProcessSourceHandoff: () =>
                   Effect.fail(new LibraryNotFound()),
+                reviewAsset: unusedReview,
               }),
             ),
           ),
@@ -279,11 +286,65 @@ test('keeps a not-local Process source distinct from missing and service failure
                 loadDetail: () => Effect.die('unused'),
                 loadProcessSourceHandoff: () =>
                   Effect.fail(new LibraryAssetUnavailable()),
+                reviewAsset: unusedReview,
               }),
             ),
           ),
         ),
       ),
     (error: unknown) => error instanceof LibraryAssetUnavailable,
+  )
+})
+
+test('decodes Library route failures and rejects malformed page responses', async () => {
+  await assert.rejects(
+    () =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const client = yield* LibraryClient
+          return yield* client.detail('missing')
+        }).pipe(
+          Effect.provide(layer),
+          Effect.provide(
+            Layer.succeed(
+              LibraryTransport,
+              LibraryTransport.of({
+                loadPage: () => Effect.die('unused'),
+                loadDetail: () =>
+                  Effect.succeed(
+                    LibraryRouteFailure.cases.AssetNotFound.make({}),
+                  ),
+                loadProcessSourceHandoff: () => Effect.die('unused'),
+                reviewAsset: unusedReview,
+              }),
+            ),
+          ),
+        ),
+      ),
+    (error: unknown) => error instanceof LibraryNotFound,
+  )
+
+  await assert.rejects(
+    () =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const client = yield* LibraryClient
+          return yield* client.page(query)
+        }).pipe(
+          Effect.provide(layer),
+          Effect.provide(
+            Layer.succeed(
+              LibraryTransport,
+              LibraryTransport.of({
+                loadPage: () => Effect.succeed({ results: [] }),
+                loadDetail: () => Effect.die('unused'),
+                loadProcessSourceHandoff: () => Effect.die('unused'),
+                reviewAsset: unusedReview,
+              }),
+            ),
+          ),
+        ),
+      ),
+    (error: unknown) => error instanceof LibraryUnavailable,
   )
 })

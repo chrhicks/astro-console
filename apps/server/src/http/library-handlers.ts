@@ -6,8 +6,12 @@ import { Effect, Schema } from 'effect'
 import {
   AssetReview,
   AssetRevision,
+  LibraryDetailResponse,
+  LibraryPageResponse,
   LibraryQuery,
+  LibraryRouteFailure,
   ObserveLiveFrameReview,
+  ProcessSourceHandoffResponse,
   ReviewAssetFailure,
   ReviewAssetRequest,
   ReviewAssetResponse,
@@ -67,23 +71,40 @@ export function processSourceHandoff(
       }),
       Effect.provide(sqliteLibraryServiceLayer(db, snapshotVersion)),
       Effect.map((result) => {
-        if ('reason' in result)
-          return json(response, result.status, {
-            outcome: 'rejected',
-            reason: result.reason,
-            ...(result.status === 409
-              ? {
-                  message:
-                    'This asset is temporarily unavailable and cannot open in Process.',
-                }
-              : {}),
-          })
-        return json(response, result.status, result.body)
+        if ('reason' in result) {
+          const failure =
+            result.reason === 'InvalidInput'
+              ? LibraryRouteFailure.cases.InvalidInput.make({
+                  message: 'The service could not read that action.',
+                })
+              : result.reason === 'AssetNotFound'
+                ? LibraryRouteFailure.cases.AssetNotFound.make({})
+                : result.reason === 'AssetUnavailable'
+                  ? LibraryRouteFailure.cases.AssetUnavailable.make({
+                      message:
+                        'This asset is temporarily unavailable and cannot open in Process.',
+                    })
+                  : LibraryRouteFailure.cases.LibraryUnavailable.make({})
+          return json(response, result.status, failure)
+        }
+        return json(
+          response,
+          result.status,
+          Schema.encodeSync(ProcessSourceHandoffResponse)(result.body),
+        )
       }),
     )
   } catch {
     return Effect.sync(() =>
-      json(response, 400, { outcome: 'rejected', reason: 'InvalidInput' }),
+      json(
+        response,
+        400,
+        Schema.encodeSync(ProcessSourceHandoffResponse)(
+          LibraryRouteFailure.cases.InvalidInput.make({
+            message: 'The service could not read that action.',
+          }),
+        ),
+      ),
     )
   }
 }
@@ -105,7 +126,13 @@ export function libraryPage(
         Effect.succeed({ status: 503, body: libraryUnavailableBody }),
     }),
     Effect.provide(sqliteLibraryServiceLayer(db, snapshotVersion)),
-    Effect.map((result) => json(response, result.status, result.body)),
+    Effect.map((result) =>
+      json(
+        response,
+        result.status,
+        Schema.encodeSync(LibraryPageResponse)(result.body),
+      ),
+    ),
   )
   return tracedLibraryOperation(response, 'catalog.page', operation)
 }
@@ -146,7 +173,13 @@ export function libraryDetail(
         Effect.succeed({ status: 503, body: libraryUnavailableBody }),
     }),
     Effect.provide(sqliteLibraryServiceLayer(db, snapshotVersion)),
-    Effect.map((result) => json(response, result.status, result.body)),
+    Effect.map((result) =>
+      json(
+        response,
+        result.status,
+        Schema.encodeSync(LibraryDetailResponse)(result.body),
+      ),
+    ),
   )
   return tracedLibraryOperation(response, 'asset.detail', operation)
 }
@@ -428,16 +461,12 @@ function decodedAssetId(value: string) {
     return ''
   }
 }
-const libraryInvalidBody = {
-  outcome: 'rejected',
-  reason: 'InvalidInput',
+const libraryInvalidBody = LibraryRouteFailure.cases.InvalidInput.make({
   message: 'The service could not read that action.',
-}
-const libraryNotFoundBody = { outcome: 'rejected', reason: 'AssetNotFound' }
-const libraryUnavailableBody = {
-  outcome: 'rejected',
-  reason: 'LibraryUnavailable',
-}
+})
+const libraryNotFoundBody = LibraryRouteFailure.cases.AssetNotFound.make({})
+const libraryUnavailableBody =
+  LibraryRouteFailure.cases.LibraryUnavailable.make({})
 export async function downloadAsset(
   response: ServerResponse,
   db: DatabaseSync,

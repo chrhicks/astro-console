@@ -90,6 +90,7 @@ export default tseslint.config(
   {
     files: [
       'src/services/acquire-domain.ts',
+      'src/services/captured-frame-intake.ts',
       'src/services/processing-project-domain.ts',
       'src/services/run-domain.ts',
     ],

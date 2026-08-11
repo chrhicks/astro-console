@@ -1,9 +1,13 @@
 import { Context, Effect, Layer, ManagedRuntime, Schema } from 'effect'
 import {
   LibraryAssetDetail as LibraryAssetDetailSchema,
+  LibraryDetailResponse,
   LibraryPage as LibraryPageSchema,
+  LibraryPageResponse,
   LibraryQuery as LibraryQuerySchema,
+  LibraryRouteFailure,
   ProcessSourceHandoff as ProcessSourceHandoffSchema,
+  ProcessSourceHandoffResponse,
   AssetReview,
   ReviewAssetFailure,
   ReviewAssetRequest,
@@ -48,7 +52,7 @@ export interface LibraryTransportShape {
     unknown,
     LibraryNotFound | LibraryAssetUnavailable | LibraryUnavailable
   >
-  readonly reviewAsset?: (
+  readonly reviewAsset: (
     assetId: string,
     request: ReviewRequest,
   ) => Effect.Effect<unknown, LibraryUnavailable>
@@ -100,7 +104,12 @@ export const layer = Layer.effect(
           ),
         )
         return yield* transport.loadPage(decodedQuery).pipe(
-          Effect.flatMap(Schema.decodeUnknownEffect(LibraryPageSchema)),
+          Effect.flatMap(Schema.decodeUnknownEffect(LibraryPageResponse)),
+          Effect.flatMap((response) =>
+            '_tag' in response
+              ? Effect.fail(libraryPageFailure())
+              : Effect.succeed(response),
+          ),
           Effect.mapError(
             () =>
               new LibraryUnavailable({
@@ -111,7 +120,12 @@ export const layer = Layer.effect(
       }),
       detail: Effect.fn('LibraryClient.detail')(function* (assetId: string) {
         return yield* transport.loadDetail(assetId).pipe(
-          Effect.flatMap(Schema.decodeUnknownEffect(LibraryAssetDetailSchema)),
+          Effect.flatMap(Schema.decodeUnknownEffect(LibraryDetailResponse)),
+          Effect.flatMap((response) =>
+            '_tag' in response
+              ? Effect.fail(libraryDetailFailure(response))
+              : Effect.succeed(response),
+          ),
           Effect.mapError((error) =>
             error instanceof LibraryNotFound
               ? error
@@ -125,7 +139,12 @@ export const layer = Layer.effect(
         function* (assetId: string) {
           return yield* transport.loadProcessSourceHandoff(assetId).pipe(
             Effect.flatMap(
-              Schema.decodeUnknownEffect(ProcessSourceHandoffSchema),
+              Schema.decodeUnknownEffect(ProcessSourceHandoffResponse),
+            ),
+            Effect.flatMap((response) =>
+              '_tag' in response
+                ? Effect.fail(processSourceFailure(response))
+                : Effect.succeed(response),
             ),
             Effect.mapError((error) =>
               error instanceof LibraryNotFound ||
@@ -150,10 +169,6 @@ export const layer = Layer.effect(
               new LibraryUnavailable({ reason: 'Review input is invalid.' }),
           ),
         )
-        if (transport.reviewAsset === undefined)
-          return yield* Effect.fail(
-            new LibraryUnavailable({ reason: 'Review is unavailable.' }),
-          )
         const response = yield* transport.reviewAsset(assetId, input)
         const decoded = yield* Schema.decodeUnknownEffect(ReviewAssetResponse)(
           response,
@@ -185,8 +200,6 @@ export function libraryPagePath(query: LibraryQuery) {
 
 const load = (
   url: string,
-  detail = false,
-  sourceHandoff = false,
 ): Effect.Effect<
   unknown,
   LibraryNotFound | LibraryAssetUnavailable | LibraryUnavailable
@@ -194,13 +207,6 @@ const load = (
   Effect.tryPromise({
     try: async (signal) => {
       const response = await fetch(url, { signal })
-      if (response.status === 404 && detail) throw new LibraryNotFound()
-      if (response.status === 409 && sourceHandoff)
-        throw new LibraryAssetUnavailable()
-      if (!response.ok)
-        throw new LibraryUnavailable({
-          reason: 'The Library service is unavailable.',
-        })
       return response.json()
     },
     catch: (error) =>
@@ -228,7 +234,7 @@ export const browserLibraryTransportLayer = Layer.succeed(
         ),
       ),
     loadDetail: (assetId) =>
-      load(`/api/library/assets/${encodeURIComponent(assetId)}`, true).pipe(
+      load(`/api/library/assets/${encodeURIComponent(assetId)}`).pipe(
         Effect.mapError((error) =>
           error instanceof LibraryAssetUnavailable
             ? new LibraryUnavailable({
@@ -238,11 +244,7 @@ export const browserLibraryTransportLayer = Layer.succeed(
         ),
       ),
     loadProcessSourceHandoff: (assetId) =>
-      load(
-        `/api/library/assets/${encodeURIComponent(assetId)}/process-source`,
-        true,
-        true,
-      ),
+      load(`/api/library/assets/${encodeURIComponent(assetId)}/process-source`),
     reviewAsset: (assetId, request) =>
       Effect.tryPromise({
         try: async (signal) => {
@@ -278,3 +280,28 @@ const reviewFailure = (failure: typeof ReviewAssetFailure.Type) =>
     RevisionConflict: () => 'The Library review changed. Reload and retry.',
     LibraryUnavailable: () => 'The Library review service is unavailable.',
   })
+
+const libraryPageFailure = () =>
+  new LibraryUnavailable({ reason: 'The Library page could not be read.' })
+
+const libraryDetailFailure = (failure: typeof LibraryRouteFailure.Type) =>
+  failure._tag === 'AssetNotFound'
+    ? new LibraryNotFound()
+    : new LibraryUnavailable({
+        reason:
+          failure._tag === 'InvalidInput'
+            ? failure.message
+            : 'The Library detail could not be read.',
+      })
+
+const processSourceFailure = (failure: typeof LibraryRouteFailure.Type) =>
+  failure._tag === 'AssetNotFound'
+    ? new LibraryNotFound()
+    : failure._tag === 'AssetUnavailable'
+      ? new LibraryAssetUnavailable()
+      : new LibraryUnavailable({
+          reason:
+            failure._tag === 'InvalidInput'
+              ? failure.message
+              : 'The Process source handoff could not be read.',
+        })

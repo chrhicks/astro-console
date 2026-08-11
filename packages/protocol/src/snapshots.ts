@@ -1,5 +1,4 @@
 import { Schema } from 'effect'
-import { CommandTag } from './commands.js'
 import { CaptureMetric, PointingVector } from './acquire.js'
 import { FrameInspection, AssetReview } from './asset-domain.js'
 import {
@@ -38,9 +37,24 @@ const ActionAvailabilityReason = Schema.Literals([
   'SafetyInterlock',
 ])
 
+const AcquireActionTag = Schema.Literals([
+  'RetryPlateSolveWithParameters',
+  'SkipAcquireTarget',
+  'AbortAcquire',
+  'ApprovePointingCorrection',
+  'CaptureTargetAcquisitionEvidence',
+  'RecordLiveFrameEvidence',
+  'StartManagedCapture',
+  'PauseManagedCapture',
+  'StopManagedCapture',
+  'RecenterManagedCapture',
+  'CapturePolarAlignmentMeasurement',
+  'AcceptPolarAlignmentEvidence',
+])
+
 const ActionAvailabilityDetails = {
   reason: ActionAvailabilityReason,
-  safeNextActions: Schema.Array(CommandTag),
+  safeNextActions: Schema.Array(AcquireActionTag),
   blockingSubsystem: Schema.optionalKey(
     Schema.Literals([
       'service',
@@ -56,9 +70,9 @@ const ActionAvailabilityDetails = {
 }
 
 const ActionAvailability = Schema.TaggedUnion({
-  Available: { action: CommandTag },
-  Unavailable: { action: CommandTag, ...ActionAvailabilityDetails },
-  RequiresApproval: { action: CommandTag, ...ActionAvailabilityDetails },
+  Available: { action: AcquireActionTag },
+  Unavailable: { action: AcquireActionTag, ...ActionAvailabilityDetails },
+  RequiresApproval: { action: AcquireActionTag, ...ActionAvailabilityDetails },
 })
 
 export const AcquireSnapshot = Schema.Struct({
@@ -445,3 +459,27 @@ export const LibraryPage = Schema.Struct({
   nextCursor: Schema.optionalKey(LibraryCursor),
   catalogChanged: Schema.Boolean,
 })
+
+export const LibraryRouteFailure = Schema.TaggedUnion({
+  InvalidInput: { message: Schema.NonEmptyString },
+  AssetNotFound: {},
+  AssetUnavailable: { message: Schema.NonEmptyString },
+  LibraryUnavailable: {},
+})
+
+export type LibraryRouteFailure = typeof LibraryRouteFailure.Type
+
+export const LibraryPageResponse = Schema.Union([
+  LibraryPage,
+  LibraryRouteFailure,
+])
+
+export const LibraryDetailResponse = Schema.Union([
+  LibraryAssetDetail,
+  LibraryRouteFailure,
+])
+
+export const ProcessSourceHandoffResponse = Schema.Union([
+  ProcessSourceHandoff,
+  LibraryRouteFailure,
+])

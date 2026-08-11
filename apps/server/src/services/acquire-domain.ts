@@ -8,12 +8,21 @@ import {
   PositiveInt,
   PositiveNumber,
   RunId,
-  SolveRecoveryParameters,
 } from '@astro-console/protocol'
 
 export const RecoverySeriesId = Schema.NonEmptyString.pipe(
   Schema.brand('RecoverySeriesId'),
 )
+
+export const SolveRecoveryParameters = Schema.Struct({
+  exposureSeconds: Schema.Finite.check(Schema.isGreaterThan(0)),
+  binning: Schema.Int.check(Schema.isGreaterThan(0)),
+  solverProfile: Schema.NonEmptyString,
+})
+
+export interface SolveRecoveryParameters extends Schema.Schema.Type<
+  typeof SolveRecoveryParameters
+> {}
 
 export const PointingVector = Schema.Struct({
   rightAscensionArcsec: Schema.Finite,

@@ -521,6 +521,34 @@ export const ProcessingProjectNotice = Schema.Struct({
   revision: ProcessingProjectRevision,
 })
 
+export const ProcessingProjectHttpFailure = Schema.TaggedUnion({
+  InvalidInput: { message: Schema.NonEmptyString },
+  RequestTooLarge: { message: Schema.NonEmptyString },
+  ServiceUnavailable: { message: Schema.NonEmptyString },
+  ProjectRouteNotFound: { message: Schema.NonEmptyString },
+  DomainRejected: { error: ProcessingProjectError },
+})
+
+export type ProcessingProjectHttpFailure =
+  typeof ProcessingProjectHttpFailure.Type
+
+export const ProcessingProjectListResponse = Schema.Union([
+  ProcessingProjectList,
+  ProcessingProjectHttpFailure,
+])
+export const OpenedProcessingProjectResponse = Schema.Union([
+  OpenedProcessingProject,
+  ProcessingProjectHttpFailure,
+])
+export const ProcessingProjectEvidenceResponse = Schema.Union([
+  ProcessingProjectEvidence,
+  ProcessingProjectHttpFailure,
+])
+export const ProcessingProjectChangedResponse = Schema.Union([
+  ProcessingProjectChanged,
+  ProcessingProjectHttpFailure,
+])
+
 const processingDraftStage = (
   value: typeof ProcessingStageDraftValue.Type,
 ): typeof ExecutableProcessingStage.Type =>

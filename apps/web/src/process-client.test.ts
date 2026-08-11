@@ -4,9 +4,10 @@ import {
   AssetId,
   IntentId,
   ProcessingProjectId,
+  ProcessingProjectHttpFailure,
   ProcessingProjectRevision,
 } from '@astro-console/protocol'
-import { processClient } from './process-client'
+import { ProcessingProjectRequestError, processClient } from './process-client'
 
 test('uses explicit Processing Project routes and does not replay changes', async () => {
   const originalFetch = globalThis.fetch
@@ -83,6 +84,34 @@ test('uses explicit Processing Project routes and does not replay changes', asyn
     requests.filter((request) => request.method === 'PATCH').length,
     1,
   )
+})
+
+test('decodes Processing Project failures and rejects malformed JSON responses', async () => {
+  const originalFetch = globalThis.fetch
+  try {
+    globalThis.fetch = async () =>
+      Response.json(
+        ProcessingProjectHttpFailure.cases.DomainRejected.make({
+          error: {
+            _tag: 'ProjectNotFound',
+            projectId: ProcessingProjectId.make('missing-project'),
+          },
+        }),
+        { status: 404 },
+      )
+    await assert.rejects(
+      () => processClient.open('missing-project'),
+      (error: unknown) =>
+        error instanceof ProcessingProjectRequestError &&
+        error.detail._tag === 'DomainRejected' &&
+        error.detail.error._tag === 'ProjectNotFound',
+    )
+
+    globalThis.fetch = async () => Response.json({ projectId: 'incomplete' })
+    await assert.rejects(() => processClient.evidence('project-1'))
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 const now = '2026-08-10T00:00:00.000Z'

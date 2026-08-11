@@ -41,7 +41,9 @@ const CapturedFrameIntake = Schema.Struct({
   idempotencyKey: Schema.NonEmptyString,
 })
 
-type CapturedFrameIntake = typeof CapturedFrameIntake.Type
+interface CapturedFrameIntake extends Schema.Schema.Type<
+  typeof CapturedFrameIntake
+> {}
 
 const Existing = Schema.Struct({
   semantic_key: Schema.String,

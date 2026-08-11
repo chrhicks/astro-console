@@ -1,11 +1,16 @@
 import { Schema } from 'effect'
 import {
   CreateProcessingProjectRequest as CreateProcessingProjectRequestSchema,
-  OpenedProcessingProject as OpenedProcessingProjectSchema,
+  OpenedProcessingProjectResponse,
   ProcessingProjectChangeRequest as ProcessingProjectChangeRequestSchema,
-  ProcessingProjectChanged as ProcessingProjectChangedSchema,
-  ProcessingProjectEvidence as ProcessingProjectEvidenceSchema,
+  ProcessingProjectChangedResponse,
+  ProcessingProjectEvidenceResponse,
+  ProcessingProjectHttpFailure,
+  ProcessingProjectListResponse,
   ProcessingProjectList as ProcessingProjectListSchema,
+  OpenedProcessingProject as OpenedProcessingProjectSchema,
+  ProcessingProjectEvidence as ProcessingProjectEvidenceSchema,
+  ProcessingProjectChanged as ProcessingProjectChangedSchema,
 } from '@astro-console/protocol'
 
 export type ProcessingProjectList = typeof ProcessingProjectListSchema.Type
@@ -21,22 +26,32 @@ export type ProcessingProjectChangeRequest =
 
 export const processClient = {
   async list() {
-    return request('/api/process/projects', ProcessingProjectListSchema)
+    return request(
+      '/api/process/projects',
+      ProcessingProjectListResponse,
+      ProcessingProjectListSchema,
+    )
   },
 
   async create(input: CreateProcessingProjectRequest) {
     const requestBody = Schema.decodeUnknownSync(
       CreateProcessingProjectRequestSchema,
     )(input)
-    return request('/api/process/projects', ProcessingProjectChangedSchema, {
-      method: 'POST',
-      body: JSON.stringify(requestBody),
-    })
+    return request(
+      '/api/process/projects',
+      ProcessingProjectChangedResponse,
+      ProcessingProjectChangedSchema,
+      {
+        method: 'POST',
+        body: JSON.stringify(requestBody),
+      },
+    )
   },
 
   async open(projectId: string) {
     return request(
       `/api/process/projects/${encodeURIComponent(projectId)}`,
+      OpenedProcessingProjectResponse,
       OpenedProcessingProjectSchema,
     )
   },
@@ -44,6 +59,7 @@ export const processClient = {
   async evidence(projectId: string) {
     return request(
       `/api/process/projects/${encodeURIComponent(projectId)}/evidence`,
+      ProcessingProjectEvidenceResponse,
       ProcessingProjectEvidenceSchema,
     )
   },
@@ -54,6 +70,7 @@ export const processClient = {
     )(input)
     return request(
       `/api/process/projects/${encodeURIComponent(input.projectId)}`,
+      ProcessingProjectChangedResponse,
       ProcessingProjectChangedSchema,
       { method: 'PATCH', body: JSON.stringify(requestBody) },
     )
@@ -61,8 +78,14 @@ export const processClient = {
 }
 
 async function request<
-  S extends Schema.Top & Schema.ConstraintDecoder<unknown>,
->(path: string, schema: S, init?: RequestInit): Promise<S['Type']> {
+  Response extends Schema.Top & Schema.ConstraintDecoder<unknown>,
+  Success extends Schema.Top & Schema.ConstraintDecoder<unknown>,
+>(
+  path: string,
+  responseSchema: Response,
+  successSchema: Success,
+  init?: RequestInit,
+): Promise<Success['Type']> {
   const response = await fetch(path, {
     ...init,
     headers: {
@@ -73,15 +96,16 @@ async function request<
     },
   })
   const value: unknown = await response.json().catch(() => undefined)
-  if (!response.ok)
-    throw new ProcessingProjectRequestError(response.status, value)
-  return Schema.decodeUnknownSync(schema)(value)
+  const decoded = Schema.decodeUnknownSync(responseSchema)(value)
+  if (Schema.is(ProcessingProjectHttpFailure)(decoded))
+    throw new ProcessingProjectRequestError(response.status, decoded)
+  return Schema.decodeUnknownSync(successSchema)(decoded)
 }
 
 export class ProcessingProjectRequestError extends Error {
   constructor(
     readonly status: number,
-    readonly detail: unknown,
+    readonly detail: typeof ProcessingProjectHttpFailure.Type,
   ) {
     super('The Processing Project request was not accepted.')
   }

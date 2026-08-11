@@ -5,6 +5,7 @@ import {
   BootstrapHttpSuccessEnvelope,
   BootstrapSnapshot,
   BootstrapSseEventEnvelope,
+  CommandEnvelope,
   PlanCommandRequest,
 } from './index.js'
 
@@ -75,6 +76,34 @@ test('rejects malformed HTTP request identities and freshness values', async () 
           expectedPlanRevision: -1,
           expectedLeaseRevision: 0,
           idempotencyKey: 'accept-run',
+        },
+      }),
+    ),
+  )
+})
+
+test('generic commands accept only the live Control route variants', async () => {
+  const command = await Effect.runPromise(
+    Schema.decodeUnknownEffect(CommandEnvelope)({
+      commandId: 'take-control',
+      command: {
+        _tag: 'TakeControl',
+        expectedLeaseRevision: 1,
+        idempotencyKey: 'take-control',
+      },
+    }),
+  )
+  assert.equal(command.command._tag, 'TakeControl')
+
+  await assert.rejects(() =>
+    Effect.runPromise(
+      Schema.decodeUnknownEffect(CommandEnvelope)({
+        commandId: 'retired-generic-run-command',
+        command: {
+          _tag: 'PauseRun',
+          expectedLeaseRevision: 1,
+          expectedRunRevision: 1,
+          idempotencyKey: 'retired-generic-run-command',
         },
       }),
     ),
