@@ -200,6 +200,44 @@ export type DownloadGrantConfig = {
 const AcceptedDefinitionRow = Schema.Struct({ definition: Schema.String })
 const AcceptedDefinitionRecord = Schema.Struct({ definition: RunDefinition })
 
+type LocalWebServiceOptions = {
+  readonly fixture?:
+    | 'm27'
+    | 'preflight'
+    | 'plan-draft'
+    | 'library-published'
+    | 'polar'
+    | 'target-deep-sky'
+    | 'target-lunar'
+    | 'target-correction'
+    | 'target-verification'
+    | 'live-frame'
+    | 'live-frame-library'
+    | 'managed-capture'
+    | 'acquire-recovery'
+  readonly webDistPath?: string
+  readonly previewRoot?: string
+  readonly preflightProvider?: ReadOnlyPreflightProviderShape
+  readonly cameraProvider?: CameraProviderShape
+  readonly polarMeasurementProvider?: PolarMeasurementProviderShape
+  readonly targetAcquisitionProvider?: TargetAcquisitionProviderShape
+  readonly configuredTargetProvider?: PreflightProviderConfig
+  readonly capturedFrameStorage?: CapturedFrameStorage
+  readonly frameInspectionStorage?: FrameInspectionStorage
+  readonly plateSolveWorker?: PlateSolveWorkerConfig
+  readonly simulation?: DevelopmentSimulationConfig
+  readonly runExecutionContext?: typeof RunExecutionContext.Type
+  readonly runExecutorProviderOrigin?: string
+  readonly telemetry?: OriginTelemetry
+  readonly admissionObservability?: AdmissionObservation
+  readonly processWorkRoot?: string
+  readonly processFailBuildStage?: 'align'
+  readonly processWorkAutoRun?: boolean
+  readonly observeProjectionPublication?: (
+    event: 'connect' | 'disconnect' | 'publish' | 'writeFailure',
+  ) => void
+}
+
 export function createLocalWebService(
   databasePath = ':memory:',
   identityResolver: RequestAdmission = createLocalFixtureAdmission({
@@ -209,43 +247,7 @@ export function createLocalWebService(
   }),
   _unused?: unknown,
   downloadGrants?: DownloadGrantConfig,
-  options: {
-    readonly fixture?:
-      | 'm27'
-      | 'preflight'
-      | 'plan-draft'
-      | 'library-published'
-      | 'polar'
-      | 'target-deep-sky'
-      | 'target-lunar'
-      | 'target-correction'
-      | 'target-verification'
-      | 'live-frame'
-      | 'live-frame-library'
-      | 'managed-capture'
-      | 'acquire-recovery'
-    readonly webDistPath?: string
-    readonly previewRoot?: string
-    readonly preflightProvider?: ReadOnlyPreflightProviderShape
-    readonly cameraProvider?: CameraProviderShape
-    readonly polarMeasurementProvider?: PolarMeasurementProviderShape
-    readonly targetAcquisitionProvider?: TargetAcquisitionProviderShape
-    readonly configuredTargetProvider?: PreflightProviderConfig
-    readonly capturedFrameStorage?: CapturedFrameStorage
-    readonly frameInspectionStorage?: FrameInspectionStorage
-    readonly plateSolveWorker?: PlateSolveWorkerConfig
-    readonly simulation?: DevelopmentSimulationConfig
-    readonly runExecutionContext?: typeof RunExecutionContext.Type
-    readonly runExecutorProviderOrigin?: string
-    readonly telemetry?: OriginTelemetry
-    readonly admissionObservability?: AdmissionObservation
-    readonly processWorkRoot?: string
-    readonly processFailBuildStage?: 'align'
-    readonly processWorkAutoRun?: boolean
-    readonly observeProjectionPublication?: (
-      event: 'connect' | 'disconnect' | 'publish' | 'writeFailure',
-    ) => void
-  } = {},
+  options: LocalWebServiceOptions = {},
 ) {
   const database = openOriginDatabase(databasePath)
   const runtimeScope = Effect.runSync(Scope.make())
@@ -255,6 +257,29 @@ export function createLocalWebService(
       Effect.sync(() => database.close()),
     ),
   )
+  try {
+    return constructLocalWebService(
+      database,
+      runtimeScope,
+      databasePath,
+      identityResolver,
+      downloadGrants,
+      options,
+    )
+  } catch (cause) {
+    Effect.runSync(Scope.close(runtimeScope, Exit.void))
+    throw cause
+  }
+}
+
+function constructLocalWebService(
+  database: ReturnType<typeof openOriginDatabase>,
+  runtimeScope: Scope.Closeable,
+  databasePath: string,
+  identityResolver: RequestAdmission,
+  downloadGrants: DownloadGrantConfig | undefined,
+  options: LocalWebServiceOptions,
+) {
   if (options.fixture !== undefined) {
     installM27Fixture(
       database,
