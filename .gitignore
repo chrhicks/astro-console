@@ -1,6 +1,7 @@
 .continuum/
 .references/
 .agents/
+.codex/
 .env
 .env.local
 .env.development.local
