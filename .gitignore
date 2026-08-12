@@ -31,4 +31,6 @@ apps/v2-local-web/.astro-local-web/
 .tmp/
 # Retain legacy generated state until old directories are manually removed.
 .astro-local-web/
-docs/v2-ui-final/
+docs/adr/
+docs/agents/
+skills-lock.json
