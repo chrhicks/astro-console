@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { mkdtempSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { ManagedRuntime, Schema } from 'effect'
@@ -48,6 +49,15 @@ const openRuntime = async (config: OriginServerConfig) => {
   const origin = await runtime.runPromise(OriginRuntime)
   const bound = await runtime.runPromise(origin.listen())
   return { runtime, origin, bound }
+}
+
+const reservePort = async () => {
+  const server = createServer()
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (address === null || typeof address === 'string')
+    throw new Error('Expected a TCP address')
+  return { server, port: address.port }
 }
 
 test('origin runtime owns HTTP, work publication, restart, and scoped shutdown', async () => {
@@ -146,4 +156,54 @@ test('origin runtime owns HTTP, work publication, restart, and scoped shutdown',
   )
   await recovered.runtime.dispose()
   await assert.rejects(fetch(`${recoveredBase}/health/live`))
+})
+
+test('origin runtime rolls back an earlier listener when a later bind fails', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-origin-rollback-'))
+  const primaryReservation = await reservePort()
+  const primaryPort = primaryReservation.port
+  await new Promise<void>((resolve, reject) =>
+    primaryReservation.server.close((error) =>
+      error === undefined ? resolve() : reject(error),
+    ),
+  )
+  const ownerReservation = await reservePort()
+  const config: OriginServerConfig = {
+    ...runtimeConfig(root),
+    runtime: {
+      ...runtimeConfig(root).runtime,
+      port: primaryPort,
+      localOwnerPort: ownerReservation.port,
+    },
+    admission: {
+      mode: 'production',
+      issuer: 'https://access.example.test',
+      audience: 'origin-runtime-test',
+      jwksUrl: 'https://access.example.test/cdn-cgi/access/certs',
+      bootstrapPath: join(root, 'membership.json'),
+      clientContext: 'phone',
+      cacheTtlMs: 60_000,
+    },
+    fixture: undefined,
+  }
+  const runtime = ManagedRuntime.make(
+    originRuntimeLayer(config, productionOriginAdapters),
+  )
+  const origin = await runtime.runPromise(OriginRuntime)
+
+  await assert.rejects(runtime.runPromise(origin.listen()))
+
+  const reclaimed = createServer()
+  try {
+    await new Promise<void>((resolve, reject) => {
+      reclaimed.once('error', reject)
+      reclaimed.listen(primaryPort, '127.0.0.1', resolve)
+    })
+  } finally {
+    await new Promise<void>((resolve) => reclaimed.close(() => resolve()))
+    await new Promise<void>((resolve) =>
+      ownerReservation.server.close(() => resolve()),
+    )
+    await runtime.dispose()
+  }
 })

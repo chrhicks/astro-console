@@ -117,7 +117,9 @@ export interface StateSqliteRepositoryShape {
   readonly controllerConnected: (identity: LocalIdentity) => void
   readonly controllerDisconnected: (identity: LocalIdentity) => void
   readonly expireReconnectGrace: () => void
-  readonly sseProjection: (identity: LocalIdentity) => string
+  readonly projectionEvent: (
+    identity: LocalIdentity,
+  ) => BootstrapSseEventEnvelope
   readonly commit: (values: Record<string, unknown>) => void
   readonly advanceProjectionCursor: () => number
   readonly persistEvidence: (
@@ -437,8 +439,8 @@ export const stateSqliteRepositoryLayer = (
         },
       })
     }
-    const sseProjection = (identity: LocalIdentity) => {
-      const event = Effect.runSync(
+    const projectionEvent = (identity: LocalIdentity) =>
+      Effect.runSync(
         bootstrapSnapshot(identity).pipe(
           Effect.flatMap((data) =>
             Schema.decodeUnknownEffect(BootstrapSseEventEnvelope)({
@@ -449,8 +451,6 @@ export const stateSqliteRepositoryLayer = (
           ),
         ),
       )
-      return `id: ${event.id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`
-    }
     const readiness = () => projectReadiness(state())
     const operations = () => projectOperations(state())
     const persistEvidence = (
@@ -509,7 +509,7 @@ export const stateSqliteRepositoryLayer = (
       controllerConnected,
       controllerDisconnected,
       expireReconnectGrace,
-      sseProjection,
+      projectionEvent,
       commit,
       advanceProjectionCursor,
       persistEvidence,

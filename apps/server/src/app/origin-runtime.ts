@@ -16,19 +16,46 @@ import {
   defaultOriginTelemetry,
   type OriginTelemetry,
 } from '../observability/origin-telemetry.ts'
+import { recordOperationalEvent } from '../observability/operational-telemetry.ts'
+import { tracedStartup } from '../observability/startup-telemetry.ts'
 import {
   recordAdmissionDecision,
   recordJwksRefresh,
 } from '../observability/admission-telemetry.ts'
-import { recordOperationalEvent } from '../observability/operational-telemetry.ts'
-import { tracedStartup } from '../observability/startup-telemetry.ts'
 import { runExecutable } from './executable.ts'
 import {
   createLocalOwnerAdmission,
-  createLocalWebService,
   createRemoteDesktopAdmission,
   createRemoteReadOnlyAdmission,
-} from './origin-service.ts'
+} from './origin-admission.ts'
+import { makeProductionOriginApplication } from './origin-application.ts'
+import { listenOriginHttp } from '../http/effect-origin-http.ts'
+import {
+  absentCameraProviderSelectionLayer,
+  absentPolarMeasurementProviderSelectionLayer,
+  absentTargetAcquisitionProviderSelectionLayer,
+  configuredCameraProviderSelectionLayer,
+} from '../services/acquire-command-service.ts'
+import {
+  absentReadOnlyPreflightProviderSelectionLayer,
+  configuredReadOnlyPreflightProviderSelectionLayer,
+} from '../services/preflight-command-service.ts'
+import {
+  absentLibraryDownloadGrantLayer,
+  configuredLibraryDownloadGrantLayer,
+  configuredLibraryRepresentationStorageLayer,
+} from '../services/library-representation-service.ts'
+import {
+  configuredOriginCapturedFrameStorageLayer,
+  configuredOriginConfiguredTargetProviderLayer,
+  configuredOriginFrameInspectionStorageLayer,
+  configuredOriginPlateSolveWorkerLayer,
+  configuredOriginRunExecutionLayer,
+  absentOriginConfiguredTargetProviderLayer,
+  absentOriginRunExecutionLayer,
+  originProcessWorkBehaviorLayer,
+  originTelemetryServicesLayer,
+} from './origin-application-services.ts'
 
 export type OriginRuntimeAdapters = {
   readonly preflightProvider: (
@@ -101,12 +128,6 @@ export const originRuntimeLayer = (
         }),
       )
 
-      const admissionObservability = {
-        admission: (reason: Parameters<typeof recordAdmissionDecision>[0]) =>
-          telemetry.runSync(recordAdmissionDecision(reason)),
-        jwks: (outcome: Parameters<typeof recordJwksRefresh>[0]) =>
-          telemetry.runSync(recordJwksRefresh(outcome)),
-      }
       const preflightConfig = config.preflightProvider
       const preflightProvider =
         preflightConfig === undefined
@@ -117,152 +138,159 @@ export const originRuntimeLayer = (
           ? undefined
           : adapters.cameraProvider(preflightConfig)
       const issuer = adapters.downloadGrantIssuer(config.downloadGrant)
-      const origin = yield* Effect.try({
-        try: () =>
-          telemetry.runSync(
-            tracedStartup(
-              'service.create',
-              Effect.sync(() =>
-                createLocalWebService(
-                  config.runtime.databasePath,
-                  createRemoteReadOnlyAdmission(config),
-                  undefined,
-                  issuer === undefined ? undefined : { issuer },
-                  {
-                    ...(config.fixture === undefined
-                      ? {}
-                      : { fixture: config.fixture }),
-                    ...(preflightProvider === undefined
-                      ? {}
-                      : { preflightProvider }),
-                    ...(cameraProvider === undefined
-                      ? {}
-                      : {
-                          cameraProvider,
-                          runExecutorProviderOrigin: new URL(
-                            `http://${preflightConfig?.host}:${preflightConfig?.port}`,
-                          ).origin,
-                          ...(preflightConfig?.devices.camera?.uniqueId ===
-                          undefined
-                            ? {}
-                            : {
-                                runExecutionContext: RunExecutionContext.make({
-                                  rigId: preflightConfig.rigId,
-                                  cameraDeviceId:
-                                    preflightConfig.devices.camera.uniqueId,
-                                  ...(preflightConfig.devices.telescope
-                                    ?.uniqueId === undefined
-                                    ? {}
-                                    : {
-                                        mountDeviceId:
-                                          preflightConfig.devices.telescope
-                                            .uniqueId,
-                                        ...(preflightConfig.site === undefined
-                                          ? config.simulation === undefined
-                                            ? {}
-                                            : {
-                                                latitudeDegrees: 39.755,
-                                                longitudeDegrees:
-                                                  -74.2677777778,
-                                                elevationMeters: 0,
-                                              }
-                                          : preflightConfig.site),
-                                      }),
-                                  completionBehavior: 'hold',
-                                  unsafeBehavior: 'pauseAndPark',
-                                }),
-                              }),
-                        }),
-                    webDistPath: config.runtime.webDistPath,
-                    previewRoot: config.runtime.previewRoot,
-                    capturedFrameStorage: {
-                      originalsRoot: config.runtime.originalsRoot,
-                    },
-                    frameInspectionStorage: {
-                      originalsRoot: config.runtime.originalsRoot,
-                      previewsRoot: config.runtime.previewRoot,
-                    },
-                    plateSolveWorker: {
-                      originalsRoot: config.runtime.originalsRoot,
-                      executable: config.plateSolve.executable,
-                      indexesRoot: config.plateSolve.indexesRoot,
-                      timeoutMs: config.plateSolve.timeoutMs,
-                      solverVersion: config.plateSolve.solverVersion,
-                      scaleLowDeg: config.plateSolve.scaleLowDeg,
-                      scaleHighDeg: config.plateSolve.scaleHighDeg,
-                      searchRadiusDeg: config.plateSolve.searchRadiusDeg,
-                    },
-                    ...(config.simulation === undefined &&
-                    preflightConfig?.site !== undefined &&
-                    preflightConfig.devices.camera?.uniqueId !== undefined &&
-                    preflightConfig.devices.telescope?.uniqueId !== undefined
-                      ? { configuredTargetProvider: preflightConfig }
-                      : {}),
-                    ...(config.simulation === undefined
-                      ? {}
-                      : { simulation: config.simulation }),
-                    telemetry,
-                    admissionObservability,
-                  },
-                ),
-              ),
+      const runContext =
+        cameraProvider === undefined ||
+        preflightConfig?.devices.camera?.uniqueId === undefined
+          ? undefined
+          : RunExecutionContext.make({
+              rigId: preflightConfig.rigId,
+              cameraDeviceId: preflightConfig.devices.camera.uniqueId,
+              ...(preflightConfig.devices.telescope?.uniqueId === undefined
+                ? {}
+                : {
+                    mountDeviceId: preflightConfig.devices.telescope.uniqueId,
+                    ...(preflightConfig.site === undefined
+                      ? config.simulation === undefined
+                        ? {}
+                        : {
+                            latitudeDegrees: 39.755,
+                            longitudeDegrees: -74.2677777778,
+                            elevationMeters: 0,
+                          }
+                      : preflightConfig.site),
+                  }),
+              completionBehavior: 'hold',
+              unsafeBehavior: 'pauseAndPark',
+            })
+      const configuredTarget =
+        config.simulation === undefined &&
+        preflightConfig?.site !== undefined &&
+        preflightConfig.devices.camera?.uniqueId !== undefined &&
+        preflightConfig.devices.telescope?.uniqueId !== undefined
+          ? preflightConfig
+          : undefined
+      const applicationServices = Layer.mergeAll(
+        preflightProvider === undefined
+          ? absentReadOnlyPreflightProviderSelectionLayer
+          : configuredReadOnlyPreflightProviderSelectionLayer(
+              preflightProvider,
             ),
-          ),
-        catch: (cause) => failure('create', cause),
-      })
-      yield* Effect.addFinalizer(() => Effect.sync(() => origin.close()))
+        cameraProvider === undefined
+          ? absentCameraProviderSelectionLayer
+          : configuredCameraProviderSelectionLayer(cameraProvider),
+        absentPolarMeasurementProviderSelectionLayer,
+        absentTargetAcquisitionProviderSelectionLayer,
+        configuredOriginCapturedFrameStorageLayer({
+          originalsRoot: config.runtime.originalsRoot,
+        }),
+        configuredOriginFrameInspectionStorageLayer({
+          originalsRoot: config.runtime.originalsRoot,
+          previewsRoot: config.runtime.previewRoot,
+        }),
+        configuredOriginPlateSolveWorkerLayer({
+          originalsRoot: config.runtime.originalsRoot,
+          executable: config.plateSolve.executable,
+          indexesRoot: config.plateSolve.indexesRoot,
+          timeoutMs: config.plateSolve.timeoutMs,
+          solverVersion: config.plateSolve.solverVersion,
+          scaleLowDeg: config.plateSolve.scaleLowDeg,
+          scaleHighDeg: config.plateSolve.scaleHighDeg,
+          searchRadiusDeg: config.plateSolve.searchRadiusDeg,
+        }),
+        configuredTarget === undefined
+          ? absentOriginConfiguredTargetProviderLayer
+          : configuredOriginConfiguredTargetProviderLayer(configuredTarget),
+        runContext === undefined || preflightConfig === undefined
+          ? absentOriginRunExecutionLayer
+          : configuredOriginRunExecutionLayer(
+              runContext,
+              new URL(`http://${preflightConfig.host}:${preflightConfig.port}`)
+                .origin,
+            ),
+        configuredLibraryRepresentationStorageLayer({
+          originalsRoot: config.runtime.originalsRoot,
+          previewsRoot: config.runtime.previewRoot,
+        }),
+        issuer === undefined
+          ? absentLibraryDownloadGrantLayer
+          : configuredLibraryDownloadGrantLayer(issuer),
+        originProcessWorkBehaviorLayer({ autoRun: true }),
+        originTelemetryServicesLayer(telemetry),
+      )
+      const application = yield* tracedStartup(
+        'service.create',
+        makeProductionOriginApplication(config).pipe(
+          Effect.provide(applicationServices),
+        ),
+      ).pipe(Effect.mapError((cause) => failure('create', cause)))
       const scope = yield* Effect.scope
       let listening: Promise<BoundOriginRuntime> | undefined
-
-      const bind = async (
-        port: number,
-        admission?: Parameters<typeof origin.listen>[2],
-      ) => {
-        const listener = await telemetry.runPromise(
-          tracedStartup(
-            'listener.bind',
-            Effect.promise(() =>
-              origin.listen(port, config.runtime.host, admission),
-            ),
-          ),
-        )
-        Effect.runSync(
-          Scope.addFinalizer(
-            scope,
-            Effect.promise(() => listener.close()),
-          ),
-        )
-        return listener
-      }
 
       const listen = Effect.fn('OriginRuntime.listen')(function* () {
         const listenPromise =
           listening ??
-          (listening = (async () => {
-            const primary = await bind(config.runtime.port)
-            if (config.admission.mode === 'development') return { primary }
-            const localOwnerPort = config.runtime.localOwnerPort
-            if (localOwnerPort === undefined)
-              throw new Error(
-                'Production origin requires ASTRO_LOCAL_OWNER_PORT',
-              )
-            const localOwner = await bind(
-              localOwnerPort,
-              createLocalOwnerAdmission(),
-            )
-            const remoteDesktop =
-              config.runtime.remoteDesktopPort === undefined
-                ? undefined
-                : await bind(
-                    config.runtime.remoteDesktopPort,
-                    createRemoteDesktopAdmission(config),
+          (listening = telemetry.runPromise(
+            tracedStartup(
+              'listener.bind',
+              Effect.gen(function* () {
+                const observation = {
+                  admission: (
+                    reason: Parameters<typeof recordAdmissionDecision>[0],
+                  ) => telemetry.runSync(recordAdmissionDecision(reason)),
+                  jwks: (outcome: Parameters<typeof recordJwksRefresh>[0]) =>
+                    telemetry.runSync(recordJwksRefresh(outcome)),
+                }
+                const bindings = [
+                  {
+                    name: 'primary',
+                    host: config.runtime.host,
+                    port: config.runtime.port,
+                    admission: createRemoteReadOnlyAdmission(config),
+                    observation,
+                  },
+                  ...(config.admission.mode === 'development'
+                    ? []
+                    : [
+                        {
+                          name: 'localOwner',
+                          host: config.runtime.host,
+                          port: config.runtime.localOwnerPort ?? 0,
+                          admission: createLocalOwnerAdmission(),
+                          observation,
+                        },
+                        ...(config.runtime.remoteDesktopPort === undefined
+                          ? []
+                          : [
+                              {
+                                name: 'remoteDesktop',
+                                host: config.runtime.host,
+                                port: config.runtime.remoteDesktopPort,
+                                admission: createRemoteDesktopAdmission(config),
+                                observation,
+                              },
+                            ]),
+                      ]),
+                ] as const
+                const bound = yield* Scope.provide(
+                  listenOriginHttp(application, bindings),
+                  scope,
+                )
+                if (bound.primary === undefined)
+                  return yield* Effect.die(
+                    new Error('Origin primary listener was not bound'),
                   )
-            return {
-              primary,
-              localOwner,
-              ...(remoteDesktop === undefined ? {} : { remoteDesktop }),
-            }
-          })())
+                return {
+                  primary: bound.primary,
+                  ...(bound.localOwner === undefined
+                    ? {}
+                    : { localOwner: bound.localOwner }),
+                  ...(bound.remoteDesktop === undefined
+                    ? {}
+                    : { remoteDesktop: bound.remoteDesktop }),
+                }
+              }),
+            ),
+          ))
         return yield* Effect.tryPromise({
           try: () => listenPromise,
           catch: (cause) => failure('listen', cause),

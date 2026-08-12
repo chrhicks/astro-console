@@ -1,0 +1,214 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { Effect, Fiber, Queue, Stream } from 'effect'
+import { TestClock } from 'effect/testing'
+import {
+  openOriginTestApplication,
+  openOriginTestApplicationForDatabase,
+} from './origin-test-graph.ts'
+import { ingestAdapterObservation } from '../services/adapter-observation-service.ts'
+import { makeLatestProjectionQueue } from '../services/projection-publication.ts'
+import { projectionHeartbeatStream } from '../http/effect-origin-http.ts'
+import { originProjectionObservationLayer } from '../app/origin-application-services.ts'
+import { consumeProjectionInvalidations } from '../app/origin-application.ts'
+
+const decoder = new TextDecoder()
+
+type OriginTestGraph = Awaited<ReturnType<typeof openOriginTestApplication>>
+const ingestObservation = (service: OriginTestGraph, raw: unknown) =>
+  Effect.runSync(
+    ingestAdapterObservation(raw, {
+      personId: 'owner-chicks',
+      clientId: 'desktop-owner',
+      role: 'owner',
+      capability: 'controlCapable',
+    }).pipe(Effect.provide(service.context)),
+  )
+
+const observation = (frameId: string) => ({
+  frameId,
+  capturedAt: '2026-08-11T12:00:00.000Z',
+  quality: 'verified' as const,
+  desired: 'M27 center',
+  solved: 'M27 center + 8 arcsec',
+  uncertaintyArcsec: 2.5,
+  correctionState: 'automatic' as const,
+  correctionEvidence: 'Adapter solve accepted.',
+  correctionBound: '8 arcsec within 30 arcsec bound.',
+  protection: 'No operator action required.',
+})
+
+const readChunk = async (
+  reader: ReadableStreamDefaultReader<Uint8Array> | undefined,
+) => {
+  assert.ok(reader !== undefined)
+  const chunk = await reader.read()
+  assert.equal(chunk.done, false)
+  assert.ok(chunk.value !== undefined)
+  return decoder.decode(chunk.value)
+}
+
+const eventCursor = (chunk: string) => Number(chunk.match(/^id: (\d+)$/m)?.[1])
+
+const awaitObservations = (
+  queue: Queue.Queue<'connect' | 'disconnect' | 'publish'>,
+  expected: 'connect' | 'disconnect',
+  count: number,
+) =>
+  Effect.gen(function* () {
+    let observed = 0
+    while (observed < count) {
+      if ((yield* Queue.take(queue)) === expected) observed += 1
+    }
+  })
+
+test('projection streams publish current and ordered typed state to two clients', async (t) => {
+  const observations = Effect.runSync(
+    Queue.unbounded<'connect' | 'disconnect' | 'publish'>(),
+  )
+  const service = await openOriginTestApplicationForDatabase(
+    ':memory:',
+    { fixture: 'm27' },
+    originProjectionObservationLayer((event) => {
+      Effect.runSync(Queue.offer(observations, event))
+    }),
+  )
+  const listener = await service.listen()
+  t.after(async () => {
+    await listener.close()
+    await service.close()
+  })
+  const base = `http://127.0.0.1:${listener.port}`
+  const [firstResponse, secondResponse] = await Promise.all([
+    fetch(`${base}/api/events`),
+    fetch(`${base}/api/events`),
+  ])
+  const first = firstResponse.body?.getReader()
+  const second = secondResponse.body?.getReader()
+
+  const [firstInitial, secondInitial] = await Promise.all([
+    readChunk(first),
+    readChunk(second),
+  ])
+  assert.match(firstInitial, /event: ProjectionChanged/)
+  assert.match(secondInitial, /event: ProjectionChanged/)
+  await Effect.runPromise(awaitObservations(observations, 'connect', 2))
+
+  assert.ok(ingestObservation(service, observation('stream-order-1')))
+  const [firstPublication, secondPublication] = await Promise.all([
+    readChunk(first),
+    readChunk(second),
+  ])
+  assert.match(firstPublication, /event: ProjectionChanged/)
+  assert.equal(eventCursor(firstPublication), eventCursor(secondPublication))
+
+  assert.ok(ingestObservation(service, observation('stream-order-2')))
+  const [firstLater, secondLater] = await Promise.all([
+    readChunk(first),
+    readChunk(second),
+  ])
+  const firstCursor = eventCursor(firstPublication)
+  const laterCursor = eventCursor(firstLater)
+  assert.ok(laterCursor > firstCursor)
+  assert.equal(laterCursor, eventCursor(secondLater))
+
+  await Promise.all([first?.cancel(), second?.cancel()])
+  await Effect.runPromise(awaitObservations(observations, 'disconnect', 2))
+})
+
+test('Effect heartbeat streams emit together and stop with their scope', async () => {
+  const writes = Effect.runSync(Queue.unbounded<string>())
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const observe = (name: string) =>
+          projectionHeartbeatStream.pipe(
+            Stream.runForEach((payload) =>
+              Queue.offer(writes, `${name}:${decoder.decode(payload)}`),
+            ),
+          )
+        const first = yield* observe('first').pipe(Effect.forkScoped)
+        const second = yield* observe('second').pipe(Effect.forkScoped)
+
+        yield* TestClock.adjust('15 seconds')
+        assert.deepEqual(
+          new Set(yield* Queue.takeAll(writes)),
+          new Set(['first:: heartbeat\n\n', 'second:: heartbeat\n\n']),
+        )
+
+        yield* Fiber.interrupt(first)
+        yield* TestClock.adjust('15 seconds')
+        assert.deepEqual(yield* Queue.takeAll(writes), [
+          'second:: heartbeat\n\n',
+        ])
+
+        yield* Fiber.interrupt(second)
+        yield* TestClock.adjust('15 seconds')
+        assert.equal(yield* Queue.size(writes), 0)
+      }),
+    ).pipe(Effect.provide(TestClock.layer())),
+  )
+})
+
+test('slow projection subscribers coalesce pending updates to the latest cursor', async () => {
+  const queue = Effect.runSync(makeLatestProjectionQueue<number>())
+  Effect.runSync(Queue.offer(queue, 1))
+  Effect.runSync(Queue.offer(queue, 2))
+  Effect.runSync(Queue.offer(queue, 3))
+
+  assert.equal(Effect.runSync(Queue.size(queue)), 1)
+  assert.equal(Effect.runSync(Queue.take(queue)), 3)
+})
+
+test('production invalidation consumer preserves every callback in order', async () => {
+  const invalidations = Effect.runSync(Queue.unbounded<number>())
+  const published = Effect.runSync(Queue.unbounded<number>())
+  const consumer = Effect.runFork(
+    consumeProjectionInvalidations(invalidations, (cursor) =>
+      Queue.offer(published, cursor),
+    ),
+  )
+
+  Queue.offerUnsafe(invalidations, 7)
+  Queue.offerUnsafe(invalidations, 8)
+  Queue.offerUnsafe(invalidations, 9)
+
+  assert.deepEqual(
+    await Effect.runPromise(
+      Effect.all([
+        Queue.take(published),
+        Queue.take(published),
+        Queue.take(published),
+      ]),
+    ),
+    [7, 8, 9],
+  )
+  await Effect.runPromise(Fiber.interrupt(consumer))
+})
+
+test('runtime-scope disposal finalizes simultaneous HTTP streams', async (t) => {
+  const service = await openOriginTestApplicationForDatabase(':memory:', {
+    fixture: 'm27',
+  })
+  const listener = await service.listen()
+  t.after(async () => {
+    await listener.close()
+    await service.close()
+  })
+  const base = `http://127.0.0.1:${listener.port}`
+  const [firstResponse, secondResponse] = await Promise.all([
+    fetch(`${base}/api/events`),
+    fetch(`${base}/api/events`),
+  ])
+  const first = firstResponse.body?.getReader()
+  const second = secondResponse.body?.getReader()
+  await Promise.all([readChunk(first), readChunk(second)])
+
+  await service.close()
+  const [firstDone, secondDone] = await Promise.all([
+    first?.read(),
+    second?.read(),
+  ])
+  assert.equal(firstDone?.done, true)
+  assert.equal(secondDone?.done, true)
+})

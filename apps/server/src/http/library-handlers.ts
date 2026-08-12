@@ -265,54 +265,72 @@ export async function observeLiveFrameReview(
     | undefined
   >,
 ) {
-  const frame = await currentFrame()
-  if (frame === undefined)
-    return json(
-      response,
-      200,
-      ObserveLiveFrameReview.cases.Unavailable.make({
-        reason: 'NoCurrentFrame',
-        message: 'No current captured frame is available for review.',
-      }),
-    )
   const result = await Effect.runPromise(
-    LibraryService.pipe(
-      Effect.flatMap((library) => library.detail(frame.sourceFrameAssetId)),
-      Effect.map((asset) =>
-        ObserveLiveFrameReview.cases.Available.make({
-          capturedAtEpochMs: frame.capturedAtEpochMs,
-          disposition: frame.disposition,
-          asset,
-        }),
-      ),
-      Effect.catchTags({
-        'Server.LibraryAssetNotFound': () =>
-          Effect.succeed(
-            ObserveLiveFrameReview.cases.Unavailable.make({
-              reason: 'LibraryAssetNotFound',
-              message: 'The current frame has not materialized in Library yet.',
-            }),
-          ),
-        'Server.LibraryInputInvalid': () =>
-          Effect.succeed(
-            ObserveLiveFrameReview.cases.Unavailable.make({
-              reason: 'LibraryAssetNotFound',
-              message: 'The current frame cannot be resolved in Library.',
-            }),
-          ),
-        'Server.LibraryPersistenceUnavailable': () =>
-          Effect.succeed(
-            ObserveLiveFrameReview.cases.Unavailable.make({
-              reason: 'LibraryUnavailable',
-              message: 'Library review evidence is temporarily unavailable.',
-            }),
-          ),
-      }),
-      Effect.provide(sqliteLibraryServiceLayer(db, snapshotVersion)),
+    readObserveLiveFrameReview(
+      db,
+      snapshotVersion,
+      Effect.promise(currentFrame),
     ),
   )
   return json(response, 200, result)
 }
+
+export const readObserveLiveFrameReview = Effect.fn(
+  'Library.readObserveLiveFrameReview',
+)(function* (
+  db: DatabaseSync,
+  snapshotVersion: () => number,
+  currentFrame: Effect.Effect<
+    | {
+        readonly sourceFrameAssetId: string
+        readonly capturedAtEpochMs: number
+        readonly disposition: 'accepted' | 'rejected'
+      }
+    | undefined,
+    unknown
+  >,
+) {
+  const frame = yield* currentFrame
+  if (frame === undefined)
+    return ObserveLiveFrameReview.cases.Unavailable.make({
+      reason: 'NoCurrentFrame',
+      message: 'No current captured frame is available for review.',
+    })
+  return yield* LibraryService.pipe(
+    Effect.flatMap((library) => library.detail(frame.sourceFrameAssetId)),
+    Effect.map((asset) =>
+      ObserveLiveFrameReview.cases.Available.make({
+        capturedAtEpochMs: frame.capturedAtEpochMs,
+        disposition: frame.disposition,
+        asset,
+      }),
+    ),
+    Effect.catchTags({
+      'Server.LibraryAssetNotFound': () =>
+        Effect.succeed(
+          ObserveLiveFrameReview.cases.Unavailable.make({
+            reason: 'LibraryAssetNotFound',
+            message: 'The current frame has not materialized in Library yet.',
+          }),
+        ),
+      'Server.LibraryInputInvalid': () =>
+        Effect.succeed(
+          ObserveLiveFrameReview.cases.Unavailable.make({
+            reason: 'LibraryAssetNotFound',
+            message: 'The current frame cannot be resolved in Library.',
+          }),
+        ),
+      'Server.LibraryPersistenceUnavailable': () =>
+        Effect.succeed(
+          ObserveLiveFrameReview.cases.Unavailable.make({
+            reason: 'LibraryUnavailable',
+            message: 'Library review evidence is temporarily unavailable.',
+          }),
+        ),
+    }),
+    Effect.provide(sqliteLibraryServiceLayer(db, snapshotVersion)),
+  )
+})
 export async function libraryReview(
   response: ServerResponse,
   db: DatabaseSync,

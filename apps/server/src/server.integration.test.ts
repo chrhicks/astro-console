@@ -12,9 +12,16 @@ import {
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
-import type { IncomingMessage } from 'node:http'
 import { generateKeyPairSync, sign } from 'node:crypto'
-import { Cause, ConfigProvider, Effect, Exit, Schema } from 'effect'
+import {
+  Cause,
+  ConfigProvider,
+  Context,
+  Effect,
+  Exit,
+  Layer,
+  Schema,
+} from 'effect'
 import {
   AcquireSnapshot,
   AcquireCommandResponse,
@@ -56,8 +63,13 @@ const revisePlanSequence = <
 import {
   createOriginAdmission,
   createLocalOwnerAdmission,
-  createLocalWebService,
-} from './app/origin-service.ts'
+} from './app/origin-admission.ts'
+import {
+  openOriginTestApplication,
+  openOriginTestApplicationForDatabase,
+  originTestDatabase,
+} from './integration/origin-test-graph.ts'
+import { ingestAdapterObservation } from './services/adapter-observation-service.ts'
 import {
   createJwksKeyResolver,
   createMembershipBootstrapResolver,
@@ -70,21 +82,49 @@ import {
 import { originServerConfig } from './config/environment-config.ts'
 import { alpacaPreflightProvider } from './providers/alpaca-preflight-provider.ts'
 import { alpacaCameraProvider } from './providers/alpaca-camera-provider.ts'
-import { materializeCapturedFrame } from './services/captured-frame-intake.ts'
+import {
+  ingestCapturedFrame,
+  materializeCapturedFrame,
+} from './services/captured-frame-intake.ts'
+import { inspectCapturedFrame } from './services/frame-inspection.ts'
 import { createPlateSolveWorker } from './workers/plate-solve-worker.ts'
+import { createProcessWorkWorker } from './workers/process-work-worker.ts'
+import { RunSqliteRepository } from './persistence/run-sqlite-repository.ts'
+import type { AdmissionRequest } from './auth/identity.ts'
+import type { RequestAdmission } from './auth/identity.ts'
+import type { DownloadGrantIssuer } from './storage/r2-download-grant.ts'
+import { configuredLibraryDownloadGrantLayer } from './services/library-representation-service.ts'
+import {
+  configuredCameraProviderSelectionLayer,
+  configuredPolarMeasurementProviderSelectionLayer,
+  configuredTargetAcquisitionProviderSelectionLayer,
+} from './services/acquire-command-service.ts'
+import { configuredReadOnlyPreflightProviderSelectionLayer } from './services/preflight-command-service.ts'
+import {
+  configuredOriginCapturedFrameStorageLayer,
+  configuredOriginFrameInspectionStorageLayer,
+  configuredOriginPlateSolveWorkerLayer,
+  originProcessWorkBehaviorLayer,
+} from './app/origin-application-services.ts'
 
-function createFixtureService(
-  databasePath?: Parameters<typeof createLocalWebService>[0],
-  identityResolver?: Parameters<typeof createLocalWebService>[1],
-  unused?: Parameters<typeof createLocalWebService>[2],
-  downloadGrants?: Parameters<typeof createLocalWebService>[3],
+async function createFixtureService(
+  databasePath = ':memory:',
+  identityResolver?: RequestAdmission,
+  downloadGrants?: {
+    readonly issuer: DownloadGrantIssuer
+    readonly now?: () => Date
+  },
 ) {
-  return createLocalWebService(
+  return await openOriginTestApplicationForDatabase(
     databasePath,
-    identityResolver,
-    unused,
-    downloadGrants,
     { fixture: 'm27' },
+    downloadGrants === undefined
+      ? undefined
+      : configuredLibraryDownloadGrantLayer(
+          downloadGrants.issuer,
+          downloadGrants.now,
+        ),
+    identityResolver,
   )
 }
 
@@ -93,6 +133,10 @@ async function bootstrapSnapshot(url: string, init?: RequestInit) {
   const body: unknown = await response.json()
   return Schema.decodeUnknownSync(BootstrapHttpSuccessEnvelope)(body).data
 }
+
+const admissionRequest = (
+  headers: AdmissionRequest['headers'] = {},
+): AdmissionRequest => ({ method: 'GET', path: '/api/snapshot', headers })
 
 function retainedFitsWithHints() {
   const card = (key: string, value: string) =>
@@ -128,66 +172,91 @@ const capturedEquipment = {
   cameraDeviceId: 'fixture-camera',
 }
 
+type OriginTestGraph = Awaited<ReturnType<typeof openOriginTestApplication>>
+const ingestObservation = (service: OriginTestGraph, raw: unknown) =>
+  Effect.runSync(
+    ingestAdapterObservation(raw, {
+      personId: 'owner-chicks',
+      clientId: 'desktop-owner',
+      role: 'owner',
+      capability: 'controlCapable',
+    }).pipe(Effect.provide(service.context)),
+  )
+
+const retainCapturedFrame = (
+  service: OriginTestGraph,
+  raw: unknown,
+  bytes: Uint8Array,
+) =>
+  Effect.runSync(
+    ingestCapturedFrame(
+      { originalsRoot: service.config.runtime.originalsRoot },
+      raw,
+      bytes,
+    ).pipe(Effect.provide(service.context)),
+  )
+
 test('local plate solver records solved and no-solution evidence without a mount path', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'astro-plate-solve-'))
   const databasePath = join(root, 'state.sqlite')
   const originalsRoot = join(root, 'originals')
   let calls = 0
-  const service = createLocalWebService(
+  const plateSolveWorker = {
+    originalsRoot,
+    executable: '/usr/bin/solve-field',
+    indexesRoot: '/home/chicks/.local/share/astrometry/indexes',
+    timeoutMs: 45_000,
+    solverVersion: '0.97',
+    scaleLowDeg: 20,
+    scaleHighDeg: 30,
+    searchRadiusDeg: 15,
+    execute: async ({ args }: { readonly args: ReadonlyArray<string> }) => {
+      calls += 1
+      assert.deepEqual(args.slice(2, 8), [
+        '--dir',
+        args[3],
+        '--no-plots',
+        '--overwrite',
+        '--cpulimit',
+        '45',
+      ])
+      const backendConfigPath = args[1]
+      assert.ok(backendConfigPath)
+      assert.equal(
+        readFileSync(backendConfigPath, 'utf8'),
+        'add_path /home/chicks/.local/share/astrometry/indexes\nautoindex\n',
+      )
+      assert.deepEqual(args.slice(8, 20), [
+        '--scale-units',
+        'degwidth',
+        '--scale-low',
+        '20',
+        '--scale-high',
+        '30',
+        '--ra',
+        '210',
+        '--dec',
+        '54',
+        '--radius',
+        '15',
+      ])
+      return {
+        exitCode: 0,
+        stdout: `${'verbose solver output '.repeat(200)}Field center: (299.901, 22.721)`,
+        stderr: '',
+      }
+    },
+  }
+  const service = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
     {
       fixture: 'target-deep-sky',
-      capturedFrameStorage: { originalsRoot },
-      plateSolveWorker: {
-        originalsRoot,
-        executable: '/usr/bin/solve-field',
-        indexesRoot: '/home/chicks/.local/share/astrometry/indexes',
-        timeoutMs: 45_000,
-        solverVersion: '0.97',
-        scaleLowDeg: 20,
-        scaleHighDeg: 30,
-        searchRadiusDeg: 15,
-        execute: async ({ args }) => {
-          calls += 1
-          assert.deepEqual(args.slice(2, 8), [
-            '--dir',
-            args[3],
-            '--no-plots',
-            '--overwrite',
-            '--cpulimit',
-            '45',
-          ])
-          const backendConfigPath = args[1]
-          assert.ok(backendConfigPath)
-          assert.equal(
-            readFileSync(backendConfigPath, 'utf8'),
-            'add_path /home/chicks/.local/share/astrometry/indexes\nautoindex\n',
-          )
-          assert.deepEqual(args.slice(8, 20), [
-            '--scale-units',
-            'degwidth',
-            '--scale-low',
-            '20',
-            '--scale-high',
-            '30',
-            '--ra',
-            '210',
-            '--dec',
-            '54',
-            '--radius',
-            '15',
-          ])
-          return {
-            exitCode: 0,
-            stdout: `${'verbose solver output '.repeat(200)}Field center: (299.901, 22.721)`,
-            stderr: '',
-          }
-        },
-      },
+      runtime: { originalsRoot: { originalsRoot }.originalsRoot },
     },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+      configuredOriginPlateSolveWorkerLayer(plateSolveWorker),
+    ),
   )
   const intake = {
     assetId: 'asset-capture-plate-solve-001',
@@ -209,10 +278,13 @@ test('local plate solver records solved and no-solution evidence without a mount
     idempotencyKey: 'plate-solve-001',
   }
   assert.equal(
-    service.ingestCapturedFrame(intake, retainedFitsWithHints()).outcome,
+    retainCapturedFrame(service, intake, retainedFitsWithHints()).outcome,
     'accepted',
   )
-  const solved = await service.solveRetainedFrame(intake.assetId)
+  const solved = await createPlateSolveWorker(
+    originTestDatabase(service),
+    plateSolveWorker,
+  ).solve(intake.assetId)
   assert.deepEqual(solved.outcome, 'recorded')
   if (solved.outcome !== 'recorded') throw new Error('solve was not recorded')
   assert.equal(solved.result, 'Solved')
@@ -220,24 +292,30 @@ test('local plate solver records solved and no-solution evidence without a mount
   assert.equal(existsSync(join(originalsRoot, `${intake.assetId}.fits`)), true)
   const evidence = databaseRow(
     PlateSolveEvidenceRow,
-    service.database.prepare('SELECT evidence FROM plate_solve_runs').get(),
+    originTestDatabase(service)
+      .prepare('SELECT evidence FROM plate_solve_runs')
+      .get(),
   )
   assert.match(evidence.evidence, /astrometry.net/)
   assert.match(evidence.evidence, /asset-capture-plate-solve-001/)
   const session = databaseRow(
     AcquireSessionRow,
-    service.database.prepare('SELECT session FROM acquire_sessions').get(),
+    originTestDatabase(service)
+      .prepare('SELECT session FROM acquire_sessions')
+      .get(),
   )
   assert.match(session.session, /SolveAttempt/)
   assert.doesNotMatch(session.session, /CorrectionAccepted/)
 
-  service.close()
-  const resumed = createLocalWebService(databasePath)
+  await service.close()
+  const resumed = await openOriginTestApplicationForDatabase(databasePath)
   t.after(() => resumed.close())
   assert.equal(
     databaseRow(
       PlateSolveEvidenceRow,
-      resumed.database.prepare('SELECT evidence FROM plate_solve_runs').get(),
+      originTestDatabase(resumed)
+        .prepare('SELECT evidence FROM plate_solve_runs')
+        .get(),
     ).evidence,
     evidence.evidence,
   )
@@ -247,16 +325,20 @@ test('local plate solver records solved and no-solution evidence without a mount
 test('local plate solver records a bounded failure as typed no-solution and retains its source', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'astro-plate-solve-failure-'))
   const originalsRoot = join(root, 'originals')
-  const service = createLocalWebService(
+  const service = await openOriginTestApplicationForDatabase(
     undefined,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'target-deep-sky', capturedFrameStorage: { originalsRoot } },
+    {
+      fixture: 'target-deep-sky',
+      runtime: { originalsRoot: { originalsRoot }.originalsRoot },
+    },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+    ),
   )
   t.after(() => service.close())
   const assetId = 'asset-capture-plate-solve-timeout'
-  service.ingestCapturedFrame(
+  retainCapturedFrame(
+    service,
     {
       assetId,
       frameId: 'plate-solve-timeout',
@@ -278,7 +360,7 @@ test('local plate solver records a bounded failure as typed no-solution and reta
     },
     retainedFitsWithHints(),
   )
-  const outcome = await createPlateSolveWorker(service.database, {
+  const outcome = await createPlateSolveWorker(originTestDatabase(service), {
     originalsRoot,
     executable: '/usr/bin/solve-field',
     indexesRoot: '/home/chicks/.local/share/astrometry/indexes',
@@ -299,7 +381,9 @@ test('local plate solver records a bounded failure as typed no-solution and reta
   assert.equal(existsSync(join(originalsRoot, `${assetId}.fits`)), true)
   const session = databaseRow(
     AcquireSessionRow,
-    service.database.prepare('SELECT session FROM acquire_sessions').get(),
+    originTestDatabase(service)
+      .prepare('SELECT session FROM acquire_sessions')
+      .get(),
   )
   assert.match(session.session, /solver-failure/)
 })
@@ -307,16 +391,20 @@ test('local plate solver records a bounded failure as typed no-solution and reta
 test('local plate solver records normal solve-field exit 1 as no-solution', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'astro-plate-solve-none-'))
   const originalsRoot = join(root, 'originals')
-  const service = createLocalWebService(
+  const service = await openOriginTestApplicationForDatabase(
     undefined,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'target-deep-sky', capturedFrameStorage: { originalsRoot } },
+    {
+      fixture: 'target-deep-sky',
+      runtime: { originalsRoot: { originalsRoot }.originalsRoot },
+    },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+    ),
   )
   t.after(() => service.close())
   const assetId = 'asset-capture-plate-solve-none'
-  service.ingestCapturedFrame(
+  retainCapturedFrame(
+    service,
     {
       assetId,
       frameId: 'plate-solve-none',
@@ -338,7 +426,7 @@ test('local plate solver records normal solve-field exit 1 as no-solution', asyn
     },
     retainedFitsWithHints(),
   )
-  const result = await createPlateSolveWorker(service.database, {
+  const result = await createPlateSolveWorker(originTestDatabase(service), {
     originalsRoot,
     executable: '/usr/bin/solve-field',
     indexesRoot: '/home/chicks/.local/share/astrometry/indexes',
@@ -352,7 +440,9 @@ test('local plate solver records normal solve-field exit 1 as no-solution', asyn
   assert.equal(result.outcome, 'recorded')
   const session = databaseRow(
     AcquireSessionRow,
-    service.database.prepare('SELECT session FROM acquire_sessions').get(),
+    originTestDatabase(service)
+      .prepare('SELECT session FROM acquire_sessions')
+      .get(),
   )
   assert.match(session.session, /no-solution/)
   assert.doesNotMatch(session.session, /solver-failure/)
@@ -363,15 +453,21 @@ test('materializes deterministic captured bytes as an immutable Library asset wi
   const databasePath = join(root, 'state.sqlite')
   const originalsRoot = join(root, 'originals')
   const previewsRoot = join(root, 'previews')
-  const service = createLocalWebService(
+  const service = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
     {
-      capturedFrameStorage: { originalsRoot },
-      frameInspectionStorage: { originalsRoot, previewsRoot },
+      runtime: {
+        originalsRoot: { originalsRoot, previewsRoot }.originalsRoot,
+        previewRoot: { originalsRoot, previewsRoot }.previewsRoot,
+      },
     },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+      configuredOriginFrameInspectionStorageLayer({
+        originalsRoot,
+        previewsRoot,
+      }),
+    ),
   )
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
@@ -379,7 +475,8 @@ test('materializes deterministic captured bytes as an immutable Library asset wi
   const reader = stream.body?.getReader()
   if (reader === undefined) throw new Error('SSE response has no body')
   await reader.read()
-  const first = service.ingestCapturedFrame(
+  const first = retainCapturedFrame(
+    service,
     {
       assetId: 'asset-capture-m27-001',
       frameId: 'frame-m27-001',
@@ -405,7 +502,8 @@ test('materializes deterministic captured bytes as an immutable Library asset wi
   if (first.outcome !== 'accepted')
     throw new Error('capture frame was rejected')
   assert.deepEqual(
-    service.ingestCapturedFrame(
+    retainCapturedFrame(
+      service,
       {
         assetId: 'asset-capture-m27-001',
         frameId: 'frame-m27-001',
@@ -431,7 +529,16 @@ test('materializes deterministic captured bytes as an immutable Library asset wi
   )
   const emitted = new TextDecoder().decode((await reader.read()).value)
   assert.match(emitted, /"eventCursor":1/)
-  const inspected = service.inspectFrame('asset-capture-m27-001')
+  const inspected = Effect.runSync(
+    inspectCapturedFrame(
+      originTestDatabase(service),
+      {
+        originalsRoot: service.config.runtime.originalsRoot,
+        previewsRoot: service.config.runtime.previewRoot,
+      },
+      'asset-capture-m27-001',
+    ),
+  )
   assert.equal(inspected?.inspection._tag, 'Available')
   assert.equal(
     existsSync(join(previewsRoot, 'asset-capture-m27-001.png')),
@@ -457,7 +564,7 @@ test('materializes deterministic captured bytes as an immutable Library asset wi
   assert.equal(
     databaseRow(
       CountRow,
-      service.database
+      originTestDatabase(service)
         .prepare(
           "SELECT count(*) AS count FROM events WHERE type='FrameInspectionUpdated'",
         )
@@ -494,21 +601,27 @@ test('materializes deterministic captured bytes as an immutable Library asset wi
   )
   await reader.cancel()
   await listener.close()
-  service.close()
-  const recovered = createLocalWebService(
+  await service.close()
+  const recovered = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
     {
-      capturedFrameStorage: { originalsRoot },
-      frameInspectionStorage: { originalsRoot, previewsRoot },
+      runtime: {
+        originalsRoot: { originalsRoot, previewsRoot }.originalsRoot,
+        previewRoot: { originalsRoot, previewsRoot }.previewsRoot,
+      },
     },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+      configuredOriginFrameInspectionStorageLayer({
+        originalsRoot,
+        previewsRoot,
+      }),
+    ),
   )
   const recoveredListener = await recovered.listen()
   t.after(async () => {
     await recoveredListener.close()
-    recovered.close()
+    await recovered.close()
   })
   const recoveredDetail = await fetch(
     `http://127.0.0.1:${recoveredListener.port}/api/library/assets/asset-capture-m27-001`,
@@ -639,16 +752,22 @@ test('Phase 4 deterministic chain carries one current captured frame through Lib
   const databasePath = join(root, 'state.sqlite')
   const originalsRoot = join(root, 'originals')
   const previewsRoot = join(root, 'previews')
-  let service = createLocalWebService(
+  let service = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
     {
       fixture: 'live-frame',
-      capturedFrameStorage: { originalsRoot },
-      frameInspectionStorage: { originalsRoot, previewsRoot },
+      runtime: {
+        originalsRoot: { originalsRoot, previewsRoot }.originalsRoot,
+        previewRoot: { originalsRoot, previewsRoot }.previewsRoot,
+      },
     },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+      configuredOriginFrameInspectionStorageLayer({
+        originalsRoot,
+        previewsRoot,
+      }),
+    ),
   )
   let listener = await service.listen()
   let base = `http://127.0.0.1:${listener.port}`
@@ -666,7 +785,8 @@ test('Phase 4 deterministic chain carries one current captured frame through Lib
     idempotencyKey: 'phase-4-live-frame',
   })
   assert.equal(recorded.response.status, 200)
-  const first = service.ingestCapturedFrame(
+  const first = retainCapturedFrame(
+    service,
     {
       assetId: 'asset-capture-live-001',
       frameId: 'frame-live-001',
@@ -690,7 +810,16 @@ test('Phase 4 deterministic chain carries one current captured frame through Lib
   )
   assert.equal(first.outcome, 'accepted')
   assert.equal(
-    service.inspectFrame('asset-capture-live-001')?.inspection._tag,
+    Effect.runSync(
+      inspectCapturedFrame(
+        originTestDatabase(service),
+        {
+          originalsRoot: service.config.runtime.originalsRoot,
+          previewsRoot: service.config.runtime.previewRoot,
+        },
+        'asset-capture-live-001',
+      ),
+    )?.inspection._tag,
     'Available',
   )
   const asset = await fetch(
@@ -714,7 +843,8 @@ test('Phase 4 deterministic chain carries one current captured frame through Lib
   assert.equal(review._tag, 'Accepted')
   if (review._tag !== 'Accepted') throw new Error('review was not accepted')
   assert.equal(review.review.decision, 'accepted')
-  const second = service.ingestCapturedFrame(
+  const second = retainCapturedFrame(
+    service,
     {
       assetId: 'asset-capture-live-002',
       frameId: 'frame-live-002',
@@ -768,22 +898,28 @@ test('Phase 4 deterministic chain carries one current captured frame through Lib
   assert.match(connected, /eventCursor/)
   await reader.cancel()
   await listener.close()
-  service.close()
-  service = createLocalWebService(
+  await service.close()
+  service = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
     {
-      capturedFrameStorage: { originalsRoot },
-      frameInspectionStorage: { originalsRoot, previewsRoot },
+      runtime: {
+        originalsRoot: { originalsRoot, previewsRoot }.originalsRoot,
+        previewRoot: { originalsRoot, previewsRoot }.previewsRoot,
+      },
     },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+      configuredOriginFrameInspectionStorageLayer({
+        originalsRoot,
+        previewsRoot,
+      }),
+    ),
   )
   listener = await service.listen()
   base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const restartedReview = await fetch(`${base}/api/observe/live-frame`).then(
     (response) => response.json(),
@@ -803,17 +939,13 @@ test('Phase 4 deterministic chain carries one current captured frame through Lib
 })
 
 test('live-frame-library fixture exposes the available current review without a catalog request', async (t) => {
-  const service = createLocalWebService(
-    ':memory:',
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'live-frame-library' },
-  )
+  const service = await openOriginTestApplicationForDatabase(':memory:', {
+    fixture: 'live-frame-library',
+  })
   const listener = await service.listen()
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const review = await fetch(
     `http://127.0.0.1:${listener.port}/api/observe/live-frame`,
@@ -824,23 +956,33 @@ test('live-frame-library fixture exposes the available current review without a 
   assert.equal(review.asset.review.decision, 'accepted')
 })
 
-test('persists truthful unavailable inspection state when a retained original is absent', () => {
+test('persists truthful unavailable inspection state when a retained original is absent', async () => {
   const root = mkdtempSync(join(tmpdir(), 'astro-inspection-unavailable-'))
   const originalsRoot = join(root, 'originals')
-  const service = createLocalWebService(
-    undefined,
-    undefined,
-    undefined,
+  const service = await openOriginTestApplicationForDatabase(
     undefined,
     {
-      capturedFrameStorage: { originalsRoot },
-      frameInspectionStorage: {
-        originalsRoot,
-        previewsRoot: join(root, 'previews'),
+      runtime: {
+        originalsRoot: {
+          originalsRoot,
+          previewsRoot: join(root, 'previews'),
+        }.originalsRoot,
+        previewRoot: {
+          originalsRoot,
+          previewsRoot: join(root, 'previews'),
+        }.previewsRoot,
       },
     },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+      configuredOriginFrameInspectionStorageLayer({
+        originalsRoot,
+        previewsRoot: join(root, 'previews'),
+      }),
+    ),
   )
-  const created = service.ingestCapturedFrame(
+  const created = retainCapturedFrame(
+    service,
     {
       assetId: 'asset-capture-unavailable-001',
       frameId: 'frame-unavailable-001',
@@ -865,32 +1007,51 @@ test('persists truthful unavailable inspection state when a retained original is
   assert.equal(created.outcome, 'accepted')
   unlinkSync(join(originalsRoot, 'asset-capture-unavailable-001.fits'))
   assert.deepEqual(
-    service.inspectFrame('asset-capture-unavailable-001')?.inspection,
+    Effect.runSync(
+      inspectCapturedFrame(
+        originTestDatabase(service),
+        {
+          originalsRoot: service.config.runtime.originalsRoot,
+          previewsRoot: service.config.runtime.previewRoot,
+        },
+        'asset-capture-unavailable-001',
+      ),
+    )?.inspection,
     {
       _tag: 'Unavailable',
       summary: 'The immutable original is not available for inspection.',
     },
   )
-  service.close()
+  await service.close()
 })
 
-test('persists truthful failed inspection state when a retained original changes', () => {
+test('persists truthful failed inspection state when a retained original changes', async () => {
   const root = mkdtempSync(join(tmpdir(), 'astro-inspection-failed-'))
   const originalsRoot = join(root, 'originals')
-  const service = createLocalWebService(
-    undefined,
-    undefined,
-    undefined,
+  const service = await openOriginTestApplicationForDatabase(
     undefined,
     {
-      capturedFrameStorage: { originalsRoot },
-      frameInspectionStorage: {
-        originalsRoot,
-        previewsRoot: join(root, 'previews'),
+      runtime: {
+        originalsRoot: {
+          originalsRoot,
+          previewsRoot: join(root, 'previews'),
+        }.originalsRoot,
+        previewRoot: {
+          originalsRoot,
+          previewsRoot: join(root, 'previews'),
+        }.previewsRoot,
       },
     },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+      configuredOriginFrameInspectionStorageLayer({
+        originalsRoot,
+        previewsRoot: join(root, 'previews'),
+      }),
+    ),
   )
-  const created = service.ingestCapturedFrame(
+  const created = retainCapturedFrame(
+    service,
     {
       assetId: 'asset-capture-failed-001',
       frameId: 'frame-failed-001',
@@ -918,16 +1079,25 @@ test('persists truthful failed inspection state when a retained original changes
     'changed-fits-bytes',
   )
   assert.equal(
-    service.inspectFrame('asset-capture-failed-001')?.inspection._tag,
+    Effect.runSync(
+      inspectCapturedFrame(
+        originTestDatabase(service),
+        {
+          originalsRoot: service.config.runtime.originalsRoot,
+          previewsRoot: service.config.runtime.previewRoot,
+        },
+        'asset-capture-failed-001',
+      ),
+    )?.inspection._tag,
     'Failed',
   )
-  service.close()
+  await service.close()
 })
 
 test('Library review is owner-only, revision-guarded, idempotent, durable, and projected', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'astro-library-review-'))
   const databasePath = join(root, 'state.sqlite')
-  const service = createFixtureService(databasePath)
+  const service = await createFixtureService(databasePath)
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   const stream = await fetch(`${base}/api/events`)
@@ -1001,7 +1171,7 @@ test('Library review is owner-only, revision-guarded, idempotent, durable, and p
     rating: 5,
   })
   assert.equal('annotation' in (reviewedSummary?.review ?? {}), false)
-  const viewer = createFixtureService(undefined, () => ({
+  const viewer = await createFixtureService(undefined, () => ({
     personId: 'viewer',
     clientId: 'viewer',
     role: 'viewer' as const,
@@ -1010,7 +1180,7 @@ test('Library review is owner-only, revision-guarded, idempotent, durable, and p
   const viewerListener = await viewer.listen()
   t.after(async () => {
     await viewerListener.close()
-    viewer.close()
+    await viewer.close()
   })
   const viewerResponse = await fetch(
     `http://127.0.0.1:${viewerListener.port}/api/library/assets/asset-m27-001/review`,
@@ -1046,12 +1216,12 @@ test('Library review is owner-only, revision-guarded, idempotent, durable, and p
   assert.equal(invalid.failure._tag, 'InvalidInput')
   await reader.cancel()
   await listener.close()
-  service.close()
-  const recovered = createFixtureService(databasePath)
+  await service.close()
+  const recovered = await createFixtureService(databasePath)
   const recoveredListener = await recovered.listen()
   t.after(async () => {
     await recoveredListener.close()
-    recovered.close()
+    await recovered.close()
   })
   const recoveredDetail = await fetch(
     `http://127.0.0.1:${recoveredListener.port}/api/library/assets/asset-m27-001`,
@@ -1060,7 +1230,7 @@ test('Library review is owner-only, revision-guarded, idempotent, durable, and p
 })
 
 test('bootstrap and bounded control transport decode shared contracts before mutation', async (t) => {
-  const service = createFixtureService(undefined, () => ({
+  const service = await createFixtureService(undefined, () => ({
     personId: 'member',
     clientId: 'desktop-member',
     role: 'viewer' as const,
@@ -1070,7 +1240,7 @@ test('bootstrap and bounded control transport decode shared contracts before mut
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const snapshot = Schema.decodeUnknownSync(BootstrapHttpSuccessEnvelope)(
     await fetch(`${base}/api/snapshot`).then((response) => response.json()),
@@ -1093,7 +1263,9 @@ test('bootstrap and bounded control transport decode shared contracts before mut
   assert.equal(event.id, event.data.eventCursor)
   const before = databaseRow(
     CountRow,
-    service.database.prepare('SELECT count(*) AS count FROM events').get(),
+    originTestDatabase(service)
+      .prepare('SELECT count(*) AS count FROM events')
+      .get(),
   ).count
   const malformed = Schema.decodeUnknownSync(CommandHttpFailureEnvelope)(
     await fetch(`${base}/api/commands/control`, {
@@ -1105,7 +1277,9 @@ test('bootstrap and bounded control transport decode shared contracts before mut
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM events').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM events')
+        .get(),
     ).count,
     before,
   )
@@ -1127,12 +1301,12 @@ test('bootstrap and bounded control transport decode shared contracts before mut
 })
 
 test('Plan command transport decodes one closed request boundary and projects persisted eligibility', async (t) => {
-  const service = createFixtureService()
+  const service = await createFixtureService()
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const malformed = await fetch(`${base}/api/plan/commands`, {
     method: 'POST',
@@ -1557,15 +1731,14 @@ const refreshCameraPreflight = (
 
 test('camera commands reject stale authority before the provider and retain only reconciled observations', async (t) => {
   let starts = 0
-  const service = createLocalWebService(
+  const service = await openOriginTestApplicationForDatabase(
     undefined,
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'preflight',
-      preflightProvider: readyCameraPreflightProvider,
-      cameraProvider: {
+    { fixture: 'preflight' },
+    Layer.mergeAll(
+      configuredReadOnlyPreflightProviderSelectionLayer(
+        readyCameraPreflightProvider,
+      ),
+      configuredCameraProviderSelectionLayer({
         startExposure: () => {
           starts += 1
           return Effect.succeed(undefined)
@@ -1576,13 +1749,13 @@ test('camera commands reject stale authority before the provider and retain only
             observedAt: '2026-08-05T10:00:00.000Z',
             cameraState: 'exposing',
           }),
-      },
-    },
+      }),
+    ),
   )
   const listener = await service.listen()
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const base = `http://127.0.0.1:${listener.port}`
   const started = await startFixtureRun(base, 'camera-command-run')
@@ -1620,7 +1793,7 @@ test('camera commands reject stale authority before the provider and retain only
   assert.equal(
     databaseRow(
       Schema.Struct({ observation: Schema.String }),
-      service.database
+      originTestDatabase(service)
         .prepare('SELECT observation FROM camera_observations WHERE run_id=?')
         .get(activeRun.runId),
     ).observation.includes('exposing'),
@@ -1639,23 +1812,22 @@ test('camera provider failure persists recover truth and the receipt prevents co
     'state.sqlite',
   )
   let calls = 0
-  const service = createLocalWebService(
+  const service = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'preflight',
-      preflightProvider: readyCameraPreflightProvider,
-      cameraProvider: {
+    { fixture: 'preflight' },
+    Layer.mergeAll(
+      configuredReadOnlyPreflightProviderSelectionLayer(
+        readyCameraPreflightProvider,
+      ),
+      configuredCameraProviderSelectionLayer({
         startExposure: () => {
           calls += 1
           return Effect.fail(new Error('recorded timeout'))
         },
         abortExposure: () => Effect.fail(new Error('recorded disconnect')),
         readState: () => Effect.fail(new Error('unreachable')),
-      },
-    },
+      }),
+    ),
   )
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
@@ -1686,12 +1858,12 @@ test('camera provider failure persists recover truth and the receipt prevents co
     'unavailable',
   )
   await listener.close()
-  service.close()
-  const recovered = createLocalWebService(databasePath)
+  await service.close()
+  const recovered = await openOriginTestApplicationForDatabase(databasePath)
   const recoveredListener = await recovered.listen()
   t.after(async () => {
     await recoveredListener.close()
-    recovered.close()
+    await recovered.close()
   })
   const snapshot = await bootstrapSnapshot(
     `http://127.0.0.1:${recoveredListener.port}/api/snapshot`,
@@ -1708,15 +1880,33 @@ test('completed camera image becomes a durable Library original and duplicate co
   const root = mkdtempSync(join(tmpdir(), 'astro-camera-library-'))
   const databasePath = join(root, 'state.sqlite')
   let reads = 0
-  const service = createLocalWebService(
+  const service = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
     {
       fixture: 'preflight',
-      preflightProvider: readyCameraPreflightProvider,
-      cameraProvider: {
+      runtime: {
+        originalsRoot: {
+          originalsRoot: join(root, 'originals'),
+          previewsRoot: join(root, 'previews'),
+        }.originalsRoot,
+        previewRoot: {
+          originalsRoot: join(root, 'originals'),
+          previewsRoot: join(root, 'previews'),
+        }.previewsRoot,
+      },
+    },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({
+        originalsRoot: join(root, 'originals'),
+      }),
+      configuredOriginFrameInspectionStorageLayer({
+        originalsRoot: join(root, 'originals'),
+        previewsRoot: join(root, 'previews'),
+      }),
+      configuredReadOnlyPreflightProviderSelectionLayer(
+        readyCameraPreflightProvider,
+      ),
+      configuredCameraProviderSelectionLayer({
         startExposure: () => Effect.succeed(undefined),
         abortExposure: () => Effect.succeed(undefined),
         readState: () =>
@@ -1733,13 +1923,8 @@ test('completed camera image becomes a durable Library original and duplicate co
             format: 'fits' as const,
           })
         },
-      },
-      capturedFrameStorage: { originalsRoot: join(root, 'originals') },
-      frameInspectionStorage: {
-        originalsRoot: join(root, 'originals'),
-        previewsRoot: join(root, 'previews'),
-      },
-    },
+      }),
+    ),
   )
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
@@ -1782,12 +1967,12 @@ test('completed camera image becomes a durable Library original and duplicate co
     /^SIMPLE/,
   )
   await listener.close()
-  service.close()
-  const recovered = createLocalWebService(databasePath)
+  await service.close()
+  const recovered = await openOriginTestApplicationForDatabase(databasePath)
   const recoveredListener = await recovered.listen()
   t.after(async () => {
     await recoveredListener.close()
-    recovered.close()
+    await recovered.close()
   })
   assert.equal(
     (
@@ -1801,15 +1986,9 @@ test('completed camera image becomes a durable Library original and duplicate co
 
 test('target fixtures keep provisional slew acknowledgement separate from deep-sky and lunar image evidence', async (t) => {
   for (const fixture of ['target-deep-sky', 'target-lunar'] as const) {
-    const service = createLocalWebService(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
-        fixture,
-      },
-    )
+    const service = await openOriginTestApplicationForDatabase(undefined, {
+      fixture: fixture,
+    })
     const listener = await service.listen()
     const base = `http://127.0.0.1:${listener.port}`
     const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
@@ -1834,10 +2013,14 @@ test('target fixtures keep provisional slew acknowledgement separate from deep-s
     )
     const session = Schema.decodeUnknownSync(
       Schema.Struct({ session: Schema.String }),
-    )(service.database.prepare('SELECT session FROM acquire_sessions').get())
+    )(
+      originTestDatabase(service)
+        .prepare('SELECT session FROM acquire_sessions')
+        .get(),
+    )
     assert.match(session.session, /TargetSlewAcknowledged/)
     await listener.close()
-    service.close()
+    await service.close()
   }
   t.after(() => undefined)
 })
@@ -1847,13 +2030,9 @@ test('lunar target acquisition publishes image evidence and survives restart', a
     mkdtempSync(join(tmpdir(), 'astro-target-lunar-')),
     'state.sqlite',
   )
-  let service = createLocalWebService(
-    databasePath,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'target-lunar' },
-  )
+  let service = await openOriginTestApplicationForDatabase(databasePath, {
+    fixture: 'target-lunar',
+  })
   let listener = await service.listen()
   let base = `http://127.0.0.1:${listener.port}`
   const stream = await fetch(`${base}/api/events`)
@@ -1876,9 +2055,9 @@ test('lunar target acquisition publishes image evidence and survives restart', a
   assert.match(await nextEvent(reader), /LunarDiskLimbMeasurement/)
   await reader?.cancel()
   await listener.close()
-  service.close()
+  await service.close()
 
-  service = createLocalWebService(databasePath)
+  service = await openOriginTestApplicationForDatabase(databasePath)
   listener = await service.listen()
   base = `http://127.0.0.1:${listener.port}`
   const restarted = await bootstrapSnapshot(`${base}/api/snapshot`)
@@ -1888,14 +2067,16 @@ test('lunar target acquisition publishes image evidence and survives restart', a
     'LunarDiskLimbMeasurement',
   )
   await listener.close()
-  service.close()
+  await service.close()
 })
 
 test('live frame evidence is durable, idempotent, published over SSE, and stays read-only on phone', async () => {
   const root = mkdtempSync(join(tmpdir(), 'astro-live-frame-'))
   const databasePath = join(root, 'state.sqlite')
-  let service = createLocalWebService(
+  let service = await openOriginTestApplicationForDatabase(
     databasePath,
+    { fixture: 'live-frame' },
+    undefined,
     (request) =>
       request?.headers.authorization === 'Bearer phone'
         ? {
@@ -1910,9 +2091,6 @@ test('live frame evidence is durable, idempotent, published over SSE, and stays 
             role: 'owner' as const,
             capability: 'controlCapable' as const,
           },
-    undefined,
-    undefined,
-    { fixture: 'live-frame' },
   )
   let listener = await service.listen()
   let base = `http://127.0.0.1:${listener.port}`
@@ -1953,7 +2131,7 @@ test('live frame evidence is durable, idempotent, published over SSE, and stays 
   assert.equal(unresolvedReview.reason, 'LibraryAssetNotFound')
   assert.deepEqual(
     materializeCapturedFrame(
-      service.database,
+      originTestDatabase(service),
       { originalsRoot: join(root, 'originals') },
       {
         assetId: 'asset-capture-live-001',
@@ -1993,7 +2171,11 @@ test('live frame evidence is durable, idempotent, published over SSE, and stays 
   )
   const stored = Schema.decodeUnknownSync(
     Schema.Struct({ session: Schema.String }),
-  )(service.database.prepare('SELECT session FROM acquire_sessions').get())
+  )(
+    originTestDatabase(service)
+      .prepare('SELECT session FROM acquire_sessions')
+      .get(),
+  )
   assert.equal(
     Schema.decodeUnknownSync(AcquireSession)(
       JSON.parse(stored.session),
@@ -2002,9 +2184,9 @@ test('live frame evidence is durable, idempotent, published over SSE, and stays 
   )
   await reader?.cancel()
   await listener.close()
-  service.close()
+  await service.close()
 
-  service = createLocalWebService(databasePath)
+  service = await openOriginTestApplicationForDatabase(databasePath)
   listener = await service.listen()
   base = `http://127.0.0.1:${listener.port}`
   const restarted = await bootstrapSnapshot(`${base}/api/snapshot`)
@@ -2014,7 +2196,7 @@ test('live frame evidence is durable, idempotent, published over SSE, and stays 
     'Known',
   )
   await listener.close()
-  service.close()
+  await service.close()
 })
 
 test('managed capture persists guarded progress actions, replay, SSE, restart, and phone read-only state', async () => {
@@ -2022,8 +2204,8 @@ test('managed capture persists guarded progress actions, replay, SSE, restart, a
     mkdtempSync(join(tmpdir(), 'astro-managed-capture-')),
     'state.sqlite',
   )
-  const admission = (request?: Pick<IncomingMessage, 'headers'>) =>
-    request?.headers.authorization === 'Bearer phone'
+  const admission = (request: AdmissionRequest) =>
+    request.headers.authorization === 'Bearer phone'
       ? {
           personId: 'owner-chicks',
           clientId: 'phone-owner',
@@ -2036,12 +2218,11 @@ test('managed capture persists guarded progress actions, replay, SSE, restart, a
           role: 'owner' as const,
           capability: 'controlCapable' as const,
         }
-  let service = createLocalWebService(
+  let service = await openOriginTestApplicationForDatabase(
     databasePath,
-    admission,
-    undefined,
-    undefined,
     { fixture: 'managed-capture' },
+    undefined,
+    admission,
   )
   let listener = await service.listen()
   let base = `http://127.0.0.1:${listener.port}`
@@ -2115,8 +2296,13 @@ test('managed capture persists guarded progress actions, replay, SSE, restart, a
   })
   assert.equal(stale.response.status, 409)
   await listener.close()
-  service.close()
-  service = createLocalWebService(databasePath, admission)
+  await service.close()
+  service = await openOriginTestApplicationForDatabase(
+    databasePath,
+    {},
+    undefined,
+    admission,
+  )
   listener = await service.listen()
   base = `http://127.0.0.1:${listener.port}`
   assert.equal(
@@ -2125,7 +2311,7 @@ test('managed capture persists guarded progress actions, replay, SSE, restart, a
     'stopped',
   )
   await listener.close()
-  service.close()
+  await service.close()
 })
 
 test('Acquire recovery is bounded, reconciled, idempotent, streamed, restart-safe, and phone read-only', async () => {
@@ -2133,8 +2319,8 @@ test('Acquire recovery is bounded, reconciled, idempotent, streamed, restart-saf
     mkdtempSync(join(tmpdir(), 'astro-acquire-recovery-')),
     'state.sqlite',
   )
-  const admission = (request?: Pick<IncomingMessage, 'headers'>) =>
-    request?.headers.authorization === 'Bearer phone'
+  const admission = (request: AdmissionRequest) =>
+    request.headers.authorization === 'Bearer phone'
       ? {
           personId: 'owner-chicks',
           clientId: 'phone-owner',
@@ -2147,12 +2333,11 @@ test('Acquire recovery is bounded, reconciled, idempotent, streamed, restart-saf
           role: 'owner' as const,
           capability: 'controlCapable' as const,
         }
-  let service = createLocalWebService(
+  let service = await openOriginTestApplicationForDatabase(
     databasePath,
-    admission,
-    undefined,
-    undefined,
     { fixture: 'acquire-recovery' },
+    undefined,
+    admission,
   )
   let listener = await service.listen()
   let base = `http://127.0.0.1:${listener.port}`
@@ -2206,9 +2391,14 @@ test('Acquire recovery is bounded, reconciled, idempotent, streamed, restart-saf
   )
   await reader?.cancel()
   await listener.close()
-  service.close()
+  await service.close()
 
-  service = createLocalWebService(databasePath, admission)
+  service = await openOriginTestApplicationForDatabase(
+    databasePath,
+    {},
+    undefined,
+    admission,
+  )
   listener = await service.listen()
   base = `http://127.0.0.1:${listener.port}`
   assert.equal(
@@ -2216,15 +2406,11 @@ test('Acquire recovery is bounded, reconciled, idempotent, streamed, restart-saf
     'solving',
   )
   await listener.close()
-  service.close()
+  await service.close()
 
-  const skipService = createLocalWebService(
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'acquire-recovery' },
-  )
+  const skipService = await openOriginTestApplicationForDatabase(undefined, {
+    fixture: 'acquire-recovery',
+  })
   const skipListener = await skipService.listen()
   const skipBase = `http://127.0.0.1:${skipListener.port}`
   const skipSnapshot = await bootstrapSnapshot(`${skipBase}/api/snapshot`)
@@ -2248,7 +2434,7 @@ test('Acquire recovery is bounded, reconciled, idempotent, streamed, restart-saf
     'skipped',
   )
   await skipListener.close()
-  skipService.close()
+  await skipService.close()
 })
 
 test('AbortAcquire is lease and revision guarded, durable, idempotent, and streamed', async () => {
@@ -2256,13 +2442,9 @@ test('AbortAcquire is lease and revision guarded, durable, idempotent, and strea
     mkdtempSync(join(tmpdir(), 'astro-acquire-abort-')),
     'state.sqlite',
   )
-  let service = createLocalWebService(
-    databasePath,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'acquire-recovery' },
-  )
+  let service = await openOriginTestApplicationForDatabase(databasePath, {
+    fixture: 'acquire-recovery',
+  })
   let listener = await service.listen()
   let base = `http://127.0.0.1:${listener.port}`
   const stream = await fetch(`${base}/api/events`)
@@ -2305,9 +2487,9 @@ test('AbortAcquire is lease and revision guarded, durable, idempotent, and strea
   )
   await reader?.cancel()
   await listener.close()
-  service.close()
+  await service.close()
 
-  service = createLocalWebService(databasePath)
+  service = await openOriginTestApplicationForDatabase(databasePath)
   listener = await service.listen()
   base = `http://127.0.0.1:${listener.port}`
   assert.equal(
@@ -2315,22 +2497,18 @@ test('AbortAcquire is lease and revision guarded, durable, idempotent, and strea
     'aborted',
   )
   await listener.close()
-  service.close()
+  await service.close()
 })
 
 test('target correction fixture installs a durable large pending proposal without a provider call', async (t) => {
-  const service = createLocalWebService(
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'target-correction' },
-  )
+  const service = await openOriginTestApplicationForDatabase(undefined, {
+    fixture: 'target-correction',
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
   assert.equal(snapshot.observe?.acquire?.phase, 'awaitingApproval')
@@ -2342,18 +2520,14 @@ test('target correction fixture installs a durable large pending proposal withou
 })
 
 test('target verification fixture exposes provisional acknowledgement and fresh-image verification', async (t) => {
-  const service = createLocalWebService(
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'target-verification' },
-  )
+  const service = await openOriginTestApplicationForDatabase(undefined, {
+    fixture: 'target-verification',
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
   assert.equal(snapshot.observe?.acquire?.phase, 'verifying')
@@ -2370,14 +2544,11 @@ test('target verification fixture exposes provisional acknowledgement and fresh-
 test('pointing correction keeps provider acknowledgement provisional until a fresh solved frame verifies it', async (t) => {
   let captures = 0
   let corrections = 0
-  const service = createLocalWebService(
+  const service = await openOriginTestApplicationForDatabase(
     undefined,
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'target-deep-sky',
-      targetAcquisitionProvider: {
+    { fixture: 'target-deep-sky' },
+    Layer.mergeAll(
+      configuredTargetAcquisitionProviderSelectionLayer({
         capture: () => {
           captures += 1
           return Effect.succeed({
@@ -2419,14 +2590,14 @@ test('pointing correction keeps provider acknowledgement provisional until a fre
             acknowledgementRef: 'fixture-correction-acknowledgement',
           })
         },
-      },
-    },
+      }),
+    ),
   )
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const first = await bootstrapSnapshot(`${base}/api/snapshot`)
   if (first.activeRun._tag !== 'Active' || first.observe?.acquire === undefined)
@@ -2458,21 +2629,22 @@ test('pointing correction keeps provider acknowledgement provisional until a fre
   assert.equal(captures, 2)
   const row = Schema.decodeUnknownSync(
     Schema.Struct({ session: Schema.String }),
-  )(service.database.prepare('SELECT session FROM acquire_sessions').get())
+  )(
+    originTestDatabase(service)
+      .prepare('SELECT session FROM acquire_sessions')
+      .get(),
+  )
   assert.match(row.session, /CorrectionAccepted/)
   assert.match(row.session, /verificationOfCorrectionAttemptId/)
 })
 
 test('recovery retains prior solved evidence when later verification frames have no solution', async (t) => {
   let captures = 0
-  const service = createLocalWebService(
+  const service = await openOriginTestApplicationForDatabase(
     undefined,
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'target-deep-sky',
-      targetAcquisitionProvider: {
+    { fixture: 'target-deep-sky' },
+    Layer.mergeAll(
+      configuredTargetAcquisitionProviderSelectionLayer({
         capture: () => {
           captures += 1
           return Effect.succeed({
@@ -2526,14 +2698,14 @@ test('recovery retains prior solved evidence when later verification frames have
             acknowledgedAtEpochMs: 1_722_729_600_200,
             acknowledgementRef: 'fixture-retained-correction',
           }),
-      },
-    },
+      }),
+    ),
   )
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const capture = async (idempotencyKey: string) => {
     const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
@@ -2570,14 +2742,11 @@ test('recovery retains prior solved evidence when later verification frames have
 test('pointing correction revision replays idempotently before approval and still requires fresh image verification', async (t) => {
   let captures = 0
   let corrections = 0
-  const service = createLocalWebService(
+  const service = await openOriginTestApplicationForDatabase(
     undefined,
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'target-deep-sky',
-      targetAcquisitionProvider: {
+    { fixture: 'target-deep-sky' },
+    Layer.mergeAll(
+      configuredTargetAcquisitionProviderSelectionLayer({
         capture: () => {
           captures += 1
           return Effect.succeed({
@@ -2619,14 +2788,14 @@ test('pointing correction revision replays idempotently before approval and stil
             acknowledgementRef: 'fixture-revision-acknowledgement',
           })
         },
-      },
-    },
+      }),
+    ),
   )
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
   if (
@@ -2726,8 +2895,10 @@ test('read-only preflight persists configured provider facts, survives restart, 
         ],
       }),
   }
-  const service = createLocalWebService(
+  const service = await openOriginTestApplicationForDatabase(
     databasePath,
+    { fixture: 'preflight' },
+    Layer.mergeAll(configuredReadOnlyPreflightProviderSelectionLayer(provider)),
     (request) =>
       request?.headers.authorization === 'Bearer phone'
         ? {
@@ -2742,9 +2913,6 @@ test('read-only preflight persists configured provider facts, survives restart, 
             role: 'owner' as const,
             capability: 'controlCapable' as const,
           },
-    undefined,
-    undefined,
-    { fixture: 'preflight', preflightProvider: provider },
   )
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
@@ -2783,18 +2951,20 @@ test('read-only preflight persists configured provider facts, survives restart, 
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM outbox')
+        .get(),
     ).count,
     0,
   )
   await reader?.cancel()
   await listener.close()
-  service.close()
-  const recovered = createLocalWebService(databasePath)
+  await service.close()
+  const recovered = await openOriginTestApplicationForDatabase(databasePath)
   const recoveredListener = await recovered.listen()
   t.after(async () => {
     await recoveredListener.close()
-    recovered.close()
+    await recovered.close()
   })
   const snapshot = await bootstrapSnapshot(
     `http://127.0.0.1:${recoveredListener.port}/api/snapshot`,
@@ -2824,14 +2994,11 @@ test('configured provider failure persists an unavailable preflight snapshot bef
     mkdtempSync(join(tmpdir(), 'astro-preflight-unavailable-')),
     'state.sqlite',
   )
-  const service = createLocalWebService(
+  const service = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'preflight',
-      preflightProvider: {
+    { fixture: 'preflight' },
+    Layer.mergeAll(
+      configuredReadOnlyPreflightProviderSelectionLayer({
         observe: () => Effect.fail(new Error('recorded provider outage')),
         unavailableSnapshot: () => ({
           observedAt: '2026-08-05T10:00:00.000Z',
@@ -2866,8 +3033,8 @@ test('configured provider failure persists an unavailable preflight snapshot bef
             ],
           },
         }),
-      },
-    },
+      }),
+    ),
   )
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
@@ -2892,12 +3059,12 @@ test('configured provider failure persists an unavailable preflight snapshot bef
     'unavailable',
   )
   await listener.close()
-  service.close()
-  const recovered = createLocalWebService(databasePath)
+  await service.close()
+  const recovered = await openOriginTestApplicationForDatabase(databasePath)
   const recoveredListener = await recovered.listen()
   t.after(async () => {
     await recoveredListener.close()
-    recovered.close()
+    await recovered.close()
   })
   const snapshot = await bootstrapSnapshot(
     `http://127.0.0.1:${recoveredListener.port}/api/snapshot`,
@@ -2907,18 +3074,14 @@ test('configured provider failure persists an unavailable preflight snapshot bef
 })
 
 test('polar inspect fixture records deterministic guidance with acceptance available', async (t) => {
-  const service = createLocalWebService(
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'polar' },
-  )
+  const service = await openOriginTestApplicationForDatabase(undefined, {
+    fixture: 'polar',
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
   const capture = polarCaptureIntent(initial, 'polar-inspect-guidance')
@@ -2956,17 +3119,14 @@ test('polar Acquire records only solved evidence, requires current in-tolerance 
       })
     },
   }
-  const unavailable = createLocalWebService(
+  const unavailable = await openOriginTestApplicationForDatabase(
     ':memory:',
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'polar',
-      polarMeasurementProvider: {
+    { fixture: 'polar' },
+    Layer.mergeAll(
+      configuredPolarMeasurementProviderSelectionLayer({
         measure: () => Effect.fail('fixture provider unavailable'),
-      },
-    },
+      }),
+    ),
   )
   const unavailableListener = await unavailable.listen()
   const unavailableBase = `http://127.0.0.1:${unavailableListener.port}`
@@ -2990,14 +3150,12 @@ test('polar Acquire records only solved evidence, requires current in-tolerance 
     'Unavailable',
   )
   await unavailableListener.close()
-  unavailable.close()
+  await unavailable.close()
 
-  let service = createLocalWebService(
+  let service = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'polar', polarMeasurementProvider: provider },
+    { fixture: 'polar' },
+    Layer.mergeAll(configuredPolarMeasurementProviderSelectionLayer(provider)),
   )
   let listener = await service.listen()
   let base = `http://127.0.0.1:${listener.port}`
@@ -3059,20 +3217,22 @@ test('polar Acquire records only solved evidence, requires current in-tolerance 
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM outbox')
+        .get(),
     ).count,
     0,
   )
   await reader?.cancel()
   await listener.close()
-  service.close()
+  await service.close()
 
-  service = createLocalWebService(databasePath)
+  service = await openOriginTestApplicationForDatabase(databasePath)
   listener = await service.listen()
   base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const recovered = await bootstrapSnapshot(`${base}/api/snapshot`)
   assert.equal(recovered.observe?.acquire?.phase, 'completed')
@@ -3087,12 +3247,12 @@ test('polar Acquire records only solved evidence, requires current in-tolerance 
 })
 
 test('every retired direct Plan, Observe, and control route returns a JSON 404', async (t) => {
-  const service = createFixtureService()
+  const service = await createFixtureService()
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   for (const path of [
     '/api/commands/start-run',
@@ -3136,7 +3296,7 @@ test('canonical control commands persist exact requests, actor-scoped receipts, 
     mkdtempSync(join(tmpdir(), 'astro-canonical-control-')),
     'state.sqlite',
   )
-  const service = createFixtureService(databasePath, (request) => {
+  const service = await createFixtureService(databasePath, (request) => {
     const token = request?.headers.authorization
     if (token === 'Bearer owner')
       return {
@@ -3183,7 +3343,7 @@ test('canonical control commands persist exact requests, actor-scoped receipts, 
   }
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const stream = await fetch(`${base}/api/events`, { headers: owner })
   const reader = stream.body?.getReader()
@@ -3241,7 +3401,7 @@ test('canonical control commands persist exact requests, actor-scoped receipts, 
   assert.equal(
     databaseRow(
       Schema.Struct({ target_control_capable: Schema.Int }),
-      service.database
+      originTestDatabase(service)
         .prepare(
           'SELECT target_control_capable FROM control_requests WHERE request_id=?',
         )
@@ -3273,7 +3433,7 @@ test('canonical control commands persist exact requests, actor-scoped receipts, 
   assert.equal(
     databaseRow(
       CountRow,
-      service.database
+      originTestDatabase(service)
         .prepare('SELECT count(*) AS count FROM control_command_receipts')
         .get(),
     ).count,
@@ -3318,7 +3478,9 @@ test('canonical control commands persist exact requests, actor-scoped receipts, 
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM events').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM events')
+        .get(),
     ).count,
     2,
   )
@@ -3385,7 +3547,7 @@ test('canonical control commands persist exact requests, actor-scoped receipts, 
   assert.deepEqual(
     databaseRow(
       Schema.Struct({ type: Schema.String, snapshot: Schema.String }),
-      service.database
+      originTestDatabase(service)
         .prepare(
           'SELECT type,snapshot FROM events ORDER BY cursor DESC LIMIT 1',
         )
@@ -3462,7 +3624,7 @@ test('canonical control commands persist exact requests, actor-scoped receipts, 
   assert.deepEqual(
     databaseRow(
       Schema.Struct({ type: Schema.String, snapshot: Schema.String }),
-      service.database
+      originTestDatabase(service)
         .prepare(
           'SELECT type,snapshot FROM events ORDER BY cursor DESC LIMIT 1',
         )
@@ -3514,7 +3676,7 @@ test('canonical control commands persist exact requests, actor-scoped receipts, 
       Schema.Struct({ type: Schema.String, snapshot: Schema.String }),
     ),
   )(
-    service.database
+    originTestDatabase(service)
       .prepare(
         "SELECT type,snapshot FROM events WHERE type IN ('ControlRequested','ControlGranted','ControlDeclined','ControlReleased','OwnerTookControl') ORDER BY cursor",
       )
@@ -3530,8 +3692,8 @@ test('canonical control commands persist exact requests, actor-scoped receipts, 
   )
   await reader?.cancel()
   await listener.close()
-  service.close()
-  const recovered = createFixtureService(databasePath, () => ({
+  await service.close()
+  const recovered = await createFixtureService(databasePath, () => ({
     personId: 'owner',
     clientId: 'desktop-owner',
     role: 'owner' as const,
@@ -3540,7 +3702,7 @@ test('canonical control commands persist exact requests, actor-scoped receipts, 
   const recoveredListener = await recovered.listen()
   t.after(async () => {
     await recoveredListener.close()
-    recovered.close()
+    await recovered.close()
   })
   const recoveredSnapshot = await bootstrapSnapshot(
     `http://127.0.0.1:${recoveredListener.port}/api/snapshot`,
@@ -3555,19 +3717,21 @@ test('canonical control commands persist exact requests, actor-scoped receipts, 
 })
 
 test('reconnect lease expiry records the canonical control event once', async (t) => {
-  const service = createFixtureService()
+  const service = await createFixtureService()
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const before = databaseRow(
     CountRow,
-    service.database.prepare('SELECT count(*) AS count FROM events').get(),
+    originTestDatabase(service)
+      .prepare('SELECT count(*) AS count FROM events')
+      .get(),
   ).count
   const beforeSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
-  const update = service.database.prepare(
+  const update = originTestDatabase(service).prepare(
     'UPDATE state SET value=? WHERE key=?',
   )
   update.run(JSON.stringify('desktop-member'), 'leaseHolder')
@@ -3576,7 +3740,7 @@ test('reconnect lease expiry records the canonical control event once', async (t
   const afterSnapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
   const event = databaseRow(
     Schema.Struct({ type: Schema.String, snapshot: Schema.String }),
-    service.database
+    originTestDatabase(service)
       .prepare('SELECT type,snapshot FROM events ORDER BY cursor DESC LIMIT 1')
       .get(),
   )
@@ -3591,7 +3755,9 @@ test('reconnect lease expiry records the canonical control event once', async (t
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM events').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM events')
+        .get(),
     ).count,
     before + 1,
   )
@@ -3603,8 +3769,8 @@ test('expired control requests are removed before projection and grant', async (
     mkdtempSync(join(tmpdir(), 'astro-control-request-expiry-')),
     'state.sqlite',
   )
-  const admission = (request?: Pick<IncomingMessage, 'headers'>) =>
-    request?.headers.authorization === 'Bearer member'
+  const admission = (request: AdmissionRequest) =>
+    request.headers.authorization === 'Bearer member'
       ? {
           personId: 'member',
           clientId: 'desktop-member',
@@ -3617,12 +3783,12 @@ test('expired control requests are removed before projection and grant', async (
           role: 'owner' as const,
           capability: 'controlCapable' as const,
         }
-  const service = createFixtureService(databasePath, admission)
+  const service = await createFixtureService(databasePath, admission)
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const requested = Schema.decodeUnknownSync(CommandHttpSuccessEnvelope)(
     await fetch(`${base}/api/commands/control`, {
@@ -3640,7 +3806,7 @@ test('expired control requests are removed before projection and grant', async (
   )
   const pending = requested.data.control.pendingRequests?.[0]
   if (pending === undefined) throw new Error('Control request is unavailable')
-  service.database
+  originTestDatabase(service)
     .prepare(
       'UPDATE control_requests SET target_control_capable=0 WHERE request_id=?',
     )
@@ -3664,7 +3830,7 @@ test('expired control requests are removed before projection and grant', async (
     (await bootstrapSnapshot(`${base}/api/snapshot`)).eventCursor,
     beforeUnavailableGrant,
   )
-  service.database
+  originTestDatabase(service)
     .prepare(
       'UPDATE control_requests SET target_control_capable=1,expires_at=? WHERE request_id=?',
     )
@@ -3691,12 +3857,12 @@ test('expired control requests are removed before projection and grant', async (
     beforeGrant,
   )
   await listener.close()
-  service.close()
-  const recovered = createFixtureService(databasePath, admission)
+  await service.close()
+  const recovered = await createFixtureService(databasePath, admission)
   const recoveredListener = await recovered.listen()
   t.after(async () => {
     await recoveredListener.close()
-    recovered.close()
+    await recovered.close()
   })
   assert.deepEqual(
     (
@@ -3709,18 +3875,14 @@ test('expired control requests are removed before projection and grant', async (
 })
 
 test('Plan command preview responses preserve persisted notice and disruptive domain results', async (t) => {
-  const service = createLocalWebService(
-    ':memory:',
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'plan-draft' },
-  )
+  const service = await openOriginTestApplicationForDatabase(':memory:', {
+    fixture: 'plan-draft',
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
   if (initial.plan === undefined) throw new Error('Fixture Plan is unavailable')
@@ -3824,7 +3986,7 @@ test('Plan command preview responses preserve persisted notice and disruptive do
         consequences: Schema.String,
         expires_at: Schema.String,
       }),
-      service.database
+      originTestDatabase(service)
         .prepare(
           'SELECT preview_id,classification,consequences,expires_at FROM run_mutation_previews WHERE preview_id=?',
         )
@@ -3842,12 +4004,12 @@ test('Plan command preview responses preserve persisted notice and disruptive do
 })
 
 test('later drafts retain the latest accepted definition summary without making it current', async (t) => {
-  const service = createFixtureService()
+  const service = await createFixtureService()
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
   if (initial.plan === undefined) throw new Error('Fixture Plan is unavailable')
@@ -3885,17 +4047,19 @@ test('later drafts retain the latest accepted definition summary without making 
 })
 
 test('malformed persisted Plan execution data returns a bounded unavailable response', async (t) => {
-  const service = createFixtureService()
+  const service = await createFixtureService()
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
   if (snapshot.plan === undefined)
     throw new Error('Fixture Plan is unavailable')
-  service.database.prepare('UPDATE run_definitions SET definition=?').run('{')
+  originTestDatabase(service)
+    .prepare('UPDATE run_definitions SET definition=?')
+    .run('{')
   const response = await fetch(`${base}/api/plan/commands`, {
     method: 'POST',
     body: JSON.stringify({
@@ -3947,21 +4111,17 @@ async function nextEvent(
 
 test('Processing Project HTTP accepts explicit Project changes and exposes settled evidence', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'astro-stage-publication-'))
-  const service = createLocalWebService(
+  const service = await openOriginTestApplicationForDatabase(
     join(root, 'state.sqlite'),
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'm27',
-      processWorkRoot: root,
-      processWorkAutoRun: false,
-    },
+    { fixture: 'm27' },
+    Layer.mergeAll(
+      originProcessWorkBehaviorLayer({ outputRoot: root, autoRun: false }),
+    ),
   )
   const listener = await service.listen()
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const base = `http://127.0.0.1:${listener.port}`
   const malformedResponse = await fetch(`${base}/api/process/projects`, {
@@ -4023,10 +4183,17 @@ test('Processing Project HTTP accepts explicit Project changes and exposes settl
     await acceptedResponse.json(),
   )
   assert.equal(accepted.project.activeAttempt?.state, 'Queued')
-  assert.deepEqual(service.processWorkPass(), {
-    outcome: 'completed',
-    kind: 'projectStage',
-  })
+  assert.deepEqual(
+    Effect.runSync(
+      createProcessWorkWorker({ outputRoot: root })
+        .pass()
+        .pipe(Effect.provide(service.context)),
+    ),
+    {
+      outcome: 'completed',
+      kind: 'projectStage',
+    },
+  )
   const opened = Schema.decodeUnknownSync(OpenedProcessingProject)(
     await fetch(
       `${base}/api/process/projects/${created.project.projectId}`,
@@ -4046,16 +4213,16 @@ test('Processing Project HTTP accepts explicit Project changes and exposes settl
   assert.equal(evidence.attempts[0]?.outputs[0]?.relation, 'WorkingResult')
 })
 
-test('fresh SQLite initialization creates the current V2 tables', () => {
+test('fresh SQLite initialization creates the current V2 tables', async () => {
   const databasePath = join(
     mkdtempSync(join(tmpdir(), 'astro-fresh-schema-')),
     'state.sqlite',
   )
-  const service = createLocalWebService(databasePath)
+  const service = await openOriginTestApplicationForDatabase(databasePath)
   assert.equal(
     databaseRow(
       CountRow,
-      service.database
+      originTestDatabase(service)
         .prepare(
           "SELECT count(*) AS count FROM pragma_table_info('outbox') WHERE name IN ('claim_token','claimed_by','claim_until','attempts','last_error','retry_after','ack_at')",
         )
@@ -4066,7 +4233,7 @@ test('fresh SQLite initialization creates the current V2 tables', () => {
   assert.equal(
     databaseRow(
       CountRow,
-      service.database
+      originTestDatabase(service)
         .prepare(
           "SELECT count(*) AS count FROM pragma_table_info('observing_plans') WHERE name='run_eligible'",
         )
@@ -4077,7 +4244,7 @@ test('fresh SQLite initialization creates the current V2 tables', () => {
   assert.equal(
     databaseRow(
       CountRow,
-      service.database
+      originTestDatabase(service)
         .prepare(
           "SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name='schema_migrations'",
         )
@@ -4085,7 +4252,7 @@ test('fresh SQLite initialization creates the current V2 tables', () => {
     ).count,
     0,
   )
-  service.close()
+  await service.close()
 })
 
 test('app-owned SQLite opener rejects paths outside its root with a tagged error', () => {
@@ -4108,18 +4275,18 @@ test('origin admission factory consumes decoded configuration', async (t) => {
       ),
     ),
   )
-  const identity = createOriginAdmission(config)()
+  const identity = createOriginAdmission(config)(admissionRequest())
   assert.deepEqual(identity, {
     personId: 'owner-chicks',
     clientId: 'phone-monitor',
     capability: 'readOnly',
     role: 'owner',
   })
-  const service = createFixtureService()
+  const service = await createFixtureService()
   const listener = await service.listen(0)
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   assert.ok(listener.port > 0)
 })
@@ -4174,12 +4341,12 @@ test('origin configuration enables the real preflight adapter only with complete
 })
 
 test('operational endpoints expose bounded admitted health without internal detail', async (t) => {
-  const service = createFixtureService()
+  const service = await createFixtureService()
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   assert.deepEqual(
     await fetch(`${base}/health/live`).then((response) => response.json()),
@@ -4207,7 +4374,7 @@ test('operational endpoints expose bounded admitted health without internal deta
   assert.equal(operations.disk, 'unknown')
   assert.equal(operations.rig, 'unknown')
   assert.equal(JSON.stringify(operations).includes('/'), false)
-  const denied = createFixtureService(':memory:', () => ({
+  const denied = await createFixtureService(':memory:', () => ({
     personId: 'viewer',
     clientId: 'viewer',
     capability: 'readOnly',
@@ -4227,7 +4394,7 @@ test('operational endpoints expose bounded admitted health without internal deta
     200,
   )
   await deniedListener.close()
-  denied.close()
+  await denied.close()
 })
 
 test('production admission rechecks normalized bootstrap policy and revokes removed viewer subjects', async () => {
@@ -4235,8 +4402,8 @@ test('production admission rechecks normalized bootstrap policy and revokes remo
     mkdtempSync(join(tmpdir(), 'astro-production-access-')),
     'state.sqlite',
   )
-  const seeded = createFixtureService(databasePath)
-  seeded.close()
+  const seeded = await createFixtureService(databasePath)
+  await seeded.close()
   const keys = generateKeyPairSync('rsa', { modulusLength: 2048 })
   const issuer = 'https://access.example'
   const audience = 'audience'
@@ -4291,9 +4458,9 @@ test('production admission rechecks normalized bootstrap policy and revokes remo
     observe: (reason) => admissionReasons.push(reason),
   } satisfies Parameters<typeof createProductionAccessAdmission>[0]
   const admitted = createProductionAccessAdmission(config)
-  const request = {
-    headers: { 'cf-access-jwt-assertion': claim('viewer@example.com') },
-  }
+  const request = admissionRequest({
+    'cf-access-jwt-assertion': claim('viewer@example.com'),
+  })
   assert.deepEqual(await admitted(request), {
     personId: 'viewer',
     clientId: 'access:viewer-subject',
@@ -4313,7 +4480,7 @@ test('production admission rechecks normalized bootstrap policy and revokes remo
   )
   const revoked = createProductionAccessAdmission({ ...config, bootstrap: [] })
   assert.equal(await revoked(request), undefined)
-  assert.equal(await admitted({ headers: {} }), undefined)
+  assert.equal(await admitted(admissionRequest()), undefined)
   assert.deepEqual(jwksOutcomes, ['success'])
   assert.deepEqual(admissionReasons, [
     'admitted',
@@ -4338,8 +4505,8 @@ test('production admission reloads a removed membership bootstrap file before th
   const directory = mkdtempSync(join(tmpdir(), 'astro-bootstrap-reload-'))
   const databasePath = join(directory, 'state.sqlite')
   const bootstrapPath = join(directory, 'membership.json')
-  const seeded = createFixtureService(databasePath)
-  seeded.close()
+  const seeded = await createFixtureService(databasePath)
+  await seeded.close()
   const keys = generateKeyPairSync('rsa', { modulusLength: 2048 })
   const issuer = 'https://access.example'
   const audience = 'bootstrap-audience'
@@ -4391,9 +4558,7 @@ test('production admission reloads a removed membership bootstrap file before th
     }),
   ).toString('base64url')
   const token = `${header}.${payload}.${sign('RSA-SHA256', Buffer.from(`${header}.${payload}`), keys.privateKey).toString('base64url')}`
-  const request = {
-    headers: { 'cf-access-jwt-assertion': token },
-  }
+  const request = admissionRequest({ 'cf-access-jwt-assertion': token })
   assert.equal((await admission(request))?.personId, 'reload-owner')
   unlinkSync(bootstrapPath)
   now += 1_000
@@ -4405,8 +4570,8 @@ test('production Access JWKS admission refreshes by kid, bounds cache use, and f
     mkdtempSync(join(tmpdir(), 'astro-jwks-')),
     'state.sqlite',
   )
-  const seeded = createFixtureService(databasePath)
-  seeded.close()
+  const seeded = await createFixtureService(databasePath)
+  await seeded.close()
   const oldKeys = generateKeyPairSync('rsa', { modulusLength: 2048 })
   const newKeys = generateKeyPairSync('rsa', { modulusLength: 2048 })
   const issuer = 'https://access.example'
@@ -4460,9 +4625,8 @@ test('production Access JWKS admission refreshes by kid, bounds cache use, and f
       { email: 'owner@example.com', personId: 'rotating-owner', role: 'owner' },
     ],
   })
-  const request = (token: string) => ({
-    headers: { 'cf-access-jwt-assertion': token },
-  })
+  const request = (token: string) =>
+    admissionRequest({ 'cf-access-jwt-assertion': token })
   assert.equal(
     (await admission(request(claim('old-kid', oldKeys))))?.personId,
     'rotating-owner',
@@ -4507,12 +4671,12 @@ test('production Access JWKS admission refreshes by kid, bounds cache use, and f
 })
 
 test('persisted exhausted correction keeps evidence visible without issuing work and projects over SSE', async (t) => {
-  const service = createFixtureService()
+  const service = await createFixtureService()
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const stream = await fetch(`${base}/api/events`)
   const reader = stream.body?.getReader()
@@ -4535,13 +4699,13 @@ test('persisted exhausted correction keeps evidence visible without issuing work
       action: 'Review recovery in Observe before any new command.',
     },
   }
-  service.database
+  originTestDatabase(service)
     .prepare("UPDATE state SET value=? WHERE key='evidence'")
     .run(JSON.stringify(evidence))
-  service.database
+  originTestDatabase(service)
     .prepare("UPDATE state SET value=? WHERE key='snapshotVersion'")
     .run('2')
-  service.database
+  originTestDatabase(service)
     .prepare("UPDATE state SET value=? WHERE key='eventCursor'")
     .run('1')
   const changed = await Promise.race([
@@ -4558,7 +4722,7 @@ test('persisted exhausted correction keeps evidence visible without issuing work
   const persisted = JSON.parse(
     databaseRow(
       ProjectionRow,
-      service.database
+      originTestDatabase(service)
         .prepare("SELECT value FROM state WHERE key='evidence'")
         .get(),
     ).value,
@@ -4568,18 +4732,20 @@ test('persisted exhausted correction keeps evidence visible without issuing work
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM outbox')
+        .get(),
     ).count,
     0,
   )
   await reader?.cancel()
   await listener.close()
-  service.close()
+  await service.close()
 })
 
-test('decoded adapter observation updates service evidence and malformed input fails closed', () => {
-  const service = createFixtureService()
-  const accepted = service.ingestObservation({
+test('decoded adapter observation updates service evidence and malformed input fails closed', async () => {
+  const service = await createFixtureService()
+  const accepted = ingestObservation(service, {
     frameId: 'frame-adapter-001',
     capturedAt: '2026-07-24T02:00:00.000Z',
     quality: 'verified',
@@ -4594,12 +4760,12 @@ test('decoded adapter observation updates service evidence and malformed input f
   assert.equal(accepted?.evidence.frameId, 'frame-adapter-001')
   const before = JSON.stringify(accepted?.evidence)
   assert.equal(
-    service.ingestObservation({ frameId: '', correctionState: 'automatic' }),
+    ingestObservation(service, { frameId: '', correctionState: 'automatic' }),
     undefined,
   )
   assert.equal(
     JSON.stringify(
-      service.ingestObservation({ frameId: '', correctionState: 'automatic' })
+      ingestObservation(service, { frameId: '', correctionState: 'automatic' })
         ?.evidence,
     ),
     undefined,
@@ -4607,25 +4773,27 @@ test('decoded adapter observation updates service evidence and malformed input f
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM outbox')
+        .get(),
     ).count,
     0,
   )
   assert.equal(
     JSON.stringify(
-      service.database
+      originTestDatabase(service)
         .prepare("SELECT value FROM state WHERE key='evidence'")
         .get(),
     ).includes('frame-adapter-001'),
     true,
   )
   assert.equal(before.includes('frame-adapter-001'), true)
-  service.close()
+  await service.close()
 })
 
-test('local solved-frame evidence faithfully decodes as the V2 AcquireSnapshot contract', () => {
-  const service = createFixtureService()
-  const snapshot = service.ingestObservation({
+test('local solved-frame evidence faithfully decodes as the V2 AcquireSnapshot contract', async () => {
+  const service = await createFixtureService()
+  const snapshot = ingestObservation(service, {
     frameId: 'frame-contract-001',
     capturedAt: '2026-07-24T02:00:00.000Z',
     quality: 'verified',
@@ -4664,16 +4832,16 @@ test('local solved-frame evidence faithfully decodes as the V2 AcquireSnapshot c
     contract.latestEvidence?.sourceFrameAssetId,
     'frame-contract-001',
   )
-  service.close()
+  await service.close()
 })
 
 test('Library queries enforce bounded pages, cursor order, role filters, and allowed sorts', async (t) => {
-  const service = createFixtureService()
+  const service = await createFixtureService()
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const first = await fetch(
     `${base}/api/library?queryId=library-check&pageSize=3&sort=sharpestFirst`,
@@ -4718,16 +4886,16 @@ test('Library queries enforce bounded pages, cursor order, role filters, and all
     400,
   )
   await listener.close()
-  service.close()
+  await service.close()
 })
 
 test('Library detail uses stable identities and snapshot delivery remains catalog-bounded', async (t) => {
-  const service = createFixtureService()
+  const service = await createFixtureService()
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const detail = await fetch(`${base}/api/library/assets/asset-m27-001`).then(
     (response) => response.json(),
@@ -4754,7 +4922,7 @@ test('Library detail uses stable identities and snapshot delivery remains catalo
     (await fetch(`${base}/api/library/assets/asset-m27-999`)).status,
     404,
   )
-  service.database
+  originTestDatabase(service)
     .prepare(
       "UPDATE library_assets SET detail='{}' WHERE asset_id='asset-m27-001'",
     )
@@ -4766,7 +4934,7 @@ test('Library detail uses stable identities and snapshot delivery remains catalo
   assert.equal(snapshot.activeRun._tag, 'None')
   assert.equal(JSON.stringify(snapshot).includes('asset-m27-'), false)
   await listener.close()
-  service.close()
+  await service.close()
 })
 
 test('authenticated workspace projections preserve future intent, bounded Library evidence, and a stable Process handoff', async (t) => {
@@ -4774,16 +4942,18 @@ test('authenticated workspace projections preserve future intent, bounded Librar
     mkdtempSync(join(tmpdir(), 'astro-process-source-handoff-')),
     'state.sqlite',
   )
-  let service = createFixtureService(databasePath)
+  let service = await createFixtureService(databasePath)
   let listener = await service.listen()
   let base = `http://127.0.0.1:${listener.port}`
   const outboxBefore = databaseRow(
     CountRow,
-    service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+    originTestDatabase(service)
+      .prepare('SELECT count(*) AS count FROM outbox')
+      .get(),
   ).count
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const plan = await fetch(`${base}/api/workspaces/plan`).then((response) =>
     response.json(),
@@ -4849,20 +5019,24 @@ test('authenticated workspace projections preserve future intent, bounded Librar
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM events').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM events')
+        .get(),
     ).count,
     0,
   )
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM outbox')
+        .get(),
     ).count,
     outboxBefore,
   )
   await listener.close()
-  service.close()
-  service = createFixtureService(databasePath)
+  await service.close()
+  service = await createFixtureService(databasePath)
   listener = await service.listen()
   base = `http://127.0.0.1:${listener.port}`
   const refreshed = await fetch(
@@ -4877,14 +5051,18 @@ test('authenticated workspace projections preserve future intent, bounded Librar
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM events').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM events')
+        .get(),
     ).count,
     0,
   )
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM outbox')
+        .get(),
     ).count,
     outboxBefore,
   )
@@ -4911,7 +5089,7 @@ test('authenticated workspace projections preserve future intent, bounded Librar
     _tag: 'InvalidInput',
     message: 'The service could not read that action.',
   })
-  service.database
+  originTestDatabase(service)
     .prepare("UPDATE library_assets SET detail='{}' WHERE asset_id=?")
     .run(assetId)
   assert.equal(
@@ -4927,19 +5105,15 @@ test('library-published fixture projects one durable Download Eligible M27 asset
     mkdtempSync(join(tmpdir(), 'astro-library-published-fixture-')),
     'state.sqlite',
   )
-  const service = createLocalWebService(
-    databasePath,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'library-published' },
-  )
+  const service = await openOriginTestApplicationForDatabase(databasePath, {
+    fixture: 'library-published',
+  })
   const listener = await service.listen()
   let firstClosed = false
   t.after(async () => {
     if (firstClosed) return
     await listener.close()
-    service.close()
+    await service.close()
   })
   const base = `http://127.0.0.1:${listener.port}`
   const detailResponse = await fetch(`${base}/api/library/assets/asset-m27-001`)
@@ -4968,25 +5142,23 @@ test('library-published fixture projects one durable Download Eligible M27 asset
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM outbox')
+        .get(),
     ).count,
     0,
   )
   await listener.close()
-  service.close()
+  await service.close()
   firstClosed = true
 
-  const recovered = createLocalWebService(
-    databasePath,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'library-published' },
-  )
+  const recovered = await openOriginTestApplicationForDatabase(databasePath, {
+    fixture: 'library-published',
+  })
   const recoveredListener = await recovered.listen()
   t.after(async () => {
     await recoveredListener.close()
-    recovered.close()
+    await recovered.close()
   })
   const recoveredDetail = await fetch(
     `http://127.0.0.1:${recoveredListener.port}/api/library/assets/asset-m27-001`,
@@ -5002,7 +5174,7 @@ test('library-published fixture projects one durable Download Eligible M27 asset
   )
   const publication = databaseRow(
     PublicationRow,
-    recovered.database
+    originTestDatabase(recovered)
       .prepare(
         "SELECT object_key FROM asset_publications WHERE asset_id='asset-m27-001' AND state='published'",
       )
@@ -5012,18 +5184,20 @@ test('library-published fixture projects one durable Download Eligible M27 asset
   assert.equal(
     databaseRow(
       CountRow,
-      recovered.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+      originTestDatabase(recovered)
+        .prepare('SELECT count(*) AS count FROM outbox')
+        .get(),
     ).count,
     0,
   )
 })
 
 test('plan-draft fixture preserves UI-created fake definitions without run or hardware work', async (t) => {
-  const standard = createFixtureService()
+  const standard = await createFixtureService()
   assert.equal(
     databaseRow(
       CountRow,
-      standard.database
+      originTestDatabase(standard)
         .prepare(
           "SELECT count(*) AS count FROM run_definitions WHERE run_definition_id='run-definition-m27-fixture'",
         )
@@ -5031,19 +5205,15 @@ test('plan-draft fixture preserves UI-created fake definitions without run or ha
     ).count,
     1,
   )
-  standard.close()
+  await standard.close()
 
   const databasePath = join(
     mkdtempSync(join(tmpdir(), 'astro-plan-draft-fixture-')),
     'state.sqlite',
   )
-  const service = createLocalWebService(
-    databasePath,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'plan-draft' },
-  )
+  const service = await openOriginTestApplicationForDatabase(databasePath, {
+    fixture: 'plan-draft',
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
@@ -5053,7 +5223,7 @@ test('plan-draft fixture preserves UI-created fake definitions without run or ha
   assert.equal(
     databaseRow(
       CountRow,
-      service.database
+      originTestDatabase(service)
         .prepare('SELECT count(*) AS count FROM run_definitions')
         .get(),
     ).count,
@@ -5095,20 +5265,16 @@ test('plan-draft fixture preserves UI-created fake definitions without run or ha
   })
   assert.equal(accepted.status, 202)
   await listener.close()
-  service.close()
+  await service.close()
 
-  const recovered = createLocalWebService(
-    databasePath,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'plan-draft' },
-  )
+  const recovered = await openOriginTestApplicationForDatabase(databasePath, {
+    fixture: 'plan-draft',
+  })
   t.after(() => recovered.close())
   const definition = JSON.parse(
     databaseRow(
       RunDefinitionEvidenceRow,
-      recovered.database
+      originTestDatabase(recovered)
         .prepare('SELECT definition FROM run_definitions')
         .get(),
     ).definition,
@@ -5117,7 +5283,7 @@ test('plan-draft fixture preserves UI-created fake definitions without run or ha
   assert.equal(
     databaseRow(
       CountRow,
-      recovered.database
+      originTestDatabase(recovered)
         .prepare('SELECT count(*) AS count FROM run_definitions')
         .get(),
     ).count,
@@ -5126,7 +5292,9 @@ test('plan-draft fixture preserves UI-created fake definitions without run or ha
   assert.equal(
     databaseRow(
       CountRow,
-      recovered.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+      originTestDatabase(recovered)
+        .prepare('SELECT count(*) AS count FROM outbox')
+        .get(),
     ).count,
     0,
   )
@@ -5139,12 +5307,12 @@ test('plan-draft fixture preserves UI-created fake definitions without run or ha
 })
 
 test('workspace projections remain behind existing admission', async (t) => {
-  const service = createFixtureService(':memory:', () => undefined)
+  const service = await createFixtureService(':memory:', () => undefined)
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   for (const path of [
     '/api/workspaces/plan',
@@ -5155,14 +5323,14 @@ test('workspace projections remain behind existing admission', async (t) => {
 })
 
 test('a request query cannot select phone or controller capability', async (t) => {
-  const service = createFixtureService()
+  const service = await createFixtureService()
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   const queried = await bootstrapSnapshot(`${base}/api/snapshot?mode=phone`, {
     headers: { 'x-client-capability': 'readOnly' },
   })
   assert.equal(queried.membership.capability, 'controlCapable')
-  const phoneService = createFixtureService(':memory:', () => ({
+  const phoneService = await createFixtureService(':memory:', () => ({
     personId: 'owner-chicks',
     clientId: 'phone-monitor',
     capability: 'readOnly',
@@ -5170,23 +5338,36 @@ test('a request query cannot select phone or controller capability', async (t) =
   const phoneListener = await phoneService.listen()
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
     await phoneListener.close()
-    phoneService.close()
+    await phoneService.close()
   })
   const trustedPhone = await bootstrapSnapshot(
     `http://127.0.0.1:${phoneListener.port}/api/snapshot?mode=desktop`,
   )
   assert.equal(trustedPhone.membership.capability, 'readOnly')
   await listener.close()
-  service.close()
+  await service.close()
   await phoneListener.close()
-  phoneService.close()
+  await phoneService.close()
 })
 
 test('separate local owner and remote listeners keep Access clients read-only', async (t) => {
-  const remoteAdmission = (request?: Pick<IncomingMessage, 'headers'>) =>
-    request?.headers.authorization === 'Bearer remote'
+  const admittedRequests: Array<{
+    readonly method: string
+    readonly path: string
+    readonly authorization: string | undefined
+  }> = []
+  const remoteAdmission = (request: AdmissionRequest) => {
+    admittedRequests.push({
+      method: request.method,
+      path: request.path,
+      authorization:
+        typeof request.headers.authorization === 'string'
+          ? request.headers.authorization
+          : undefined,
+    })
+    return request.headers.authorization === 'Bearer remote'
       ? {
           personId: 'viewer-ada',
           clientId: 'access-viewer-ada',
@@ -5194,7 +5375,8 @@ test('separate local owner and remote listeners keep Access clients read-only', 
           capability: 'readOnly' as const,
         }
       : undefined
-  const service = createFixtureService(':memory:', remoteAdmission)
+  }
+  const service = await createFixtureService(':memory:', remoteAdmission)
   const remote = await service.listen(0, '127.0.0.1', remoteAdmission)
   const local = await service.listen(
     0,
@@ -5204,10 +5386,26 @@ test('separate local owner and remote listeners keep Access clients read-only', 
   t.after(async () => {
     await remote.close()
     await local.close()
-    service.close()
+    await service.close()
   })
   const remoteBase = `http://127.0.0.1:${remote.port}`
   const localBase = `http://127.0.0.1:${local.port}`
+  assert.deepEqual(
+    await fetch(`${remoteBase}/health/live`).then((response) =>
+      response.json(),
+    ),
+    { status: 'alive' },
+  )
+  const rejected = await fetch(`${remoteBase}/api/snapshot`)
+  assert.equal(rejected.status, 401)
+  assert.deepEqual(await rejected.json(), {
+    ok: false,
+    failure: {
+      _tag: 'AuthenticationFailure',
+      reason: 'Unauthenticated',
+      summary: 'A verified member identity is required.',
+    },
+  })
   const remoteSnapshot = await bootstrapSnapshot(`${remoteBase}/api/snapshot`, {
     headers: { authorization: 'Bearer remote' },
   })
@@ -5226,6 +5424,23 @@ test('separate local owner and remote listeners keep Access clients read-only', 
   const localSnapshot = await bootstrapSnapshot(`${localBase}/api/snapshot`)
   assert.equal(localSnapshot.membership.role, 'owner')
   assert.equal(localSnapshot.membership.capability, 'controlCapable')
+  assert.deepEqual(admittedRequests, [
+    {
+      method: 'GET',
+      path: '/api/snapshot',
+      authorization: undefined,
+    },
+    {
+      method: 'GET',
+      path: '/api/snapshot',
+      authorization: 'Bearer remote',
+    },
+    {
+      method: 'POST',
+      path: '/api/observe/preflight',
+      authorization: 'Bearer remote',
+    },
+  ])
 })
 
 test('separate remote desktop listener admits shared-control requests while phone remains read-only', async (t) => {
@@ -5241,13 +5456,13 @@ test('separate remote desktop listener admits shared-control requests while phon
     role: 'owner' as const,
     capability: 'controlCapable' as const,
   })
-  const service = createFixtureService(':memory:', phoneAdmission)
+  const service = await createFixtureService(':memory:', phoneAdmission)
   const phone = await service.listen(0, '127.0.0.1', phoneAdmission)
   const desktop = await service.listen(0, '127.0.0.1', desktopAdmission)
   t.after(async () => {
     await phone.close()
     await desktop.close()
-    service.close()
+    await service.close()
   })
   const phoneSnapshot = await bootstrapSnapshot(
     `http://127.0.0.1:${phone.port}/api/snapshot`,
@@ -5292,12 +5507,12 @@ test('separate remote desktop listener admits shared-control requests while phon
 })
 
 test('protected responses install browser security headers without caching service truth', async (t) => {
-  const service = createFixtureService()
+  const service = await createFixtureService()
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const response = await fetch(`${base}/api/snapshot`)
   assert.equal(response.headers.get('cache-control'), 'no-store')
@@ -5315,7 +5530,7 @@ test('protected responses install browser security headers without caching servi
 })
 
 test('listener shutdown closes a consumed keep-alive request', async (t) => {
-  const service = createFixtureService()
+  const service = await createFixtureService()
   const listener = await service.listen()
   t.after(() => service.close())
   const response = await fetch(
@@ -5341,18 +5556,15 @@ test('serves the web bundle with route fallback while preserving API precedence'
   writeFileSync(join(assets, 'index-abcdefgh.css'), 'body{}')
   writeFileSync(join(root, 'outside.js'), 'outside')
   symlinkSync(join(root, 'outside.js'), join(assets, 'outside.js'))
-  const service = createLocalWebService(
-    ':memory:',
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'm27', webDistPath },
-  )
+  const service = await openOriginTestApplicationForDatabase(':memory:', {
+    fixture: 'm27',
+    runtime: { webDistPath: webDistPath },
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   for (const path of [
     '/',
@@ -5401,21 +5613,15 @@ test('serves the web bundle with route fallback while preserving API precedence'
 })
 
 test('reports a missing web bundle without substituting an inline shell', async (t) => {
-  const service = createLocalWebService(
-    ':memory:',
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'm27',
-      webDistPath: join(tmpdir(), 'astro-web-bundle-missing'),
-    },
-  )
+  const service = await openOriginTestApplicationForDatabase(':memory:', {
+    fixture: 'm27',
+    runtime: { webDistPath: join(tmpdir(), 'astro-web-bundle-missing') },
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const response = await fetch(`${base}/`)
   assert.equal(response.status, 404)
@@ -5526,7 +5732,7 @@ async function startFixtureRun(base: string, idempotencyKey: string) {
 }
 
 test('simultaneous Control acquisition accepts exactly one owner transition', async (t) => {
-  const service = createFixtureService(':memory:', (request) => {
+  const service = await createFixtureService(':memory:', (request) => {
     const token = request?.headers.authorization
     if (token !== 'Bearer alpha' && token !== 'Bearer beta') return undefined
     const clientId = token === 'Bearer alpha' ? 'desktop-alpha' : 'desktop-beta'
@@ -5541,7 +5747,7 @@ test('simultaneous Control acquisition accepts exactly one owner transition', as
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
 
   // The origin and SQLite lifecycle accept each request synchronously on one
@@ -5588,7 +5794,7 @@ test('simultaneous Control acquisition accepts exactly one owner transition', as
   assert.equal(
     databaseRow(
       CountRow,
-      service.database
+      originTestDatabase(service)
         .prepare(
           "SELECT count(*) AS count FROM events WHERE type='OwnerTookControl'",
         )
@@ -5599,7 +5805,7 @@ test('simultaneous Control acquisition accepts exactly one owner transition', as
   assert.equal(
     databaseRow(
       CountRow,
-      service.database
+      originTestDatabase(service)
         .prepare('SELECT count(*) AS count FROM control_command_receipts')
         .get(),
     ).count,
@@ -5608,7 +5814,9 @@ test('simultaneous Control acquisition accepts exactly one owner transition', as
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM outbox')
+        .get(),
     ).count,
     0,
   )
@@ -5625,12 +5833,12 @@ test('simultaneous Control acquisition accepts exactly one owner transition', as
 })
 
 test('simultaneous conflicting Run starts accept exactly one lifecycle transition', async (t) => {
-  const service = createFixtureService()
+  const service = await createFixtureService()
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
   if (initial.plan === undefined) throw new Error('Fixture Plan is unavailable')
@@ -5658,7 +5866,7 @@ test('simultaneous conflicting Run starts accept exactly one lifecycle transitio
   assert.equal(
     databaseRow(
       CountRow,
-      service.database
+      originTestDatabase(service)
         .prepare("SELECT count(*) AS count FROM events WHERE type='RunStarted'")
         .get(),
     ).count,
@@ -5667,7 +5875,7 @@ test('simultaneous conflicting Run starts accept exactly one lifecycle transitio
   assert.equal(
     databaseRow(
       CountRow,
-      service.database
+      originTestDatabase(service)
         .prepare('SELECT count(*) AS count FROM run_start_receipts')
         .get(),
     ).count,
@@ -5676,7 +5884,9 @@ test('simultaneous conflicting Run starts accept exactly one lifecycle transitio
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM outbox')
+        .get(),
     ).count,
     0,
   )
@@ -5687,12 +5897,12 @@ test('simultaneous conflicting Run starts accept exactly one lifecycle transitio
 })
 
 test('simultaneous pause and stop accept exactly one Run transition', async (t) => {
-  const service = createFixtureService()
+  const service = await createFixtureService()
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const started = await startFixtureRun(base, 'simultaneous-pause-stop-start')
   if (started.observe === undefined)
@@ -5721,7 +5931,7 @@ test('simultaneous pause and stop accept exactly one Run transition', async (t) 
   assert.equal(
     databaseRow(
       CountRow,
-      service.database
+      originTestDatabase(service)
         .prepare(
           "SELECT count(*) AS count FROM events WHERE type IN ('RunPaused','RunStopped')",
         )
@@ -5732,7 +5942,7 @@ test('simultaneous pause and stop accept exactly one Run transition', async (t) 
   assert.equal(
     databaseRow(
       CountRow,
-      service.database
+      originTestDatabase(service)
         .prepare('SELECT count(*) AS count FROM run_intervention_receipts')
         .get(),
     ).count,
@@ -5741,7 +5951,9 @@ test('simultaneous pause and stop accept exactly one Run transition', async (t) 
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM outbox')
+        .get(),
     ).count,
     0,
   )
@@ -5754,18 +5966,14 @@ test('simultaneous pause and stop accept exactly one Run transition', async (t) 
 })
 
 test('simultaneous Run mutation apply requests accept exactly one preview settlement', async (t) => {
-  const service = createLocalWebService(
-    ':memory:',
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'plan-draft' },
-  )
+  const service = await openOriginTestApplicationForDatabase(':memory:', {
+    fixture: 'plan-draft',
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
   if (initial.plan === undefined) throw new Error('Fixture Plan is unavailable')
@@ -5829,7 +6037,7 @@ test('simultaneous Run mutation apply requests accept exactly one preview settle
   assert.equal(
     databaseRow(
       CountRow,
-      service.database
+      originTestDatabase(service)
         .prepare(
           "SELECT count(*) AS count FROM events WHERE type='RunMutationApplied'",
         )
@@ -5840,7 +6048,7 @@ test('simultaneous Run mutation apply requests accept exactly one preview settle
   assert.equal(
     databaseRow(
       CountRow,
-      service.database
+      originTestDatabase(service)
         .prepare('SELECT count(*) AS count FROM run_intervention_receipts')
         .get(),
     ).count,
@@ -5849,7 +6057,9 @@ test('simultaneous Run mutation apply requests accept exactly one preview settle
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM outbox')
+        .get(),
     ).count,
     0,
   )
@@ -5867,13 +6077,9 @@ test('canonical Plan commands persist draft readiness, immutable acceptance, ide
     mkdtempSync(join(tmpdir(), 'astro-canonical-plan-')),
     'state.sqlite',
   )
-  const service = createLocalWebService(
-    databasePath,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'plan-draft' },
-  )
+  const service = await openOriginTestApplicationForDatabase(databasePath, {
+    fixture: 'plan-draft',
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   const stream = await fetch(`${base}/api/events`)
@@ -5983,7 +6189,9 @@ test('canonical Plan commands persist draft readiness, immutable acceptance, ide
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM outbox')
+        .get(),
     ).count,
     0,
   )
@@ -6001,7 +6209,9 @@ test('canonical Plan commands persist draft readiness, immutable acceptance, ide
   assert.equal(later.response.status, 202)
   const definition = databaseRow(
     RunDefinitionEvidenceRow,
-    service.database.prepare('SELECT definition FROM run_definitions').get(),
+    originTestDatabase(service)
+      .prepare('SELECT definition FROM run_definitions')
+      .get(),
   )
   assert.notEqual(
     JSON.parse(definition.definition).plan.sequences[0].definition.targetName,
@@ -6009,12 +6219,12 @@ test('canonical Plan commands persist draft readiness, immutable acceptance, ide
   )
   await reader?.cancel()
   await listener.close()
-  service.close()
-  const recovered = createFixtureService(databasePath)
+  await service.close()
+  const recovered = await createFixtureService(databasePath)
   const recoveredListener = await recovered.listen()
   t.after(async () => {
     await recoveredListener.close()
-    recovered.close()
+    await recovered.close()
   })
   assert.equal(
     (
@@ -6027,12 +6237,12 @@ test('canonical Plan commands persist draft readiness, immutable acceptance, ide
 })
 
 test('canonical Observe commands drive fake lifecycle, recovery, terminal, and consequence paths', async (t) => {
-  const service = createFixtureService()
+  const service = await createFixtureService()
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const started = await startFixtureRun(base, 'canonical-observe-start')
   if (started.observe === undefined)
@@ -6047,7 +6257,15 @@ test('canonical Observe commands drive fake lifecycle, recovery, terminal, and c
   assert.equal(pause.body._tag, 'Accepted')
   const paused = await bootstrapSnapshot(`${base}/api/snapshot`)
   assert.equal(paused.observe?.phase, 'paused')
-  assert.equal(service.advanceFakeRun(), undefined)
+  assert.equal(
+    Context.get(service.context, RunSqliteRepository).advance({
+      personId: 'owner-chicks',
+      clientId: 'desktop-owner',
+      role: 'owner',
+      capability: 'controlCapable',
+    })?.body,
+    undefined,
+  )
   if (paused.observe === undefined)
     throw new Error('Paused Observe run is unavailable')
   const resumed = await submitObserve(base, {
@@ -6096,16 +6314,18 @@ test('canonical Observe commands drive fake lifecycle, recovery, terminal, and c
   assert.equal(
     databaseRow(
       CountRow,
-      service.database.prepare('SELECT count(*) AS count FROM outbox').get(),
+      originTestDatabase(service)
+        .prepare('SELECT count(*) AS count FROM outbox')
+        .get(),
     ).count,
     0,
   )
-  const stoppedService = createFixtureService()
+  const stoppedService = await createFixtureService()
   const stoppedListener = await stoppedService.listen()
   const stoppedBase = `http://127.0.0.1:${stoppedListener.port}`
   t.after(async () => {
     await stoppedListener.close()
-    stoppedService.close()
+    await stoppedService.close()
   })
   const stoppedSnapshot = await startFixtureRun(
     stoppedBase,
@@ -6131,8 +6351,8 @@ test('canonical snapshot-first reconnect and shared SQLite projection keep comma
     mkdtempSync(join(tmpdir(), 'astro-canonical-projection-')),
     'state.sqlite',
   )
-  const owner = createFixtureService(databasePath)
-  const friend = createFixtureService(databasePath, () => ({
+  const owner = await createFixtureService(databasePath)
+  const friend = await createFixtureService(databasePath, () => ({
     personId: 'friend-ada',
     clientId: 'desktop-ada',
     role: 'viewer' as const,
@@ -6145,8 +6365,8 @@ test('canonical snapshot-first reconnect and shared SQLite projection keep comma
   t.after(async () => {
     await ownerListener.close()
     await friendListener.close()
-    owner.close()
-    friend.close()
+    await owner.close()
+    await friend.close()
   })
   const stream = await fetch(`${ownerBase}/api/events`)
   const reader = stream.body?.getReader()
@@ -6158,7 +6378,7 @@ test('canonical snapshot-first reconnect and shared SQLite projection keep comma
   assert.match(await nextEvent(reconnectReader), /"phase":"capture"/)
   const before = databaseRow(
     CountRow,
-    owner.database
+    originTestDatabase(owner)
       .prepare("SELECT count(*) AS count FROM events WHERE type='RunStarted'")
       .get(),
   ).count
@@ -6180,7 +6400,7 @@ test('canonical snapshot-first reconnect and shared SQLite projection keep comma
   assert.equal(
     databaseRow(
       CountRow,
-      owner.database
+      originTestDatabase(owner)
         .prepare("SELECT count(*) AS count FROM events WHERE type='RunStarted'")
         .get(),
     ).count,
@@ -6194,7 +6414,7 @@ test('SSE controller presence persists reconnect grace and restores only after s
     mkdtempSync(join(tmpdir(), 'astro-controller-presence-')),
     'state.sqlite',
   )
-  let service = createFixtureService(databasePath)
+  let service = await createFixtureService(databasePath)
   let listener = await service.listen()
   let base = `http://127.0.0.1:${listener.port}`
   const waitForState = async (state: 'held' | 'reconnecting') => {
@@ -6214,13 +6434,13 @@ test('SSE controller presence persists reconnect grace and restores only after s
   const reconnectingVersion = reconnecting.snapshotVersion
 
   await listener.close()
-  service.close()
-  service = createFixtureService(databasePath)
+  await service.close()
+  service = await createFixtureService(databasePath)
   listener = await service.listen()
   base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   assert.equal(
     (await bootstrapSnapshot(`${base}/api/snapshot`)).control.state,
@@ -6240,7 +6460,7 @@ test('canonical Observe pause survives restart and resumes the persisted fake ru
     mkdtempSync(join(tmpdir(), 'astro-canonical-observe-restart-')),
     'state.sqlite',
   )
-  const service = createFixtureService(databasePath)
+  const service = await createFixtureService(databasePath)
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   const started = await startFixtureRun(base, 'canonical-restart-start')
@@ -6254,12 +6474,12 @@ test('canonical Observe pause survives restart and resumes the persisted fake ru
   })
   assert.equal(paused.response.status, 202)
   await listener.close()
-  service.close()
-  const recovered = createFixtureService(databasePath)
+  await service.close()
+  const recovered = await createFixtureService(databasePath)
   const recoveredListener = await recovered.listen()
   t.after(async () => {
     await recoveredListener.close()
-    recovered.close()
+    await recovered.close()
   })
   const recoveredBase = `http://127.0.0.1:${recoveredListener.port}`
   const persisted = await bootstrapSnapshot(`${recoveredBase}/api/snapshot`)
@@ -6280,12 +6500,12 @@ test('canonical Observe pause survives restart and resumes the persisted fake ru
 })
 
 test('non-fixture startup projects unavailable Plan truth through canonical commands', async (t) => {
-  const service = createLocalWebService(':memory:')
+  const service = await openOriginTestApplicationForDatabase(':memory:')
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
   assert.equal(snapshot.plan, undefined)
@@ -6303,7 +6523,7 @@ test('non-fixture startup projects unavailable Plan truth through canonical comm
 })
 
 test('canonical Plan and Observe routes enforce admitted owner, viewer, and phone authority', async (t) => {
-  const service = createFixtureService(':memory:', (request) =>
+  const service = await createFixtureService(':memory:', (request) =>
     request?.headers.authorization === 'Bearer owner'
       ? {
           personId: 'owner',
@@ -6331,7 +6551,7 @@ test('canonical Plan and Observe routes enforce admitted owner, viewer, and phon
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const owner = { authorization: 'Bearer owner' }
   const initial = await bootstrapSnapshot(`${base}/api/snapshot`, {

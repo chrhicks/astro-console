@@ -107,7 +107,7 @@ export const defaultOriginTelemetry: OriginTelemetry = {
   dispose: () => Promise.resolve(),
 }
 
-export function tracedHttpRequest<A, E>(
+export function tracedHttpRequest<A, E, R>(
   response: { readonly statusCode: number; readonly headersSent?: boolean },
   input: {
     readonly method: 'GET' | 'POST' | 'PATCH'
@@ -121,7 +121,7 @@ export function tracedHttpRequest<A, E>(
       | 'process'
       | 'projection'
   },
-  effect: Effect.Effect<A, E>,
+  effect: Effect.Effect<A, E, R>,
 ) {
   const responseSignals = Effect.suspend(() => {
     const outcome =

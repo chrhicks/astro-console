@@ -1,8 +1,17 @@
 import assert from 'node:assert/strict'
-import { createServer } from 'node:http'
 import test from 'node:test'
-import { ConfigProvider, Effect, Schema } from 'effect'
-import { createLocalWebService } from '../app/origin-service.ts'
+import {
+  ConfigProvider,
+  Context,
+  Deferred,
+  Effect,
+  Layer,
+  Queue,
+  Schema,
+} from 'effect'
+import { HttpServerResponse } from 'effect/unstable/http'
+import { ProcessingProjectId } from '@astro-console/protocol'
+import { openOriginTestApplicationForDatabase } from './origin-test-graph.ts'
 import { createOriginTelemetry } from '../observability/origin-telemetry.ts'
 import type {
   NodeRuntimeGcType,
@@ -30,9 +39,16 @@ import {
 } from '../observability/sqlite-telemetry.ts'
 import { alpacaCameraProvider } from '../providers/alpaca-camera-provider.ts'
 import { alpacaPreflightProvider } from '../providers/alpaca-preflight-provider.ts'
+import {
+  originTelemetryServicesLayer,
+  originProcessWorkBehaviorLayer,
+} from '../app/origin-application-services.ts'
+import { tracedHttpRoute } from '../http/routes/origin-route-shared.ts'
+import { ProcessingProjectLifecycle } from '../services/processing-project-service.ts'
+import { openOtlpTestCollector } from './otlp-test-collector.ts'
 
 test('origin telemetry is disabled until the standard traces exporter is enabled', async () => {
-  const collector = await testCollector()
+  const collector = await openOtlpTestCollector()
   let runtimeSamplerStarts = 0
   const telemetry = createOriginTelemetry({
     configProvider: ConfigProvider.fromUnknown({
@@ -75,7 +91,7 @@ test('origin telemetry is disabled until the standard traces exporter is enabled
 })
 
 test('origin telemetry exports protobuf spans with standard resource identity', async () => {
-  const collector = await testCollector()
+  const collector = await openOtlpTestCollector()
   const telemetry = createOriginTelemetry({
     configProvider: ConfigProvider.fromUnknown({
       OTEL_TRACES_EXPORTER: 'otlp',
@@ -119,8 +135,60 @@ test('origin telemetry exports protobuf spans with standard resource identity', 
   assert.match(payload, /astro\.workspace/)
 })
 
+test('concurrent executions keep HTTP status and outcome capture distinct', async () => {
+  const collector = await openOtlpTestCollector()
+  const telemetry = createOriginTelemetry({
+    configProvider: ConfigProvider.fromUnknown({
+      OTEL_TRACES_EXPORTER: 'otlp',
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.url}/v1/traces`,
+      OTEL_SERVICE_NAME: 'astro-console-concurrent-http-test',
+      OTEL_BSP_SCHEDULE_DELAY: '60000',
+    }),
+  })
+  try {
+    await telemetry.initialize()
+    const responses = Effect.runSync(
+      Queue.unbounded<HttpServerResponse.HttpServerResponse>(),
+    )
+    Queue.offerUnsafe(responses, HttpServerResponse.empty({ status: 200 }))
+    Queue.offerUnsafe(responses, HttpServerResponse.empty({ status: 409 }))
+    const releaseAccepted = Effect.runSync(Deferred.make<void>())
+    const route = tracedHttpRoute(
+      {
+        method: 'GET',
+        route: '/concurrent-telemetry',
+        workspace: 'library',
+      },
+      Queue.take(responses),
+      (_response, captured) =>
+        captured.pipe(
+          Effect.flatMap((value) =>
+            value.status === 200
+              ? Deferred.await(releaseAccepted).pipe(Effect.as(value))
+              : Deferred.succeed(releaseAccepted, undefined).pipe(
+                  Effect.as(value),
+                ),
+          ),
+        ),
+    )
+    await telemetry.runPromise(
+      Effect.all([route, route], { concurrency: 'unbounded' }),
+    )
+  } finally {
+    await telemetry.dispose()
+    await collector.close()
+  }
+
+  const payload = Buffer.concat(
+    collector.requests.map((request) => request.body),
+  ).toString('utf8')
+  assert.equal(textOccurrences(payload, 'HTTP GET /concurrent-telemetry'), 2)
+  assert.ok(textOccurrences(payload, 'accepted') > 0)
+  assert.ok(textOccurrences(payload, 'rejected') > 0)
+})
+
 test('origin telemetry exports structured logs and metrics with standard signal config', async () => {
-  const collector = await testCollector()
+  const collector = await openOtlpTestCollector()
   const telemetry = createOriginTelemetry({
     configProvider: ConfigProvider.fromUnknown({
       OTEL_LOGS_EXPORTER: 'otlp',
@@ -173,7 +241,7 @@ test('origin telemetry exports structured logs and metrics with standard signal 
 })
 
 test('origin telemetry exports Node runtime metrics without spans or private process data', async () => {
-  const collector = await testCollector()
+  const collector = await openOtlpTestCollector()
   let starts = 0
   let stops = 0
   let tick: (() => void) | undefined
@@ -280,7 +348,7 @@ test('origin telemetry exports Node runtime metrics without spans or private pro
 })
 
 test('SQLite telemetry exports closed spans, operation metrics, and backlog gauges', async () => {
-  const collector = await testCollector()
+  const collector = await openOtlpTestCollector()
   const telemetry = createOriginTelemetry({
     configProvider: ConfigProvider.fromUnknown({
       OTEL_TRACES_EXPORTER: 'otlp',
@@ -384,7 +452,7 @@ test('SQLite telemetry exports closed spans, operation metrics, and backlog gaug
 })
 
 test('startup and admission spans export closed outcomes without identity', async () => {
-  const collector = await testCollector()
+  const collector = await openOtlpTestCollector()
   const telemetry = createOriginTelemetry({
     configProvider: ConfigProvider.fromUnknown({
       OTEL_TRACES_EXPORTER: 'otlp',
@@ -452,11 +520,13 @@ test('startup and admission spans export closed outcomes without identity', asyn
 test('admission telemetry excludes health and static requests', async () => {
   const observed: Array<{ readonly path: string; readonly enabled: boolean }> =
     []
-  const service = createLocalWebService(
+  const service = await openOriginTestApplicationForDatabase(
     ':memory:',
+    { fixture: 'm27' },
+    undefined,
     (request, observation) => {
       observed.push({
-        path: new URL(request?.url ?? '/', 'http://local').pathname,
+        path: request.path,
         enabled: observation !== undefined,
       })
       observation?.admission('admitted')
@@ -467,14 +537,9 @@ test('admission telemetry excludes health and static requests', async () => {
         capability: 'controlCapable',
       }
     },
-    undefined,
-    undefined,
     {
-      fixture: 'm27',
-      admissionObservability: {
-        admission: () => undefined,
-        jwks: () => undefined,
-      },
+      admission: () => undefined,
+      jwks: () => undefined,
     },
   )
   try {
@@ -488,7 +553,7 @@ test('admission telemetry excludes health and static requests', async () => {
       await listener.close()
     }
   } finally {
-    service.close()
+    await service.close()
   }
 
   assert.deepEqual(observed, [
@@ -499,7 +564,7 @@ test('admission telemetry excludes health and static requests', async () => {
 })
 
 test('executor work exports a safe closed work outcome without tracing an empty poll', async () => {
-  const collector = await testCollector()
+  const collector = await openOtlpTestCollector()
   const telemetry = createOriginTelemetry({
     configProvider: ConfigProvider.fromUnknown({
       OTEL_TRACES_EXPORTER: 'otlp',
@@ -531,7 +596,7 @@ test('executor work exports a safe closed work outcome without tracing an empty 
 })
 
 test('projection snapshot and SSE setup export bounded delivery spans', async () => {
-  const collector = await testCollector()
+  const collector = await openOtlpTestCollector()
   const telemetry = createOriginTelemetry({
     configProvider: ConfigProvider.fromUnknown({
       OTEL_TRACES_EXPORTER: 'otlp',
@@ -545,12 +610,10 @@ test('projection snapshot and SSE setup export bounded delivery spans', async ()
   })
   try {
     await telemetry.initialize()
-    const service = createLocalWebService(
+    const service = await openOriginTestApplicationForDatabase(
       ':memory:',
-      undefined,
-      undefined,
-      undefined,
-      { fixture: 'm27', telemetry },
+      { fixture: 'm27' },
+      Layer.mergeAll(originTelemetryServicesLayer(telemetry)),
     )
     try {
       const listener = await service.listen()
@@ -604,7 +667,7 @@ test('projection snapshot and SSE setup export bounded delivery spans', async ()
         await listener.close()
       }
     } finally {
-      service.close()
+      await service.close()
     }
   } finally {
     await telemetry.dispose()
@@ -637,7 +700,7 @@ test('projection snapshot and SSE setup export bounded delivery spans', async ()
 })
 
 test('local image pipeline boundaries export only closed outcomes', async () => {
-  const collector = await testCollector()
+  const collector = await openOtlpTestCollector()
   const telemetry = createOriginTelemetry({
     configProvider: ConfigProvider.fromUnknown({
       OTEL_TRACES_EXPORTER: 'otlp',
@@ -712,7 +775,7 @@ test('local image pipeline boundaries export only closed outcomes', async () => 
 })
 
 test('Alpaca operations export safe child spans without changing requests', async () => {
-  const collector = await testCollector()
+  const collector = await openOtlpTestCollector()
   const telemetry = createOriginTelemetry({
     configProvider: ConfigProvider.fromUnknown({
       OTEL_TRACES_EXPORTER: 'otlp',
@@ -895,7 +958,7 @@ test('Alpaca operations export safe child spans without changing requests', asyn
 })
 
 test('Plan HTTP flows export a small safe business hierarchy', async () => {
-  const collector = await testCollector()
+  const collector = await openOtlpTestCollector()
   const telemetry = createOriginTelemetry({
     configProvider: ConfigProvider.fromUnknown({
       OTEL_TRACES_EXPORTER: 'otlp',
@@ -906,12 +969,10 @@ test('Plan HTTP flows export a small safe business hierarchy', async () => {
   })
   try {
     await telemetry.initialize()
-    const service = createLocalWebService(
+    const service = await openOriginTestApplicationForDatabase(
       ':memory:',
-      undefined,
-      undefined,
-      undefined,
-      { fixture: 'm27', telemetry },
+      { fixture: 'm27' },
+      Layer.mergeAll(originTelemetryServicesLayer(telemetry)),
     )
     try {
       const listener = await service.listen()
@@ -955,7 +1016,7 @@ test('Plan HTTP flows export a small safe business hierarchy', async () => {
         await listener.close()
       }
     } finally {
-      service.close()
+      await service.close()
     }
   } finally {
     await telemetry.dispose()
@@ -996,7 +1057,7 @@ test('Plan HTTP flows export a small safe business hierarchy', async () => {
 })
 
 test('Observe HTTP commands export only real business stages', async () => {
-  const collector = await testCollector()
+  const collector = await openOtlpTestCollector()
   const telemetry = createOriginTelemetry({
     configProvider: ConfigProvider.fromUnknown({
       OTEL_TRACES_EXPORTER: 'otlp',
@@ -1007,12 +1068,10 @@ test('Observe HTTP commands export only real business stages', async () => {
   })
   try {
     await telemetry.initialize()
-    const service = createLocalWebService(
+    const service = await openOriginTestApplicationForDatabase(
       ':memory:',
-      undefined,
-      undefined,
-      undefined,
-      { fixture: 'm27', telemetry },
+      { fixture: 'm27' },
+      Layer.mergeAll(originTelemetryServicesLayer(telemetry)),
     )
     try {
       const listener = await service.listen()
@@ -1092,7 +1151,7 @@ test('Observe HTTP commands export only real business stages', async () => {
         await listener.close()
       }
     } finally {
-      service.close()
+      await service.close()
     }
   } finally {
     await telemetry.dispose()
@@ -1133,7 +1192,7 @@ test('Observe HTTP commands export only real business stages', async () => {
 })
 
 test('Library HTTP paths export one safe business boundary each', async () => {
-  const collector = await testCollector()
+  const collector = await openOtlpTestCollector()
   const telemetry = createOriginTelemetry({
     configProvider: ConfigProvider.fromUnknown({
       OTEL_TRACES_EXPORTER: 'otlp',
@@ -1145,12 +1204,10 @@ test('Library HTTP paths export one safe business boundary each', async () => {
   let assetId = ''
   try {
     await telemetry.initialize()
-    const service = createLocalWebService(
+    const service = await openOriginTestApplicationForDatabase(
       ':memory:',
-      undefined,
-      undefined,
-      undefined,
-      { fixture: 'm27', telemetry },
+      { fixture: 'm27' },
+      Layer.mergeAll(originTelemetryServicesLayer(telemetry)),
     )
     try {
       const listener = await service.listen()
@@ -1220,7 +1277,7 @@ test('Library HTTP paths export one safe business boundary each', async () => {
         await listener.close()
       }
     } finally {
-      service.close()
+      await service.close()
     }
   } finally {
     await telemetry.dispose()
@@ -1265,25 +1322,29 @@ test('Library HTTP paths export one safe business boundary each', async () => {
 })
 
 test('Process HTTP flows export one safe Project boundary each', async () => {
-  const collector = await testCollector()
+  const collector = await openOtlpTestCollector()
   const telemetry = createOriginTelemetry({
     configProvider: ConfigProvider.fromUnknown({
       OTEL_TRACES_EXPORTER: 'otlp',
+      OTEL_METRICS_EXPORTER: 'otlp',
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.url}/v1/traces`,
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: `${collector.url}/v1/metrics`,
       OTEL_SERVICE_NAME: 'astro-console-process-test',
       OTEL_BSP_SCHEDULE_DELAY: '60000',
+      OTEL_METRIC_EXPORT_INTERVAL: '60000',
     }),
   })
   const sourceAssetId = 'asset-m27-006'
   const createIntentId = 'private-project-create-intent'
   try {
     await telemetry.initialize()
-    const service = createLocalWebService(
+    const service = await openOriginTestApplicationForDatabase(
       ':memory:',
-      undefined,
-      undefined,
-      undefined,
-      { fixture: 'm27', telemetry, processWorkAutoRun: false },
+      { fixture: 'm27' },
+      Layer.mergeAll(
+        originTelemetryServicesLayer(telemetry),
+        originProcessWorkBehaviorLayer({ autoRun: true }),
+      ),
     )
     try {
       const listener = await service.listen()
@@ -1303,7 +1364,57 @@ test('Process HTTP flows export one safe Project boundary each', async () => {
           }),
         })
         assert.equal(acceptedResponse.status, 201)
-        await acceptedResponse.body?.cancel()
+        const created = Schema.decodeUnknownSync(
+          Schema.Struct({
+            project: Schema.Struct({
+              projectId: ProcessingProjectId,
+              revision: Schema.Int,
+            }),
+          }),
+        )(await acceptedResponse.json())
+
+        const runResponse = await fetch(
+          `${base}/api/process/projects/${created.project.projectId}`,
+          {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              projectId: created.project.projectId,
+              expectedProjectRevision: created.project.revision,
+              intentId: 'private-process-run-intent',
+              intent: {
+                _tag: 'RunStage',
+                stage: 'Calibration',
+                from: { _tag: 'CurrentDraft' },
+              },
+            }),
+          },
+        )
+        assert.equal(runResponse.status, 200)
+        await runResponse.body?.cancel()
+        const lifecycle = Context.get(
+          service.context,
+          ProcessingProjectLifecycle,
+        )
+        let completed = false
+        for (let attempt = 0; attempt < 20 && !completed; attempt += 1) {
+          const opened = await telemetry.runPromise(
+            lifecycle.open(
+              {
+                personId: 'owner-chicks',
+                clientId: 'desktop-owner',
+                role: 'owner',
+                capability: 'controlCapable',
+              },
+              created.project.projectId,
+            ),
+          )
+          completed = opened.stages.some(
+            (stage) => stage.currentResult?.outcome === 'Succeeded',
+          )
+          if (!completed) await Effect.runPromise(Effect.sleep('25 millis'))
+        }
+        assert.equal(completed, true)
 
         const rejectedResponse = await fetch(
           `${base}/api/process/projects/private-project-id`,
@@ -1319,7 +1430,7 @@ test('Process HTTP flows export one safe Project boundary each', async () => {
         await listener.close()
       }
     } finally {
-      service.close()
+      await service.close()
     }
   } finally {
     await telemetry.dispose()
@@ -1330,12 +1441,16 @@ test('Process HTTP flows export one safe Project boundary each', async () => {
     collector.requests.map((request) => request.body),
   ).toString('utf8')
   assert.equal(textOccurrences(payload, 'Process.project.read'), 1)
-  assert.equal(textOccurrences(payload, 'Process.project.change'), 2)
+  assert.equal(textOccurrences(payload, 'Process.project.change'), 3)
+  assert.match(payload, /Process\.worker\.execute/)
+  assert.match(payload, /astro\.process\.backlog\.count/)
+  assert.match(payload, /astro\.process\.pressure/)
+  assert.match(payload, /astro\.sqlite\.backlog/)
   assert.equal(textOccurrences(payload, 'HTTP GET /api/process/projects'), 1)
   assert.equal(textOccurrences(payload, 'HTTP POST /api/process/projects'), 1)
   assert.equal(
     textOccurrences(payload, 'HTTP PATCH /api/process/projects/:projectId'),
-    1,
+    2,
   )
   assert.match(payload, /astro\.workspace/)
   assert.match(payload, /astro\.process\.operation/)
@@ -1453,44 +1568,4 @@ function recordedImageBytes() {
   for (const [index, value] of [0, 20_000, 40_000, 65_535].entries())
     view.setUint16(44 + index * 2, value, true)
   return bytes
-}
-
-async function testCollector() {
-  const requests: Array<{
-    readonly url: string
-    readonly contentType: string | undefined
-    readonly body: Buffer
-  }> = []
-  const server = createServer((request, response) => {
-    const chunks: Array<Buffer> = []
-    request.on('data', (chunk: Buffer) => chunks.push(chunk))
-    request.on('end', () => {
-      requests.push({
-        url: request.url ?? '',
-        contentType:
-          typeof request.headers['content-type'] === 'string'
-            ? request.headers['content-type']
-            : undefined,
-        body: Buffer.concat(chunks),
-      })
-      response.writeHead(200).end()
-    })
-  })
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', resolve)
-  })
-  const address = server.address()
-  if (address === null || typeof address === 'string')
-    throw new Error('test collector did not bind a TCP port')
-  return {
-    requests,
-    url: `http://127.0.0.1:${address.port}`,
-    close: () =>
-      new Promise<void>((resolve, reject) =>
-        server.close((error) =>
-          error === undefined ? resolve() : reject(error),
-        ),
-      ),
-  }
 }

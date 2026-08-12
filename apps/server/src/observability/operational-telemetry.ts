@@ -19,7 +19,6 @@ type OperationalOperation =
   | 'sse.connect'
   | 'sse.disconnect'
   | 'sse.publish'
-  | 'sse.writeFailure'
   | 'plateSolve'
   | 'frameIntake'
   | 'frameInspection'

@@ -13,10 +13,17 @@ import {
   PreflightSnapshot,
 } from '@astro-console/protocol'
 import { RunExecutionContext } from '../services/run-domain.ts'
-import { Effect, Schema } from 'effect'
-import { createLocalWebService } from '../app/origin-service.ts'
+import { Effect, Layer, Schema } from 'effect'
+import { openOriginTestApplicationForDatabase } from './origin-test-graph.ts'
 import { alpacaCameraProvider } from '../providers/alpaca-camera-provider.ts'
 import { alpacaPreflightProvider } from '../providers/alpaca-preflight-provider.ts'
+import { configuredCameraProviderSelectionLayer } from '../services/acquire-command-service.ts'
+import { configuredReadOnlyPreflightProviderSelectionLayer } from '../services/preflight-command-service.ts'
+import {
+  configuredOriginCapturedFrameStorageLayer,
+  configuredOriginFrameInspectionStorageLayer,
+  configuredOriginRunExecutionLayer,
+} from '../app/origin-application-services.ts'
 import {
   fitsToAlpacaImageBytes,
   readAlpacaImageBytesMetadata,
@@ -149,29 +156,37 @@ test(
       completionBehavior: 'hold',
       unsafeBehavior: 'pauseAndPark',
     })
-    const serviceOptions = {
-      simulation: {
-        origin: simulatorListener.origin,
-        launchScenario: 'exposure-success' as const,
-      },
-      runExecutorProviderOrigin: simulatorListener.origin,
-      runExecutionContext: executionContext,
-      preflightProvider: alpacaPreflightProvider(providerConfig),
-      cameraProvider: camera,
-      capturedFrameStorage: { originalsRoot },
-      frameInspectionStorage: { originalsRoot, previewsRoot },
+    const simulation = {
+      origin: simulatorListener.origin,
+      launchScenario: 'exposure-success' as const,
     }
-    let service = createLocalWebService(
+    const serviceLayers = Layer.mergeAll(
+      configuredOriginRunExecutionLayer(
+        executionContext,
+        simulatorListener.origin,
+      ),
+      configuredReadOnlyPreflightProviderSelectionLayer(
+        alpacaPreflightProvider(providerConfig),
+      ),
+      configuredCameraProviderSelectionLayer(camera),
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+      configuredOriginFrameInspectionStorageLayer({
+        originalsRoot,
+        previewsRoot,
+      }),
+    )
+    let service = await openOriginTestApplicationForDatabase(
       databasePath,
-      undefined,
-      undefined,
-      undefined,
-      serviceOptions,
+      {
+        simulation,
+        runtime: { originalsRoot, previewRoot: previewsRoot },
+      },
+      serviceLayers,
     )
     let serviceListener = await service.listen()
     t.after(async () => {
       await serviceListener.close().catch(() => undefined)
-      service.close()
+      await service.close()
       await simulatorListener.close()
       await rm(root, { recursive: true, force: true })
     })
@@ -307,13 +322,14 @@ test(
     assert.equal(beforeRestart.evidence.framesServed, 1)
 
     await serviceListener.close()
-    service.close()
-    service = createLocalWebService(
+    await service.close()
+    service = await openOriginTestApplicationForDatabase(
       databasePath,
-      undefined,
-      undefined,
-      undefined,
-      serviceOptions,
+      {
+        simulation,
+        runtime: { originalsRoot, previewRoot: previewsRoot },
+      },
+      serviceLayers,
     )
     serviceListener = await service.listen()
     base = `http://127.0.0.1:${serviceListener.port}`

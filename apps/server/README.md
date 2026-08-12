@@ -1,7 +1,7 @@
 # Server development and inspection
 
 `apps/server` is the production server implementation target. From the
-repository root, first run `npm ci` and `npm run setup` with Node 22.13 or
+repository root, first run `npm ci` and `npm run setup` with Node 22.19 or
 later. Then run `npm run dev:inspect` for owner, `npm run dev:inspect -- --client=friend`,
 or `npm run dev:inspect -- --client=phone`. Use
 `npm run dev:inspect -- --scenario=plan-draft` for the Plan browser proof:

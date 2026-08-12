@@ -1,5 +1,4 @@
 import { DatabaseSync } from 'node:sqlite'
-import type { IncomingMessage } from 'node:http'
 import {
   createPublicKey,
   createVerify,
@@ -9,6 +8,7 @@ import {
 import { readFileSync, statSync } from 'node:fs'
 import { Schema } from 'effect'
 import type {
+  AdmissionRequest,
   AdmissionObservation,
   AdmissionReason,
   LocalIdentity,
@@ -138,9 +138,9 @@ export type JwksKeyResolver = {
   refresh(observe?: (outcome: 'success' | 'failed') => void): Promise<void>
 }
 function accessToken(
-  request: Pick<IncomingMessage, 'headers'> | undefined,
+  request: Pick<AdmissionRequest, 'headers'>,
 ): AccessToken | undefined {
-  const token = request?.headers['cf-access-jwt-assertion']
+  const token = request.headers['cf-access-jwt-assertion']
   if (typeof token !== 'string' || token.length > 8_192) return undefined
   const [encodedHeader, encodedClaims, encodedSignature, extra] =
     token.split('.')
@@ -295,7 +295,7 @@ async function verifiedAccessClaims(
     readonly audience: string
     readonly keyResolver: JwksKeyResolver
   },
-  request: Pick<IncomingMessage, 'headers'> | undefined,
+  request: Pick<AdmissionRequest, 'headers'>,
   observeJwks?: AdmissionObservation['jwks'],
 ) {
   const token = accessToken(request)

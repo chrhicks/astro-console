@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { Schema } from 'effect'
+import { Context, Layer, Schema } from 'effect'
 
 const PlanMigrationRow = Schema.Struct({
   plan_id: Schema.String,
@@ -21,6 +21,14 @@ export class DatabasePathNotAppOwned extends Schema.TaggedErrorClass<DatabasePat
   'Database.PathNotAppOwned',
   { databasePath: Schema.String, allowedRoot: Schema.String },
 ) {}
+
+export class OriginDatabase extends Context.Service<
+  OriginDatabase,
+  { readonly database: DatabaseSync }
+>()('@astro-console/server/OriginDatabase') {}
+
+export const originDatabaseLayer = (database: DatabaseSync) =>
+  Layer.succeed(OriginDatabase, OriginDatabase.of({ database }))
 
 export function openOriginDatabase(databasePath: string) {
   if (databasePath !== ':memory:')
