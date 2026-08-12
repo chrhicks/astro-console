@@ -40,11 +40,11 @@ import type {
 } from '../library-client'
 import type { Projection } from '../presentation'
 import type { ProcessingProjectList } from '../nightbook-workspace-runtime'
-import { BetaCommandBar, type BetaControlSubmit } from './BetaObserveApp'
-import { nightbookHref } from './route'
+import { nightbookHref } from '../route-href'
+import { CommandBar, type ControlSubmit } from './shared-shell'
 import '@nightbook/ui/styles.css'
-import './beta-observe.css'
-import './beta-library.css'
+import './workspace.css'
+import './library.css'
 
 type DetailState = 'loading' | 'not-found' | 'unavailable'
 type IntakeProject = ProcessingProjectList[number]
@@ -65,10 +65,10 @@ type LibraryIntake = {
   submit: () => void
 }
 
-export type BetaLibraryAppProps = {
+export type LibraryWorkspaceProps = {
   projection: Projection
   loading: boolean
-  submitControl?: BetaControlSubmit
+  submitControl?: ControlSubmit
   assetId?: typeof AssetId.Type
   page: {
     readonly query: LibraryQuery
@@ -198,13 +198,13 @@ function AssetNavigator({
   page,
   selectedAssetId,
   onSelectAsset,
-}: Pick<BetaLibraryAppProps, 'page' | 'onSelectAsset'> & {
+}: Pick<LibraryWorkspaceProps, 'page' | 'onSelectAsset'> & {
   selectedAssetId: typeof AssetId.Type | undefined
 }) {
   const assets = page.value?.results ?? []
   if (assets.length === 0)
     return page.message ? (
-      <p className="beta-library-message" role="status">
+      <p className="nightbook-library-message" role="status">
         {page.message}
       </p>
     ) : null
@@ -229,7 +229,10 @@ function AssetNavigator({
     onSelectAsset(assetId)
   }
   return (
-    <nav className="beta-library-assets" aria-label="Frame review navigation">
+    <nav
+      className="nightbook-library-assets"
+      aria-label="Frame review navigation"
+    >
       <a href={nightbookHref('/library')}>Catalog</a>
       {previous ? (
         <a
@@ -286,7 +289,7 @@ function CatalogReview({
     review.rating === undefined ? '☆ Not rated' : `★ ${review.rating}/5`
   return (
     <div
-      className="beta-library-catalog-review"
+      className="nightbook-library-catalog-review"
       data-decision={review.decision}
       aria-label={`Review: ${titleCase(review.decision)}; ${rating}`}
     >
@@ -301,13 +304,13 @@ function LibraryCatalog({
   onQuery,
   onSelectAsset,
   intake,
-}: Pick<BetaLibraryAppProps, 'page' | 'onQuery' | 'onSelectAsset'> & {
+}: Pick<LibraryWorkspaceProps, 'page' | 'onQuery' | 'onSelectAsset'> & {
   intake: LibraryIntake
 }) {
   const groups = useMemo(() => {
     const grouped = new Map<
       string,
-      NonNullable<BetaLibraryAppProps['page']['value']>['results']
+      NonNullable<LibraryWorkspaceProps['page']['value']>['results']
     >()
     for (const asset of page.value?.results ?? [])
       grouped.set(asset.comparisonGroupId, [
@@ -345,7 +348,7 @@ function LibraryCatalog({
     })
 
   return (
-    <main id="beta-workspace" className="beta-library-catalog">
+    <main id="nightbook-workspace" className="nightbook-library-catalog">
       <PageHeader
         eyebrow="Library / Durable evidence"
         title="Catalog"
@@ -375,10 +378,10 @@ function LibraryCatalog({
           />
         }
       />
-      <Panel className="beta-library-catalog-controls">
+      <Panel className="nightbook-library-catalog-controls">
         <PanelHeader title="Organize" meta="Service query" />
         <PanelBody>
-          <div className="beta-library-catalog-fields">
+          <div className="nightbook-library-catalog-fields">
             <Field label="Role">
               <Select
                 value={page.query.role ?? ''}
@@ -418,20 +421,20 @@ function LibraryCatalog({
               </Select>
             </Field>
           </div>
-          <p className="beta-library-message">
+          <p className="nightbook-library-message">
             Assets are grouped by the service comparison-group identity. Night,
             target, and review-status facets are not projected by the current
             query contract.
           </p>
         </PanelBody>
       </Panel>
-      <Panel className="beta-library-intake">
+      <Panel className="nightbook-library-intake">
         <PanelHeader
           title="Processing Project intake"
           meta={`${intake.selectedAssetIds.size} frames · ${intake.selectedCaptureSetIds.size} Capture Sets`}
         />
         <PanelBody>
-          <div className="beta-library-intake-fields">
+          <div className="nightbook-library-intake-fields">
             <Field label="Destination">
               <Select
                 value={intake.destination}
@@ -478,12 +481,12 @@ function LibraryCatalog({
                   : 'Add to project'}
             </Button>
           </div>
-          <p className="beta-library-message" role="status">
+          <p className="nightbook-library-message" role="status">
             {intake.message ??
               intake.denial ??
               'Project intake is ready for an exact source selection.'}
           </p>
-          <p className="beta-library-message">
+          <p className="nightbook-library-message">
             Capture Sets resolve to the exact asset revisions currently
             retained. Intake does not start Calibration.
           </p>
@@ -499,7 +502,7 @@ function LibraryCatalog({
       ) : null}
       {groups.length ? (
         <section
-          className="beta-library-catalog-groups"
+          className="nightbook-library-catalog-groups"
           aria-label="Loaded Library groups"
         >
           {groups.map(([groupId, assets]) => {
@@ -507,14 +510,14 @@ function LibraryCatalog({
               (asset) => asset.captureSetId !== undefined,
             )?.captureSetId
             return (
-              <Panel key={groupId} className="beta-library-catalog-group">
+              <Panel key={groupId} className="nightbook-library-catalog-group">
                 <PanelHeader
                   title={groupId}
                   meta={`${assets.length} loaded representation${assets.length === 1 ? '' : 's'}`}
                 />
                 <PanelBody>
                   {captureSetId ? (
-                    <label className="beta-library-set-selector">
+                    <label className="nightbook-library-set-selector">
                       <input
                         type="checkbox"
                         disabled={intake.disabled}
@@ -524,10 +527,10 @@ function LibraryCatalog({
                       Select whole Capture Set
                     </label>
                   ) : null}
-                  <div className="beta-library-catalog-assets">
+                  <div className="nightbook-library-catalog-assets">
                     {assets.map((asset) => (
                       <div
-                        className="beta-library-selectable-asset"
+                        className="nightbook-library-selectable-asset"
                         key={asset.assetId}
                       >
                         <label>
@@ -553,7 +556,7 @@ function LibraryCatalog({
                           </span>
                           <CatalogReview review={asset.review} />
                           <StatusIndicator
-                            className="beta-library-catalog-availability"
+                            className="nightbook-library-catalog-availability"
                             label={titleCase(asset.availability)}
                             tone={availabilityTone(asset.availability)}
                             detail={`Revision ${asset.revision}`}
@@ -576,7 +579,10 @@ function LibraryCatalog({
         />
       )}
       {page.value ? (
-        <nav className="beta-library-catalog-paging" aria-label="Catalog pages">
+        <nav
+          className="nightbook-library-catalog-paging"
+          aria-label="Catalog pages"
+        >
           <Button
             size="small"
             disabled={!page.query.cursor || !onQuery}
@@ -612,7 +618,7 @@ function LibraryCatalog({
 
 function LineagePanel({ detail }: { detail: LibraryAssetDetail }) {
   return (
-    <Panel as="aside" className="beta-library-lineage">
+    <Panel as="aside" className="nightbook-library-lineage">
       <PanelHeader title="Lineage" meta="Immutable evidence" />
       <PanelBody>
         <DataList aria-label="Asset lineage">
@@ -708,7 +714,7 @@ function ReviewEvidence({
   const metrics = inspection?._tag === 'Available' ? inspection.metrics : null
   return (
     <EvidenceViewport
-      className="beta-library-evidence"
+      className="nightbook-library-evidence"
       label={`Preview for ${detail.assetId}`}
       fit={fit}
       media={
@@ -791,11 +797,11 @@ function ReviewDecision({
   onOpenProcess,
 }: {
   detail: LibraryAssetDetail
-  page: BetaLibraryAppProps['page']
+  page: LibraryWorkspaceProps['page']
   readOnly: boolean
-  onSelectAsset: BetaLibraryAppProps['onSelectAsset']
-  onReview?: BetaLibraryAppProps['onReview']
-  onOpenProcess?: BetaLibraryAppProps['onOpenProcess']
+  onSelectAsset: LibraryWorkspaceProps['onSelectAsset']
+  onReview?: LibraryWorkspaceProps['onReview']
+  onOpenProcess?: LibraryWorkspaceProps['onOpenProcess']
 }) {
   const [pending, setPending] = useState<
     'accepted' | 'rejected' | 'unreviewed'
@@ -852,18 +858,18 @@ function ReviewDecision({
     onSelect: () => review('rejected'),
   }
   return (
-    <aside className="beta-library-decision">
+    <aside className="nightbook-library-decision">
       <AssetNavigator
         page={page}
         selectedAssetId={detail.assetId}
         onSelectAsset={onSelectAsset}
       />
-      <Panel className="beta-library-review-fields">
+      <Panel className="nightbook-library-review-fields">
         <PanelHeader title="Review" meta="Durable rating and note" />
         <PanelBody>
           <Stack gap={8}>
             <div
-              className="beta-library-rating"
+              className="nightbook-library-rating"
               role="radiogroup"
               aria-label="Frame rating"
             >
@@ -943,7 +949,7 @@ function ReviewTab({
   onReview,
   onOpenProcess,
 }: Pick<
-  BetaLibraryAppProps,
+  LibraryWorkspaceProps,
   | 'detail'
   | 'page'
   | 'projection'
@@ -953,7 +959,10 @@ function ReviewTab({
 >) {
   if (!detail) return null
   return (
-    <section className="beta-library-review-grid" aria-label="Frame review">
+    <section
+      className="nightbook-library-review-grid"
+      aria-label="Frame review"
+    >
       <LineagePanel detail={detail} />
       <ReviewEvidence detail={detail} />
       <ReviewDecision
@@ -974,7 +983,7 @@ function CompareTab({
   comparison,
   onSelectComparisonAsset,
 }: Pick<
-  BetaLibraryAppProps,
+  LibraryWorkspaceProps,
   'detail' | 'page' | 'comparison' | 'onSelectComparisonAsset'
 >) {
   const peers = useMemo(
@@ -1011,8 +1020,8 @@ function CompareTab({
     `${left} · ${right ?? 'Not loaded'}`
 
   return (
-    <section className="beta-library-compare" aria-label="Frame compare">
-      <div className="beta-library-compare-picker">
+    <section className="nightbook-library-compare" aria-label="Frame compare">
+      <div className="nightbook-library-compare-picker">
         <b>Comparison peer</b>
         {peers.length ? (
           peers.map((candidate) => (
@@ -1055,7 +1064,7 @@ function CompareTab({
           }
         />
       )}
-      <Panel className="beta-library-compare-facts">
+      <Panel className="nightbook-library-compare-facts">
         <PanelHeader title="Loaded service facts" meta="Browser-only view" />
         <PanelBody>
           <DataList aria-label="Compared service facts">
@@ -1128,7 +1137,7 @@ function CompareTab({
               />
             )}
           </DataList>
-          <p className="beta-library-message">
+          <p className="nightbook-library-message">
             Left · right. Compare selection is browser-only and changes no asset
             or review.
           </p>
@@ -1149,7 +1158,7 @@ function AvailabilityTab({ detail }: { detail: LibraryAssetDetail }) {
   )
   return (
     <section
-      className="beta-library-availability"
+      className="nightbook-library-availability"
       aria-label="Asset availability"
     >
       <Panel>
@@ -1219,7 +1228,7 @@ function AvailabilityTab({ detail }: { detail: LibraryAssetDetail }) {
         actions={
           eligible ? (
             <a
-              className="beta-library-download"
+              className="nightbook-library-download"
               href={`/api/library/assets/${encodeURIComponent(detail.assetId)}/download`}
             >
               Download original
@@ -1231,8 +1240,8 @@ function AvailabilityTab({ detail }: { detail: LibraryAssetDetail }) {
   )
 }
 
-function BetaLibraryDesktop(
-  props: BetaLibraryAppProps & { intake: LibraryIntake },
+function LibraryDesktop(
+  props: LibraryWorkspaceProps & { intake: LibraryIntake },
 ) {
   const [activeTab, setActiveTab] = useState('review')
   const title =
@@ -1276,7 +1285,7 @@ function BetaLibraryDesktop(
     )
 
   return (
-    <main id="beta-workspace" className="beta-library-workspace">
+    <main id="nightbook-workspace" className="nightbook-library-workspace">
       <PageHeader
         eyebrow="Library / Frame review"
         title={title}
@@ -1297,7 +1306,7 @@ function BetaLibraryDesktop(
       />
       {props.detail ? (
         <Tabs
-          className="beta-library-tabs"
+          className="nightbook-library-tabs"
           items={tabs}
           activeId={activeTab}
           onActiveChange={setActiveTab}
@@ -1320,14 +1329,14 @@ function BetaLibraryDesktop(
   )
 }
 
-export function BetaLibraryPhone({
+export function LibraryPhone({
   loading,
   assetId,
   detail,
   detailState,
   page,
 }: Omit<
-  BetaLibraryAppProps,
+  LibraryWorkspaceProps,
   'onSelectAsset' | 'onReview' | 'onOpenProcess' | 'onSelectComparisonAsset'
 >) {
   const catalogGroups = useMemo(() => {
@@ -1341,8 +1350,8 @@ export function BetaLibraryPhone({
   }, [page.value])
   return (
     <main
-      id="beta-workspace"
-      className="beta-library-phone"
+      id="nightbook-workspace"
+      className="nightbook-library-phone"
       aria-label="Read-only Library phone projection"
     >
       <PageHeader
@@ -1491,7 +1500,7 @@ export function BetaLibraryPhone({
         </>
       ) : !assetId && catalogGroups.length ? (
         <section
-          className="beta-library-phone-groups"
+          className="nightbook-library-phone-groups"
           aria-label="Phone Library catalog"
         >
           {catalogGroups.map(([groupId, assets]) => (
@@ -1528,10 +1537,13 @@ export function BetaLibraryPhone({
   )
 }
 
-function BetaLibraryStatusStrip({ projection }: { projection: Projection }) {
+function LibraryStatusStrip({ projection }: { projection: Projection }) {
   const current = projection.shell.freshness.startsWith('Current ')
   return (
-    <footer className="beta-operational-status" aria-label="Operational status">
+    <footer
+      className="nightbook-operational-status"
+      aria-label="Operational status"
+    >
       <span>
         <i data-tone={current ? 'positive' : 'warning'} aria-hidden="true" />
         <b>Library</b> ·{' '}
@@ -1546,7 +1558,7 @@ function BetaLibraryStatusStrip({ projection }: { projection: Projection }) {
   )
 }
 
-export function BetaLibraryApp(props: BetaLibraryAppProps) {
+export function LibraryWorkspace(props: LibraryWorkspaceProps) {
   const phone = usePhoneProjection()
   const [selectedAssetIds, setSelectedAssetIds] = useState<ReadonlySet<string>>(
     new Set(),
@@ -1635,14 +1647,14 @@ export function BetaLibraryApp(props: BetaLibraryAppProps) {
   }
   return (
     <div
-      className="beta-app nb-theme"
+      className="nightbook-app nb-theme"
       data-nb-theme="nightbook"
       data-nb-density="compact"
     >
-      <a className="beta-skip-link" href="#beta-workspace">
+      <a className="nightbook-skip-link" href="#nightbook-workspace">
         Skip to Library evidence
       </a>
-      <BetaCommandBar
+      <CommandBar
         projection={props.projection}
         loading={props.loading}
         workspace="library"
@@ -1650,7 +1662,7 @@ export function BetaLibraryApp(props: BetaLibraryAppProps) {
         allowControlAction={!phone}
       />
       {phone ? (
-        <BetaLibraryPhone
+        <LibraryPhone
           projection={props.projection}
           loading={props.loading}
           page={props.page}
@@ -1661,11 +1673,11 @@ export function BetaLibraryApp(props: BetaLibraryAppProps) {
             : { detailState: props.detailState })}
         />
       ) : (
-        <BetaLibraryDesktop {...props} intake={intake} />
+        <LibraryDesktop {...props} intake={intake} />
       )}
-      <BetaLibraryStatusStrip projection={props.projection} />
+      <LibraryStatusStrip projection={props.projection} />
     </div>
   )
 }
 
-export default BetaLibraryApp
+export default LibraryWorkspace

@@ -8,7 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { BootstrapClientState } from '../bootstrap-client'
 import { projectBootstrapState } from '../bootstrap-projection'
 import { unavailableProjection } from '../future-adapter'
-import { BetaPlanApp, BetaPlanPhone } from './BetaPlanApp'
+import { PlanWorkspace, PlanPhone } from './PlanWorkspace'
 
 const executionDefinition = (
   sequenceId: string,
@@ -104,7 +104,7 @@ const snapshot = (
   Schema.decodeUnknownSync(BootstrapSnapshot)({
     ...(active ? bootstrapFixtures.activeRun : bootstrapFixtures.fresh),
     plan: {
-      planId: 'plan-beta',
+      planId: 'plan-current',
       revision: 3,
       readiness: 'ready',
       readinessSummary: 'All supplied planning facts are viable.',
@@ -113,7 +113,7 @@ const snapshot = (
       ...(active
         ? {
             acceptedRunDefinition: {
-              id: 'accepted-beta',
+              id: 'accepted-current',
               sourcePlanRevision: 3,
               acceptedAt: '2026-08-08T01:00:00.000Z',
               executor: 'fake',
@@ -170,7 +170,7 @@ const projection = (
 
 test('renders the Nightbook Plan shell and real typed editor controls', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaPlanApp, {
+    createElement(PlanWorkspace, {
       projection: projection(),
       loading: false,
       submit: async () => {
@@ -189,7 +189,7 @@ test('renders the Nightbook Plan shell and real typed editor controls', () => {
 
 test('renders active accepted state without exposing draft save', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaPlanApp, {
+    createElement(PlanWorkspace, {
       projection: projection(true),
       loading: false,
     }),
@@ -202,7 +202,7 @@ test('renders active accepted state without exposing draft save', () => {
 
 test('renders overlapping schedule intervals on deterministic separate lanes', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaPlanApp, {
+    createElement(PlanWorkspace, {
       projection: projection(false, overlappingSequences),
       loading: false,
     }),
@@ -215,7 +215,7 @@ test('renders overlapping schedule intervals on deterministic separate lanes', (
 
 test('keeps stale Plan evidence visible while removing all mutation actions', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaPlanApp, {
+    createElement(PlanWorkspace, {
       projection: projectBootstrapState(
         BootstrapClientState.Stale({
           snapshot: snapshot(true),
@@ -234,7 +234,7 @@ test('keeps stale Plan evidence visible while removing all mutation actions', ()
 
 test('phone Plan projection contains no mutation controls', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaPlanPhone, {
+    createElement(PlanPhone, {
       projection: projection(true),
       loading: false,
     }),
@@ -248,7 +248,7 @@ test('phone Plan projection contains no mutation controls', () => {
 
 test('renders unavailable Plan truthfully', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaPlanApp, {
+    createElement(PlanWorkspace, {
       projection: unavailableProjection,
       loading: false,
     }),

@@ -10,11 +10,8 @@ import { BootstrapClientState } from '../bootstrap-client'
 import { projectBootstrapState } from '../bootstrap-projection'
 import { unavailableProjection } from '../future-adapter'
 import { PreflightRefreshSubmission } from '../preflight-refresh-client'
-import {
-  BetaObserveApp,
-  BetaObservePhone,
-  projectedTakeControlAction,
-} from './BetaObserveApp'
+import { ObserveWorkspace, ObservePhone } from './ObserveWorkspace'
+import { projectedTakeControlAction } from './shared-shell'
 
 const preflightProjection = () =>
   projectBootstrapState(
@@ -22,7 +19,7 @@ const preflightProjection = () =>
       snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)({
         ...bootstrapFixtures.activeRun,
         observe: {
-          runId: 'run-beta-preflight',
+          runId: 'run-nightbook-preflight',
           revision: 4,
           executor: 'fixture',
           phase: 'preflight',
@@ -81,7 +78,7 @@ const targetSnapshot = (
   Schema.decodeUnknownSync(BootstrapSnapshot)({
     ...bootstrapFixtures.activeRun,
     observe: {
-      runId: 'run-beta-target',
+      runId: 'run-nightbook-target',
       revision: 7,
       executor: 'fixture',
       phase,
@@ -160,7 +157,7 @@ const recoveryAcquire = {
 
 test('renders truthful loading and unavailable evidence without inert content', () => {
   const loading = renderToStaticMarkup(
-    createElement(BetaObserveApp, {
+    createElement(ObserveWorkspace, {
       projection: unavailableProjection,
       loading: true,
     }),
@@ -169,7 +166,7 @@ test('renders truthful loading and unavailable evidence without inert content', 
   assert.match(loading, /aria-busy="true"/)
 
   const unavailable = renderToStaticMarkup(
-    createElement(BetaObserveApp, {
+    createElement(ObserveWorkspace, {
       projection: unavailableProjection,
       loading: false,
     }),
@@ -183,7 +180,10 @@ test('renders truthful loading and unavailable evidence without inert content', 
   assert.match(unavailable, /Target acquire/i)
   assert.match(unavailable, /Control · view/)
   assert.match(unavailable, /service truth unavailable/)
-  assert.equal((unavailable.match(/class="beta-health-item"/g) ?? []).length, 5)
+  assert.equal(
+    (unavailable.match(/class="nightbook-health-item"/g) ?? []).length,
+    5,
+  )
   assert.match(
     unavailable,
     /Rig: unknown\. Rig health is unknown without an authoritative projection\./,
@@ -204,7 +204,7 @@ test('keeps reconnecting Observe readable and removes mutation controls', () => 
     }),
   )
   const markup = renderToStaticMarkup(
-    createElement(BetaObserveApp, {
+    createElement(ObserveWorkspace, {
       projection,
       loading: false,
       targetAcquisitionCommand: async () => undefined,
@@ -223,7 +223,7 @@ test('keeps reconnecting Observe readable and removes mutation controls', () => 
 
 test('enables only the supplied safe preflight refresh seam', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaObserveApp, {
+    createElement(ObserveWorkspace, {
       projection: preflightProjection(),
       loading: false,
       refreshPreflight: async () =>
@@ -241,7 +241,7 @@ test('enables only the supplied safe preflight refresh seam', () => {
 test('keeps preflight refresh disabled without current control', () => {
   const projection = preflightProjection()
   const markup = renderToStaticMarkup(
-    createElement(BetaObserveApp, {
+    createElement(ObserveWorkspace, {
       projection: {
         ...projection,
         shell: { ...projection.shell, readOnly: true },
@@ -283,7 +283,7 @@ test('keeps pending frame retrieval in Capture without a Library handoff', () =>
     },
   }
   const markup = renderToStaticMarkup(
-    createElement(BetaObserveApp, { projection, loading: false }),
+    createElement(ObserveWorkspace, { projection, loading: false }),
   )
   assert.match(markup, /<h1>Capture<\/h1>/)
   assert.match(markup, /Retrieve Frame/)
@@ -325,7 +325,7 @@ test('keeps Verify inside Capture while leading with durable executor evidence',
     },
   }
   const markup = renderToStaticMarkup(
-    createElement(BetaObserveApp, { projection, loading: false }),
+    createElement(ObserveWorkspace, { projection, loading: false }),
   )
   assert.match(markup, /<h1>Verify<\/h1>/)
   assert.match(markup, /Capture/)
@@ -338,7 +338,7 @@ test('keeps Verify inside Capture while leading with durable executor evidence',
   assert.match(markup, /href="\/library\/assets\/asset-capture-run-frame-1"/)
   assert.match(markup, /Retrieve Frame/)
   const phoneMarkup = renderToStaticMarkup(
-    createElement(BetaObservePhone, { projection, loading: false }),
+    createElement(ObservePhone, { projection, loading: false }),
   )
   assert.match(phoneMarkup, /Review captured frame in Library/)
   assert.match(
@@ -350,7 +350,7 @@ test('keeps Verify inside Capture while leading with durable executor evidence',
 
 test('renders the real target-acquisition projection with only its advertised capture action', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaObserveApp, {
+    createElement(ObserveWorkspace, {
       projection: targetProjection(solvingAcquire),
       loading: false,
       targetAcquisitionCommand: async () => undefined,
@@ -367,7 +367,7 @@ test('renders the real target-acquisition projection with only its advertised ca
 
 test('keeps an active Acquire retry in Target acquire when the outer run remains capture', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaObserveApp, {
+    createElement(ObserveWorkspace, {
       projection: targetProjection(solvingAcquire, 'capture'),
       loading: false,
       targetAcquisitionCommand: async () => undefined,
@@ -407,16 +407,16 @@ test('leaves completed Acquire evidence behind and exposes the exact captured Li
     },
   }
   const markup = renderToStaticMarkup(
-    createElement(BetaObserveApp, { projection, loading: false }),
+    createElement(ObserveWorkspace, { projection, loading: false }),
   )
   assert.match(markup, /<h1>Complete<\/h1>/)
   assert.doesNotMatch(markup, /Target-acquisition context/)
   assert.match(markup, /Durable executor work/)
   assert.match(markup, /href="\/library\/assets\/asset-capture-final-1"/)
   const phoneMarkup = renderToStaticMarkup(
-    createElement(BetaObservePhone, { projection, loading: false }),
+    createElement(ObservePhone, { projection, loading: false }),
   )
-  assert.doesNotMatch(phoneMarkup, /beta-phone-target-evidence/)
+  assert.doesNotMatch(phoneMarkup, /nightbook-phone-target-evidence/)
   assert.match(phoneMarkup, /Review captured frame in Library/)
 })
 
@@ -454,7 +454,7 @@ test('renders exact solved correction evidence and approval without inventing re
     actions: [{ _tag: 'Available', action: 'ApprovePointingCorrection' }],
   })
   const markup = renderToStaticMarkup(
-    createElement(BetaObserveApp, {
+    createElement(ObserveWorkspace, {
       projection,
       loading: false,
       approvePointingCorrection: async () => undefined,
@@ -469,7 +469,7 @@ test('renders exact solved correction evidence and approval without inventing re
 
 test('renders bounded recovery evidence and only advertised safe recovery actions', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaObserveApp, {
+    createElement(ObserveWorkspace, {
       projection: targetProjection(recoveryAcquire),
       loading: false,
       acquireRecoveryCommand: async () => undefined,
@@ -490,7 +490,7 @@ test('renders bounded recovery evidence and only advertised safe recovery action
 
 test('keeps aborted acquisition evidence visible as a protected Recover outcome', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaObserveApp, {
+    createElement(ObserveWorkspace, {
       projection: targetProjection(
         {
           ...recoveryAcquire,
@@ -513,7 +513,7 @@ test('keeps aborted acquisition evidence visible as a protected Recover outcome'
 
 test('renders observed target completion without a browser completion claim', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaObserveApp, {
+    createElement(ObserveWorkspace, {
       projection: targetProjection({
         ...solvingAcquire,
         revision: 2,
@@ -548,7 +548,7 @@ test('renders observed target completion without a browser completion claim', ()
 
 test('phone is an explicit read-only evidence projection with no mutation controls', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaObservePhone, {
+    createElement(ObservePhone, {
       projection: preflightProjection(),
       loading: false,
     }),
@@ -566,7 +566,7 @@ test('phone is an explicit read-only evidence projection with no mutation contro
 test('target-acquisition phone projection keeps evidence and protection with zero mutation controls', () => {
   const projection = targetProjection(recoveryAcquire)
   const markup = renderToStaticMarkup(
-    createElement(BetaObservePhone, {
+    createElement(ObservePhone, {
       projection,
       loading: false,
     }),
@@ -586,44 +586,49 @@ test('target-acquisition phone projection keeps evidence and protection with zer
 
 test('pins every health control to one fixed square dimension', () => {
   const styles = readFileSync(
-    new URL('./beta-observe.css', import.meta.url),
+    new URL('./workspace.css', import.meta.url),
     'utf8',
   )
-  const rule = styles.match(/\.beta-health-item > button\s*\{([^}]*)\}/s)?.[1]
+  const rule = styles.match(
+    /\.nightbook-health-item > button\s*\{([^}]*)\}/s,
+  )?.[1]
   assert.ok(rule)
-  assert.match(rule, /inline-size:\s*var\(--beta-health-control-size\)/)
-  assert.match(rule, /block-size:\s*var\(--beta-health-control-size\)/)
-  assert.match(rule, /min-inline-size:\s*var\(--beta-health-control-size\)/)
-  assert.match(rule, /min-block-size:\s*var\(--beta-health-control-size\)/)
+  assert.match(rule, /inline-size:\s*var\(--nightbook-health-control-size\)/)
+  assert.match(rule, /block-size:\s*var\(--nightbook-health-control-size\)/)
+  assert.match(
+    rule,
+    /min-inline-size:\s*var\(--nightbook-health-control-size\)/,
+  )
+  assert.match(rule, /min-block-size:\s*var\(--nightbook-health-control-size\)/)
 })
 
 test('defines the approved target-acquire and recovery responsive geometry', () => {
   const styles = readFileSync(
-    new URL('./beta-observe.css', import.meta.url),
+    new URL('./workspace.css', import.meta.url),
     'utf8',
   )
   assert.match(
     styles,
-    /\.beta-target-stage\[data-mode='acquire'\][^{]*\{[^}]*grid-template-columns:\s*240px minmax\(420px, 1fr\) 280px/s,
+    /\.nightbook-target-stage\[data-mode='acquire'\][^{]*\{[^}]*grid-template-columns:\s*240px minmax\(420px, 1fr\) 280px/s,
   )
   assert.match(
     styles,
-    /@media \(min-width: 601px\) and \(max-width: 1120px\)[\s\S]*?\.beta-target-stage\[data-mode='acquire'\][^{]*\{[^}]*grid-template-columns:\s*240px minmax\(0, 1fr\)/,
+    /@media \(min-width: 601px\) and \(max-width: 1120px\)[\s\S]*?\.nightbook-target-stage\[data-mode='acquire'\][^{]*\{[^}]*grid-template-columns:\s*240px minmax\(0, 1fr\)/,
   )
   assert.match(
     styles,
-    /@media \(min-width: 601px\) and \(max-width: 780px\)[\s\S]*?\.beta-target-stage\[data-mode='acquire'\],[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/,
+    /@media \(min-width: 601px\) and \(max-width: 780px\)[\s\S]*?\.nightbook-target-stage\[data-mode='acquire'\],[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/,
   )
   assert.match(
     styles,
-    /@media \(min-width: 601px\) and \(max-width: 780px\)[\s\S]*?\.beta-observe-stage\s*\{[^}]*height:\s*max-content[\s\S]*?\.beta-context-rail,\s*\.beta-evidence-panel\s*\{[^}]*height:\s*auto/,
+    /@media \(min-width: 601px\) and \(max-width: 780px\)[\s\S]*?\.nightbook-observe-stage\s*\{[^}]*height:\s*max-content[\s\S]*?\.nightbook-context-rail,\s*\.nightbook-evidence-panel\s*\{[^}]*height:\s*auto/,
   )
   assert.match(
     styles,
-    /\.beta-target-stage\[data-mode='recover'\][^{]*\{[^}]*grid-template-columns:\s*minmax\(520px, 1fr\) 280px/s,
+    /\.nightbook-target-stage\[data-mode='recover'\][^{]*\{[^}]*grid-template-columns:\s*minmax\(520px, 1fr\) 280px/s,
   )
   assert.match(
     styles,
-    /@media \(min-width: 601px\) and \(max-width: 1120px\)[\s\S]*?\.beta-target-stage\[data-mode='recover'\][^{]*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 280px[\s\S]*?\.beta-target-stage\[data-mode='recover'\] > \.beta-decision-rail[^{]*\{[^}]*grid-column:\s*auto/,
+    /@media \(min-width: 601px\) and \(max-width: 1120px\)[\s\S]*?\.nightbook-target-stage\[data-mode='recover'\][^{]*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 280px[\s\S]*?\.nightbook-target-stage\[data-mode='recover'\] > \.nightbook-decision-rail[^{]*\{[^}]*grid-column:\s*auto/,
   )
 })

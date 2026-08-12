@@ -37,10 +37,10 @@ import {
 } from 'react'
 import { PlanCommandSubmission, type PlanAction } from '../plan-command-client'
 import type { Projection, StatusTone } from '../presentation'
-import { BetaCommandBar, type BetaControlSubmit } from './BetaObserveApp'
+import { CommandBar, type ControlSubmit } from './shared-shell'
 import '@nightbook/ui/styles.css'
-import './beta-observe.css'
-import './beta-plan.css'
+import './workspace.css'
+import './plan.css'
 
 type PlanSequence = PlanWorkspaceProjection['sequences'][number]
 type PlanEligibility = NonNullable<
@@ -56,14 +56,14 @@ type ConfirmAction =
   | { kind: 'start' }
   | { kind: 'apply-preview' }
 
-export type BetaPlanAppProps = {
+export type PlanWorkspaceProps = {
   projection: Projection
   loading: boolean
   submit?: (
     action: PlanAction,
     key: typeof IdempotencyKey.Type,
   ) => Promise<PlanCommandSubmission>
-  submitControl?: BetaControlSubmit
+  submitControl?: ControlSubmit
 }
 
 const tone = (value: StatusTone): Tone => {
@@ -240,7 +240,7 @@ function PlanFieldGroup({
   children: ReactNode
 }) {
   return (
-    <fieldset className="beta-plan-field-group">
+    <fieldset className="nightbook-plan-field-group">
       <legend>{title}</legend>
       {children}
     </fieldset>
@@ -542,14 +542,14 @@ function PlanSequenceList({
           sequences.length,
         )
   return (
-    <Panel as="aside" className="beta-plan-sequences">
+    <Panel as="aside" className="nightbook-plan-sequences">
       <PanelHeader
         title="Plan order"
         meta={`rev ${projection.plan.source?.revision ?? '—'}`}
       />
       <PanelBody>
         {run ? (
-          <div className="beta-plan-section-label">Accepted / current</div>
+          <div className="nightbook-plan-section-label">Accepted / current</div>
         ) : null}
         {sequences.map((sequence, index) => {
           const state = run
@@ -563,7 +563,7 @@ function PlanSequenceList({
             <button
               key={sequence.sequenceId}
               type="button"
-              className="beta-plan-sequence"
+              className="nightbook-plan-sequence"
               data-state={state}
               data-selected={index === selected ? 'true' : 'false'}
               aria-pressed={index === selected}
@@ -602,10 +602,10 @@ function PlanSchedule({
 }) {
   const timeline = allocatePlanTimeline(sequences)
   return (
-    <Panel as="section" className="beta-plan-schedule">
+    <Panel as="section" className="nightbook-plan-schedule">
       <PanelHeader title="Sky & schedule" meta="Plan projection" />
       <PanelBody>
-        <div className="beta-plan-altitude">
+        <div className="nightbook-plan-altitude">
           <svg
             viewBox="0 0 800 220"
             aria-label="Planned target altitude curves"
@@ -626,9 +626,9 @@ function PlanSchedule({
             Planned sky evidence; selecting a row highlights its curve.
           </span>
         </div>
-        <div className="beta-plan-timeline" aria-label="Plan timeline">
+        <div className="nightbook-plan-timeline" aria-label="Plan timeline">
           <div
-            className="beta-plan-timeline-track"
+            className="nightbook-plan-timeline-track"
             style={
               {
                 '--timeline-lane-count': Math.max(1, timeline.laneCount),
@@ -663,7 +663,7 @@ function PlanSchedule({
             )}
           </div>
         </div>
-        <p className="beta-plan-muted">
+        <p className="nightbook-plan-muted">
           Accepted execution stays immutable. Draft changes update only the
           saved plan revision.
         </p>
@@ -699,7 +699,7 @@ function PlanReview({
     : eligibilityReason(source?.actions?.previewRunMutation)
   return (
     <Stack gap={8}>
-      <div className="beta-plan-review-grid">
+      <div className="nightbook-plan-review-grid">
         <Panel>
           <PanelHeader
             title={
@@ -716,7 +716,10 @@ function PlanReview({
           <PanelBody>
             <Stack gap={6}>
               {draft.map((sequence, index) => (
-                <div className="beta-plan-frozen-row" key={sequence.sequenceId}>
+                <div
+                  className="nightbook-plan-frozen-row"
+                  key={sequence.sequenceId}
+                >
                   <b>
                     {String(index + 1).padStart(2, '0')} ·{' '}
                     {sequence.definition.targetName}
@@ -726,7 +729,7 @@ function PlanReview({
                   </span>
                 </div>
               ))}
-              <p className="beta-plan-muted">
+              <p className="nightbook-plan-muted">
                 An accepted run is a frozen service-owned definition. Plan edits
                 cannot change it.
               </p>
@@ -744,9 +747,12 @@ function PlanReview({
           />
           <PanelBody>
             {changed.length > 0 ? (
-              <div className="beta-plan-change-list">
+              <div className="nightbook-plan-change-list">
                 {changed.map(({ sequence, accepted: prior }) => (
-                  <label className="beta-plan-change" key={sequence.sequenceId}>
+                  <label
+                    className="nightbook-plan-change"
+                    key={sequence.sequenceId}
+                  >
                     <Checkbox checked readOnly />
                     <div>
                       <b>{sequence.definition.targetName}</b>
@@ -779,7 +785,7 @@ function PlanReview({
                 description={source.runMutationPreview.consequences}
               />
             ) : projection.shell.currentRun ? (
-              <div className="beta-plan-preview-options">
+              <div className="nightbook-plan-preview-options">
                 <AttentionCard
                   tone="neutral"
                   statusLabel="Preview first"
@@ -820,19 +826,19 @@ function PlanReview({
   )
 }
 
-export function BetaPlanPhone({
+export function PlanPhone({
   projection,
   loading,
-}: Pick<BetaPlanAppProps, 'projection' | 'loading'>) {
+}: Pick<PlanWorkspaceProps, 'projection' | 'loading'>) {
   const view = projection.plan
   const source = view.source
   return (
     <main
-      id="beta-workspace"
-      className="beta-phone-workspace beta-plan-phone"
+      id="nightbook-workspace"
+      className="nightbook-phone-workspace nightbook-plan-phone"
       aria-label="Read-only phone Plan projection"
     >
-      <header className="beta-phone-header">
+      <header className="nightbook-phone-header">
         <div>
           <p>Plan / read only</p>
           <h1>{loading ? 'Loading plan' : view.title}</h1>
@@ -886,7 +892,7 @@ export function BetaPlanPhone({
       <Panel>
         <PanelHeader title="Sequence order" meta="Saved plan" />
         <PanelBody>
-          <div className="beta-plan-phone-sequences">
+          <div className="nightbook-plan-phone-sequences">
             {(source?.sequences ?? []).map((sequence, index) => (
               <article key={sequence.sequenceId}>
                 <b>
@@ -912,25 +918,25 @@ function PlanStatusStrip({ projection }: { projection: Projection }) {
   const current = projection.shell.freshness.startsWith('Current ')
   return (
     <footer
-      className="beta-operational-status beta-plan-status-strip"
+      className="nightbook-operational-status nightbook-plan-status-strip"
       aria-label="Operational status"
     >
-      <span className="beta-plan-status-desktop">
+      <span className="nightbook-plan-status-desktop">
         <i data-tone={tone(planTone(projection.plan))} aria-hidden="true" />
         <b>
           {source?.acceptedRunDefinition ? 'Accepted plan' : 'Plan draft'}
         </b>{' '}
         · {projection.plan.readiness}
       </span>
-      <span className="beta-plan-status-desktop">
+      <span className="nightbook-plan-status-desktop">
         Plan · {current ? 'service-owned truth' : 'service truth unavailable'} ·
         revision {source?.revision ?? '—'}
       </span>
-      <span className="beta-plan-status-desktop">
+      <span className="nightbook-plan-status-desktop">
         {projection.shell.currentRun?.target ?? 'No active run'} ·{' '}
         {projection.shell.controller}
       </span>
-      <span className="beta-plan-status-mobile">
+      <span className="nightbook-plan-status-mobile">
         <i data-tone={tone(planTone(projection.plan))} aria-hidden="true" />
         <b>
           {source?.acceptedRunDefinition ? 'Accepted plan' : 'Plan draft'}
@@ -941,7 +947,7 @@ function PlanStatusStrip({ projection }: { projection: Projection }) {
   )
 }
 
-function PlanDesktop({ projection, loading, submit }: BetaPlanAppProps) {
+function PlanDesktop({ projection, loading, submit }: PlanWorkspaceProps) {
   const source = projection.plan.source
   const [selected, setSelected] = useState(0)
   const [tab, setTab] = useState<PlanTab>('editor')
@@ -1069,8 +1075,8 @@ function PlanDesktop({ projection, loading, submit }: BetaPlanAppProps) {
   if (!loading && source === undefined)
     return (
       <main
-        id="beta-workspace"
-        className="beta-desktop-workspace beta-plan-workspace"
+        id="nightbook-workspace"
+        className="nightbook-desktop-workspace nightbook-plan-workspace"
       >
         <PageHeader
           eyebrow="Plan / Authoritative intent"
@@ -1088,13 +1094,13 @@ function PlanDesktop({ projection, loading, submit }: BetaPlanAppProps) {
 
   return (
     <main
-      id="beta-workspace"
-      className="beta-desktop-workspace beta-plan-workspace"
+      id="nightbook-workspace"
+      className="nightbook-desktop-workspace nightbook-plan-workspace"
       aria-busy={loading}
     >
-      <div ref={portalRoot} className="beta-plan-portal" />
+      <div ref={portalRoot} className="nightbook-plan-portal" />
       <PageHeader
-        className="beta-plan-header"
+        className="nightbook-plan-header"
         eyebrow={
           projection.shell.currentRun
             ? 'Plan / Observing now'
@@ -1106,13 +1112,13 @@ function PlanDesktop({ projection, loading, submit }: BetaPlanAppProps) {
             : 'Plan the next accepted run'
         }
       />
-      <div className="beta-plan-freeze-banner">
+      <div className="nightbook-plan-freeze-banner">
         <StatusIndicator
           tone={banner.tone}
           label={banner.label}
           detail={banner.detail}
         />
-        <span className="beta-plan-freeze-copy">{banner.copy}</span>
+        <span className="nightbook-plan-freeze-copy">{banner.copy}</span>
         <Button
           size="small"
           disabled={!preview && changed === 0}
@@ -1122,7 +1128,7 @@ function PlanDesktop({ projection, loading, submit }: BetaPlanAppProps) {
         </Button>
       </div>
       <Tabs
-        className="beta-plan-tabs"
+        className="nightbook-plan-tabs"
         label="Plan views"
         activeId={tab}
         onActiveChange={(id: string) => setTab(id as PlanTab)}
@@ -1132,7 +1138,7 @@ function PlanDesktop({ projection, loading, submit }: BetaPlanAppProps) {
             label: 'Night editor',
             content: sequence ? (
               <Stack gap={8}>
-                <div className="beta-plan-active-grid">
+                <div className="nightbook-plan-active-grid">
                   <PlanSequenceList
                     projection={projection}
                     sequences={draft}
@@ -1140,7 +1146,7 @@ function PlanDesktop({ projection, loading, submit }: BetaPlanAppProps) {
                     onSelect={setSelected}
                   />
                   <PlanSchedule sequences={draft} selected={selected} />
-                  <Panel as="aside" className="beta-plan-editor">
+                  <Panel as="aside" className="nightbook-plan-editor">
                     <PanelHeader
                       title={`Sequence ${String(selected + 1).padStart(2, '0')} · editor`}
                       meta={
@@ -1163,14 +1169,14 @@ function PlanDesktop({ projection, loading, submit }: BetaPlanAppProps) {
                             : 'Draft matches saved plan'
                         }
                       />
-                      <p className="beta-plan-muted">
+                      <p className="nightbook-plan-muted">
                         Only the saved Plan revision is editable. Accepted
                         execution remains frozen.
                       </p>
                     </PanelBody>
                   </Panel>
                 </div>
-                <div className="beta-plan-action-dock">
+                <div className="nightbook-plan-action-dock">
                   <div>
                     <b>
                       {result ??
@@ -1246,7 +1252,7 @@ function PlanDesktop({ projection, loading, submit }: BetaPlanAppProps) {
                     send({ _tag: 'PreviewRunMutation', mutation })
                   }
                 />
-                <div className="beta-plan-action-dock">
+                <div className="nightbook-plan-action-dock">
                   <div>
                     <b>
                       {result ??
@@ -1338,18 +1344,18 @@ function PlanDesktop({ projection, loading, submit }: BetaPlanAppProps) {
   )
 }
 
-export function BetaPlanApp(props: BetaPlanAppProps) {
+export function PlanWorkspace(props: PlanWorkspaceProps) {
   const phone = usePhoneProjection()
   return (
     <div
-      className="beta-app nb-theme"
+      className="nightbook-app nb-theme"
       data-nb-theme="nightbook"
       data-nb-density="compact"
     >
-      <a className="beta-skip-link" href="#beta-workspace">
+      <a className="nightbook-skip-link" href="#nightbook-workspace">
         Skip to Plan
       </a>
-      <BetaCommandBar
+      <CommandBar
         projection={props.projection}
         loading={props.loading}
         workspace="plan"
@@ -1357,7 +1363,7 @@ export function BetaPlanApp(props: BetaPlanAppProps) {
         allowControlAction={!phone}
       />
       {phone ? (
-        <BetaPlanPhone projection={props.projection} loading={props.loading} />
+        <PlanPhone projection={props.projection} loading={props.loading} />
       ) : (
         <PlanDesktop {...props} />
       )}
@@ -1366,4 +1372,4 @@ export function BetaPlanApp(props: BetaPlanAppProps) {
   )
 }
 
-export default BetaPlanApp
+export default PlanWorkspace

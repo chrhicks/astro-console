@@ -19,7 +19,7 @@ import {
   DevelopmentSimulationUnavailable,
 } from '@astro-console/protocol'
 import { useEffect, useState, type ChangeEvent } from 'react'
-import { nightbookHref } from './route'
+import { nightbookHref } from '../route-href'
 
 type SimulationProjection = typeof DevelopmentSimulationProjection.Type
 type UnavailableSimulation = typeof DevelopmentSimulationUnavailable.Type
@@ -168,15 +168,15 @@ export function DevelopmentSimulationSurface({
   }
   return (
     <section
-      className="beta-simulation-strip"
+      className="nightbook-simulation-strip"
       aria-label="Development simulation context"
       aria-busy={pending}
     >
-      <div className="beta-simulation-identity">
+      <div className="nightbook-simulation-identity">
         <strong>Simulation · not live hardware</strong>
         <span>{scenario}</span>
       </div>
-      <div className="beta-simulation-evidence">
+      <div className="nightbook-simulation-evidence">
         <span>
           {frame === undefined || frame === null
             ? 'Real FITS copy · no frame selected'
@@ -189,7 +189,7 @@ export function DevelopmentSimulationSurface({
         </span>
       </div>
       {!protectedControls && projection !== undefined ? (
-        <div className="beta-simulation-controls">
+        <div className="nightbook-simulation-controls">
           <Field label="Scenario">
             <Select
               value={selectedScenario}
@@ -256,12 +256,12 @@ export function DevelopmentSimulationSurface({
           <a href={nightbookHref('/observe')}>Observe</a>
         </div>
       ) : (
-        <span className="beta-simulation-protection">
+        <span className="nightbook-simulation-protection">
           Controls require desktop.
         </span>
       )}
       <Flyout
-        className="beta-simulation-details"
+        className="nightbook-simulation-details"
         open={detailsOpen}
         onOpenChange={setDetailsOpen}
         label="Simulation details"
@@ -341,7 +341,7 @@ export function DevelopmentSimulationSurface({
           {unavailable !== undefined ? <p>{unavailable.message}</p> : null}
         </Stack>
       </Flyout>
-      <span className="beta-simulation-message" role="status">
+      <span className="nightbook-simulation-message" role="status">
         {message ??
           (projection === undefined
             ? unavailable?.message

@@ -11,10 +11,10 @@ import { Schema } from 'effect'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { unavailableProjection } from '../future-adapter'
-import { BetaLibraryApp, BetaLibraryPhone } from './BetaLibraryApp'
+import { LibraryWorkspace, LibraryPhone } from './LibraryWorkspace'
 
 const query = LibraryQuerySchema.make({
-  queryId: LibraryQueryId.make('nightbook-beta'),
+  queryId: LibraryQueryId.make('nightbook-current'),
   pageSize: 40,
   sort: 'capturedAtDescending',
 })
@@ -125,7 +125,7 @@ const controllerProjection = {
 
 test('allows a desktop owner to select Project sources without the Control Lease', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaLibraryApp, {
+    createElement(LibraryWorkspace, {
       projection: controllerProjection,
       loading: false,
       page: { query, value: page },
@@ -140,7 +140,7 @@ test('allows a desktop owner to select Project sources without the Control Lease
 
 test('renders one real frame-review task from Library contracts', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaLibraryApp, {
+    createElement(LibraryWorkspace, {
       projection: controllerProjection,
       loading: false,
       assetId: detail.assetId,
@@ -187,7 +187,7 @@ test('renders one real frame-review task from Library contracts', () => {
 
 test('renders a service-page catalog grouped only by projected identities', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaLibraryApp, {
+    createElement(LibraryWorkspace, {
       projection: controllerProjection,
       loading: false,
       page: { query, value: page },
@@ -218,7 +218,7 @@ test('renders a service-page catalog grouped only by projected identities', () =
   assert.match(markup, /Unreviewed/)
   assert.match(markup, /☆ Not rated/)
   assert.match(markup, /Rejected/)
-  assert.match(markup, /beta-library-catalog-availability/)
+  assert.match(markup, /nightbook-library-catalog-availability/)
   assert.match(markup, /Temporarily Unavailable/)
   assert.match(markup, /Revision 1/)
   assert.match(
@@ -232,7 +232,7 @@ test('renders a service-page catalog grouped only by projected identities', () =
 
 test('disables every Library intake control for a read-only shell', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaLibraryApp, {
+    createElement(LibraryWorkspace, {
       projection: unavailableProjection,
       loading: false,
       page: { query, value: page },
@@ -246,15 +246,12 @@ test('disables every Library intake control for a read-only shell', () => {
 })
 
 test('wraps long catalog availability and revision inside the card', () => {
-  const styles = readFileSync(
-    new URL('./beta-library.css', import.meta.url),
-    'utf8',
-  )
+  const styles = readFileSync(new URL('./library.css', import.meta.url), 'utf8')
   const availabilityRule = styles.match(
-    /\.beta-library-catalog-availability\s*\{([^}]*)\}/s,
+    /\.nightbook-library-catalog-availability\s*\{([^}]*)\}/s,
   )?.[1]
   const availabilityTextRule = styles.match(
-    /\.beta-library-catalog-availability > b,\s*\.beta-library-catalog-availability > small\s*\{([^}]*)\}/s,
+    /\.nightbook-library-catalog-availability > b,\s*\.nightbook-library-catalog-availability > small\s*\{([^}]*)\}/s,
   )?.[1]
   assert.ok(availabilityRule)
   assert.ok(availabilityTextRule)
@@ -288,7 +285,7 @@ test('renders the published fixture facts without inventing delivery progress or
     ],
   })
   const markup = renderToStaticMarkup(
-    createElement(BetaLibraryApp, {
+    createElement(LibraryWorkspace, {
       projection: controllerProjection,
       loading: false,
       assetId: publishedDetail.assetId,
@@ -318,7 +315,7 @@ test('keeps preview failure truth separate from durable asset truth', () => {
     },
   })
   const markup = renderToStaticMarkup(
-    createElement(BetaLibraryApp, {
+    createElement(LibraryWorkspace, {
       projection: controllerProjection,
       loading: false,
       page: { query, value: page },
@@ -354,7 +351,7 @@ test('renders complete Process output lineage without invented capture lineage',
     },
   })
   const markup = renderToStaticMarkup(
-    createElement(BetaLibraryApp, {
+    createElement(LibraryWorkspace, {
       projection: controllerProjection,
       loading: false,
       page: { query, value: page },
@@ -386,7 +383,7 @@ test('phone retains exact Process output and operation lineage without controls'
     },
   })
   const markup = renderToStaticMarkup(
-    createElement(BetaLibraryPhone, {
+    createElement(LibraryPhone, {
       projection: controllerProjection,
       loading: false,
       page: { query, value: page },
@@ -402,7 +399,7 @@ test('phone retains exact Process output and operation lineage without controls'
 
 test('phone is evidence, availability, and lineage without mutation controls', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaLibraryPhone, {
+    createElement(LibraryPhone, {
       projection: controllerProjection,
       loading: false,
       page: { query, value: page },
@@ -433,7 +430,7 @@ test('phone is evidence, availability, and lineage without mutation controls', (
 
 test('phone catalog is useful read-only service evidence with navigation only', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaLibraryPhone, {
+    createElement(LibraryPhone, {
       projection: controllerProjection,
       loading: false,
       page: { query, value: page },
@@ -458,7 +455,7 @@ test('phone catalog is useful read-only service evidence with navigation only', 
 
 test('phone keeps an unavailable asset route distinct from the catalog', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaLibraryPhone, {
+    createElement(LibraryPhone, {
       projection: controllerProjection,
       loading: false,
       assetId: detail.assetId,
@@ -475,7 +472,7 @@ test('phone keeps an unavailable asset route distinct from the catalog', () => {
 
 test('does not expose a review action without current asset detail', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaLibraryApp, {
+    createElement(LibraryWorkspace, {
       projection: controllerProjection,
       loading: false,
       page: { query, value: page },
@@ -492,7 +489,7 @@ test('does not expose a review action without current asset detail', () => {
 
 test('keeps desktop review controls disabled for a read-only or stale projection', () => {
   const markup = renderToStaticMarkup(
-    createElement(BetaLibraryApp, {
+    createElement(LibraryWorkspace, {
       projection: unavailableProjection,
       loading: false,
       page: { query, value: page },
@@ -522,7 +519,7 @@ test('keeps Process handoff disabled when the service marks it unavailable', () 
     },
   )
   const markup = renderToStaticMarkup(
-    createElement(BetaLibraryApp, {
+    createElement(LibraryWorkspace, {
       projection: controllerProjection,
       loading: false,
       page: { query, value: page },
@@ -541,12 +538,9 @@ test('keeps Process handoff disabled when the service marks it unavailable', () 
 })
 
 test('contains the wide review grid inside the available shell height', () => {
-  const styles = readFileSync(
-    new URL('./beta-library.css', import.meta.url),
-    'utf8',
-  )
+  const styles = readFileSync(new URL('./library.css', import.meta.url), 'utf8')
   const wideRule = styles.match(
-    /\.beta-library-review-grid\s*\{([^}]*)\}/s,
+    /\.nightbook-library-review-grid\s*\{([^}]*)\}/s,
   )?.[1]
   assert.ok(wideRule)
   assert.match(wideRule, /height:\s*100%/)
@@ -554,17 +548,14 @@ test('contains the wide review grid inside the available shell height', () => {
   assert.doesNotMatch(wideRule, /100vh/)
   assert.match(
     styles,
-    /@media \(max-width: 1050px\)[\s\S]*?\.beta-library-review-grid\s*\{[^}]*height:\s*auto/,
+    /@media \(max-width: 1050px\)[\s\S]*?\.nightbook-library-review-grid\s*\{[^}]*height:\s*auto/,
   )
 })
 
 test('gives each desktop rating star a clear bounded hit area', () => {
-  const styles = readFileSync(
-    new URL('./beta-library.css', import.meta.url),
-    'utf8',
-  )
+  const styles = readFileSync(new URL('./library.css', import.meta.url), 'utf8')
   const ratingButtonRule = styles.match(
-    /\.beta-library-rating button\s*\{([^}]*)\}/s,
+    /\.nightbook-library-rating button\s*\{([^}]*)\}/s,
   )?.[1]
   assert.ok(ratingButtonRule)
   assert.match(ratingButtonRule, /width:\s*40px/)
@@ -574,17 +565,14 @@ test('gives each desktop rating star a clear bounded hit area', () => {
 })
 
 test('keeps both Library preview modes inside the bounded wide review row', () => {
-  const styles = readFileSync(
-    new URL('./beta-library.css', import.meta.url),
-    'utf8',
-  )
+  const styles = readFileSync(new URL('./library.css', import.meta.url), 'utf8')
   const evidenceRule = Array.from(
-    styles.matchAll(/\.beta-library-evidence\s*\{([^}]*)\}/gs),
+    styles.matchAll(/\.nightbook-library-evidence\s*\{([^}]*)\}/gs),
   )
     .map((match) => match[1])
     .find((rule) => rule?.includes('height: 100%'))
   const canvasRule = styles.match(
-    /\.beta-library-evidence \.nb-evidence-canvas\s*\{([^}]*)\}/s,
+    /\.nightbook-library-evidence \.nb-evidence-canvas\s*\{([^}]*)\}/s,
   )?.[1]
   assert.ok(evidenceRule)
   assert.ok(canvasRule)
@@ -597,11 +585,11 @@ test('keeps both Library preview modes inside the bounded wide review row', () =
   assert.match(canvasRule, /aspect-ratio:\s*auto/)
   assert.match(
     styles,
-    /\.beta-library-evidence\[data-fit='aspect'\] \.nb-evidence-canvas > img\s*\{[^}]*object-fit:\s*contain/,
+    /\.nightbook-library-evidence\[data-fit='aspect'\] \.nb-evidence-canvas > img\s*\{[^}]*object-fit:\s*contain/,
   )
   assert.match(
     styles,
-    /\.beta-library-evidence\[data-fit='fill'\] \.nb-evidence-canvas > img\s*\{[^}]*object-fit:\s*cover/,
+    /\.nightbook-library-evidence\[data-fit='fill'\] \.nb-evidence-canvas > img\s*\{[^}]*object-fit:\s*cover/,
   )
 })
 
@@ -611,7 +599,7 @@ test('names loading and not-found detail states without exposing review actions'
     ['not-found', 'The selected asset was not found.'],
   ] as const) {
     const markup = renderToStaticMarkup(
-      createElement(BetaLibraryApp, {
+      createElement(LibraryWorkspace, {
         projection: controllerProjection,
         loading: detailState === 'loading',
         page: { query, value: page },

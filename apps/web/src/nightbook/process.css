@@ -1,111 +1,111 @@
-.beta-process-workspace {
+.nightbook-process-workspace {
   grid-template-rows: auto minmax(520px, 1fr);
 }
-.beta-process-grid {
+.nightbook-process-grid {
   display: grid;
   grid-template-columns: 220px minmax(430px, 1fr) 285px;
   gap: 8px;
   min-width: 0;
   min-height: 0;
 }
-.beta-process-grid > * {
+.nightbook-process-grid > * {
   min-width: 0;
   height: 100%;
 }
-.beta-process-source .nb-panel-body,
-.beta-process-operation .nb-panel-body,
-.beta-process-stage .nb-panel-body {
+.nightbook-process-source .nb-panel-body,
+.nightbook-process-operation .nb-panel-body,
+.nightbook-process-stage .nb-panel-body {
   overflow: auto;
 }
-.beta-process-stage .nb-panel-body {
+.nightbook-process-stage .nb-panel-body {
   height: calc(100% - 34px);
 }
-.beta-process-stage .nb-evidence {
+.nightbook-process-stage .nb-evidence {
   min-height: 360px;
 }
-.beta-process-stage .nb-evidence-canvas {
+.nightbook-process-stage .nb-evidence-canvas {
   min-height: 330px;
 }
-.beta-process-message,
-.beta-process-denial,
-.beta-process-phone-protection {
+.nightbook-process-message,
+.nightbook-process-denial,
+.nightbook-process-phone-protection {
   color: var(--nb-muted);
   font-size: 10px;
 }
-.beta-process-denial {
+.nightbook-process-denial {
   margin: 0;
 }
-.beta-process-empty {
+.nightbook-process-empty {
   align-self: start;
 }
-.beta-process-empty .nb-attention {
+.nightbook-process-empty .nb-attention {
   max-width: 760px;
 }
-.beta-process-review {
+.nightbook-process-review {
   min-width: 0;
 }
-.beta-process-review .nb-evidence,
-.beta-process-review .nb-evidence-canvas {
+.nightbook-process-review .nb-evidence,
+.nightbook-process-review .nb-evidence-canvas {
   min-height: 150px;
 }
-.beta-process-operation a {
+.nightbook-process-operation a {
   color: var(--nb-accent);
   font: 9px var(--nb-font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.beta-operational-status .beta-process-status-mobile {
+.nightbook-operational-status .nightbook-process-status-mobile {
   display: none;
 }
 @media (min-width: 781px) and (max-width: 1120px) {
-  .beta-process-grid {
+  .nightbook-process-grid {
     grid-template-columns: 190px minmax(0, 1fr);
   }
-  .beta-process-operation {
+  .nightbook-process-operation {
     grid-column: 1/-1;
     height: auto;
   }
-  .beta-process-operation .nb-panel-body > .nb-stack {
+  .nightbook-process-operation .nb-panel-body > .nb-stack {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     align-items: start;
   }
 }
 @media (min-width: 601px) and (max-width: 780px) {
-  .beta-process-grid {
+  .nightbook-process-grid {
     grid-template-columns: minmax(0, 1fr);
     grid-auto-rows: max-content;
     overflow: visible;
   }
-  .beta-process-stage {
+  .nightbook-process-stage {
     grid-row: 1;
     min-height: 520px;
   }
-  .beta-process-source {
+  .nightbook-process-source {
     grid-row: 2;
     align-self: start;
     height: max-content;
   }
-  .beta-process-operation {
+  .nightbook-process-operation {
     grid-row: 3;
     align-self: start;
     height: max-content;
   }
-  .beta-process-source .nb-panel-body,
-  .beta-process-operation .nb-panel-body {
+  .nightbook-process-source .nb-panel-body,
+  .nightbook-process-operation .nb-panel-body {
     overflow: visible;
   }
 }
 @media (max-width: 600px) {
-  .beta-process-phone {
+  .nightbook-process-phone {
     overflow-x: hidden;
     grid-auto-rows: max-content;
   }
-  .beta-process-phone-sources {
+  .nightbook-process-phone-sources {
     display: grid;
     gap: 6px;
   }
-  .beta-process-phone-source {
+  .nightbook-process-phone-source {
     min-width: 0;
     border: 1px solid var(--nb-line);
     border-radius: var(--nb-radius);
@@ -114,25 +114,25 @@
     display: grid;
     gap: 3px;
   }
-  .beta-process-phone-source b,
-  .beta-process-phone-source span {
+  .nightbook-process-phone-source b,
+  .nightbook-process-phone-source span {
     overflow-wrap: anywhere;
   }
-  .beta-process-phone-source span {
+  .nightbook-process-phone-source span {
     color: var(--nb-muted);
     font: 600 10px/1.4 var(--nb-font-mono);
   }
-  .beta-process-phone .nb-evidence-canvas {
+  .nightbook-process-phone .nb-evidence-canvas {
     min-height: 220px;
   }
-  .beta-operational-status.beta-process-status {
+  .nightbook-operational-status.nightbook-process-status {
     display: flex;
     min-width: 0;
   }
-  .beta-operational-status .beta-process-status-desktop {
+  .nightbook-operational-status .nightbook-process-status-desktop {
     display: none;
   }
-  .beta-operational-status .beta-process-status-mobile {
+  .nightbook-operational-status .nightbook-process-status-mobile {
     display: flex;
     width: 100%;
     max-width: none;
@@ -140,7 +140,7 @@
     font-size: 8px;
   }
 }
-.beta-process-project-grid {
+.nightbook-process-project-grid {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
@@ -148,32 +148,32 @@
   overflow: hidden;
 }
 
-.beta-process-project-rail,
-.beta-process-project-sources {
+.nightbook-process-project-rail,
+.nightbook-process-project-sources {
   min-width: 0;
   min-height: 0;
 }
 
-.beta-process-project-sources {
+.nightbook-process-project-sources {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
 }
 
-.beta-process-project-sources .nb-panel-body {
+.nightbook-process-project-sources .nb-panel-body {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
-.beta-process-source-table {
+.nightbook-process-source-table {
   min-width: 720px;
   display: grid;
   gap: 5px;
 }
 
-.beta-process-source-row {
+.nightbook-process-source-row {
   border: 1px solid var(--nb-line);
   border-radius: var(--nb-radius);
   background: var(--nb-surface-raised);
@@ -186,80 +186,80 @@
   gap: 10px;
 }
 
-.beta-process-source-row > div {
+.nightbook-process-source-row > div {
   min-width: 0;
   display: grid;
   gap: 3px;
 }
 
-.beta-process-source-row b,
-.beta-process-source-row span {
+.nightbook-process-source-row b,
+.nightbook-process-source-row span {
   overflow-wrap: anywhere;
 }
 
-.beta-process-attempts {
+.nightbook-process-attempts {
   display: grid;
   gap: 6px;
 }
 
-.beta-process-develop {
+.nightbook-process-develop {
   display: grid;
   gap: 8px;
 }
 
-.beta-process-develop-grid {
+.nightbook-process-develop-grid {
   display: grid;
   grid-template-columns: minmax(320px, 1.25fr) minmax(260px, 0.75fr);
   gap: 8px;
   align-items: start;
 }
 
-.beta-process-develop-grid .nb-evidence,
-.beta-process-develop-grid .nb-evidence-canvas {
+.nightbook-process-develop-grid .nb-evidence,
+.nightbook-process-develop-grid .nb-evidence-canvas {
   min-height: 280px;
 }
 
-.beta-process-develop-color {
+.nightbook-process-develop-color {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
 @media (max-width: 1180px) and (min-width: 601px) {
-  .beta-process-develop-grid {
+  .nightbook-process-develop-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
-.beta-process-calibration-intro {
+.nightbook-process-calibration-intro {
   margin: 0;
   color: var(--nb-muted);
   font: 600 10px/1.5 var(--nb-font-mono);
 }
 
-.beta-process-calibration-matches {
+.nightbook-process-calibration-matches {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 6px;
 }
 
-.beta-process-calibration-reasons {
+.nightbook-process-calibration-reasons {
   margin: 0;
   padding-left: 16px;
   display: grid;
   gap: 2px;
 }
 
-.beta-process-calibration-reasons li {
+.nightbook-process-calibration-reasons li {
   overflow-wrap: anywhere;
 }
 
-.beta-process-phone-source > .beta-process-calibration-reasons {
+.nightbook-process-phone-source > .nightbook-process-calibration-reasons {
   color: var(--nb-muted);
   font: 600 10px/1.4 var(--nb-font-mono);
 }
 
-.beta-process-attempts article {
+.nightbook-process-attempts article {
   display: grid;
   gap: 3px;
   border: 1px solid var(--nb-line);
@@ -268,39 +268,39 @@
   padding: 8px;
 }
 
-.beta-process-attempts b,
-.beta-process-attempts span,
-.beta-process-attempts strong {
+.nightbook-process-attempts b,
+.nightbook-process-attempts span,
+.nightbook-process-attempts strong {
   overflow-wrap: anywhere;
 }
 
-.beta-process-attempts span,
-.beta-process-attempts strong,
-.beta-process-attempts p {
+.nightbook-process-attempts span,
+.nightbook-process-attempts strong,
+.nightbook-process-attempts p {
   color: var(--nb-muted);
   font: 600 10px/1.4 var(--nb-font-mono);
 }
 
-.beta-process-attempts strong {
+.nightbook-process-attempts strong {
   color: var(--nb-warning);
 }
 
 @media (max-width: 900px) and (min-width: 601px) {
-  .beta-process-project-grid {
+  .nightbook-process-project-grid {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
   }
 
-  .beta-process-source-table {
+  .nightbook-process-source-table {
     min-width: 0;
   }
 
-  .beta-process-source-row {
+  .nightbook-process-source-row {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 }
 
-.beta-process-source-row span {
+.nightbook-process-source-row span {
   color: var(--nb-muted);
   font: 600 11px var(--nb-font-mono);
 }

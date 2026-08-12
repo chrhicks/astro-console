@@ -36,16 +36,16 @@ import type {
   ProcessingProjectList,
 } from '../nightbook-workspace-runtime'
 import type { Projection } from '../presentation'
-import { BetaCommandBar, type BetaControlPresentation } from './BetaObserveApp'
-import { nightbookHref } from './route'
+import { nightbookHref } from '../route-href'
+import { CommandBar, type ControlPresentation } from './shared-shell'
 import '@nightbook/ui/styles.css'
-import './beta-observe.css'
-import './beta-process.css'
+import './workspace.css'
+import './process.css'
 
 type ViewedStage = 'Sources' | ExecutableProcessingStage | 'Master'
 type HandoffState = 'loading' | 'not-found' | 'not-local' | 'unavailable'
 
-export type BetaProcessAppProps = {
+export type ProcessWorkspaceProps = {
   projection: Projection
   loading: boolean
   projectId?: typeof ProcessingProjectId.Type | undefined
@@ -103,7 +103,7 @@ const usePhoneProjection = () => {
 const processControlPresentation = (
   project: OpenedProcessingProject | undefined,
   phone: boolean,
-): BetaControlPresentation => {
+): ControlPresentation => {
   if (phone)
     return {
       label: 'Process · view',
@@ -144,7 +144,7 @@ const processControlPresentation = (
   }
 }
 
-export default function BetaProcessApp(props: BetaProcessAppProps) {
+export default function ProcessWorkspace(props: ProcessWorkspaceProps) {
   const phone = usePhoneProjection()
   const [viewedStage, setViewedStage] = useState<ViewedStage>('Sources')
   const [pending, setPending] = useState<string>()
@@ -178,11 +178,11 @@ export default function BetaProcessApp(props: BetaProcessAppProps) {
   const authority = processControlPresentation(project, phone)
   return (
     <div
-      className="beta-app nb-theme"
+      className="nightbook-app nb-theme"
       data-nb-theme="nightbook"
       data-nb-density="compact"
     >
-      <BetaCommandBar
+      <CommandBar
         projection={props.projection}
         loading={props.loading}
         workspace="process"
@@ -259,8 +259,8 @@ function ProjectList({
 }) {
   return (
     <main
-      id="beta-workspace"
-      className="beta-desktop-workspace beta-process-workspace"
+      id="nightbook-workspace"
+      className="nightbook-desktop-workspace nightbook-process-workspace"
     >
       <PageHeader eyebrow="Process / Projects" title="Processing Projects" />
       <Panel>
@@ -286,7 +286,7 @@ function ProjectList({
               projects.map((project) => (
                 <a
                   key={project.projectId}
-                  className="beta-process-project-link"
+                  className="nightbook-process-project-link"
                   href={nightbookHref(
                     `/process/projects/${encodeURIComponent(project.projectId)}`,
                   )}
@@ -324,8 +324,8 @@ function SourceIntake({
   const [name, setName] = useState(`Process ${assetId}`)
   return (
     <main
-      id="beta-workspace"
-      className="beta-desktop-workspace beta-process-workspace"
+      id="nightbook-workspace"
+      className="nightbook-desktop-workspace nightbook-process-workspace"
     >
       <PageHeader
         eyebrow="Process / Library handoff"
@@ -433,8 +433,8 @@ function ProjectWorkspace({
   )
   return (
     <main
-      id="beta-workspace"
-      className="beta-desktop-workspace beta-process-workspace"
+      id="nightbook-workspace"
+      className="nightbook-desktop-workspace nightbook-process-workspace"
       aria-busy={pending !== undefined}
     >
       <PageHeader
@@ -451,8 +451,8 @@ function ProjectWorkspace({
           />
         }
       />
-      <div className="beta-process-grid">
-        <Panel className="beta-process-source">
+      <div className="nightbook-process-grid">
+        <Panel className="nightbook-process-source">
           <PanelHeader
             title="Project"
             meta={`${project.sources.length} sources`}
@@ -481,7 +481,7 @@ function ProjectWorkspace({
             </Stack>
           </PanelBody>
         </Panel>
-        <Panel className="beta-process-stage">
+        <Panel className="nightbook-process-stage">
           <PanelHeader title={viewedStage} meta="Current Result" />
           <PanelBody>
             {viewedStage === 'Sources' ? (
@@ -497,7 +497,7 @@ function ProjectWorkspace({
             ) : null}
           </PanelBody>
         </Panel>
-        <Panel className="beta-process-operation">
+        <Panel className="nightbook-process-operation">
           <PanelHeader
             title="Controls"
             meta={mutable ? 'Project intent' : 'Protected'}
@@ -521,7 +521,7 @@ function ProjectWorkspace({
               />
             )}
             {message ? (
-              <p className="beta-process-message" role="status">
+              <p className="nightbook-process-message" role="status">
                 {message}
               </p>
             ) : null}
@@ -696,7 +696,7 @@ function StageControls({
         {runLabel} {stage.stage}
       </Button>
       {runUnavailable ? (
-        <p className="beta-process-denial">
+        <p className="nightbook-process-denial">
           <b>Unavailable:</b> {titleCase(runUnavailable)}
         </p>
       ) : null}
@@ -827,10 +827,10 @@ function ProcessPhone({
       .length ?? 0
   return (
     <main
-      id="beta-workspace"
-      className="beta-phone-workspace beta-process-phone"
+      id="nightbook-workspace"
+      className="nightbook-phone-workspace nightbook-process-phone"
     >
-      <header className="beta-phone-header">
+      <header className="nightbook-phone-header">
         <div>
           <p>Process / read only</p>
           <h1>{project?.name ?? sourceAssetId ?? 'Processing Projects'}</h1>
@@ -933,7 +933,7 @@ function ProcessStatus({
 }) {
   return (
     <footer
-      className="beta-operational-status beta-process-status"
+      className="nightbook-operational-status nightbook-process-status"
       aria-label="Operational status"
     >
       <span>

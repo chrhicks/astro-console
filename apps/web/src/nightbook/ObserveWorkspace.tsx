@@ -2,7 +2,6 @@ import {
   ActionPanel,
   AttemptTrail,
   AttentionCard,
-  Button,
   DataList,
   DataListItem,
   EvidenceViewport,
@@ -18,30 +17,22 @@ import {
   type Tone,
 } from '@nightbook/ui'
 import {
-  CommandId,
   IdempotencyKey,
   type ObserveWorkspaceProjection,
 } from '@astro-console/protocol'
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   ObserveCommandSubmission,
   type ObserveAction,
 } from '../observe-command-client'
-import { type CommandSubmission, type ControlIntent } from '../command-client'
 import type { PreflightRefreshSubmission } from '../preflight-refresh-client'
-import type {
-  HealthFact,
-  ObserveView,
-  Projection,
-  ShellView,
-  StatusTone,
-} from '../presentation'
-import { DevelopmentSimulationStrip } from './development-simulation'
-import { nightbookHref } from './route'
+import type { ObserveView, Projection, StatusTone } from '../presentation'
+import { nightbookHref } from '../route-href'
+import { CommandBar, type ControlSubmit } from './shared-shell'
 import '@nightbook/ui/styles.css'
-import './beta-observe.css'
+import './workspace.css'
 
-export type BetaObserveAppProps = {
+export type ObserveWorkspaceProps = {
   projection: Projection
   loading: boolean
   submit?: (
@@ -57,12 +48,8 @@ export type BetaObserveAppProps = {
       | 'AbortAcquire',
   ) => Promise<void>
   approvePointingCorrection?: (proposalId: string) => Promise<void>
-  submitControl?: BetaControlSubmit
+  submitControl?: ControlSubmit
 }
-
-export type BetaControlSubmit = (
-  intent: ControlIntent,
-) => Promise<CommandSubmission>
 
 const lifecycleStages = [
   { id: 'preflight', label: 'Preflight' },
@@ -199,7 +186,7 @@ const progressPercent = (progress: ReturnType<typeof runProgress>) =>
     ? undefined
     : Math.round((progress.value / progress.max) * 100)
 
-function BetaProgress({
+function Progress({
   progress,
   showValue = false,
 }: {
@@ -208,7 +195,7 @@ function BetaProgress({
 }) {
   const percent = progressPercent(progress)
   return (
-    <div className="beta-progress">
+    <div className="nightbook-progress">
       <div>
         <span>{progress.label}</span>
         {showValue && percent !== undefined ? <b>{percent}%</b> : null}
@@ -236,10 +223,10 @@ const evidenceStatusLabel = (view: ObserveView) => {
 }
 
 const Evidence = ({ view }: { view: ObserveView }) => (
-  <figure className="beta-evidence" aria-label="Current Observe evidence">
-    <div className="beta-evidence-canvas">
+  <figure className="nightbook-evidence" aria-label="Current Observe evidence">
+    <div className="nightbook-evidence-canvas">
       <div
-        className="beta-evidence-copy"
+        className="nightbook-evidence-copy"
         role="group"
         aria-label="Evidence facts"
       >
@@ -250,7 +237,7 @@ const Evidence = ({ view }: { view: ObserveView }) => (
         />
         <p>{view.evidence}</p>
         {view.trace.length > 0 ? (
-          <ol className="beta-trace" aria-label="Current evidence trace">
+          <ol className="nightbook-trace" aria-label="Current evidence trace">
             {view.trace.slice(0, 3).map((fact) => (
               <li key={fact}>{fact}</li>
             ))}
@@ -403,11 +390,11 @@ function TargetEvidenceViewport({ acquire }: { acquire: AcquireView }) {
   const metrics = evidenceMetrics(acquire)
   return (
     <EvidenceViewport
-      className="beta-target-evidence"
+      className="nightbook-target-evidence"
       label="Current target-acquisition evidence"
       fit="fill"
       fallback={
-        <div className="beta-target-evidence-copy">
+        <div className="nightbook-target-evidence-copy">
           <StatusIndicator
             label={titleCase(acquire.phase)}
             tone={acquireTone(acquire)}
@@ -439,7 +426,7 @@ function TargetContext({
 }) {
   const attempts = attemptItems(acquire)
   return (
-    <Panel className="beta-target-context" as="aside">
+    <Panel className="nightbook-target-context" as="aside">
       <PanelHeader
         title="Target acquire"
         meta={`Acquire rev ${acquire.revision}`}
@@ -464,7 +451,7 @@ function TargetContext({
         {attempts.length > 0 ? (
           <AttemptTrail label="Acquisition attempts" items={attempts} />
         ) : (
-          <p className="beta-target-empty-trail">
+          <p className="nightbook-target-empty-trail">
             No attempt evidence has been recorded.
           </p>
         )}
@@ -488,9 +475,9 @@ function TargetDecision({
   pending: string | undefined
   result: string | undefined
   run: (id: string, action: (() => Promise<void>) | undefined) => void
-  targetAcquisitionCommand: BetaObserveAppProps['targetAcquisitionCommand']
-  acquireRecoveryCommand: BetaObserveAppProps['acquireRecoveryCommand']
-  approvePointingCorrection: BetaObserveAppProps['approvePointingCorrection']
+  targetAcquisitionCommand: ObserveWorkspaceProps['targetAcquisitionCommand']
+  acquireRecoveryCommand: ObserveWorkspaceProps['acquireRecoveryCommand']
+  approvePointingCorrection: ObserveWorkspaceProps['approvePointingCorrection']
 }) {
   const descriptor = (
     id: string,
@@ -601,7 +588,7 @@ function TargetDecision({
                 : 'Acquire the target'
   return (
     <ActionPanel
-      className="beta-decision-rail"
+      className="nightbook-decision-rail"
       eyebrow={
         projection.shell.readOnly
           ? 'Decision now · viewer'
@@ -623,13 +610,13 @@ function TargetDecision({
   )
 }
 
-function BetaTargetStage({
+function TargetStage({
   projection,
   targetAcquisitionCommand,
   acquireRecoveryCommand,
   approvePointingCorrection,
 }: Pick<
-  BetaObserveAppProps,
+  ObserveWorkspaceProps,
   | 'projection'
   | 'targetAcquisitionCommand'
   | 'acquireRecoveryCommand'
@@ -676,11 +663,11 @@ function BetaTargetStage({
   if (recovery)
     return (
       <section
-        className="beta-target-stage"
+        className="nightbook-target-stage"
         data-mode="recover"
         aria-live="polite"
       >
-        <Panel className="beta-target-recovery-evidence">
+        <Panel className="nightbook-target-recovery-evidence">
           <PanelHeader
             title="Recovery evidence"
             meta={`${acquire.attemptCount} attempts retained`}
@@ -709,12 +696,12 @@ function BetaTargetStage({
     )
   return (
     <section
-      className="beta-target-stage"
+      className="nightbook-target-stage"
       data-mode="acquire"
       aria-live="polite"
     >
       <TargetContext view={view} acquire={acquire} />
-      <Panel className="beta-target-evidence-panel">
+      <Panel className="nightbook-target-evidence-panel">
         <PanelHeader title="Current evidence" meta="Image truth first" />
         <PanelBody>
           <TargetEvidenceViewport acquire={acquire} />
@@ -725,294 +712,7 @@ function BetaTargetStage({
   )
 }
 
-const healthSlotLabels = ['Service', 'Rig', 'Tunnel', 'Processing', 'Storage']
-
-const healthFacts = (health: readonly HealthFact[]): readonly HealthFact[] =>
-  healthSlotLabels.map(
-    (label) =>
-      health.find(
-        (candidate) => candidate.label.toLowerCase() === label.toLowerCase(),
-      ) ?? {
-        label,
-        state: 'unknown',
-        summary: `${label} health is unknown without an authoritative projection.`,
-        detail: `${label} health is unknown without an authoritative projection.`,
-        tone: 'neutral',
-      },
-  )
-
-function BetaHealth({ health }: { health: readonly HealthFact[] }) {
-  const id = useId()
-  return (
-    <div className="beta-health" aria-label="System health">
-      {healthFacts(health).map((fact, index) => {
-        const tooltipId = `${id}-${index}`
-        return (
-          <div
-            className="beta-health-item"
-            data-tone={tone(fact.tone)}
-            key={fact.label}
-          >
-            <button
-              type="button"
-              aria-label={`${fact.label}: ${fact.state}. ${fact.summary}`}
-              aria-describedby={tooltipId}
-            >
-              <i aria-hidden="true" />
-            </button>
-            <span role="tooltip" id={tooltipId}>
-              <b>{fact.label}</b>
-              {fact.state} · {fact.summary}
-            </span>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-const controlLabel = (shell: ShellView, loading: boolean) => {
-  if (loading) return 'Control · wait'
-  if (shell.readOnly) return 'Control · view'
-  return 'Control · you'
-}
-
-export type BetaControlPresentation = {
-  label: string
-  dialogLabel: string
-  heading: string
-  state: string
-  tone: 'neutral' | 'positive' | 'warning' | 'danger' | 'info'
-  subjectLabel: string
-  subject: string
-  presence: string
-  protection: string
-}
-
-export const projectedTakeControlAction = (shell: ShellView) =>
-  shell.control.readOnly
-    ? undefined
-    : shell.control.actions.find((action) => action.kind === 'take')
-
-function BetaControl({
-  shell,
-  loading,
-  presentation,
-  submitControl,
-  allowAction,
-}: {
-  shell: ShellView
-  loading: boolean
-  presentation: BetaControlPresentation | undefined
-  submitControl: BetaControlSubmit | undefined
-  allowAction: boolean
-}) {
-  const [open, setOpen] = useState(false)
-  const [pending, setPending] = useState(false)
-  const [message, setMessage] = useState<string | undefined>()
-  const panelId = useId()
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  const takeAction = allowAction ? projectedTakeControlAction(shell) : undefined
-  const takeControl = () => {
-    if (
-      takeAction === undefined ||
-      shell.control.readOnly ||
-      submitControl === undefined ||
-      pending
-    )
-      return
-    setPending(true)
-    setMessage(undefined)
-    void submitControl({
-      _tag: 'TakeControl',
-      commandId: CommandId.make(crypto.randomUUID()),
-      idempotencyKey: IdempotencyKey.make(crypto.randomUUID()),
-    }).then(
-      (result) => {
-        setPending(false)
-        setMessage(
-          result._tag === 'Accepted'
-            ? 'Control action recorded. Waiting for the current service projection.'
-            : `${result._tag === 'Rejected' ? result.failure.summary : result.reason} ${result.safeNextAction}`,
-        )
-      },
-      () => {
-        setPending(false)
-        setMessage('Control action could not reach the service.')
-      },
-    )
-  }
-  useEffect(() => {
-    if (!open) return
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      setOpen(false)
-      requestAnimationFrame(() => triggerRef.current?.focus())
-    }
-    document.addEventListener('keydown', closeOnEscape)
-    return () => document.removeEventListener('keydown', closeOnEscape)
-  }, [open])
-  return (
-    <div className="beta-control">
-      <button
-        ref={triggerRef}
-        className="beta-control-trigger"
-        type="button"
-        aria-expanded={open}
-        aria-controls={panelId}
-        aria-haspopup="dialog"
-        onClick={() => setOpen((value) => !value)}
-      >
-        {presentation?.label ?? controlLabel(shell, loading)}
-      </button>
-      {open ? (
-        <section
-          className="beta-control-flyout"
-          id={panelId}
-          role="dialog"
-          aria-label={presentation?.dialogLabel ?? 'Control state'}
-        >
-          <header>
-            <b>{presentation?.heading ?? 'Control state'}</b>
-            <StatusIndicator
-              label={presentation?.state ?? shell.control.state}
-              tone={
-                presentation?.tone ?? (shell.readOnly ? 'warning' : 'positive')
-              }
-            />
-          </header>
-          <DataList>
-            <DataListItem
-              label={presentation?.subjectLabel ?? 'Controller'}
-              value={presentation?.subject ?? shell.controller}
-            />
-            <DataListItem
-              label="Presence"
-              value={presentation?.presence ?? shell.control.presence}
-            />
-            <DataListItem
-              label="Revision"
-              value={String(shell.control.revision)}
-            />
-          </DataList>
-          <p>{presentation?.protection ?? shell.protection}</p>
-          {message ? <p role="status">{message}</p> : null}
-          {takeAction !== undefined && !shell.control.readOnly ? (
-            <div className="beta-control-actions">
-              <Button
-                tone="primary"
-                size="small"
-                disabled={loading || pending || submitControl === undefined}
-                title={
-                  submitControl === undefined
-                    ? 'Control command service is not ready.'
-                    : undefined
-                }
-                onClick={takeControl}
-              >
-                {pending ? 'Taking control…' : takeAction.label}
-              </Button>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-    </div>
-  )
-}
-
-function BetaCommandBar({
-  projection,
-  loading,
-  workspace = 'observe',
-  controlPresentation,
-  submitControl,
-  allowControlAction = true,
-}: Pick<BetaObserveAppProps, 'projection' | 'loading'> & {
-  workspace?: 'plan' | 'observe' | 'library' | 'process'
-  controlPresentation?: BetaControlPresentation | undefined
-  submitControl?: BetaControlSubmit | undefined
-  allowControlAction?: boolean
-}) {
-  const run = projection.shell.currentRun
-  const progress =
-    workspace === 'observe'
-      ? observeProgress(projection)
-      : runProgress(projection)
-  const percent = progressPercent(progress)
-  const workspaceLabel = titleCase(workspace)
-  const targetAcquisition =
-    workspace === 'observe' &&
-    projection.observe.source?.acquire?.acquisitionMethod !== undefined
-  return (
-    <div className="beta-shell-header">
-      <header className="beta-command-bar">
-        <a
-          className="beta-brand"
-          href={nightbookHref(`/${workspace}`)}
-          aria-label={`Nightbook ${workspaceLabel}`}
-        >
-          <span aria-hidden="true">N</span>
-          <span>
-            <strong>Nightbook</strong>
-            <small>Backyard observatory</small>
-          </span>
-        </a>
-        <nav aria-label="Workspaces">
-          <a
-            href={nightbookHref('/plan')}
-            aria-current={workspace === 'plan' ? 'page' : undefined}
-          >
-            Plan
-          </a>
-          <a
-            href={nightbookHref('/observe')}
-            aria-current={workspace === 'observe' ? 'page' : undefined}
-          >
-            Observe
-          </a>
-          <a
-            href={nightbookHref('/library')}
-            aria-current={workspace === 'library' ? 'page' : undefined}
-          >
-            Library
-          </a>
-          <a
-            href={nightbookHref('/process')}
-            aria-current={workspace === 'process' ? 'page' : undefined}
-          >
-            Process
-          </a>
-        </nav>
-        <div className="beta-run-capsule" aria-label="Current run">
-          <i
-            data-active={run === undefined ? 'false' : 'true'}
-            aria-hidden="true"
-          />
-          <b>{run?.target ?? (loading ? 'WAIT' : 'NONE')}</b>
-          <span>
-            {targetAcquisition
-              ? lifecycleLabel(projection.observe)
-              : (run?.phase ?? (loading ? 'Loading' : 'No run'))}
-          </span>
-          <strong>{percent === undefined ? '—' : `${percent}%`}</strong>
-        </div>
-        <BetaHealth health={projection.shell.health} />
-        <BetaControl
-          shell={projection.shell}
-          loading={loading}
-          presentation={controlPresentation}
-          submitControl={submitControl}
-          allowAction={allowControlAction}
-        />
-      </header>
-      <DevelopmentSimulationStrip readOnly={projection.shell.readOnly} />
-    </div>
-  )
-}
-
-export { BetaCommandBar }
-
-function BetaStatusStrip({ projection }: { projection: Projection }) {
+function StatusStrip({ projection }: { projection: Projection }) {
   const rig = projection.shell.health.find((fact) => fact.label === 'Rig')
   const storage = projection.shell.health.find(
     (fact) => fact.label === 'Storage',
@@ -1023,7 +723,10 @@ function BetaStatusStrip({ projection }: { projection: Projection }) {
       ? projection.observe.phase
       : lifecycleLabel(projection.observe)
   return (
-    <footer className="beta-operational-status" aria-label="Operational status">
+    <footer
+      className="nightbook-operational-status"
+      aria-label="Operational status"
+    >
       <span>
         <i data-tone={tone(projection.observe.tone)} aria-hidden="true" />
         <b>{phase}</b> ·{' '}
@@ -1042,10 +745,10 @@ function BetaStatusStrip({ projection }: { projection: Projection }) {
   )
 }
 
-export function BetaObservePhone({
+export function ObservePhone({
   projection,
   loading,
-}: Pick<BetaObserveAppProps, 'projection' | 'loading'>) {
+}: Pick<ObserveWorkspaceProps, 'projection' | 'loading'>) {
   const progress = observeProgress(projection)
   const view = projection.observe
   const acquire = view.source?.acquire
@@ -1055,12 +758,12 @@ export function BetaObservePhone({
   const attempts = targetAcquisition ? attemptItems(acquire) : []
   return (
     <section
-      id="beta-workspace"
-      className="beta-phone-workspace"
+      id="nightbook-workspace"
+      className="nightbook-phone-workspace"
       aria-label="Read-only phone projection"
-      data-testid="beta-phone"
+      data-testid="nightbook-phone"
     >
-      <header className="beta-phone-header">
+      <header className="nightbook-phone-header">
         <div>
           <p>Live run</p>
           <h1>{loading ? 'Loading current state' : view.target}</h1>
@@ -1082,17 +785,17 @@ export function BetaObservePhone({
         title={lifecycleLabel(view)}
         description="Desktop workflow controls are intentionally unavailable."
       />
-      <Panel as="section" className="beta-phone-progress-panel">
+      <Panel as="section" className="nightbook-phone-progress-panel">
         <PanelHeader
           title="Run progress"
           meta={progress.pending ? '—' : lifecycleLabel(view)}
         />
         <PanelBody>
-          <BetaProgress progress={progress} showValue />
+          <Progress progress={progress} showValue />
         </PanelBody>
       </Panel>
       {targetAcquisition ? (
-        <Panel as="section" className="beta-phone-target-evidence">
+        <Panel as="section" className="nightbook-phone-target-evidence">
           <PanelHeader
             title="Target evidence"
             meta={titleCase(acquire.phase)}
@@ -1109,7 +812,7 @@ export function BetaObservePhone({
       )}
       {view.source?.latestCapturedAssetId !== undefined ? (
         <a
-          className="beta-phone-library-link"
+          className="nightbook-phone-library-link"
           href={nightbookHref(
             `/library/assets/${encodeURIComponent(view.source.latestCapturedAssetId)}`,
           )}
@@ -1224,7 +927,7 @@ const executorAttemptItems = (
           : 'current',
   }))
 
-function BetaObserveDesktop({
+function ObserveDesktop({
   projection,
   loading,
   submit,
@@ -1232,7 +935,7 @@ function BetaObserveDesktop({
   targetAcquisitionCommand,
   acquireRecoveryCommand,
   approvePointingCorrection,
-}: BetaObserveAppProps) {
+}: ObserveWorkspaceProps) {
   const [result, setResult] = useState<string>()
   const [refreshing, setRefreshing] = useState(false)
   const [pendingAction, setPendingAction] = useState<ObserveAction>()
@@ -1328,13 +1031,13 @@ function BetaObserveDesktop({
   )
 
   return (
-    <main id="beta-workspace" className="beta-desktop-workspace">
-      <header className="beta-titlebar">
+    <main id="nightbook-workspace" className="nightbook-desktop-workspace">
+      <header className="nightbook-titlebar">
         <div>
           <p>Observe / Authoritative lifecycle</p>
           <h1>{currentStage}</h1>
         </div>
-        <div className="beta-title-progress">
+        <div className="nightbook-title-progress">
           <span>
             {lifecycleState.activeIndex < 0
               ? '— of 6'
@@ -1349,7 +1052,7 @@ function BetaObserveDesktop({
       </header>
 
       <StepRail
-        className="beta-lifecycle"
+        className="nightbook-lifecycle"
         items={lifecycleState.items}
         activeId={lifecycleState.activeId}
         label="Observe lifecycle"
@@ -1358,7 +1061,7 @@ function BetaObserveDesktop({
 
       {source?.acquire?.acquisitionMethod !== undefined &&
       (source.acquire.phase !== 'completed' || source.phase === 'acquire') ? (
-        <BetaTargetStage
+        <TargetStage
           projection={projection}
           {...(targetAcquisitionCommand === undefined
             ? {}
@@ -1371,8 +1074,8 @@ function BetaObserveDesktop({
             : { approvePointingCorrection })}
         />
       ) : (
-        <section className="beta-observe-stage" aria-live="polite">
-          <Panel className="beta-context-rail" as="aside">
+        <section className="nightbook-observe-stage" aria-live="polite">
+          <Panel className="nightbook-context-rail" as="aside">
             <PanelHeader
               title={`Run plan · rev ${source?.revision ?? '—'}`}
               meta="Read-only here"
@@ -1394,7 +1097,7 @@ function BetaObserveDesktop({
                   value={source?.executor ?? 'Unavailable'}
                 />
               </DataList>
-              <div className="beta-run-summary">
+              <div className="nightbook-run-summary">
                 <b>
                   {projection.shell.currentRun?.sequenceProgress ?? view.status}
                 </b>
@@ -1404,7 +1107,7 @@ function BetaObserveDesktop({
           </Panel>
 
           <Panel
-            className="beta-evidence-panel"
+            className="nightbook-evidence-panel"
             as="section"
             aria-busy={loading}
           >
@@ -1413,7 +1116,7 @@ function BetaObserveDesktop({
               meta="Verdict first · facts behind"
             />
             <PanelBody>
-              <div className="beta-evidence-stack">
+              <div className="nightbook-evidence-stack">
                 <AttentionCard
                   tone={tone(view.tone)}
                   statusLabel={
@@ -1432,7 +1135,7 @@ function BetaObserveDesktop({
                 ) : null}
                 {source?.latestCapturedAssetId !== undefined ? (
                   <a
-                    className="beta-simulation-library-link"
+                    className="nightbook-simulation-library-link"
                     href={nightbookHref(
                       `/library/assets/${encodeURIComponent(source.latestCapturedAssetId)}`,
                     )}
@@ -1464,7 +1167,7 @@ function BetaObserveDesktop({
           </Panel>
 
           <ActionPanel
-            className="beta-decision-rail"
+            className="nightbook-decision-rail"
             eyebrow={
               projection.shell.readOnly
                 ? 'Decision now · viewer'
@@ -1478,7 +1181,7 @@ function BetaObserveDesktop({
               result ??
               (projection.shell.readOnly
                 ? projection.shell.protection
-                : 'Only proven beta command seams are enabled.')
+                : 'Only proven command paths are enabled.')
             }
           />
         </section>
@@ -1487,31 +1190,36 @@ function BetaObserveDesktop({
   )
 }
 
-export function BetaObserveApp(props: BetaObserveAppProps) {
+export function ObserveWorkspace(props: ObserveWorkspaceProps) {
   const phone = usePhoneProjection()
   return (
     <div
-      className="beta-app nb-theme"
+      className="nightbook-app nb-theme"
       data-nb-theme="nightbook"
       data-nb-density="compact"
     >
-      <a className="beta-skip-link" href="#beta-workspace">
+      <a className="nightbook-skip-link" href="#nightbook-workspace">
         Skip to Observe evidence
       </a>
-      <BetaCommandBar
+      <CommandBar
         projection={props.projection}
         loading={props.loading}
         submitControl={props.submitControl}
         allowControlAction={!phone}
+        runPresentation={{
+          label:
+            props.projection.observe.source?.acquire?.acquisitionMethod ===
+            undefined
+              ? (props.projection.shell.currentRun?.phase ??
+                (props.loading ? 'Loading' : 'No run'))
+              : lifecycleLabel(props.projection.observe),
+          percent: progressPercent(observeProgress(props.projection)),
+        }}
       />
-      {phone ? (
-        <BetaObservePhone {...props} />
-      ) : (
-        <BetaObserveDesktop {...props} />
-      )}
-      <BetaStatusStrip projection={props.projection} />
+      {phone ? <ObservePhone {...props} /> : <ObserveDesktop {...props} />}
+      <StatusStrip projection={props.projection} />
     </div>
   )
 }
 
-export default BetaObserveApp
+export default ObserveWorkspace

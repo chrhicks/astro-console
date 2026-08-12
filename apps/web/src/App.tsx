@@ -21,7 +21,7 @@ import {
   ReviewAssetRequest,
 } from '@astro-console/protocol'
 import { parseRoute, routeWorkspace, type Route } from './routes'
-import { nightbookHref } from './beta/route'
+import { nightbookHref } from './route-href'
 import {
   createNightbookWorkspaceRuntime,
   initialNightbookWorkspaceState,
@@ -34,10 +34,10 @@ import {
 } from './nightbook-workspace-runtime'
 
 const currentRoute = () => parseRoute(location.pathname, location.search)
-const BetaObserveApp = lazy(() => import('./beta/BetaObserveApp'))
-const BetaLibraryApp = lazy(() => import('./beta/BetaLibraryApp'))
-const BetaPlanApp = lazy(() => import('./beta/BetaPlanApp'))
-const BetaProcessApp = lazy(() => import('./beta/BetaProcessApp'))
+const ObserveWorkspace = lazy(() => import('./nightbook/ObserveWorkspace'))
+const LibraryWorkspace = lazy(() => import('./nightbook/LibraryWorkspace'))
+const PlanWorkspace = lazy(() => import('./nightbook/PlanWorkspace'))
+const ProcessWorkspace = lazy(() => import('./nightbook/ProcessWorkspace'))
 
 type SubmissionHandlers<Result> = {
   readonly [Tag in NightbookWorkspaceSubmission['_tag']]?: (
@@ -405,7 +405,7 @@ export function App() {
           </main>
         }
       >
-        <BetaObserveApp
+        <ObserveWorkspace
           projection={projection}
           loading={!projectionReceived}
           {...(submitControl === undefined ? {} : { submitControl })}
@@ -441,7 +441,7 @@ export function App() {
           </main>
         }
       >
-        <BetaPlanApp
+        <PlanWorkspace
           projection={projection}
           loading={!projectionReceived}
           {...(submitControl === undefined ? {} : { submitControl })}
@@ -461,7 +461,7 @@ export function App() {
           </main>
         }
       >
-        <BetaLibraryApp
+        <LibraryWorkspace
           projection={projection}
           loading={!projectionReceived}
           {...(submitControl === undefined ? {} : { submitControl })}
@@ -526,7 +526,7 @@ export function App() {
           </main>
         }
       >
-        <BetaProcessApp
+        <ProcessWorkspace
           projection={projection}
           loading={!projectionReceived}
           {...(route.kind === 'process-project'
