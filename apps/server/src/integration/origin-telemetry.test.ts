@@ -8,6 +8,7 @@ import {
   Layer,
   Queue,
   Schema,
+  Stream,
 } from 'effect'
 import { HttpServerResponse } from 'effect/unstable/http'
 import { ProcessingProjectId } from '@astro-console/protocol'
@@ -1373,6 +1374,33 @@ test('Process HTTP flows export one safe Project boundary each', async () => {
           }),
         )(await acceptedResponse.json())
 
+        const lifecycle = Context.get(
+          service.context,
+          ProcessingProjectLifecycle,
+        )
+        const caller = {
+          personId: 'owner-chicks',
+          clientId: 'desktop-owner',
+          role: 'owner' as const,
+          capability: 'controlCapable' as const,
+        }
+        const settled = telemetry.runPromise(
+          lifecycle.changes(caller).pipe(
+            Stream.filterEffect(() =>
+              lifecycle
+                .open(caller, created.project.projectId)
+                .pipe(
+                  Effect.map((opened) =>
+                    opened.stages.some(
+                      (stage) => stage.currentResult?.outcome === 'Succeeded',
+                    ),
+                  ),
+                ),
+            ),
+            Stream.runHead,
+          ),
+        )
+
         const runResponse = await fetch(
           `${base}/api/process/projects/${created.project.projectId}`,
           {
@@ -1392,29 +1420,16 @@ test('Process HTTP flows export one safe Project boundary each', async () => {
         )
         assert.equal(runResponse.status, 200)
         await runResponse.body?.cancel()
-        const lifecycle = Context.get(
-          service.context,
-          ProcessingProjectLifecycle,
+        await settled
+        const opened = await telemetry.runPromise(
+          lifecycle.open(caller, created.project.projectId),
         )
-        let completed = false
-        for (let attempt = 0; attempt < 20 && !completed; attempt += 1) {
-          const opened = await telemetry.runPromise(
-            lifecycle.open(
-              {
-                personId: 'owner-chicks',
-                clientId: 'desktop-owner',
-                role: 'owner',
-                capability: 'controlCapable',
-              },
-              created.project.projectId,
-            ),
-          )
-          completed = opened.stages.some(
+        assert.equal(
+          opened.stages.some(
             (stage) => stage.currentResult?.outcome === 'Succeeded',
-          )
-          if (!completed) await Effect.runPromise(Effect.sleep('25 millis'))
-        }
-        assert.equal(completed, true)
+          ),
+          true,
+        )
 
         const rejectedResponse = await fetch(
           `${base}/api/process/projects/private-project-id`,

@@ -1,10 +1,8 @@
 import { DatabaseSync } from 'node:sqlite'
-import { Option, Schema } from 'effect'
+import { Schema } from 'effect'
 import {
   AcquireRevision,
-  AcquireCommandResponse,
   AttemptId,
-  CameraCommandResponse,
   PositiveInt,
   RunId,
 } from '@astro-console/protocol'
@@ -18,62 +16,6 @@ import { AcquireCommandOutcome } from '../services/acquire-command-outcome.ts'
 const StoredSession = Schema.Struct({ session: Schema.String })
 const StoredStateValue = Schema.Struct({ value: Schema.String })
 const StoredReceipt = Schema.Struct({ response: Schema.String })
-const StoredReceiptResponse = Schema.Struct({
-  status: Schema.Int,
-  body: Schema.Unknown,
-})
-
-type ApplicationReceiptKind = 'acquire' | 'camera'
-
-const commandOutcome = (outcome: typeof AcquireCommandOutcome.Type) => outcome
-
-const legacyApplicationReceipt = (
-  kind: ApplicationReceiptKind,
-  status: number,
-  raw: unknown,
-): typeof AcquireCommandOutcome.Type => {
-  if (kind === 'acquire') {
-    const response = Schema.decodeUnknownSync(AcquireCommandResponse)(raw)
-    return AcquireCommandResponse.match(response, {
-      Accepted: (response) =>
-        commandOutcome(
-          AcquireCommandOutcome.cases.AcquireAccepted.make({ response }),
-        ),
-      Rejected: (response) =>
-        commandOutcome(
-          AcquireCommandOutcome.cases.AcquireRejected.make({ response }),
-        ),
-      Unavailable: (response) =>
-        commandOutcome(
-          AcquireCommandOutcome.cases.AcquireUnavailable.make({ response }),
-        ),
-    })
-  }
-
-  const response = Schema.decodeUnknownSync(CameraCommandResponse)(raw)
-  return CameraCommandResponse.match(response, {
-    Accepted: (response) =>
-      commandOutcome(
-        AcquireCommandOutcome.cases.CameraAccepted.make({ response }),
-      ),
-    Completed: (response) =>
-      commandOutcome(
-        AcquireCommandOutcome.cases.CameraAccepted.make({ response }),
-      ),
-    Rejected: (response) =>
-      status === 409
-        ? commandOutcome(
-            AcquireCommandOutcome.cases.CameraRejected.make({ response }),
-          )
-        : commandOutcome(
-            AcquireCommandOutcome.cases.CameraUnavailable.make({ response }),
-          ),
-    Unavailable: (response) =>
-      commandOutcome(
-        AcquireCommandOutcome.cases.CameraUnavailable.make({ response }),
-      ),
-  })
-}
 
 export const polarSession = (runId: string) =>
   AcquireSession.make({
@@ -214,35 +156,7 @@ export const acquireSqliteRepository = (database: DatabaseSync) => ({
       throw error
     }
   },
-  receipt: (key: string, clientId: string) => {
-    const row = Schema.decodeUnknownSync(Schema.optional(StoredReceipt))(
-      database
-        .prepare(
-          'SELECT response FROM acquire_receipts WHERE idempotency_key=? AND actor_client_id=?',
-        )
-        .get(key, clientId),
-    )
-    return row === undefined
-      ? undefined
-      : Schema.decodeUnknownSync(StoredReceiptResponse)(
-          JSON.parse(row.response),
-        )
-  },
-  saveReceipt: (
-    key: string,
-    clientId: string,
-    response: { readonly status: number; readonly body: unknown },
-  ) =>
-    database
-      .prepare(
-        'INSERT OR REPLACE INTO acquire_receipts (idempotency_key,actor_client_id,response) VALUES (?,?,?)',
-      )
-      .run(key, clientId, JSON.stringify(response)),
-  applicationReceipt: (
-    kind: ApplicationReceiptKind,
-    key: string,
-    clientId: string,
-  ) => {
+  applicationReceipt: (key: string, clientId: string) => {
     const row = Schema.decodeUnknownSync(Schema.optional(StoredReceipt))(
       database
         .prepare(
@@ -251,20 +165,14 @@ export const acquireSqliteRepository = (database: DatabaseSync) => ({
         .get(key, clientId),
     )
     if (row === undefined) return undefined
-    const stored = Schema.decodeUnknownSync(StoredReceiptResponse)(
+    return Schema.decodeUnknownSync(AcquireCommandOutcome)(
       JSON.parse(row.response),
     )
-    const outcome = Schema.decodeUnknownOption(AcquireCommandOutcome)(
-      stored.body,
-    )
-    return Option.isSome(outcome)
-      ? outcome.value
-      : legacyApplicationReceipt(kind, stored.status, stored.body)
   },
   saveApplicationReceipt: (key: string, clientId: string, outcome: unknown) =>
     database
       .prepare(
         'INSERT OR REPLACE INTO acquire_receipts (idempotency_key,actor_client_id,response) VALUES (?,?,?)',
       )
-      .run(key, clientId, JSON.stringify({ status: 0, body: outcome })),
+      .run(key, clientId, JSON.stringify(outcome)),
 })

@@ -33,7 +33,6 @@ import {
   ObserveCommandResponse,
   PlanCommandResponse,
   ProcessSourceHandoff,
-  ProcessSourceHandoffResponse,
   OpenedProcessingProject,
   ProcessingProjectChanged,
   ProcessingProjectEvidence,
@@ -4912,12 +4911,6 @@ test('Library detail uses stable identities and snapshot delivery remains catalo
     (await fetch(`${base}/api/library/assets/malformed`)).status,
     400,
   )
-  const malformedPath = await fetch(`${base}/api/library/assets/%`)
-  assert.equal(malformedPath.status, 400)
-  assert.deepEqual(await malformedPath.json(), {
-    _tag: 'InvalidInput',
-    message: 'The service could not read that action.',
-  })
   assert.equal(
     (await fetch(`${base}/api/library/assets/asset-m27-999`)).status,
     404,
@@ -5079,15 +5072,6 @@ test('authenticated workspace projections preserve future intent, bounded Librar
     _tag: 'AssetUnavailable',
     message:
       'This asset is temporarily unavailable and cannot open in Process.',
-  })
-  const malformed = await fetch(`${base}/api/library/assets/%/process-source`)
-  assert.equal(malformed.status, 400)
-  const malformedBody = Schema.decodeUnknownSync(ProcessSourceHandoffResponse)(
-    await malformed.json(),
-  )
-  assert.deepEqual(malformedBody, {
-    _tag: 'InvalidInput',
-    message: 'The service could not read that action.',
   })
   originTestDatabase(service)
     .prepare("UPDATE library_assets SET detail='{}' WHERE asset_id=?")

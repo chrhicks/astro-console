@@ -1,6 +1,5 @@
 import { Effect, Layer } from 'effect'
 import { HttpRouter, HttpServerRequest } from 'effect/unstable/http'
-import { OriginDatabase } from '../../persistence/database.ts'
 import { RunSqliteRepository } from '../../persistence/run-sqlite-repository.ts'
 import { StateSqliteRepository } from '../../persistence/state-sqlite-repository.ts'
 import {
@@ -8,12 +7,12 @@ import {
   PreflightCommandService,
 } from '../../services/preflight-command-service.ts'
 import { ProjectionPublication } from '../../services/projection-publication.ts'
+import { LibraryService } from '../../services/library-service.ts'
 import {
   observeCommandFromRequest,
   observeInvalidResponse,
   observeServiceResponse,
 } from '../command-handlers.ts'
-import { readObserveLiveFrameReview } from '../library-handlers.ts'
 import {
   json,
   OriginRequestIdentity,
@@ -21,27 +20,13 @@ import {
   tracedHttpRoute,
 } from './origin-route-shared.ts'
 
-const apiNotFound = {
-  outcome: 'rejected',
-  reason: 'InvalidInput',
-  message: 'The service could not read that action.',
-} as const
-
-export const observeRouteCompatibilityResponse = (
-  method: string,
-  requestPath: string,
-) =>
-  method === 'HEAD' && requestPath === '/api/observe/live-frame'
-    ? json(404, apiNotFound)
-    : undefined
-
 export const makeObserveRoutes = Effect.fn('OriginHttp.makeObserveRoutes')(
   function* () {
-    const { database } = yield* OriginDatabase
     const runRepository = yield* RunSqliteRepository
     const repository = yield* StateSqliteRepository
     const publication = yield* ProjectionPublication
     const preflightService = yield* PreflightCommandService
+    const library = yield* LibraryService
 
     const commands = HttpRouter.add(
       'POST',
@@ -100,9 +85,7 @@ export const makeObserveRoutes = Effect.fn('OriginHttp.makeObserveRoutes')(
       '/api/observe/live-frame',
       Effect.gen(function* () {
         const identity = yield* OriginRequestIdentity
-        const review = yield* readObserveLiveFrameReview(
-          database,
-          () => repository.state().snapshotVersion,
+        const review = yield* library.liveFrameReview(
           repository
             .bootstrapSnapshot(identity)
             .pipe(

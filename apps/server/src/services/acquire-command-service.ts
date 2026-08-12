@@ -243,7 +243,6 @@ const executeCamera = Effect.fn('AcquireCommandService.executeCamera')(
     materialization: CameraExposureMaterializationShape,
   ) {
     const prior = acquireRepository.applicationReceipt(
-      'camera',
       camera.intent.idempotencyKey,
       identity.clientId,
     )
@@ -445,7 +444,6 @@ const executeAcquire = Effect.fn('AcquireCommandService.executeAcquire')(
   ) {
     if (Option.isSome(decoded)) {
       const prior = acquireRepository.applicationReceipt(
-        'acquire',
         decoded.value.intent.idempotencyKey,
         identity.clientId,
       )

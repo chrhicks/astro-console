@@ -48,20 +48,11 @@ import {
 import { tracedProjectionDelivery } from '../observability/projection-telemetry.ts'
 import { tracedAdmission } from '../observability/admission-telemetry.ts'
 import { tracedSqliteOperation } from '../observability/sqlite-telemetry.ts'
-import {
-  makeObserveRoutes,
-  observeRouteCompatibilityResponse,
-} from './routes/observe-routes.ts'
+import { makeObserveRoutes } from './routes/observe-routes.ts'
 import { makePlanRoutes } from './routes/plan-routes.ts'
 import { makeSimulationRoutes } from './routes/simulation-routes.ts'
-import {
-  makeProcessingProjectRoutes,
-  processingProjectRouteCompatibilityResponse,
-} from './routes/processing-project-routes.ts'
-import {
-  makeLibraryRouteCompatibility,
-  makeLibraryRoutes,
-} from './routes/library-routes.ts'
+import { makeProcessingProjectRoutes } from './routes/processing-project-routes.ts'
+import { makeLibraryRoutes } from './routes/library-routes.ts'
 
 type OriginRequestAdmissionShape = {
   readonly admit: RequestAdmission
@@ -233,7 +224,6 @@ export const makeOriginHttpApplication = (
     const acquireRoutes = yield* makeAcquireRoutes()
     const simulationRoutes = makeSimulationRoutes(developmentSimulation)
     const libraryRoutes = yield* makeLibraryRoutes()
-    const libraryRouteCompatibility = yield* makeLibraryRouteCompatibility()
     const processingProjectRoutes = yield* makeProcessingProjectRoutes()
 
     const live = HttpRouter.add(
@@ -361,24 +351,8 @@ export const makeOriginHttpApplication = (
         : Effect.promise(async () => admission.admit(admissionRequest))
       if (identity === undefined)
         return yield* unauthenticated(request.method, requestPath)
-      const observeCompatibility = observeRouteCompatibilityResponse(
-        request.method,
-        requestPath,
-      )
-      const processingProjectCompatibility =
-        processingProjectRouteCompatibilityResponse(request.method, requestPath)
-      const libraryCompatibility = yield* libraryRouteCompatibility(
-        request.method,
-        requestPath,
-        identity,
-      )
-      return (
-        observeCompatibility ??
-        processingProjectCompatibility ??
-        libraryCompatibility ??
-        (yield* routes.pipe(
-          Effect.provideService(OriginRequestIdentity, identity),
-        ))
+      return yield* routes.pipe(
+        Effect.provideService(OriginRequestIdentity, identity),
       )
     })
   })

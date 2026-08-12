@@ -1451,6 +1451,10 @@ test('origin owns the scheduled executor pass and stops it with the service life
   const observation = new Promise<void>((resolve) => {
     observed = resolve
   })
+  let imageRead!: () => void
+  const imageReadCompleted = new Promise<void>((resolve) => {
+    imageRead = resolve
+  })
   const service = await openOriginTestApplicationForDatabase(
     ':memory:',
     {
@@ -1493,6 +1497,7 @@ test('origin owns the scheduled executor pass and stops it with the service life
         },
         readImageArray: () => {
           imageReads += 1
+          imageRead()
           return Effect.succeed({
             bytes: imageBytes2x2(),
             format: 'cameraRaw' as const,
@@ -1617,8 +1622,15 @@ test('origin owns the scheduled executor pass and stops it with the service life
     ),
   ])
   cameraState = 'idle'
-  for (let attempt = 0; attempt < 20 && imageReads === 0; attempt += 1)
-    await Effect.runPromise(Effect.sleep('100 millis'))
+  await Promise.race([
+    imageReadCompleted,
+    new Promise<never>((_, rejectWait) =>
+      setTimeout(
+        () => rejectWait(new Error('Scheduled image retrieval did not run.')),
+        2_000,
+      ),
+    ),
+  ])
   assert.equal(starts, 1)
   assert.equal(imageReads, 1)
   assert.equal((await snapshot()).activeRun._tag, 'Active')

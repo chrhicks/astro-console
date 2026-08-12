@@ -36,7 +36,6 @@ import {
   LibraryRepresentationService,
 } from '../../services/library-representation-service.ts'
 import { responseHeaders } from '../response.ts'
-import type { LocalIdentity } from '../../auth/identity.ts'
 import { tracedLibraryOperation } from '../../observability/library-telemetry.ts'
 
 const invalidInput = LibraryRouteFailure.cases.InvalidInput.make({
@@ -44,12 +43,6 @@ const invalidInput = LibraryRouteFailure.cases.InvalidInput.make({
 })
 const assetNotFound = LibraryRouteFailure.cases.AssetNotFound.make({})
 const libraryUnavailable = LibraryRouteFailure.cases.LibraryUnavailable.make({})
-const apiNotFound = {
-  outcome: 'rejected',
-  reason: 'InvalidInput',
-  message: 'The service could not read that action.',
-} as const
-
 const decodedAssetId = (value: string | undefined) => {
   try {
     return value === undefined ? '' : decodeURIComponent(value)
@@ -67,57 +60,6 @@ const requestAssetId = (
     `^/api/library/assets/([^/]+)${suffix.replace('/', '\\/')}$`,
   ).exec(path)?.[1]
 }
-
-export const makeLibraryRouteCompatibility = Effect.fn(
-  'OriginHttp.makeLibraryRouteCompatibility',
-)(function* () {
-  const reviews = yield* LibraryReviewService
-  return Effect.fn('OriginHttp.libraryRouteCompatibility')(function* (
-    method: string,
-    requestPath: string,
-    identity: LocalIdentity,
-  ) {
-    const libraryGetPath =
-      requestPath === '/api/library' ||
-      /^\/api\/library\/assets\/[^/]+(?:\/(?:preview|download|process-source))?$/.test(
-        requestPath,
-      )
-    if (method === 'HEAD' && libraryGetPath) return json(404, apiNotFound)
-    if (!requestPath.startsWith('/api/library/assets/')) return undefined
-    const review = method === 'POST' && requestPath.endsWith('/review')
-    if (method !== 'GET' && !review) return undefined
-    const suffix = [
-      '/preview',
-      '/download',
-      '/process-source',
-      ...(review ? ['/review'] : []),
-    ].find((value) => requestPath.endsWith(value))
-    const encoded = requestPath.slice(
-      '/api/library/assets/'.length,
-      suffix === undefined ? undefined : -suffix.length,
-    )
-    const decoded = decodedAssetId(encoded)
-    if (/^[A-Za-z0-9-]+$/.test(decoded)) return undefined
-    if (review) {
-      const authorization = yield* reviews.authorize(identity)
-      return LibraryReviewAuthorization.match(authorization, {
-        ReadOnly: ({ response }) => json(403, response),
-        Authorized: () =>
-          json(
-            400,
-            ReviewAssetResponse.cases.Rejected.make({
-              failure: ReviewAssetFailure.cases.InvalidInput.make({
-                message: 'The service could not read that review action.',
-              }),
-            }),
-          ),
-      })
-    }
-    return suffix === '/preview' || suffix === '/download'
-      ? json(400, { outcome: 'rejected', reason: 'InvalidInput' })
-      : json(400, invalidInput)
-  })
-})
 
 const decodeLibraryQuery = (request: HttpServerRequest.HttpServerRequest) => {
   const url = new URL(request.url, 'http://local')

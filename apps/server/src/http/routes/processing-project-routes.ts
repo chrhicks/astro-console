@@ -51,43 +51,6 @@ const serviceUnavailable =
   ProcessingProjectHttpFailure.cases.ServiceUnavailable.make({
     message: 'Processing Project persistence is unavailable.',
   })
-const projectRouteNotFound =
-  ProcessingProjectHttpFailure.cases.ProjectRouteNotFound.make({
-    message: 'The Processing Project route does not exist.',
-  })
-
-export const processingProjectRouteCompatibilityResponse = (
-  method: string,
-  requestPath: string,
-) => {
-  const collection = requestPath === '/api/process/projects'
-  const detail = /^\/api\/process\/projects\/[^/]+$/.test(requestPath)
-  const evidence = /^\/api\/process\/projects\/[^/]+\/evidence$/.test(
-    requestPath,
-  )
-  if (!collection && !requestPath.startsWith('/api/process/projects/'))
-    return undefined
-  if (detail || (evidence && method === 'GET')) {
-    const suffix = evidence ? '/evidence' : ''
-    const encoded = requestPath.slice(
-      '/api/process/projects/'.length,
-      suffix === '' ? undefined : -suffix.length,
-    )
-    try {
-      decodeURIComponent(encoded)
-    } catch {
-      return json(400, invalidInput)
-    }
-  }
-  if (
-    (collection && (method === 'GET' || method === 'POST')) ||
-    (detail && (method === 'GET' || method === 'PATCH')) ||
-    (evidence && method === 'GET')
-  )
-    return undefined
-  return json(404, projectRouteNotFound)
-}
-
 const processingErrorStatus = (error: typeof ProcessingProjectError.Type) => {
   if (ProcessingProjectError.guards.ProcessAuthorityDenied(error)) return 403
   if (ProcessingProjectError.guards.ProjectNotFound(error)) return 404

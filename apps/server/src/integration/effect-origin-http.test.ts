@@ -1283,97 +1283,9 @@ test('Processing Project detail, evidence, and change preserve lifecycle truth',
     }),
   ))
 
-test('Processing Project routes preserve method, path, and change-body compatibility', () =>
+test('Processing Project changes reject oversized, malformed, and mismatched bodies', () =>
   ownerOrigin(({ bases }) =>
     Effect.gen(function* () {
-      const headers = { 'x-listener-key': 'owner' }
-      for (const path of [
-        '/api/process/projects',
-        '/api/process/projects/project-head',
-        '/api/process/projects/project-head/evidence',
-      ]) {
-        const response = yield* fetchEffect(`${bases.owner}${path}`, {
-          method: 'HEAD',
-          headers,
-        })
-        assert.equal(response.status, 404, path)
-        assert.equal(
-          response.headers.get('content-type'),
-          'application/json; charset=utf-8',
-        )
-      }
-
-      const unmatched = yield* fetchEffect(
-        `${bases.owner}/api/process/projects/project-id/extra`,
-        { headers },
-      )
-      assert.equal(unmatched.status, 404)
-      assert.deepEqual(
-        yield* responseJson(unmatched).pipe(
-          Effect.flatMap(
-            Schema.decodeUnknownEffect(ProcessingProjectHttpFailure),
-          ),
-        ),
-        {
-          _tag: 'ProjectRouteNotFound',
-          message: 'The Processing Project route does not exist.',
-        },
-      )
-
-      const malformedPath = yield* fetchEffect(
-        `${bases.owner}/api/process/projects/%`,
-        { headers },
-      )
-      assert.equal(malformedPath.status, 400)
-      assert.equal(
-        (yield* responseJson(malformedPath).pipe(
-          Effect.flatMap(
-            Schema.decodeUnknownEffect(ProcessingProjectHttpFailure),
-          ),
-        ))._tag,
-        'InvalidInput',
-      )
-
-      const malformedEvidenceHead = yield* fetchEffect(
-        `${bases.owner}/api/process/projects/%/evidence`,
-        { method: 'HEAD', headers },
-      )
-      assert.equal(malformedEvidenceHead.status, 404)
-      assert.equal(
-        malformedEvidenceHead.headers.get('content-type'),
-        'application/json; charset=utf-8',
-      )
-      const malformedEvidencePost = yield* fetchEffect(
-        `${bases.owner}/api/process/projects/%/evidence`,
-        { method: 'POST', headers },
-      )
-      assert.equal(malformedEvidencePost.status, 404)
-      assert.deepEqual(
-        yield* responseJson(malformedEvidencePost).pipe(
-          Effect.flatMap(
-            Schema.decodeUnknownEffect(ProcessingProjectHttpFailure),
-          ),
-        ),
-        {
-          _tag: 'ProjectRouteNotFound',
-          message: 'The Processing Project route does not exist.',
-        },
-      )
-
-      const encodedProjectId = yield* fetchEffect(
-        `${bases.owner}/api/process/projects/%2F`,
-        { headers },
-      )
-      assert.equal(encodedProjectId.status, 404)
-      const encodedProjectIdBody = yield* responseJson(encodedProjectId).pipe(
-        Effect.flatMap(
-          Schema.decodeUnknownEffect(ProcessingProjectHttpFailure),
-        ),
-      )
-      assert.equal(encodedProjectIdBody._tag, 'DomainRejected')
-      if (encodedProjectIdBody._tag === 'DomainRejected')
-        assert.equal(encodedProjectIdBody.error._tag, 'ProjectNotFound')
-
       const oversizedChange = yield* fetchEffect(
         `${bases.owner}/api/process/projects/project-body-limit`,
         {
@@ -1485,25 +1397,6 @@ test('Library review preserves owner authority, revisions, idempotency, and proj
       assert.equal(deniedMalformed._tag, 'Rejected')
       if (deniedMalformed._tag === 'Rejected')
         assert.equal(deniedMalformed.failure._tag, 'ClientReadOnly')
-      const deniedMalformedPathResponse = yield* fetchEffect(
-        `${bases.viewer}/api/library/assets/%/review`,
-        {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            'x-listener-key': 'viewer',
-          },
-          body: JSON.stringify({ decision: 'accepted' }),
-        },
-      )
-      const deniedMalformedPath = yield* responseJson(
-        deniedMalformedPathResponse,
-      ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(ReviewAssetResponse)))
-      assert.equal(deniedMalformedPathResponse.status, 403)
-      assert.equal(deniedMalformedPath._tag, 'Rejected')
-      if (deniedMalformedPath._tag === 'Rejected')
-        assert.equal(deniedMalformedPath.failure._tag, 'ClientReadOnly')
-
       const acceptedResponse = yield* submit(bases.owner, request)
       const accepted = yield* responseJson(acceptedResponse).pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(ReviewAssetResponse)),
@@ -1585,22 +1478,6 @@ test('Library preview and local download preserve bounded immutable representati
         originalBytes,
       )
 
-      const previewHead = yield* fetchEffect(
-        `${bases.owner}/api/library/assets/asset-m27-001/preview`,
-        { method: 'HEAD', headers: { 'x-listener-key': 'owner' } },
-      )
-      assert.equal(previewHead.status, 404)
-      assert.equal(
-        previewHead.headers.get('content-type'),
-        'application/json; charset=utf-8',
-      )
-
-      const downloadHead = yield* fetchEffect(
-        `${bases.owner}/api/library/assets/asset-m27-001/download`,
-        { method: 'HEAD', headers: { 'x-listener-key': 'owner' } },
-      )
-      assert.equal(downloadHead.status, 404)
-
       const preview = yield* fetchEffect(
         `${bases.owner}/api/library/assets/asset-m27-001/preview`,
         { headers: { 'x-listener-key': 'owner' } },
@@ -1679,16 +1556,6 @@ test('Library published download preserves the bounded grant redirect', () => {
             '2026-08-11T00:00:00.000Z',
             'published/run-m27-001/finals/asset-m27-001.fits',
           )
-        const head = yield* fetchEffect(
-          `${bases.owner}/api/library/assets/asset-m27-001/download`,
-          {
-            method: 'HEAD',
-            headers: { 'x-listener-key': 'owner' },
-            redirect: 'manual',
-          },
-        )
-        assert.equal(head.status, 404)
-        assert.equal(issued.length, 0)
         const response = yield* fetchEffect(
           `${bases.owner}/api/library/assets/asset-m27-001/download`,
           {
@@ -1728,25 +1595,6 @@ test('Library routes preserve bounded input and truthful failure envelopes', () 
   ownerOrigin(({ bases }) =>
     Effect.gen(function* () {
       const headers = { 'x-listener-key': 'owner' }
-      const headPaths = [
-        '/api/library',
-        '/api/library/assets/asset-m27-001',
-        '/api/library/assets/asset-m27-001/preview',
-        '/api/library/assets/asset-m27-001/download',
-        '/api/library/assets/asset-m27-001/process-source',
-        '/api/observe/live-frame',
-      ]
-      for (const path of headPaths) {
-        const response = yield* fetchEffect(`${bases.owner}${path}`, {
-          method: 'HEAD',
-          headers,
-        })
-        assert.equal(response.status, 404, path)
-        assert.equal(
-          response.headers.get('content-type'),
-          'application/json; charset=utf-8',
-        )
-      }
       const invalidPage = yield* fetchEffect(
         `${bases.owner}/api/library?pageSize=101&sort=capturedAtDescending`,
         { headers },
@@ -1762,15 +1610,6 @@ test('Library routes preserve bounded input and truthful failure envelopes', () 
         { headers },
       )
       assert.equal(invalidDetail.status, 400)
-      const malformedPath = yield* fetchEffect(
-        `${bases.owner}/api/library/assets/%`,
-        { headers },
-      )
-      assert.equal(malformedPath.status, 400)
-      assert.deepEqual(yield* responseJson(malformedPath), {
-        _tag: 'InvalidInput',
-        message: 'The service could not read that action.',
-      })
       const missingDetail = yield* fetchEffect(
         `${bases.owner}/api/library/assets/asset-m27-999`,
         { headers },
@@ -1806,27 +1645,6 @@ test('Library routes preserve bounded input and truthful failure envelopes', () 
       assert.equal(invalidReviewBody._tag, 'Rejected')
       if (invalidReviewBody._tag === 'Rejected')
         assert.equal(invalidReviewBody.failure._tag, 'InvalidInput')
-      const malformedReviewPath = yield* fetchEffect(
-        `${bases.owner}/api/library/assets/%/review`,
-        {
-          method: 'POST',
-          headers: { ...headers, 'content-type': 'application/json' },
-          body: JSON.stringify({
-            expectedAssetRevision: 1,
-            expectedReviewRevision: 0,
-            decision: 'accepted',
-            idempotencyKey: 'effect-malformed-review-path',
-          }),
-        },
-      )
-      assert.equal(malformedReviewPath.status, 400)
-      const malformedReviewBody = yield* responseJson(malformedReviewPath).pipe(
-        Effect.flatMap(Schema.decodeUnknownEffect(ReviewAssetResponse)),
-      )
-      assert.equal(malformedReviewBody._tag, 'Rejected')
-      if (malformedReviewBody._tag === 'Rejected')
-        assert.equal(malformedReviewBody.failure._tag, 'InvalidInput')
-
       const unavailablePreview = yield* fetchEffect(
         `${bases.owner}/api/library/assets/asset-m27-001/preview`,
         { headers },
@@ -2141,66 +1959,6 @@ test('Acquire accepts target evidence once and returns its durable receipt witho
               },
             },
           }
-        }),
-      correct: () => Effect.die('Correction was not expected'),
-    }),
-  )
-})
-
-test('Acquire replays a legacy durable receipt without provider work', () => {
-  let providerCalls = 0
-  return ownerOrigin(
-    ({ graph, bases }) =>
-      Effect.gen(function* () {
-        const started = yield* startEffectRun(
-          graph,
-          bases.owner,
-          'effect-acquire-legacy-receipt-start-001',
-        )
-        if (started.activeRun._tag !== 'Active')
-          return yield* Effect.die('Expected active fixture Run')
-        acquireSqliteRepository(graph.database).install(
-          targetAcquisitionSession(
-            started.activeRun.run.runId,
-            'deepSkyPlateSolve',
-          ),
-        )
-        const intent = {
-          _tag: 'CaptureTargetAcquisitionEvidence',
-          expectedLeaseRevision: started.control.revision,
-          expectedRunRevision: started.activeRun.run.revision,
-          expectedAcquireRevision: 0,
-          idempotencyKey: 'effect-acquire-legacy-receipt-001',
-        } as const
-        const legacyResponse = AcquireCommandResponse.cases.Unavailable.make({
-          summary: 'The legacy provider outcome remains unknown.',
-        })
-        acquireSqliteRepository(graph.database).saveReceipt(
-          intent.idempotencyKey,
-          owner.clientId,
-          { status: 503, body: legacyResponse },
-        )
-        const response = yield* fetchEffect(
-          `${bases.owner}/api/acquire/commands`,
-          {
-            method: 'POST',
-            headers: ownerHeaders,
-            body: JSON.stringify({ intent }),
-          },
-        )
-        const body = yield* responseJson(response).pipe(
-          Effect.flatMap(Schema.decodeUnknownEffect(AcquireCommandResponse)),
-        )
-        assert.equal(response.status, 503)
-        assert.deepEqual(body, legacyResponse)
-        assert.equal(providerCalls, 0)
-      }),
-    undefined,
-    targetRouteDependenciesLayer({
-      capture: () =>
-        Effect.sync(() => {
-          providerCalls += 1
-          return { _tag: 'Aborted' as const, summary: 'Not expected.' }
         }),
       correct: () => Effect.die('Correction was not expected'),
     }),
