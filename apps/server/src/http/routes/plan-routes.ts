@@ -5,6 +5,7 @@ import { RunSqliteRepository } from '../../persistence/run-sqlite-repository.ts'
 import { StateSqliteRepository } from '../../persistence/state-sqlite-repository.ts'
 import { ProjectionPublication } from '../../services/projection-publication.ts'
 import { planWorkspaceProjection } from '../../services/runtime-bootstrap.ts'
+import { tracedPlanWorkspaceRead } from '../../observability/plan-telemetry.ts'
 import {
   planCommandFromRequest,
   planInvalidResponse,
@@ -14,6 +15,7 @@ import {
   json,
   OriginRequestIdentity,
   requestJson,
+  tracedHttpRoute,
 } from './origin-route-shared.ts'
 
 export const makePlanRoutes = Effect.fn('OriginHttp.makePlanRoutes')(
@@ -26,34 +28,49 @@ export const makePlanRoutes = Effect.fn('OriginHttp.makePlanRoutes')(
     const workspace = HttpRouter.add(
       'GET',
       '/api/workspaces/plan',
-      Effect.sync(() => json(200, planWorkspaceProjection(database))),
+      tracedHttpRoute(
+        {
+          method: 'GET',
+          route: '/api/workspaces/plan',
+          workspace: 'plan',
+        },
+        Effect.sync(() => json(200, planWorkspaceProjection(database))),
+        (_response, effect) => tracedPlanWorkspaceRead(effect),
+      ),
     )
     const commands = HttpRouter.add(
       'POST',
       '/api/plan/commands',
-      Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest
-        const identity = yield* OriginRequestIdentity
-        const raw = yield* requestJson(request)
-        const result = yield* planCommandFromRequest(
-          Promise.resolve(raw),
-          runRepository,
-          repository,
-          identity,
-          (_type, cursor) => publication.publish(cursor),
-        ).pipe(
-          Effect.catchTags({
-            'Server.PlanCommandInputInvalid': () =>
-              planInvalidResponse(repository, identity),
-            'Server.PlanServiceUnavailable': () =>
-              planServiceResponse(
-                'PlanServiceUnavailable',
-                'The Plan service is temporarily unavailable.',
-              ),
-          }),
-        )
-        return json(result.status, result.body)
-      }),
+      tracedHttpRoute(
+        {
+          method: 'POST',
+          route: '/api/plan/commands',
+          workspace: 'plan',
+        },
+        Effect.gen(function* () {
+          const request = yield* HttpServerRequest.HttpServerRequest
+          const identity = yield* OriginRequestIdentity
+          const raw = yield* requestJson(request)
+          const result = yield* planCommandFromRequest(
+            Promise.resolve(raw),
+            runRepository,
+            repository,
+            identity,
+            (_type, cursor) => publication.publish(cursor),
+          ).pipe(
+            Effect.catchTags({
+              'Server.PlanCommandInputInvalid': () =>
+                planInvalidResponse(repository, identity),
+              'Server.PlanServiceUnavailable': () =>
+                planServiceResponse(
+                  'PlanServiceUnavailable',
+                  'The Plan service is temporarily unavailable.',
+                ),
+            }),
+          )
+          return json(result.status, result.body)
+        }),
+      ),
     )
 
     return Layer.merge(workspace, commands)

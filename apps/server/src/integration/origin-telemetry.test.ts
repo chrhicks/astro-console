@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import test from 'node:test'
 import { ConfigProvider, Effect, Schema } from 'effect'
-import { createLocalWebService } from '../app/origin-service.ts'
+import { openOriginTestApplication } from './origin-test-graph.ts'
 import { createOriginTelemetry } from '../observability/origin-telemetry.ts'
 import type {
   NodeRuntimeGcType,
@@ -452,7 +452,7 @@ test('startup and admission spans export closed outcomes without identity', asyn
 test('admission telemetry excludes health and static requests', async () => {
   const observed: Array<{ readonly path: string; readonly enabled: boolean }> =
     []
-  const service = createLocalWebService(
+  const service = await openOriginTestApplication(
     ':memory:',
     (request, observation) => {
       observed.push({
@@ -488,7 +488,7 @@ test('admission telemetry excludes health and static requests', async () => {
       await listener.close()
     }
   } finally {
-    service.close()
+    await service.close()
   }
 
   assert.deepEqual(observed, [
@@ -545,7 +545,7 @@ test('projection snapshot and SSE setup export bounded delivery spans', async ()
   })
   try {
     await telemetry.initialize()
-    const service = createLocalWebService(
+    const service = await openOriginTestApplication(
       ':memory:',
       undefined,
       undefined,
@@ -604,7 +604,7 @@ test('projection snapshot and SSE setup export bounded delivery spans', async ()
         await listener.close()
       }
     } finally {
-      service.close()
+      await service.close()
     }
   } finally {
     await telemetry.dispose()
@@ -906,7 +906,7 @@ test('Plan HTTP flows export a small safe business hierarchy', async () => {
   })
   try {
     await telemetry.initialize()
-    const service = createLocalWebService(
+    const service = await openOriginTestApplication(
       ':memory:',
       undefined,
       undefined,
@@ -955,7 +955,7 @@ test('Plan HTTP flows export a small safe business hierarchy', async () => {
         await listener.close()
       }
     } finally {
-      service.close()
+      await service.close()
     }
   } finally {
     await telemetry.dispose()
@@ -1007,7 +1007,7 @@ test('Observe HTTP commands export only real business stages', async () => {
   })
   try {
     await telemetry.initialize()
-    const service = createLocalWebService(
+    const service = await openOriginTestApplication(
       ':memory:',
       undefined,
       undefined,
@@ -1092,7 +1092,7 @@ test('Observe HTTP commands export only real business stages', async () => {
         await listener.close()
       }
     } finally {
-      service.close()
+      await service.close()
     }
   } finally {
     await telemetry.dispose()
@@ -1145,7 +1145,7 @@ test('Library HTTP paths export one safe business boundary each', async () => {
   let assetId = ''
   try {
     await telemetry.initialize()
-    const service = createLocalWebService(
+    const service = await openOriginTestApplication(
       ':memory:',
       undefined,
       undefined,
@@ -1220,7 +1220,7 @@ test('Library HTTP paths export one safe business boundary each', async () => {
         await listener.close()
       }
     } finally {
-      service.close()
+      await service.close()
     }
   } finally {
     await telemetry.dispose()
@@ -1278,7 +1278,7 @@ test('Process HTTP flows export one safe Project boundary each', async () => {
   const createIntentId = 'private-project-create-intent'
   try {
     await telemetry.initialize()
-    const service = createLocalWebService(
+    const service = await openOriginTestApplication(
       ':memory:',
       undefined,
       undefined,
@@ -1319,7 +1319,7 @@ test('Process HTTP flows export one safe Project boundary each', async () => {
         await listener.close()
       }
     } finally {
-      service.close()
+      await service.close()
     }
   } finally {
     await telemetry.dispose()

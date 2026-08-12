@@ -10,6 +10,7 @@ import { alpacaPreflightProvider } from '../providers/alpaca-preflight-provider.
 import { alpacaCameraProvider } from '../providers/alpaca-camera-provider.ts'
 import type { ReadOnlyPreflightProviderShape } from '../services/preflight-service.ts'
 import type { CameraProviderShape } from '../services/camera-command-service.ts'
+import { RunExecutionContext } from '../services/run-domain.ts'
 import {
   createOriginTelemetry,
   defaultOriginTelemetry,
@@ -17,12 +18,16 @@ import {
 } from '../observability/origin-telemetry.ts'
 import { recordOperationalEvent } from '../observability/operational-telemetry.ts'
 import { tracedStartup } from '../observability/startup-telemetry.ts'
+import {
+  recordAdmissionDecision,
+  recordJwksRefresh,
+} from '../observability/admission-telemetry.ts'
 import { runExecutable } from './executable.ts'
 import {
   createLocalOwnerAdmission,
   createRemoteDesktopAdmission,
   createRemoteReadOnlyAdmission,
-} from './origin-service.ts'
+} from './origin-admission.ts'
 import { makeProductionOriginApplication } from './origin-application.ts'
 import { listenOriginHttp } from '../http/effect-origin-http.ts'
 
@@ -112,7 +117,67 @@ export const originRuntimeLayer = (
         makeProductionOriginApplication(config, {
           ...(preflightProvider === undefined ? {} : { preflightProvider }),
           ...(cameraProvider === undefined ? {} : { cameraProvider }),
+          ...(cameraProvider === undefined ||
+          preflightConfig?.devices.camera?.uniqueId === undefined
+            ? {}
+            : {
+                runExecutorProviderOrigin: new URL(
+                  `http://${preflightConfig.host}:${preflightConfig.port}`,
+                ).origin,
+                runExecutionContext: RunExecutionContext.make({
+                  rigId: preflightConfig.rigId,
+                  cameraDeviceId: preflightConfig.devices.camera.uniqueId,
+                  ...(preflightConfig.devices.telescope?.uniqueId === undefined
+                    ? {}
+                    : {
+                        mountDeviceId:
+                          preflightConfig.devices.telescope.uniqueId,
+                        ...(preflightConfig.site === undefined
+                          ? config.simulation === undefined
+                            ? {}
+                            : {
+                                latitudeDegrees: 39.755,
+                                longitudeDegrees: -74.2677777778,
+                                elevationMeters: 0,
+                              }
+                          : preflightConfig.site),
+                      }),
+                  completionBehavior: 'hold',
+                  unsafeBehavior: 'pauseAndPark',
+                }),
+              }),
           ...(issuer === undefined ? {} : { downloadGrantIssuer: issuer }),
+          observeProjectionPublication: (event) =>
+            telemetry.runSync(
+              recordOperationalEvent({
+                scope: 'projection',
+                operation: `sse.${event}`,
+                outcome: event === 'writeFailure' ? 'unavailable' : 'success',
+              }),
+            ),
+          capturedFrameStorage: {
+            originalsRoot: config.runtime.originalsRoot,
+          },
+          frameInspectionStorage: {
+            originalsRoot: config.runtime.originalsRoot,
+            previewsRoot: config.runtime.previewRoot,
+          },
+          plateSolveWorker: {
+            originalsRoot: config.runtime.originalsRoot,
+            executable: config.plateSolve.executable,
+            indexesRoot: config.plateSolve.indexesRoot,
+            timeoutMs: config.plateSolve.timeoutMs,
+            solverVersion: config.plateSolve.solverVersion,
+            scaleLowDeg: config.plateSolve.scaleLowDeg,
+            scaleHighDeg: config.plateSolve.scaleHighDeg,
+            searchRadiusDeg: config.plateSolve.searchRadiusDeg,
+          },
+          ...(config.simulation === undefined &&
+          preflightConfig?.site !== undefined &&
+          preflightConfig.devices.camera?.uniqueId !== undefined &&
+          preflightConfig.devices.telescope?.uniqueId !== undefined
+            ? { configuredTargetProvider: preflightConfig }
+            : {}),
         }),
       ).pipe(Effect.mapError((cause) => failure('create', cause)))
       const scope = yield* Effect.scope
@@ -125,12 +190,20 @@ export const originRuntimeLayer = (
             tracedStartup(
               'listener.bind',
               Effect.gen(function* () {
+                const observation = {
+                  admission: (
+                    reason: Parameters<typeof recordAdmissionDecision>[0],
+                  ) => telemetry.runSync(recordAdmissionDecision(reason)),
+                  jwks: (outcome: Parameters<typeof recordJwksRefresh>[0]) =>
+                    telemetry.runSync(recordJwksRefresh(outcome)),
+                }
                 const bindings = [
                   {
                     name: 'primary',
                     host: config.runtime.host,
                     port: config.runtime.port,
                     admission: createRemoteReadOnlyAdmission(config),
+                    observation,
                   },
                   ...(config.admission.mode === 'development'
                     ? []
@@ -140,6 +213,7 @@ export const originRuntimeLayer = (
                           host: config.runtime.host,
                           port: config.runtime.localOwnerPort ?? 0,
                           admission: createLocalOwnerAdmission(),
+                          observation,
                         },
                         ...(config.runtime.remoteDesktopPort === undefined
                           ? []
@@ -149,6 +223,7 @@ export const originRuntimeLayer = (
                                 host: config.runtime.host,
                                 port: config.runtime.remoteDesktopPort,
                                 admission: createRemoteDesktopAdmission(config),
+                                observation,
                               },
                             ]),
                       ]),

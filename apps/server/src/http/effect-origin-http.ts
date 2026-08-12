@@ -7,6 +7,7 @@ import {
   Exit,
   FileSystem,
   Layer,
+  Option,
   Path,
   Schedule,
   Schema,
@@ -20,10 +21,12 @@ import {
 import {
   HttpRouter,
   HttpServer,
+  HttpMiddleware,
   HttpServerRequest,
   HttpServerResponse,
 } from 'effect/unstable/http'
 import type {
+  AdmissionObservation,
   AdmissionRequest,
   LocalIdentity,
   RequestAdmission,
@@ -37,7 +40,14 @@ import { responseHeaders } from './response.ts'
 import type { DevelopmentSimulationConfig } from './development-simulation.ts'
 import { makeControlRoutes } from './routes/control-routes.ts'
 import { makeAcquireRoutes } from './routes/acquire-routes.ts'
-import { json, OriginRequestIdentity } from './routes/origin-route-shared.ts'
+import {
+  json,
+  OriginRequestIdentity,
+  tracedHttpRoute,
+} from './routes/origin-route-shared.ts'
+import { tracedProjectionDelivery } from '../observability/projection-telemetry.ts'
+import { tracedAdmission } from '../observability/admission-telemetry.ts'
+import { tracedSqliteOperation } from '../observability/sqlite-telemetry.ts'
 import {
   makeObserveRoutes,
   observeRouteCompatibilityResponse,
@@ -53,9 +63,14 @@ import {
   makeLibraryRoutes,
 } from './routes/library-routes.ts'
 
+type OriginRequestAdmissionShape = {
+  readonly admit: RequestAdmission
+  readonly observation?: AdmissionObservation
+}
+
 class OriginRequestAdmission extends Context.Service<
   OriginRequestAdmission,
-  RequestAdmission
+  OriginRequestAdmissionShape
 >()('@astro-console/server/OriginRequestAdmission') {}
 
 export type OriginHttpApplication = Effect.Effect<
@@ -69,6 +84,7 @@ export type OriginHttpBinding = {
   readonly host: string
   readonly port: number
   readonly admission: RequestAdmission
+  readonly observation?: AdmissionObservation
 }
 
 export type BoundOriginHttp = Readonly<
@@ -132,18 +148,19 @@ const makeWebResponse = (root: string) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const canonicalRoot = yield* fileSystem.realPath(root)
+    const canonicalRoot = yield* fileSystem.realPath(root).pipe(Effect.option)
 
     const read = (requestPath: string) =>
       Effect.gen(function* () {
+        if (Option.isNone(canonicalRoot)) return undefined
         const decoded = yield* Effect.try(() => decodeURIComponent(requestPath))
         if (decoded.split('/').some((part) => part === '.' || part === '..'))
           return undefined
-        const candidate = path.resolve(canonicalRoot, `.${decoded}`)
-        if (path.relative(canonicalRoot, candidate).startsWith('..'))
+        const candidate = path.resolve(canonicalRoot.value, `.${decoded}`)
+        if (path.relative(canonicalRoot.value, candidate).startsWith('..'))
           return undefined
         const resolved = yield* fileSystem.realPath(candidate)
-        if (path.relative(canonicalRoot, resolved).startsWith('..'))
+        if (path.relative(canonicalRoot.value, resolved).startsWith('..'))
           return undefined
         return yield* fileSystem.readFile(resolved)
       }).pipe(Effect.catch(() => Effect.succeed(undefined)))
@@ -189,9 +206,7 @@ const eventsResponse = (
         ),
       ),
     )
-  const heartbeat = Stream.fromSchedule(Schedule.spaced('15 seconds')).pipe(
-    Stream.map(() => encoder.encode(': heartbeat\n\n')),
-  )
+  const heartbeat = projectionHeartbeatStream
   return HttpServerResponse.stream(Stream.merge(events, heartbeat), {
     headers: {
       ...responseHeaders('text/event-stream'),
@@ -199,6 +214,10 @@ const eventsResponse = (
     },
   })
 }
+
+export const projectionHeartbeatStream = Stream.fromSchedule(
+  Schedule.spaced('15 seconds'),
+).pipe(Stream.map(() => encoder.encode(': heartbeat\n\n')))
 
 export const makeOriginHttpApplication = (
   webRoot: string,
@@ -225,14 +244,28 @@ export const makeOriginHttpApplication = (
     const snapshot = HttpRouter.add(
       'GET',
       '/api/snapshot',
-      Effect.gen(function* () {
-        const identity = yield* OriginRequestIdentity
-        const data = yield* repository.bootstrapSnapshot(identity)
-        const body = yield* Schema.decodeUnknownEffect(
-          BootstrapHttpSuccessEnvelope,
-        )({ ok: true, data })
-        return json(200, body)
-      }),
+      tracedHttpRoute(
+        { method: 'GET', route: '/api/snapshot', workspace: 'projection' },
+        Effect.gen(function* () {
+          const identity = yield* OriginRequestIdentity
+          const data = yield* tracedSqliteOperation(
+            'projection.snapshot.read',
+            repository.bootstrapSnapshot(identity),
+          )
+          const body = yield* Schema.decodeUnknownEffect(
+            BootstrapHttpSuccessEnvelope,
+          )({ ok: true, data })
+          return json(200, body)
+        }),
+        (response, effect) =>
+          tracedProjectionDelivery(response, 'snapshot', effect, () =>
+            repository.state().control.state === 'held'
+              ? 'held'
+              : repository.state().control.state === 'reconnecting'
+                ? 'reconnecting'
+                : 'unheld',
+          ),
+      ),
     )
     const ready = HttpRouter.add(
       'GET',
@@ -252,10 +285,15 @@ export const makeOriginHttpApplication = (
     const events = HttpRouter.add(
       'GET',
       '/api/events',
-      Effect.gen(function* () {
-        const identity = yield* OriginRequestIdentity
-        return eventsResponse(identity, publication)
-      }),
+      tracedHttpRoute(
+        { method: 'GET', route: '/api/events', workspace: 'projection' },
+        Effect.gen(function* () {
+          const identity = yield* OriginRequestIdentity
+          return eventsResponse(identity, publication)
+        }),
+        (response, effect) =>
+          tracedProjectionDelivery(response, 'sse.open', effect),
+      ),
     )
     const apiNotFound = HttpRouter.add('*', '/api/*', json(404, invalidInput))
     const webAndNotFound = HttpRouter.add(
@@ -310,9 +348,17 @@ export const makeOriginHttpApplication = (
         path: requestPath,
         headers: request.headers,
       }
-      const identity = yield* Effect.promise(async () =>
-        admission(admissionRequest),
-      )
+      const observed =
+        requestPath.startsWith('/api/') &&
+        requestPath !== '/api/health/ready' &&
+        requestPath !== '/api/health/operations'
+      const identity = yield* observed
+        ? tracedAdmission(
+            Effect.promise(async () =>
+              admission.admit(admissionRequest, admission.observation),
+            ),
+          )
+        : Effect.promise(async () => admission.admit(admissionRequest))
       if (identity === undefined)
         return yield* unauthenticated(request.method, requestPath)
       const observeCompatibility = observeRouteCompatibilityResponse(
@@ -367,11 +413,23 @@ export const listenOriginHttp = Effect.fn('OriginHttp.listen')(function* (
         listenerScope,
       )
       yield* Scope.provide(
-        server.serve(
-          application.pipe(
-            Effect.provideService(OriginRequestAdmission, binding.admission),
+        server
+          .serve(
+            application.pipe(
+              Effect.provideService(OriginRequestAdmission, {
+                admit: binding.admission,
+                ...(binding.observation === undefined
+                  ? {}
+                  : { observation: binding.observation }),
+              }),
+            ),
+          )
+          .pipe(
+            Effect.provideService(
+              HttpMiddleware.TracerDisabledWhen,
+              () => true,
+            ),
           ),
-        ),
         listenerScope,
       )
       bound[binding.name] = { port: tcpPort(server.address) }

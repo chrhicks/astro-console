@@ -19,7 +19,7 @@ import {
   BootstrapHttpSuccessEnvelope,
 } from '@astro-console/protocol'
 import { RunExecutionContext } from '../services/run-domain.ts'
-import { createLocalWebService } from '../app/origin-service.ts'
+import { openOriginTestApplication } from './origin-test-graph.ts'
 import { openOriginDatabase } from '../persistence/database.ts'
 import {
   RunSqliteRepository,
@@ -1417,7 +1417,7 @@ test('origin owns the scheduled executor pass and stops it with the service life
   const observation = new Promise<void>((resolve) => {
     observed = resolve
   })
-  const service = createLocalWebService(
+  const service = await openOriginTestApplication(
     ':memory:',
     undefined,
     undefined,
@@ -1465,7 +1465,7 @@ test('origin owns the scheduled executor pass and stops it with the service life
   const listener = await service.listen()
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const base = `http://127.0.0.1:${listener.port}`
   const snapshot = async () => {
@@ -1573,6 +1573,6 @@ test('origin owns the scheduled executor pass and stops it with the service life
   assert.equal(starts, 1)
   assert.equal((await snapshot()).activeRun._tag, 'Active')
   await listener.close()
-  service.close()
+  await service.close()
   assert.equal(starts, 1)
 })

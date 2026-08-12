@@ -18,6 +18,7 @@ import {
   json,
   OriginRequestIdentity,
   requestJson,
+  tracedHttpRoute,
 } from './origin-route-shared.ts'
 
 const apiNotFound = {
@@ -45,29 +46,36 @@ export const makeObserveRoutes = Effect.fn('OriginHttp.makeObserveRoutes')(
     const commands = HttpRouter.add(
       'POST',
       '/api/observe/commands',
-      Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest
-        const identity = yield* OriginRequestIdentity
-        const raw = yield* requestJson(request)
-        const result = yield* observeCommandFromRequest(
-          Promise.resolve(raw),
-          runRepository,
-          repository,
-          identity,
-          (_type, cursor) => publication.publish(cursor),
-        ).pipe(
-          Effect.catchTags({
-            'Server.ObserveCommandInputInvalid': () =>
-              observeInvalidResponse(repository, identity),
-            'Server.ObserveServiceUnavailable': () =>
-              observeServiceResponse(
-                'ObserveServiceUnavailable',
-                'The Observe command service is temporarily unavailable.',
-              ),
-          }),
-        )
-        return json(result.status, result.body)
-      }),
+      tracedHttpRoute(
+        {
+          method: 'POST',
+          route: '/api/observe/commands',
+          workspace: 'observe',
+        },
+        Effect.gen(function* () {
+          const request = yield* HttpServerRequest.HttpServerRequest
+          const identity = yield* OriginRequestIdentity
+          const raw = yield* requestJson(request)
+          const result = yield* observeCommandFromRequest(
+            Promise.resolve(raw),
+            runRepository,
+            repository,
+            identity,
+            (_type, cursor) => publication.publish(cursor),
+          ).pipe(
+            Effect.catchTags({
+              'Server.ObserveCommandInputInvalid': () =>
+                observeInvalidResponse(repository, identity),
+              'Server.ObserveServiceUnavailable': () =>
+                observeServiceResponse(
+                  'ObserveServiceUnavailable',
+                  'The Observe command service is temporarily unavailable.',
+                ),
+            }),
+          )
+          return json(result.status, result.body)
+        }),
+      ),
     )
 
     const preflight = HttpRouter.add(

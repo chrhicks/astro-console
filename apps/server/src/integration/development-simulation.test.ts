@@ -8,7 +8,10 @@ import {
   DevelopmentSimulationUnavailable,
 } from '@astro-console/protocol'
 import { RunExecutionContext } from '../services/run-domain.ts'
-import { createLocalWebService } from '../app/origin-service.ts'
+import {
+  openOriginTestApplication,
+  originTestDatabase,
+} from './origin-test-graph.ts'
 import { originServerConfig } from '../config/environment-config.ts'
 import { developmentCaptureMetadata } from '../http/development-simulation.ts'
 import { createAlpacaSimulator } from '../simulator/alpaca-simulator.ts'
@@ -101,7 +104,7 @@ test('mismatched simulation provider origin cannot create real executor work', a
     initialScenario: 'exposure-success',
   })
   const simulatorListener = await simulator.listen()
-  const service = createLocalWebService(
+  const service = await openOriginTestApplication(
     ':memory:',
     undefined,
     undefined,
@@ -135,7 +138,7 @@ test('mismatched simulation provider origin cannot create real executor work', a
   const listener = await service.listen()
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
     await simulatorListener.close()
   })
   const base = `http://127.0.0.1:${listener.port}`
@@ -158,7 +161,7 @@ test('mismatched simulation provider origin cannot create real executor work', a
   assert.equal(starts, 0)
   assert.equal(
     Schema.decodeUnknownSync(CountRow)(
-      service.database
+      originTestDatabase(service)
         .prepare(
           "SELECT count(*) AS count FROM run_executor_work WHERE kind='BeginRun'",
         )
@@ -169,11 +172,11 @@ test('mismatched simulation provider origin cannot create real executor work', a
 })
 
 test('development simulation is absent from a normal origin', async (t) => {
-  const service = createLocalWebService()
+  const service = await openOriginTestApplication()
   const listener = await service.listen()
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
 
   assert.equal(
@@ -188,7 +191,7 @@ test('origin projects and controls loopback simulation without exposing its cont
     initialScenario: 'exposure-success',
   })
   const simulatorListener = await simulator.listen()
-  const service = createLocalWebService(
+  const service = await openOriginTestApplication(
     ':memory:',
     undefined,
     undefined,
@@ -204,7 +207,7 @@ test('origin projects and controls loopback simulation without exposing its cont
   const origin = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
     await simulatorListener.close()
   })
 
@@ -300,7 +303,7 @@ test('origin projects and controls loopback simulation without exposing its cont
 test('read-only clients can inspect but cannot control development simulation', async (t) => {
   const simulator = createAlpacaSimulator({ corpusRoot: '/unused' })
   const simulatorListener = await simulator.listen()
-  const service = createLocalWebService(
+  const service = await openOriginTestApplication(
     ':memory:',
     () => ({
       personId: 'owner-chicks',
@@ -321,7 +324,7 @@ test('read-only clients can inspect but cannot control development simulation', 
   const origin = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
     await simulatorListener.close()
   })
 
@@ -358,7 +361,7 @@ test('origin keeps explicit simulation context when the simulator is malformed o
       resolve(address.port)
     })
   })
-  const service = createLocalWebService(
+  const service = await openOriginTestApplication(
     ':memory:',
     undefined,
     undefined,
@@ -374,7 +377,7 @@ test('origin keeps explicit simulation context when the simulator is malformed o
   const origin = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
     if (malformed.listening)
       await new Promise<void>((resolve, reject) =>
         malformed.close((error) =>

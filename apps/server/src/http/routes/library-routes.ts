@@ -27,6 +27,7 @@ import {
   json,
   OriginRequestIdentity,
   requestJson,
+  tracedHttpRoute,
 } from './origin-route-shared.ts'
 import {
   LibraryDownloadOutcome,
@@ -36,6 +37,7 @@ import {
 } from '../../services/library-representation-service.ts'
 import { responseHeaders } from '../response.ts'
 import type { LocalIdentity } from '../../auth/identity.ts'
+import { tracedLibraryOperation } from '../../observability/library-telemetry.ts'
 
 const invalidInput = LibraryRouteFailure.cases.InvalidInput.make({
   message: 'The service could not read that action.',
@@ -147,48 +149,62 @@ export const makeLibraryRoutes = Effect.fn('OriginHttp.makeLibraryRoutes')(
     const page = HttpRouter.add(
       'GET',
       '/api/library',
-      Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest
-        const result = yield* decodeLibraryQuery(request).pipe(
-          Effect.flatMap(library.page),
-          Effect.map((body) => ({ status: 200, body })),
-          Effect.catchTags({
-            'Server.LibraryInputInvalid': () =>
-              Effect.succeed({ status: 400, body: invalidInput }),
-            'Server.LibraryPersistenceUnavailable': () =>
-              Effect.succeed({ status: 503, body: libraryUnavailable }),
-          }),
-        )
-        return json(
-          result.status,
-          Schema.encodeSync(LibraryPageResponse)(result.body),
-        )
-      }),
+      tracedHttpRoute(
+        { method: 'GET', route: '/api/library', workspace: 'library' },
+        Effect.gen(function* () {
+          const request = yield* HttpServerRequest.HttpServerRequest
+          const result = yield* decodeLibraryQuery(request).pipe(
+            Effect.flatMap(library.page),
+            Effect.map((body) => ({ status: 200, body })),
+            Effect.catchTags({
+              'Server.LibraryInputInvalid': () =>
+                Effect.succeed({ status: 400, body: invalidInput }),
+              'Server.LibraryPersistenceUnavailable': () =>
+                Effect.succeed({ status: 503, body: libraryUnavailable }),
+            }),
+          )
+          return json(
+            result.status,
+            Schema.encodeSync(LibraryPageResponse)(result.body),
+          )
+        }),
+        (response, effect) =>
+          tracedLibraryOperation(response, 'catalog.page', effect),
+      ),
     )
 
     const detail = HttpRouter.add(
       'GET',
       '/api/library/assets/:assetId',
-      Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest
-        const result = yield* library
-          .detail(decodedAssetId(requestAssetId(request)))
-          .pipe(
-            Effect.map((body) => ({ status: 200, body })),
-            Effect.catchTags({
-              'Server.LibraryInputInvalid': () =>
-                Effect.succeed({ status: 400, body: invalidInput }),
-              'Server.LibraryAssetNotFound': () =>
-                Effect.succeed({ status: 404, body: assetNotFound }),
-              'Server.LibraryPersistenceUnavailable': () =>
-                Effect.succeed({ status: 503, body: libraryUnavailable }),
-            }),
+      tracedHttpRoute(
+        {
+          method: 'GET',
+          route: '/api/library/assets/:assetId',
+          workspace: 'library',
+        },
+        Effect.gen(function* () {
+          const request = yield* HttpServerRequest.HttpServerRequest
+          const result = yield* library
+            .detail(decodedAssetId(requestAssetId(request)))
+            .pipe(
+              Effect.map((body) => ({ status: 200, body })),
+              Effect.catchTags({
+                'Server.LibraryInputInvalid': () =>
+                  Effect.succeed({ status: 400, body: invalidInput }),
+                'Server.LibraryAssetNotFound': () =>
+                  Effect.succeed({ status: 404, body: assetNotFound }),
+                'Server.LibraryPersistenceUnavailable': () =>
+                  Effect.succeed({ status: 503, body: libraryUnavailable }),
+              }),
+            )
+          return json(
+            result.status,
+            Schema.encodeSync(LibraryDetailResponse)(result.body),
           )
-        return json(
-          result.status,
-          Schema.encodeSync(LibraryDetailResponse)(result.body),
-        )
-      }),
+        }),
+        (response, effect) =>
+          tracedLibraryOperation(response, 'asset.detail', effect),
+      ),
     )
 
     const processSource = HttpRouter.add(
@@ -229,42 +245,52 @@ export const makeLibraryRoutes = Effect.fn('OriginHttp.makeLibraryRoutes')(
     const review = HttpRouter.add(
       'POST',
       '/api/library/assets/:assetId/review',
-      Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest
-        const identity = yield* OriginRequestIdentity
-        const authorization = yield* reviews.authorize(identity)
-        return yield* LibraryReviewAuthorization.match(authorization, {
-          ReadOnly: ({ response }) => Effect.succeed(json(403, response)),
-          Authorized: () =>
-            Effect.gen(function* () {
-              const raw = yield* requestJson(request)
-              const input = yield* Schema.decodeUnknownEffect(
-                ReviewAssetRequest,
-              )(raw).pipe(Effect.option)
-              if (Option.isNone(input))
-                return json(
-                  400,
-                  ReviewAssetResponse.cases.Rejected.make({
-                    failure: ReviewAssetFailure.cases.InvalidInput.make({
-                      message: 'The service could not read that review action.',
+      tracedHttpRoute(
+        {
+          method: 'POST',
+          route: '/api/library/assets/:assetId/review',
+          workspace: 'library',
+        },
+        Effect.gen(function* () {
+          const request = yield* HttpServerRequest.HttpServerRequest
+          const identity = yield* OriginRequestIdentity
+          const authorization = yield* reviews.authorize(identity)
+          return yield* LibraryReviewAuthorization.match(authorization, {
+            ReadOnly: ({ response }) => Effect.succeed(json(403, response)),
+            Authorized: () =>
+              Effect.gen(function* () {
+                const raw = yield* requestJson(request)
+                const input = yield* Schema.decodeUnknownEffect(
+                  ReviewAssetRequest,
+                )(raw).pipe(Effect.option)
+                if (Option.isNone(input))
+                  return json(
+                    400,
+                    ReviewAssetResponse.cases.Rejected.make({
+                      failure: ReviewAssetFailure.cases.InvalidInput.make({
+                        message:
+                          'The service could not read that review action.',
+                      }),
                     }),
-                  }),
+                  )
+                const outcome = yield* reviews.review(
+                  decodedAssetId(requestAssetId(request, '/review')),
+                  input.value,
+                  identity,
                 )
-              const outcome = yield* reviews.review(
-                decodedAssetId(requestAssetId(request, '/review')),
-                input.value,
-                identity,
-              )
-              return LibraryReviewOutcome.match(outcome, {
-                ReadOnly: ({ response }) => json(403, response),
-                Accepted: ({ response }) => json(200, response),
-                NotFound: ({ response }) => json(404, response),
-                Conflict: ({ response }) => json(409, response),
-                Unavailable: ({ response }) => json(503, response),
-              })
-            }),
-        })
-      }),
+                return LibraryReviewOutcome.match(outcome, {
+                  ReadOnly: ({ response }) => json(403, response),
+                  Accepted: ({ response }) => json(200, response),
+                  NotFound: ({ response }) => json(404, response),
+                  Conflict: ({ response }) => json(409, response),
+                  Unavailable: ({ response }) => json(503, response),
+                })
+              }),
+          })
+        }),
+        (response, effect) =>
+          tracedLibraryOperation(response, 'asset.review', effect),
+      ),
     )
 
     const preview = HttpRouter.add(

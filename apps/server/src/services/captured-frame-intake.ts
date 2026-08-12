@@ -9,13 +9,15 @@ import {
 } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
-import { Schema } from 'effect'
+import { Effect, Schema } from 'effect'
 import {
   AssetId,
   NonNegativeInt,
   PositiveNumber,
   RunId,
 } from '@astro-console/protocol'
+import { OriginDatabase } from '../persistence/database.ts'
+import { ProjectionPublication } from './projection-publication.ts'
 
 const CapturedFrameIntake = Schema.Struct({
   assetId: AssetId,
@@ -243,6 +245,18 @@ export function materializeCapturedFrame(
     return { outcome: 'rejected', reason: 'MaterializationFailed' }
   }
 }
+
+export const ingestCapturedFrame = Effect.fn('CapturedFrameIntake.ingest')(
+  function* (storage: CapturedFrameStorage, raw: unknown, bytes: Uint8Array) {
+    const { database } = yield* OriginDatabase
+    const publication = yield* ProjectionPublication
+    const result = yield* Effect.sync(() =>
+      materializeCapturedFrame(database, storage, raw, bytes),
+    )
+    if (result.outcome === 'accepted') yield* publication.publish(result.cursor)
+    return result
+  },
+)
 
 function fileChecksum(path: string) {
   return createHash('sha256').update(readFileSync(path)).digest('hex')

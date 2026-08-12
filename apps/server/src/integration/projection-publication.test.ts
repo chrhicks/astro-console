@@ -1,16 +1,24 @@
 import assert from 'node:assert/strict'
-import { EventEmitter } from 'node:events'
 import test from 'node:test'
-import { Effect, Fiber, Queue } from 'effect'
+import { Effect, Fiber, Queue, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
-import { createLocalWebService } from '../app/origin-service.ts'
-import {
-  projectionHeartbeat,
-  writeProjectionSsePayload,
-} from '../http/projection-sse.ts'
+import { openOriginTestApplication } from './origin-test-graph.ts'
+import { ingestAdapterObservation } from '../services/adapter-observation-service.ts'
 import { makeLatestProjectionQueue } from '../services/projection-publication.ts'
+import { projectionHeartbeatStream } from '../http/effect-origin-http.ts'
 
 const decoder = new TextDecoder()
+
+type OriginTestGraph = Awaited<ReturnType<typeof openOriginTestApplication>>
+const ingestObservation = (service: OriginTestGraph, raw: unknown) =>
+  Effect.runSync(
+    ingestAdapterObservation(raw, {
+      personId: 'owner-chicks',
+      clientId: 'desktop-owner',
+      role: 'owner',
+      capability: 'controlCapable',
+    }).pipe(Effect.provide(service.context)),
+  )
 
 const observation = (frameId: string) => ({
   frameId,
@@ -53,7 +61,7 @@ test('projection streams publish current and ordered typed state to two clients'
   const observations = Effect.runSync(
     Queue.unbounded<'connect' | 'disconnect' | 'publish' | 'writeFailure'>(),
   )
-  const service = createLocalWebService(
+  const service = await openOriginTestApplication(
     ':memory:',
     undefined,
     undefined,
@@ -68,7 +76,7 @@ test('projection streams publish current and ordered typed state to two clients'
   const listener = await service.listen()
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const base = `http://127.0.0.1:${listener.port}`
   const [firstResponse, secondResponse] = await Promise.all([
@@ -86,7 +94,7 @@ test('projection streams publish current and ordered typed state to two clients'
   assert.match(secondInitial, /event: ProjectionChanged/)
   await Effect.runPromise(awaitObservations(observations, 'connect', 2))
 
-  assert.ok(service.ingestObservation(observation('stream-order-1')))
+  assert.ok(ingestObservation(service, observation('stream-order-1')))
   const [firstPublication, secondPublication] = await Promise.all([
     readChunk(first),
     readChunk(second),
@@ -94,7 +102,7 @@ test('projection streams publish current and ordered typed state to two clients'
   assert.match(firstPublication, /event: ProjectionChanged/)
   assert.equal(eventCursor(firstPublication), eventCursor(secondPublication))
 
-  assert.ok(service.ingestObservation(observation('stream-order-2')))
+  assert.ok(ingestObservation(service, observation('stream-order-2')))
   const [firstLater, secondLater] = await Promise.all([
     readChunk(first),
     readChunk(second),
@@ -108,17 +116,19 @@ test('projection streams publish current and ordered typed state to two clients'
   await Effect.runPromise(awaitObservations(observations, 'disconnect', 2))
 })
 
-test('HTTP heartbeat work is simultaneous and stops on interruption', async () => {
+test('Effect heartbeat streams emit together and stop with their scope', async () => {
   const writes = Effect.runSync(Queue.unbounded<string>())
   await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const first = yield* projectionHeartbeat((payload) =>
-          Queue.offer(writes, `first:${payload}`),
-        ).pipe(Effect.forkScoped)
-        const second = yield* projectionHeartbeat((payload) =>
-          Queue.offer(writes, `second:${payload}`),
-        ).pipe(Effect.forkScoped)
+        const observe = (name: string) =>
+          projectionHeartbeatStream.pipe(
+            Stream.runForEach((payload) =>
+              Queue.offer(writes, `${name}:${decoder.decode(payload)}`),
+            ),
+          )
+        const first = yield* observe('first').pipe(Effect.forkScoped)
+        const second = yield* observe('second').pipe(Effect.forkScoped)
 
         yield* TestClock.adjust('15 seconds')
         assert.deepEqual(
@@ -150,49 +160,8 @@ test('slow projection subscribers coalesce pending updates to the latest cursor'
   assert.equal(Effect.runSync(Queue.take(queue)), 3)
 })
 
-test('HTTP writes wait for drain and remove listeners when interrupted', async () => {
-  class BackpressuredResponse extends EventEmitter {
-    readonly payloads: Array<string> = []
-    writable = false
-
-    write(payload: string) {
-      this.payloads.push(payload)
-      return this.writable
-    }
-  }
-
-  const response = new BackpressuredResponse()
-  await Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const drained = yield* writeProjectionSsePayload(
-          response,
-          'first',
-        ).pipe(Effect.forkScoped)
-        yield* Effect.yieldNow
-        assert.equal(response.listenerCount('drain'), 1)
-        response.emit('drain')
-        yield* Fiber.join(drained)
-        assert.deepEqual(response.payloads, ['first'])
-        assert.equal(response.listenerCount('drain'), 0)
-
-        const interrupted = yield* writeProjectionSsePayload(
-          response,
-          'second',
-        ).pipe(Effect.forkScoped)
-        yield* Effect.yieldNow
-        assert.equal(response.listenerCount('drain'), 1)
-        yield* Fiber.interrupt(interrupted)
-        assert.equal(response.listenerCount('drain'), 0)
-        assert.equal(response.listenerCount('error'), 0)
-        assert.equal(response.listenerCount('close'), 0)
-      }),
-    ),
-  )
-})
-
 test('runtime-scope disposal finalizes simultaneous HTTP streams', async (t) => {
-  const service = createLocalWebService(
+  const service = await openOriginTestApplication(
     ':memory:',
     undefined,
     undefined,
@@ -202,7 +171,7 @@ test('runtime-scope disposal finalizes simultaneous HTTP streams', async (t) => 
   const listener = await service.listen()
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const base = `http://127.0.0.1:${listener.port}`
   const [firstResponse, secondResponse] = await Promise.all([
@@ -213,7 +182,7 @@ test('runtime-scope disposal finalizes simultaneous HTTP streams', async (t) => 
   const second = secondResponse.body?.getReader()
   await Promise.all([readChunk(first), readChunk(second)])
 
-  service.close()
+  await service.close()
   const [firstDone, secondDone] = await Promise.all([
     first?.read(),
     second?.read(),

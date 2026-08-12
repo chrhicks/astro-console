@@ -14,7 +14,7 @@ import {
 } from '@astro-console/protocol'
 import { RunExecutionContext } from '../services/run-domain.ts'
 import { Effect, Schema } from 'effect'
-import { createLocalWebService } from '../app/origin-service.ts'
+import { openOriginTestApplication } from './origin-test-graph.ts'
 import { alpacaCameraProvider } from '../providers/alpaca-camera-provider.ts'
 import { alpacaPreflightProvider } from '../providers/alpaca-preflight-provider.ts'
 import {
@@ -161,7 +161,7 @@ test(
       capturedFrameStorage: { originalsRoot },
       frameInspectionStorage: { originalsRoot, previewsRoot },
     }
-    let service = createLocalWebService(
+    let service = await openOriginTestApplication(
       databasePath,
       undefined,
       undefined,
@@ -171,7 +171,7 @@ test(
     let serviceListener = await service.listen()
     t.after(async () => {
       await serviceListener.close().catch(() => undefined)
-      service.close()
+      await service.close()
       await simulatorListener.close()
       await rm(root, { recursive: true, force: true })
     })
@@ -307,8 +307,8 @@ test(
     assert.equal(beforeRestart.evidence.framesServed, 1)
 
     await serviceListener.close()
-    service.close()
-    service = createLocalWebService(
+    await service.close()
+    service = await openOriginTestApplication(
       databasePath,
       undefined,
       undefined,

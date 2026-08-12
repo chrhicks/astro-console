@@ -22,7 +22,12 @@ import {
   ProcessingProjectPersistenceUnavailable,
   ProcessingProjectRejected,
 } from '../../services/processing-project-service.ts'
-import { json, OriginRequestIdentity } from './origin-route-shared.ts'
+import { tracedProcessOperation } from '../../observability/process-telemetry.ts'
+import {
+  json,
+  OriginRequestIdentity,
+  tracedHttpRoute,
+} from './origin-route-shared.ts'
 
 class ProcessingProjectInputInvalid extends Schema.TaggedErrorClass<ProcessingProjectInputInvalid>()(
   'Server.ProcessingProjectInputInvalid',
@@ -205,96 +210,138 @@ export const makeProcessingProjectRoutes = Effect.fn(
   const list = HttpRouter.add(
     'GET',
     '/api/process/projects',
-    Effect.gen(function* () {
-      const identity = yield* OriginRequestIdentity
-      const result = yield* lifecycle.list(identity).pipe(
-        Effect.map((body) => ({ status: 200, body })),
-        Effect.catchTag('Server.ProcessingProjectPersistenceUnavailable', () =>
-          Effect.succeed({ status: 503, body: serviceUnavailable }),
-        ),
-      )
-      return json(
-        result.status,
-        Schema.encodeSync(ProcessingProjectListResponse)(result.body),
-      )
-    }),
+    tracedHttpRoute(
+      { method: 'GET', route: '/api/process/projects', workspace: 'process' },
+      Effect.gen(function* () {
+        const identity = yield* OriginRequestIdentity
+        const result = yield* lifecycle.list(identity).pipe(
+          Effect.map((body) => ({ status: 200, body })),
+          Effect.catchTag(
+            'Server.ProcessingProjectPersistenceUnavailable',
+            () => Effect.succeed({ status: 503, body: serviceUnavailable }),
+          ),
+        )
+        return json(
+          result.status,
+          Schema.encodeSync(ProcessingProjectListResponse)(result.body),
+        )
+      }),
+      (response, effect) =>
+        tracedProcessOperation(response, 'project.read', effect),
+    ),
   )
 
   const create = HttpRouter.add(
     'POST',
     '/api/process/projects',
-    Effect.gen(function* () {
-      const request = yield* HttpServerRequest.HttpServerRequest
-      const identity = yield* OriginRequestIdentity
-      return yield* Effect.gen(function* () {
-        const raw = yield* readJson(request)
-        const input = yield* Schema.decodeUnknownEffect(
-          CreateProcessingProjectRequest,
-        )(raw).pipe(Effect.mapError(() => new ProcessingProjectInputInvalid()))
-        const body = yield* lifecycle.create(identity, input)
-        return json(
-          201,
-          Schema.encodeSync(ProcessingProjectChangedResponse)(body),
-        )
-      }).pipe(Effect.catch(processingFailureResponse))
-    }),
+    tracedHttpRoute(
+      { method: 'POST', route: '/api/process/projects', workspace: 'process' },
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest
+        const identity = yield* OriginRequestIdentity
+        return yield* Effect.gen(function* () {
+          const raw = yield* readJson(request)
+          const input = yield* Schema.decodeUnknownEffect(
+            CreateProcessingProjectRequest,
+          )(raw).pipe(
+            Effect.mapError(() => new ProcessingProjectInputInvalid()),
+          )
+          const body = yield* lifecycle.create(identity, input)
+          return json(
+            201,
+            Schema.encodeSync(ProcessingProjectChangedResponse)(body),
+          )
+        }).pipe(Effect.catch(processingFailureResponse))
+      }),
+      (response, effect) =>
+        tracedProcessOperation(response, 'project.change', effect),
+    ),
   )
 
   const open = HttpRouter.add(
     'GET',
     '/api/process/projects/:projectId',
-    Effect.gen(function* () {
-      const request = yield* HttpServerRequest.HttpServerRequest
-      const identity = yield* OriginRequestIdentity
-      return yield* Effect.gen(function* () {
-        const projectId = yield* decodeProjectId(requestProjectId(request))
-        const body = yield* lifecycle.open(identity, projectId)
-        return json(
-          200,
-          Schema.encodeSync(OpenedProcessingProjectResponse)(body),
-        )
-      }).pipe(Effect.catch(processingFailureResponse))
-    }),
+    tracedHttpRoute(
+      {
+        method: 'GET',
+        route: '/api/process/projects/:projectId',
+        workspace: 'process',
+      },
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest
+        const identity = yield* OriginRequestIdentity
+        return yield* Effect.gen(function* () {
+          const projectId = yield* decodeProjectId(requestProjectId(request))
+          const body = yield* lifecycle.open(identity, projectId)
+          return json(
+            200,
+            Schema.encodeSync(OpenedProcessingProjectResponse)(body),
+          )
+        }).pipe(Effect.catch(processingFailureResponse))
+      }),
+      (response, effect) =>
+        tracedProcessOperation(response, 'project.read', effect),
+    ),
   )
 
   const evidence = HttpRouter.add(
     'GET',
     '/api/process/projects/:projectId/evidence',
-    Effect.gen(function* () {
-      const request = yield* HttpServerRequest.HttpServerRequest
-      const identity = yield* OriginRequestIdentity
-      return yield* Effect.gen(function* () {
-        const query = yield* decodeEvidenceQuery(request)
-        const body = yield* lifecycle.evidence(identity, query)
-        return json(
-          200,
-          Schema.encodeSync(ProcessingProjectEvidenceResponse)(body),
-        )
-      }).pipe(Effect.catch(processingFailureResponse))
-    }),
+    tracedHttpRoute(
+      {
+        method: 'GET',
+        route: '/api/process/projects/:projectId/evidence',
+        workspace: 'process',
+      },
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest
+        const identity = yield* OriginRequestIdentity
+        return yield* Effect.gen(function* () {
+          const query = yield* decodeEvidenceQuery(request)
+          const body = yield* lifecycle.evidence(identity, query)
+          return json(
+            200,
+            Schema.encodeSync(ProcessingProjectEvidenceResponse)(body),
+          )
+        }).pipe(Effect.catch(processingFailureResponse))
+      }),
+      (response, effect) =>
+        tracedProcessOperation(response, 'project.read', effect),
+    ),
   )
 
   const change = HttpRouter.add(
     'PATCH',
     '/api/process/projects/:projectId',
-    Effect.gen(function* () {
-      const request = yield* HttpServerRequest.HttpServerRequest
-      const identity = yield* OriginRequestIdentity
-      return yield* Effect.gen(function* () {
-        const projectId = yield* decodeProjectId(requestProjectId(request))
-        const raw = yield* readJson(request)
-        const input = yield* Schema.decodeUnknownEffect(
-          ProcessingProjectChangeRequest,
-        )(raw).pipe(Effect.mapError(() => new ProcessingProjectInputInvalid()))
-        if (input.projectId !== projectId)
-          return yield* Effect.fail(new ProcessingProjectInputInvalid())
-        const body = yield* lifecycle.change(identity, input)
-        return json(
-          200,
-          Schema.encodeSync(ProcessingProjectChangedResponse)(body),
-        )
-      }).pipe(Effect.catch(processingFailureResponse))
-    }),
+    tracedHttpRoute(
+      {
+        method: 'PATCH',
+        route: '/api/process/projects/:projectId',
+        workspace: 'process',
+      },
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest
+        const identity = yield* OriginRequestIdentity
+        return yield* Effect.gen(function* () {
+          const projectId = yield* decodeProjectId(requestProjectId(request))
+          const raw = yield* readJson(request)
+          const input = yield* Schema.decodeUnknownEffect(
+            ProcessingProjectChangeRequest,
+          )(raw).pipe(
+            Effect.mapError(() => new ProcessingProjectInputInvalid()),
+          )
+          if (input.projectId !== projectId)
+            return yield* Effect.fail(new ProcessingProjectInputInvalid())
+          const body = yield* lifecycle.change(identity, input)
+          return json(
+            200,
+            Schema.encodeSync(ProcessingProjectChangedResponse)(body),
+          )
+        }).pipe(Effect.catch(processingFailureResponse))
+      }),
+      (response, effect) =>
+        tracedProcessOperation(response, 'project.change', effect),
+    ),
   )
 
   return Layer.mergeAll(list, create, open, evidence, change)

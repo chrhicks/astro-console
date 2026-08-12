@@ -12,11 +12,15 @@ import {
 } from '@astro-console/protocol'
 import { AcquireEvidence, AcquireSession } from '../services/acquire-domain.ts'
 import { RunExecutionContext } from '../services/run-domain.ts'
-import { Schema } from 'effect'
-import { createLocalWebService } from '../app/origin-service.ts'
+import { Effect, Schema } from 'effect'
+import {
+  openOriginTestApplication,
+  originTestDatabase,
+} from './origin-test-graph.ts'
 import { alpacaCameraProvider } from '../providers/alpaca-camera-provider.ts'
 import { alpacaPreflightProvider } from '../providers/alpaca-preflight-provider.ts'
 import { createAlpacaSimulator } from '../simulator/alpaca-simulator.ts'
+import { ingestCapturedFrame } from '../services/captured-frame-intake.ts'
 
 const repositoryRoot = fileURLToPath(new URL('../../../../', import.meta.url))
 const corpusRoot = join(repositoryRoot, '.tmp/alpaca-simulation-corpus')
@@ -157,7 +161,7 @@ test(
       '00c1ac20810456955dfb0cdf9f4632372b5a82b422e9328892168ae6c1bb843a',
     )
     const acquireAsset = Schema.decodeUnknownSync(DetailRow)(
-      fixture.service.database
+      originTestDatabase(fixture.service)
         .prepare(
           "SELECT asset_id,detail FROM library_assets WHERE asset_id<>? AND role='original' ORDER BY captured_at LIMIT 1",
         )
@@ -174,7 +178,7 @@ test(
     assert.equal(acquireDetail.provenance?.source, 'alpaca-imagearray')
     assert.deepEqual(
       Schema.decodeUnknownSync(Schema.Array(SolveBindingRow))(
-        fixture.service.database
+        originTestDatabase(fixture.service)
           .prepare('SELECT evidence FROM plate_solve_runs ORDER BY rowid')
           .all(),
       ).map((row) =>
@@ -224,7 +228,7 @@ test(
     if (snapshot.activeRun._tag !== 'Active')
       throw new Error('Run is unavailable.')
     const runId = snapshot.activeRun.run.runId
-    fixture.service.database
+    originTestDatabase(fixture.service)
       .prepare('INSERT INTO acquire_work (attempt_id,state) VALUES (?,?)')
       .run(`${runId}:deepSkyPlateSolve-initial-1:slew`, 'claimed')
     const acquireRevision = snapshot.observe?.acquire?.revision
@@ -290,7 +294,7 @@ test(
       },
     )
     let snapshot = await fixture.start('configured-target')
-    fixture.service.database
+    originTestDatabase(fixture.service)
       .prepare(
         'INSERT OR REPLACE INTO plate_solve_runs (attempt_id,source_asset_id,evidence) VALUES (?,?,?)',
       )
@@ -339,7 +343,7 @@ test(
     })
     assert.equal(solverInputs.length, 2)
     const retained = Schema.decodeUnknownSync(Schema.Array(DetailRow))(
-      fixture.service.database
+      originTestDatabase(fixture.service)
         .prepare(
           "SELECT asset_id,detail FROM library_assets WHERE format='cameraRaw'",
         )
@@ -347,7 +351,7 @@ test(
     )
     assert.equal(retained.length, 2)
     const bindings = Schema.decodeUnknownSync(Schema.Array(SolveBindingRow))(
-      fixture.service.database
+      originTestDatabase(fixture.service)
         .prepare('SELECT evidence FROM plate_solve_runs ORDER BY rowid')
         .all(),
     ).map(({ evidence }) =>
@@ -422,7 +426,7 @@ test(
     if (snapshot.activeRun._tag !== 'Active')
       throw new Error('Run is unavailable.')
     const runId = snapshot.activeRun.run.runId
-    fixture.service.database
+    originTestDatabase(fixture.service)
       .prepare(
         "INSERT INTO configured_acquire_work (effect_id,kind,payload,state) VALUES (?,?,?,'claimed')",
       )
@@ -503,34 +507,37 @@ test(
       .slice(0, 32)
     const assetId = `asset-capture-${digest}`
     assert.equal(
-      fixture.service.ingestCapturedFrame(
-        {
-          assetId,
-          frameId: `frame-${digest}`,
-          capturedAt: '2026-08-09T12:00:00.000Z',
-          format: 'cameraRaw',
-          equipment: {
-            rigId: 'simulated-deep-sky-rig',
-            cameraDeviceId: 'sim-camera-asi2600mc-pro',
+      Effect.runSync(
+        ingestCapturedFrame(
+          { originalsRoot: fixture.originalsRoot },
+          {
+            assetId,
+            frameId: `frame-${digest}`,
+            capturedAt: '2026-08-09T12:00:00.000Z',
+            format: 'cameraRaw',
+            equipment: {
+              rigId: 'simulated-deep-sky-rig',
+              cameraDeviceId: 'sim-camera-asi2600mc-pro',
+            },
+            capture: {
+              exposureSeconds: 5,
+              filter: 'No filter',
+              binning: 1,
+              frameType: 'light',
+            },
+            lineage: {
+              runId,
+              sequenceId: 'sequence-ngc7000-acquire',
+              acquisitionId: attemptId,
+            },
+            idempotencyKey: `configured-acquire:${runId}:${attemptId}`,
           },
-          capture: {
-            exposureSeconds: 5,
-            filter: 'No filter',
-            binning: 1,
-            frameType: 'light',
-          },
-          lineage: {
-            runId,
-            sequenceId: 'sequence-ngc7000-acquire',
-            acquisitionId: attemptId,
-          },
-          idempotencyKey: `configured-acquire:${runId}:${attemptId}`,
-        },
-        image,
+          image,
+        ).pipe(Effect.provide(fixture.service.context)),
       ).outcome,
       'accepted',
     )
-    fixture.service.database
+    originTestDatabase(fixture.service)
       .prepare(
         "INSERT INTO configured_acquire_work (effect_id,kind,payload,state) VALUES (?,?,?,'retrieving')",
       )
@@ -636,7 +643,7 @@ test(
     const storedSession = Schema.decodeUnknownSync(AcquireSession)(
       JSON.parse(
         Schema.decodeUnknownSync(AcquireSessionRow)(
-          fixture.service.database
+          originTestDatabase(fixture.service)
             .prepare('SELECT session FROM acquire_sessions')
             .get(),
         ).session,
@@ -754,7 +761,7 @@ async function deepSkyFixture(
           },
         }),
   }
-  let service = createLocalWebService(
+  let service = await openOriginTestApplication(
     databasePath,
     undefined,
     undefined,
@@ -765,7 +772,7 @@ async function deepSkyFixture(
   let origin = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close().catch(() => undefined)
-    service.close()
+    await service.close()
     await simulatorListener.close()
     await rm(root, { recursive: true, force: true })
   })
@@ -869,8 +876,8 @@ async function deepSkyFixture(
     },
     restart: async () => {
       await listener.close()
-      service.close()
-      service = createLocalWebService(
+      await service.close()
+      service = await openOriginTestApplication(
         databasePath,
         undefined,
         undefined,

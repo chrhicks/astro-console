@@ -14,7 +14,10 @@ import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
 import { ConfigProvider, Effect, Schema } from 'effect'
-import { createLocalWebService } from '../app/origin-service.ts'
+import {
+  openOriginTestApplication,
+  originTestDatabase,
+} from './origin-test-graph.ts'
 import type { AdmissionRequest } from '../auth/identity.ts'
 import { openAppOwnedDatabase } from '../persistence/database.ts'
 import { createPublisherWorker } from '../workers/publisher-worker.ts'
@@ -35,13 +38,13 @@ import {
   publisherEnvironmentConfig,
 } from '../config/environment-config.ts'
 
-function createFixtureService(
-  databasePath?: Parameters<typeof createLocalWebService>[0],
-  identityResolver?: Parameters<typeof createLocalWebService>[1],
-  unused?: Parameters<typeof createLocalWebService>[2],
-  downloadGrants?: Parameters<typeof createLocalWebService>[3],
+async function createFixtureService(
+  databasePath?: Parameters<typeof openOriginTestApplication>[0],
+  identityResolver?: Parameters<typeof openOriginTestApplication>[1],
+  unused?: Parameters<typeof openOriginTestApplication>[2],
+  downloadGrants?: Parameters<typeof openOriginTestApplication>[3],
 ) {
-  return createLocalWebService(
+  return await openOriginTestApplication(
     databasePath,
     identityResolver,
     unused,
@@ -306,7 +309,7 @@ test('focused executable configurations decode defaults and conditional branches
   )
 })
 
-function publisherFixture(idempotencyKey: string) {
+async function publisherFixture(idempotencyKey: string) {
   const root = mkdtempSync(join(tmpdir(), 'astro-publisher-'))
   const outputs = join(root, 'outputs')
   mkdirSync(outputs)
@@ -315,7 +318,7 @@ function publisherFixture(idempotencyKey: string) {
   const bytes = 'publication-bytes'
   const checksum = createHash('sha256').update(bytes).digest('hex')
   writeFileSync(join(outputs, `${assetId}.tiff`), bytes)
-  const service = createFixtureService(join(root, 'state.sqlite'))
+  const service = await createFixtureService(join(root, 'state.sqlite'))
   const now = new Date().toISOString()
   const detail = JSON.stringify({
     assetId,
@@ -328,7 +331,7 @@ function publisherFixture(idempotencyKey: string) {
     lineage: { sourceAssetIds: [], runId: 'run-m27-001' },
     representations: [{ label: 'Publisher fixture', state: 'available' }],
   })
-  service.database
+  originTestDatabase(service)
     .prepare('INSERT INTO library_assets VALUES (?,?,?,?,?,?,?,?,?,?)')
     .run(
       assetId,
@@ -342,12 +345,12 @@ function publisherFixture(idempotencyKey: string) {
       0,
       detail,
     )
-  service.database
+  originTestDatabase(service)
     .prepare(
       "INSERT INTO outbox(id,kind,payload,state,attempts) VALUES(?, 'PublishAsset', ?, 'pending', 0)",
     )
     .run(`publish-${assetId}`, JSON.stringify({ assetId, checksum }))
-  service.database
+  originTestDatabase(service)
     .prepare(
       'INSERT INTO process_asset_events(asset_id,event_type,checksum) VALUES(?,?,?)',
     )
@@ -620,7 +623,7 @@ test('authorized Library downloads issue an Asset-ID grant and redirect without 
             capability: 'controlCapable' as const,
           }
         : undefined
-  const service = createFixtureService(':memory:', admission, undefined, {
+  const service = await createFixtureService(':memory:', admission, undefined, {
     now: () => now,
     issuer: {
       issue: async (grant) => {
@@ -631,12 +634,12 @@ test('authorized Library downloads issue an Asset-ID grant and redirect without 
     },
   })
   const assetId = 'asset-m27-001'
-  service.database
+  originTestDatabase(service)
     .prepare(
       "UPDATE library_assets SET availability='published' WHERE asset_id=?",
     )
     .run(assetId)
-  service.database
+  originTestDatabase(service)
     .prepare(
       'INSERT INTO asset_publications (asset_id,checksum,state,updated_at,object_key) VALUES (?,?,?,?,?)',
     )
@@ -651,7 +654,7 @@ test('authorized Library downloads issue an Asset-ID grant and redirect without 
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
     await listener.close()
-    service.close()
+    await service.close()
   })
   const request = (authorization = 'Bearer viewer') =>
     fetch(`${base}/api/library/assets/${assetId}/download`, {
@@ -695,12 +698,12 @@ test('authorized Library downloads issue an Asset-ID grant and redirect without 
   now = new Date('2026-07-28T12:05:01.000Z')
   assert.equal((await request()).status, 303)
   assert.equal((await request('Bearer owner')).status, 303)
-  service.database
+  originTestDatabase(service)
     .prepare(
       "UPDATE library_assets SET availability='published' WHERE asset_id='asset-m27-002'",
     )
     .run()
-  service.database
+  originTestDatabase(service)
     .prepare(
       'INSERT INTO asset_publications (asset_id,checksum,state,updated_at,object_key) VALUES (?,?,?,?,?)',
     )
@@ -720,7 +723,7 @@ test('authorized Library downloads issue an Asset-ID grant and redirect without 
     ).status,
     303,
   )
-  service.database
+  originTestDatabase(service)
     .prepare(
       "UPDATE asset_publications SET state='temporarilyUnavailable' WHERE asset_id=?",
     )
@@ -744,12 +747,12 @@ test('authorized Library downloads issue an Asset-ID grant and redirect without 
     ).status,
     400,
   )
-  service.database
+  originTestDatabase(service)
     .prepare("UPDATE asset_publications SET state='published' WHERE asset_id=?")
     .run(assetId)
   issuerUnavailable = true
   assert.equal((await request()).status, 503)
-  const credentialFree = createFixtureService()
+  const credentialFree = await createFixtureService()
   const credentialFreeListener = await credentialFree.listen()
   assert.equal(
     (
@@ -761,7 +764,7 @@ test('authorized Library downloads issue an Asset-ID grant and redirect without 
     503,
   )
   await credentialFreeListener.close()
-  credentialFree.close()
+  await credentialFree.close()
 })
 
 test('download signer keeps mount configuration bounded and rejects unauthenticated or invalid internal requests', async (t) => {
@@ -879,14 +882,15 @@ test('SQLite resilience creates a checked snapshot and disposable restore drill 
 })
 
 test('publisher worker verifies fake provider metadata, retries idempotently, and keeps Library detail safe', async () => {
-  const { root, outputs, service, assetId } = publisherFixture('publisher-save')
+  const { root, outputs, service, assetId } =
+    await publisherFixture('publisher-save')
   const checksum = databaseRow(
     EventRow,
-    service.database
+    originTestDatabase(service)
       .prepare('SELECT checksum FROM process_asset_events WHERE asset_id=?')
       .get(assetId),
   ).checksum
-  service.database
+  originTestDatabase(service)
     .prepare(
       'INSERT INTO asset_publications (asset_id,checksum,state,updated_at,object_key) VALUES (?,?,?,?,?)',
     )
@@ -908,7 +912,7 @@ test('publisher worker verifies fake provider metadata, retries idempotently, an
   const sqliteOperations: Array<string> = []
   const publisherBacklogs: Array<number> = []
   const worker = createPublisherWorker(
-    service.database,
+    originTestDatabase(service),
     { outputsRoot: outputs },
     {
       put: async (key, file, metadata) => {
@@ -950,7 +954,7 @@ test('publisher worker verifies fake provider metadata, retries idempotently, an
   assert.equal(
     databaseRow(
       AssetAvailabilityRow,
-      service.database
+      originTestDatabase(service)
         .prepare('SELECT availability FROM library_assets WHERE asset_id=?')
         .get(assetId),
     ).availability,
@@ -982,7 +986,7 @@ test('publisher worker verifies fake provider metadata, retries idempotently, an
   assert.equal(
     databaseRow(
       PublicationRow,
-      service.database
+      originTestDatabase(service)
         .prepare('SELECT object_key FROM asset_publications WHERE asset_id=?')
         .get(assetId),
     ).object_key,
@@ -994,7 +998,7 @@ test('publisher worker verifies fake provider metadata, retries idempotently, an
   )
   const detail = databaseRow(
     AssetDetailRow,
-    service.database
+    originTestDatabase(service)
       .prepare('SELECT detail FROM library_assets WHERE asset_id=?')
       .get(assetId),
   ).detail
@@ -1004,14 +1008,14 @@ test('publisher worker verifies fake provider metadata, retries idempotently, an
     new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
   )
   assert.doesNotMatch(detail, /published\/run|checksum|credential|key/i)
-  service.close()
+  await service.close()
 })
 
 test('publisher worker fails closed on conflicting durable publication checksum', async () => {
-  const { outputs, service, assetId } = publisherFixture(
+  const { outputs, service, assetId } = await publisherFixture(
     'publisher-conflict-save',
   )
-  service.database
+  originTestDatabase(service)
     .prepare(
       'INSERT INTO asset_publications (asset_id,checksum,state,updated_at,object_key) VALUES (?,?,?,?,?)',
     )
@@ -1024,7 +1028,7 @@ test('publisher worker fails closed on conflicting durable publication checksum'
     )
   let puts = 0
   const worker = createPublisherWorker(
-    service.database,
+    originTestDatabase(service),
     { outputsRoot: outputs },
     {
       put: async () => {
@@ -1038,7 +1042,7 @@ test('publisher worker fails closed on conflicting durable publication checksum'
   assert.equal(
     databaseRow(
       StatusRow,
-      service.database
+      originTestDatabase(service)
         .prepare('SELECT state FROM asset_publications WHERE asset_id=?')
         .get(assetId),
     ).state,
@@ -1047,23 +1051,23 @@ test('publisher worker fails closed on conflicting durable publication checksum'
   assert.equal(
     databaseRow(
       StatusRow,
-      service.database
+      originTestDatabase(service)
         .prepare("SELECT state FROM outbox WHERE kind='PublishAsset'")
         .get(),
     ).state,
     'failed',
   )
-  service.close()
+  await service.close()
 })
 
 test('publisher worker durably settles malformed work, asset identities, and unreadable files', async () => {
-  const malformed = publisherFixture('publisher-malformed-save')
-  malformed.service.database
+  const malformed = await publisherFixture('publisher-malformed-save')
+  originTestDatabase(malformed.service)
     .prepare("UPDATE outbox SET payload='not-json' WHERE kind='PublishAsset'")
     .run()
   let puts = 0
   const malformedWorker = createPublisherWorker(
-    malformed.service.database,
+    originTestDatabase(malformed.service),
     { outputsRoot: malformed.outputs },
     {
       put: async () => {
@@ -1077,17 +1081,19 @@ test('publisher worker durably settles malformed work, asset identities, and unr
   assert.equal(
     databaseRow(
       StatusRow,
-      malformed.service.database
+      originTestDatabase(malformed.service)
         .prepare("SELECT state FROM outbox WHERE kind='PublishAsset'")
         .get(),
     ).state,
     'failed',
   )
-  malformed.service.close()
+  await malformed.service.close()
 
-  const malformedAsset = publisherFixture('publisher-malformed-asset-save')
+  const malformedAsset = await publisherFixture(
+    'publisher-malformed-asset-save',
+  )
   const malformedAssetId = 'not-an-asset'
-  malformedAsset.service.database
+  originTestDatabase(malformedAsset.service)
     .prepare(
       'UPDATE library_assets SET asset_id=?,detail=replace(detail,?,?) WHERE asset_id=?',
     )
@@ -1097,11 +1103,11 @@ test('publisher worker durably settles malformed work, asset identities, and unr
       malformedAssetId,
       malformedAsset.assetId,
     )
-  malformedAsset.service.database
+  originTestDatabase(malformedAsset.service)
     .prepare("UPDATE outbox SET payload=? WHERE kind='PublishAsset'")
     .run(JSON.stringify({ assetId: malformedAssetId, checksum: 'ignored' }))
   const malformedAssetWorker = createPublisherWorker(
-    malformedAsset.service.database,
+    originTestDatabase(malformedAsset.service),
     { outputsRoot: malformedAsset.outputs },
     {
       put: async () => {
@@ -1115,18 +1121,18 @@ test('publisher worker durably settles malformed work, asset identities, and unr
   assert.equal(
     databaseRow(
       StatusRow,
-      malformedAsset.service.database
+      originTestDatabase(malformedAsset.service)
         .prepare("SELECT state FROM outbox WHERE kind='PublishAsset'")
         .get(),
     ).state,
     'failed',
   )
-  malformedAsset.service.close()
+  await malformedAsset.service.close()
 
-  const unreadable = publisherFixture('publisher-unreadable-save')
+  const unreadable = await publisherFixture('publisher-unreadable-save')
   unlinkSync(join(unreadable.outputs, `${unreadable.assetId}.tiff`))
   const unreadableWorker = createPublisherWorker(
-    unreadable.service.database,
+    originTestDatabase(unreadable.service),
     { outputsRoot: unreadable.outputs },
     {
       put: async () => {
@@ -1140,28 +1146,30 @@ test('publisher worker durably settles malformed work, asset identities, and unr
   assert.equal(
     databaseRow(
       StatusRow,
-      unreadable.service.database
+      originTestDatabase(unreadable.service)
         .prepare("SELECT state FROM outbox WHERE kind='PublishAsset'")
         .get(),
     ).state,
     'failed',
   )
-  unreadable.service.close()
+  await unreadable.service.close()
 })
 
 test('publisher worker lease expiry and stale acknowledgements cannot project stale provider work', async () => {
-  const { outputs, service, assetId } = publisherFixture('publisher-lease-save')
+  const { outputs, service, assetId } = await publisherFixture(
+    'publisher-lease-save',
+  )
   const keys: string[] = []
   let stale = true
   const worker = createPublisherWorker(
-    service.database,
+    originTestDatabase(service),
     { outputsRoot: outputs },
     {
       put: async (key) => {
         keys.push(key)
         if (stale) {
           stale = false
-          service.database
+          originTestDatabase(service)
             .prepare(
               "UPDATE outbox SET claim_token='newer-worker',claim_until=? WHERE kind='PublishAsset'",
             )
@@ -1180,7 +1188,7 @@ test('publisher worker lease expiry and stale acknowledgements cannot project st
   assert.equal(await worker.pass('replacement'), 'published')
   const row = databaseRow(
     OutboxAttemptRow,
-    service.database
+    originTestDatabase(service)
       .prepare("SELECT state,attempts FROM outbox WHERE kind='PublishAsset'")
       .get(),
   )
@@ -1191,20 +1199,22 @@ test('publisher worker lease expiry and stale acknowledgements cannot project st
   assert.equal(
     databaseRow(
       AssetAvailabilityRow,
-      service.database
+      originTestDatabase(service)
         .prepare('SELECT availability FROM library_assets WHERE asset_id=?')
         .get(assetId),
     ).availability,
     'published',
   )
-  service.close()
+  await service.close()
 })
 
 test('publisher worker preserves a publication persistence failure and recovers the committed claim', async () => {
-  const { outputs, service } = publisherFixture('publisher-persistence-save')
+  const { outputs, service } = await publisherFixture(
+    'publisher-persistence-save',
+  )
   let puts = 0
   const worker = createPublisherWorker(
-    service.database,
+    originTestDatabase(service),
     { outputsRoot: outputs },
     {
       put: async () => {
@@ -1218,7 +1228,7 @@ test('publisher worker preserves a publication persistence failure and recovers 
       }),
     },
   )
-  service.database.exec(`
+  originTestDatabase(service).exec(`
     CREATE TRIGGER reject_publication
     BEFORE INSERT ON asset_publications
     BEGIN
@@ -1230,7 +1240,7 @@ test('publisher worker preserves a publication persistence failure and recovers 
   assert.equal(
     databaseRow(
       ClaimedOutboxRow,
-      service.database
+      originTestDatabase(service)
         .prepare(
           "SELECT state,claim_token,claimed_by,claim_until FROM outbox WHERE kind='PublishAsset'",
         )
@@ -1238,11 +1248,11 @@ test('publisher worker preserves a publication persistence failure and recovers 
     ).state,
     'claimed',
   )
-  service.database.exec('DROP TRIGGER reject_publication')
-  service.database
+  originTestDatabase(service).exec('DROP TRIGGER reject_publication')
+  originTestDatabase(service)
     .prepare("UPDATE outbox SET claim_until='2000-01-01T00:00:00.000Z'")
     .run()
   assert.equal(await worker.pass(), 'published')
   assert.equal(puts, 1)
-  service.close()
+  await service.close()
 })
