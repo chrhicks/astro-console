@@ -36,19 +36,20 @@ export const tracedHttpRoute = <E, R>(
     response: HttpTraceResponse,
     effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
   ) => Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
-) => {
-  const response: HttpTraceResponse = { statusCode: 500, headersSent: false }
-  const captured = effect.pipe(
-    Effect.tap((value) =>
-      Effect.sync(() => {
-        response.statusCode = value.status
-        response.headersSent = true
-      }),
-    ),
-  )
-  return tracedHttpRequest(
-    response,
-    input,
-    business === undefined ? captured : business(response, captured),
-  )
-}
+) =>
+  Effect.suspend(() => {
+    const response: HttpTraceResponse = { statusCode: 500, headersSent: false }
+    const captured = effect.pipe(
+      Effect.tap((value) =>
+        Effect.sync(() => {
+          response.statusCode = value.status
+          response.headersSent = true
+        }),
+      ),
+    )
+    return tracedHttpRequest(
+      response,
+      input,
+      business === undefined ? captured : business(response, captured),
+    )
+  })

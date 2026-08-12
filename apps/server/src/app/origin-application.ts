@@ -2,14 +2,19 @@ import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { NodeFileSystem, NodePath } from '@effect/platform-node'
-import { Context, Effect, Layer, Schedule, Schema, Stream } from 'effect'
-import type { OriginServerConfig } from '../config/environment-config.ts'
-import type { PreflightProviderConfig } from '../config/environment-config.ts'
-import { reject } from '../http/origin-handlers.ts'
 import {
-  makeOriginHttpApplication,
-  type OriginHttpApplication,
-} from '../http/effect-origin-http.ts'
+  Context,
+  Effect,
+  Layer,
+  Match,
+  Queue,
+  Schedule,
+  Schema,
+  Stream,
+} from 'effect'
+import type { OriginServerConfig } from '../config/environment-config.ts'
+import { reject } from '../http/origin-handlers.ts'
+import { makeOriginHttpApplication } from '../http/effect-origin-http.ts'
 import {
   openOriginDatabase,
   OriginDatabase,
@@ -28,6 +33,9 @@ import { installPublishedLibraryFixture } from '../persistence/library-sqlite-re
 import {
   AcquireCommandService,
   CameraExposureMaterialization,
+  CameraProviderSelection,
+  PolarMeasurementProviderSelection,
+  TargetAcquisitionProviderSelection,
   absentCameraProviderSelectionLayer,
   absentPolarMeasurementProviderSelectionLayer,
   absentTargetAcquisitionProviderSelectionLayer,
@@ -41,20 +49,13 @@ import {
 } from '../services/acquire-command-service.ts'
 import type { CameraProviderShape } from '../services/camera-command-service.ts'
 import { materializeCapturedFrame } from '../services/captured-frame-intake.ts'
-import type { PolarMeasurementProviderShape } from '../services/polar-service.ts'
-import type { TargetAcquisitionProviderShape } from '../services/target-acquisition-service.ts'
 import { configuredTargetAcquisitionProvider } from '../services/configured-target-acquisition-provider.ts'
 import { developmentTargetAcquisitionProvider } from '../services/development-target-acquisition-provider.ts'
-import type { CapturedFrameStorage } from '../services/captured-frame-intake.ts'
-import type { FrameInspectionStorage } from '../services/frame-inspection.ts'
-import type { PlateSolveWorkerConfig } from '../workers/plate-solve-worker.ts'
-import type { RunExecutionContext } from '../services/run-domain.ts'
 import { acquireSqliteRepository } from '../persistence/acquire-sqlite-repository.ts'
 import { createRunExecutorWorker } from '../workers/run-executor-worker.ts'
 import {
-  absentLibraryDownloadGrantLayer,
-  configuredLibraryDownloadGrantLayer,
-  configuredLibraryRepresentationStorageLayer,
+  LibraryDownloadGrantSelection,
+  LibraryRepresentationStorageSelection,
   LibraryRepresentationService,
   libraryRepresentationServiceLayer,
 } from '../services/library-representation-service.ts'
@@ -67,9 +68,9 @@ import {
   absentReadOnlyPreflightProviderSelectionLayer,
   configuredReadOnlyPreflightProviderSelectionLayer,
   PreflightCommandService,
+  ReadOnlyPreflightProviderSelection,
   preflightCommandServiceLayer,
 } from '../services/preflight-command-service.ts'
-import type { ReadOnlyPreflightProviderShape } from '../services/preflight-service.ts'
 import {
   ProcessingProjectLifecycle,
   ProcessingProjectWork,
@@ -93,35 +94,49 @@ import {
   bootstrapPlanWorkspaceProjection,
   observeWorkspaceProjection,
 } from '../services/workspace-projection-service.ts'
-import type { DownloadGrantIssuer } from '../storage/r2-download-grant.ts'
 import {
   createProcessWorkWorker,
   processWorkResultChangesProjection,
 } from '../workers/process-work-worker.ts'
+import {
+  OriginApplicationTelemetry,
+  OriginCapturedFrameStorage,
+  OriginConfiguredTargetProvider,
+  OriginFrameInspectionStorage,
+  OriginPlateSolveWorker,
+  OriginProcessWorkBehavior,
+  OriginProjectionObservation,
+  OriginRunExecution,
+  type OptionalSelection,
+} from './origin-application-services.ts'
+import { tracedExecutorWork } from '../observability/executor-telemetry.ts'
+import {
+  tracedFrameInspection,
+  tracedFrameIntake,
+} from '../observability/pipeline-telemetry.ts'
+import {
+  recordSqliteBacklog,
+  tracedSqliteOperation,
+} from '../observability/sqlite-telemetry.ts'
+import {
+  recordProcessBacklog,
+  recordProcessPressureMetric,
+  tracedProcessWorker,
+} from '../observability/process-telemetry.ts'
 
 const LibraryDetailRow = Schema.Struct({ detail: Schema.String })
 const LibraryDetailJson = Schema.Record(Schema.String, Schema.Unknown)
 
-export type OriginApplicationDependencies = {
-  readonly preflightProvider?: ReadOnlyPreflightProviderShape
-  readonly cameraProvider?: CameraProviderShape
-  readonly polarMeasurementProvider?: PolarMeasurementProviderShape
-  readonly targetAcquisitionProvider?: TargetAcquisitionProviderShape
-  readonly configuredTargetProvider?: PreflightProviderConfig
-  readonly capturedFrameStorage?: CapturedFrameStorage
-  readonly frameInspectionStorage?: FrameInspectionStorage
-  readonly plateSolveWorker?: PlateSolveWorkerConfig
-  readonly runExecutionContext?: typeof RunExecutionContext.Type
-  readonly runExecutorProviderOrigin?: string
-  readonly downloadGrantIssuer?: DownloadGrantIssuer
-  readonly downloadGrantNow?: () => Date
-  readonly observeProjectionPublication?: (
-    event: 'connect' | 'disconnect' | 'publish' | 'writeFailure',
-  ) => void
-  readonly processWorkRoot?: string
-  readonly processWorkAutoRun?: boolean
-  readonly processFailBuildStage?: 'align'
-}
+const configuredValue = <A>(selection: OptionalSelection<A>) =>
+  Match.value(selection).pipe(
+    Match.tag('Configured', ({ value }) => value),
+    Match.orElse(() => undefined),
+  )
+
+export const consumeProjectionInvalidations = (
+  invalidations: Queue.Queue<number>,
+  publish: (cursor: number) => Effect.Effect<void>,
+) => Queue.take(invalidations).pipe(Effect.flatMap(publish), Effect.forever)
 
 const configuredCameraExposureMaterializationLayer = (
   provider: CameraProviderShape,
@@ -208,11 +223,48 @@ const configuredCameraExposureMaterializationLayer = (
     }),
   )
 
-export const makeProductionOriginGraph = (
-  config: OriginServerConfig,
-  dependencies: OriginApplicationDependencies,
-) =>
+export const makeProductionOriginGraph = (config: OriginServerConfig) =>
   Effect.gen(function* () {
+    const cameraSelection = yield* CameraProviderSelection
+    const polarSelection = yield* PolarMeasurementProviderSelection
+    const targetSelection = yield* TargetAcquisitionProviderSelection
+    const preflightSelection = yield* ReadOnlyPreflightProviderSelection
+    const capturedFrameStorageSelection = yield* OriginCapturedFrameStorage
+    const frameInspectionStorageSelection = yield* OriginFrameInspectionStorage
+    const plateSolveWorkerSelection = yield* OriginPlateSolveWorker
+    const configuredTargetSelection = yield* OriginConfiguredTargetProvider
+    const runExecution = yield* OriginRunExecution
+    const representationStorage = yield* LibraryRepresentationStorageSelection
+    const downloadGrant = yield* LibraryDownloadGrantSelection
+    const observeProjection = yield* OriginProjectionObservation
+    const processWorkBehavior = yield* OriginProcessWorkBehavior
+    const telemetry = yield* OriginApplicationTelemetry
+    const cameraProvider = Match.value(cameraSelection).pipe(
+      Match.tag('Configured', ({ provider }) => provider),
+      Match.orElse(() => undefined),
+    )
+    const polarProvider = Match.value(polarSelection).pipe(
+      Match.tag('Configured', ({ provider }) => provider),
+      Match.orElse(() => undefined),
+    )
+    const targetProvider = Match.value(targetSelection).pipe(
+      Match.tag('Configured', ({ provider }) => provider),
+      Match.orElse(() => undefined),
+    )
+    const preflightProvider = Match.value(preflightSelection).pipe(
+      Match.tag('Configured', ({ provider }) => provider),
+      Match.orElse(() => undefined),
+    )
+    const capturedFrameStorage = configuredValue(capturedFrameStorageSelection)
+    const frameInspectionStorage = configuredValue(
+      frameInspectionStorageSelection,
+    )
+    const configuredTargetProvider = configuredValue(configuredTargetSelection)
+    const plateSolveWorker = configuredValue(plateSolveWorkerSelection)
+    const configuredRunExecution = Match.value(runExecution).pipe(
+      Match.tag('Configured', (configured) => configured),
+      Match.orElse(() => undefined),
+    )
     const database = openOriginDatabase(config.runtime.databasePath)
     yield* Effect.addFinalizer(() => Effect.sync(() => database.close()))
 
@@ -257,16 +309,16 @@ export const makeProductionOriginGraph = (
           database,
           repository,
           reject,
-          dependencies.runExecutionContext === undefined ||
+          configuredRunExecution === undefined ||
             (config.simulation !== undefined &&
-              dependencies.runExecutorProviderOrigin !==
+              configuredRunExecution.providerOrigin !==
                 config.simulation.origin)
-            ? dependencies.cameraProvider === undefined
+            ? cameraProvider === undefined
               ? { executor: 'fake' }
               : { executor: 'unavailable' }
             : {
                 executor: 'real',
-                executionContext: dependencies.runExecutionContext,
+                executionContext: configuredRunExecution.context,
               },
         ),
       ),
@@ -280,44 +332,63 @@ export const makeProductionOriginGraph = (
           eventFor: repository.projectionEvent,
           controllerConnected: repository.controllerConnected,
           controllerDisconnected: repository.controllerDisconnected,
-          ...(dependencies.observeProjectionPublication === undefined
-            ? {}
-            : {
-                observe: (event) =>
-                  dependencies.observeProjectionPublication?.(event),
-              }),
+          observe: observeProjection,
         }),
       ),
       ProjectionPublication,
     )
+    const projectionInvalidations = yield* Queue.unbounded<number>()
+    const invalidateProjection = (cursor: number) => {
+      Queue.offerUnsafe(projectionInvalidations, cursor)
+    }
+    yield* consumeProjectionInvalidations(
+      projectionInvalidations,
+      publication.publish,
+    ).pipe(Effect.forkScoped)
     const runExecutor =
-      dependencies.cameraProvider === undefined ||
-      dependencies.runExecutionContext === undefined ||
+      cameraProvider === undefined ||
+      configuredRunExecution === undefined ||
       (config.simulation !== undefined &&
-        dependencies.runExecutorProviderOrigin !== config.simulation.origin)
+        configuredRunExecution.providerOrigin !== config.simulation.origin)
         ? undefined
         : createRunExecutorWorker({
             database,
             stateRepository: repository,
-            cameraProvider: dependencies.cameraProvider,
+            cameraProvider,
             acquireRepository: acquireSqliteRepository(database),
             developmentDeepSkyHold:
-              dependencies.configuredTargetProvider !== undefined ||
+              configuredTargetProvider !== undefined ||
               config.simulation?.launchScenario ===
                 'target-evidence-progression' ||
               config.simulation?.launchScenario === 'solve-success-no-solution',
-            ...(dependencies.capturedFrameStorage === undefined
+            ...(capturedFrameStorage === undefined
               ? {}
               : {
-                  capturedFrameStorage: dependencies.capturedFrameStorage,
+                  capturedFrameStorage,
                 }),
-            ...(dependencies.frameInspectionStorage === undefined
+            ...(frameInspectionStorage === undefined
               ? {}
               : {
-                  frameInspectionStorage: dependencies.frameInspectionStorage,
+                  frameInspectionStorage,
                 }),
-            publish: (_type, cursor) =>
-              Effect.runSync(publication.publish(cursor)),
+            publish: (_type, cursor) => invalidateProjection(cursor),
+            traceWork: (kind, run) =>
+              telemetry.runPromise(tracedExecutorWork(kind, run)),
+            traceFrameIntake: (run) =>
+              telemetry.runSync(tracedFrameIntake(Effect.sync(run))),
+            traceFrameInspection: (effect) =>
+              telemetry.runPromise(
+                tracedFrameInspection(effect).pipe(Effect.exit),
+              ),
+            traceSqlite: (operation, run) =>
+              telemetry.runSync(
+                tracedSqliteOperation(
+                  operation,
+                  Effect.try({ try: run, catch: (cause) => cause }),
+                ),
+              ),
+            observeSqliteBacklog: (backlog, count) =>
+              telemetry.runSync(recordSqliteBacklog(backlog, count)),
           })
     if (runExecutor !== undefined)
       yield* Effect.forkScoped(
@@ -338,53 +409,50 @@ export const makeProductionOriginGraph = (
       Layer.succeed(ProjectionPublication, publication),
     )
     const selectedTargetProvider =
-      dependencies.targetAcquisitionProvider ??
-      (dependencies.configuredTargetProvider !== undefined &&
-      dependencies.capturedFrameStorage !== undefined &&
-      dependencies.cameraProvider !== undefined &&
-      dependencies.plateSolveWorker !== undefined
+      targetProvider ??
+      (configuredTargetProvider !== undefined &&
+      capturedFrameStorage !== undefined &&
+      cameraProvider !== undefined &&
+      plateSolveWorker !== undefined
         ? configuredTargetAcquisitionProvider({
             database,
-            alpaca: dependencies.configuredTargetProvider,
-            cameraProvider: dependencies.cameraProvider,
-            capturedFrameStorage: dependencies.capturedFrameStorage,
-            plateSolveWorker: dependencies.plateSolveWorker,
-            ...(dependencies.frameInspectionStorage === undefined
+            alpaca: configuredTargetProvider,
+            cameraProvider,
+            capturedFrameStorage,
+            plateSolveWorker,
+            ...(frameInspectionStorage === undefined
               ? {}
               : {
-                  frameInspectionStorage: dependencies.frameInspectionStorage,
+                  frameInspectionStorage,
                 }),
-            publish: (_type, cursor) =>
-              Effect.runSync(publication.publish(cursor)),
+            publish: (_type, cursor) => invalidateProjection(cursor),
           })
         : undefined) ??
       (config.simulation !== undefined &&
-      dependencies.capturedFrameStorage !== undefined &&
-      dependencies.cameraProvider !== undefined &&
+      capturedFrameStorage !== undefined &&
+      cameraProvider !== undefined &&
       (config.simulation.launchScenario === 'target-evidence-progression' ||
         config.simulation.launchScenario === 'solve-success-no-solution')
         ? developmentTargetAcquisitionProvider({
             database,
             simulation: config.simulation,
-            capturedFrameStorage: dependencies.capturedFrameStorage,
-            cameraProvider: dependencies.cameraProvider,
-            ...(dependencies.frameInspectionStorage === undefined
+            capturedFrameStorage,
+            cameraProvider,
+            ...(frameInspectionStorage === undefined
               ? {}
               : {
-                  frameInspectionStorage: dependencies.frameInspectionStorage,
+                  frameInspectionStorage,
                 }),
-            publish: (_type, cursor) =>
-              Effect.runSync(publication.publish(cursor)),
+            publish: (_type, cursor) => invalidateProjection(cursor),
           })
         : undefined) ??
       fixtureTargetAcquisitionProvider(config.fixture)
     const polarMeasurementProvider =
-      dependencies.polarMeasurementProvider ??
-      fixturePolarMeasurementProvider(config.fixture)
+      polarProvider ?? fixturePolarMeasurementProvider(config.fixture)
     const acquireSelections = Layer.mergeAll(
-      dependencies.cameraProvider === undefined
+      cameraProvider === undefined
         ? absentCameraProviderSelectionLayer
-        : configuredCameraProviderSelectionLayer(dependencies.cameraProvider),
+        : configuredCameraProviderSelectionLayer(cameraProvider),
       polarMeasurementProvider === undefined
         ? absentPolarMeasurementProviderSelectionLayer
         : configuredPolarMeasurementProviderSelectionLayer(
@@ -395,20 +463,18 @@ export const makeProductionOriginGraph = (
         : configuredTargetAcquisitionProviderSelectionLayer(
             selectedTargetProvider,
           ),
-      dependencies.cameraProvider === undefined
+      cameraProvider === undefined
         ? unavailableCameraExposureMaterializationLayer
         : configuredCameraExposureMaterializationLayer(
-            dependencies.cameraProvider,
+            cameraProvider,
             config.runtime.originalsRoot,
           ).pipe(Layer.provide(baseLayer)),
       config.simulation === undefined
         ? standardAcquireOuterTransitionPolicyLayer
         : boundedSimulationAcquireOuterTransitionPolicyLayer,
-      dependencies.preflightProvider === undefined
+      preflightProvider === undefined
         ? absentReadOnlyPreflightProviderSelectionLayer
-        : configuredReadOnlyPreflightProviderSelectionLayer(
-            dependencies.preflightProvider,
-          ),
+        : configuredReadOnlyPreflightProviderSelectionLayer(preflightProvider),
     )
     const serviceDependencies = Layer.merge(baseLayer, acquireSelections)
     const acquire = Context.get(
@@ -448,16 +514,11 @@ export const makeProductionOriginGraph = (
           Layer.provide(
             Layer.mergeAll(
               Layer.succeed(LibraryService, library),
-              configuredLibraryRepresentationStorageLayer({
-                originalsRoot: config.runtime.originalsRoot,
-                previewsRoot: config.runtime.previewRoot,
-              }),
-              dependencies.downloadGrantIssuer === undefined
-                ? absentLibraryDownloadGrantLayer
-                : configuredLibraryDownloadGrantLayer(
-                    dependencies.downloadGrantIssuer,
-                    dependencies.downloadGrantNow,
-                  ),
+              Layer.succeed(
+                LibraryRepresentationStorageSelection,
+                representationStorage,
+              ),
+              Layer.succeed(LibraryDownloadGrantSelection, downloadGrant),
             ),
           ),
         ),
@@ -471,13 +532,18 @@ export const makeProductionOriginGraph = (
     const work = Context.get(projects, ProcessingProjectWork)
     const processWorker = createProcessWorkWorker({
       outputRoot:
-        dependencies.processWorkRoot ??
+        processWorkBehavior.outputRoot ??
         (config.runtime.databasePath === ':memory:'
           ? join(tmpdir(), `astro-console-process-${randomUUID()}`)
           : `${config.runtime.databasePath}.process-work`),
-      ...(dependencies.processFailBuildStage === undefined
-        ? {}
-        : { failBuildStage: dependencies.processFailBuildStage }),
+      traceWork: (kind, stage, run) =>
+        telemetry.runSync(tracedProcessWorker(kind, stage, Effect.sync(run))),
+      observeBacklog: (count, oldestAgeSeconds) => {
+        telemetry.runSync(recordProcessBacklog(count, oldestAgeSeconds))
+        telemetry.runSync(recordSqliteBacklog('process', count))
+      },
+      observePressure: (state) =>
+        telemetry.runSync(recordProcessPressureMetric(state)),
     })
     const publishProcessingProjection = () =>
       publication.publish(repository.advanceProjectionCursor())
@@ -492,7 +558,7 @@ export const makeProductionOriginGraph = (
         })
         .pipe(Stream.runForEach(() => publishProcessingProjection())),
     )
-    if (dependencies.processWorkAutoRun !== false)
+    if (processWorkBehavior.autoRun)
       yield* Effect.forkScoped(
         processWorker.pass().pipe(
           Effect.provideService(ProcessingProjectWork, work),
@@ -530,14 +596,7 @@ export const makeProductionOriginGraph = (
     return { application, context }
   })
 
-export const makeProductionOriginApplication = (
-  config: OriginServerConfig,
-  dependencies: OriginApplicationDependencies,
-): Effect.Effect<
-  OriginHttpApplication,
-  unknown,
-  import('effect').Scope.Scope
-> =>
-  makeProductionOriginGraph(config, dependencies).pipe(
+export const makeProductionOriginApplication = (config: OriginServerConfig) =>
+  makeProductionOriginGraph(config).pipe(
     Effect.map(({ application }) => application),
   )

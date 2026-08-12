@@ -1,27 +1,16 @@
-import { Context, Effect, Exit, Scope } from 'effect'
+import { Context, Effect, Exit, Layer, Scope } from 'effect'
 import type { OriginServerConfig } from '../config/environment-config.ts'
 import type { RequestAdmission } from '../auth/identity.ts'
-import {
-  makeProductionOriginGraph,
-  type OriginApplicationDependencies,
-} from '../app/origin-application.ts'
+import { makeProductionOriginGraph } from '../app/origin-application.ts'
 import { listenOriginHttp } from '../http/effect-origin-http.ts'
 import { OriginDatabase } from '../persistence/database.ts'
 import { createLocalFixtureAdmission } from '../auth/access-admission.ts'
-import type { ReadOnlyPreflightProviderShape } from '../services/preflight-service.ts'
-import type { CameraProviderShape } from '../services/camera-command-service.ts'
-import type { DownloadGrantIssuer } from '../storage/r2-download-grant.ts'
-import type { DevelopmentSimulationConfig } from '../http/development-simulation.ts'
-import type { PolarMeasurementProviderShape } from '../services/polar-service.ts'
-import type { TargetAcquisitionProviderShape } from '../services/target-acquisition-service.ts'
-import type { CapturedFrameStorage } from '../services/captured-frame-intake.ts'
-import type { FrameInspectionStorage } from '../services/frame-inspection.ts'
-import type { PlateSolveWorkerConfig } from '../workers/plate-solve-worker.ts'
-import type { OriginTelemetry } from '../observability/origin-telemetry.ts'
 import type { AdmissionObservation } from '../auth/identity.ts'
-import type { RunExecutionContext } from '../services/run-domain.ts'
-import type { PreflightProviderConfig } from '../config/environment-config.ts'
-import { recordOperationalEvent } from '../observability/operational-telemetry.ts'
+import {
+  OriginApplicationTelemetry,
+  defaultOriginApplicationServicesLayer,
+  type OriginApplicationServices,
+} from '../app/origin-application-services.ts'
 
 export const originTestConfig = (
   root: string,
@@ -56,17 +45,21 @@ export const originTestConfig = (
 
 export const openOriginTestGraph = async (options: {
   readonly config: OriginServerConfig
-  readonly dependencies?: OriginApplicationDependencies
+  readonly services: Layer.Layer<OriginApplicationServices, unknown, never>
   readonly admission: RequestAdmission
-  readonly telemetry?: OriginTelemetry
   readonly admissionObservability?: AdmissionObservation
 }) => {
-  const runPromise = options.telemetry?.runPromise ?? Effect.runPromise
   const scope = Effect.runSync(Scope.make('sequential'))
   try {
-    const graph = await runPromise(
+    const serviceContext = await Effect.runPromise(
+      Scope.provide(Layer.build(options.services), scope),
+    )
+    const telemetry = Context.get(serviceContext, OriginApplicationTelemetry)
+    const graph = await telemetry.runPromise(
       Scope.provide(
-        makeProductionOriginGraph(options.config, options.dependencies ?? {}),
+        makeProductionOriginGraph(options.config).pipe(
+          Effect.provide(serviceContext),
+        ),
         scope,
       ),
     )
@@ -84,7 +77,7 @@ export const openOriginTestGraph = async (options: {
         )
         let bound
         try {
-          bound = await runPromise(
+          bound = await telemetry.runPromise(
             Scope.provide(
               listenOriginHttp(graph.application, [
                 {
@@ -123,141 +116,97 @@ export const originTestDatabase = (
   graph: Awaited<ReturnType<typeof openOriginTestGraph>>,
 ) => Context.get(graph.context, OriginDatabase).database
 
-type OriginTestApplicationOptions = {
-  readonly fixture?: OriginServerConfig['fixture']
-  readonly webDistPath?: string
-  readonly previewRoot?: string
-  readonly preflightProvider?: ReadOnlyPreflightProviderShape
-  readonly cameraProvider?: CameraProviderShape
-  readonly simulation?: DevelopmentSimulationConfig
-  readonly capturedFrameStorage?: CapturedFrameStorage
-  readonly frameInspectionStorage?: FrameInspectionStorage
-  readonly plateSolveWorker?: PlateSolveWorkerConfig
-  readonly polarMeasurementProvider?: PolarMeasurementProviderShape
-  readonly targetAcquisitionProvider?: TargetAcquisitionProviderShape
-  readonly configuredTargetProvider?: PreflightProviderConfig
-  readonly runExecutionContext?: typeof RunExecutionContext.Type
-  readonly runExecutorProviderOrigin?: string
-  readonly telemetry?: OriginTelemetry
-  readonly admissionObservability?: AdmissionObservation
-  readonly processWorkRoot?: string
-  readonly processFailBuildStage?: 'align'
-  readonly processWorkAutoRun?: boolean
-  readonly observeProjectionPublication?: (
-    event: 'connect' | 'disconnect' | 'publish' | 'writeFailure',
-  ) => void
+export const originMemoryTestConfig = (
+  overrides: OriginTestConfigOverrides = {},
+) => {
+  const root = '/tmp/astro-origin-test'
+  return originTestConfig(root, {
+    ...overrides,
+    fixture: overrides.fixture,
+    runtime: {
+      ...originTestConfig(root).runtime,
+      databasePath: ':memory:',
+      ...overrides.runtime,
+    },
+  })
 }
 
-/** Raw compatibility boot while the old integration evidence moves to services. */
-export const openOriginTestApplication = async (
+export const originTestConfigForDatabase = (
   databasePath = ':memory:',
+  overrides: OriginTestConfigOverrides = {},
+) => {
+  const root =
+    databasePath === ':memory:' ? '/tmp/astro-origin-test' : databasePath
+  return originTestConfig(root, {
+    ...overrides,
+    fixture: overrides.fixture,
+    runtime: {
+      ...originTestConfig(root).runtime,
+      databasePath,
+      ...overrides.runtime,
+    },
+  })
+}
+
+export const originTestApplicationServices = <R, E>(
+  config: OriginServerConfig,
+  override?: Layer.Layer<R, E, never>,
+) =>
+  override === undefined
+    ? defaultOriginApplicationServicesLayer(config)
+    : Layer.effectContext(
+        Effect.gen(function* () {
+          const defaults = yield* Layer.build(
+            defaultOriginApplicationServicesLayer(config),
+          )
+          const overrides = yield* Layer.build(override)
+          return Context.merge(defaults, overrides)
+        }),
+      )
+
+export const openOriginTestApplication = async (
+  config: OriginServerConfig = originMemoryTestConfig(),
+  services: Layer.Layer<
+    OriginApplicationServices,
+    unknown,
+    never
+  > = defaultOriginApplicationServicesLayer(config),
   admission: RequestAdmission = createLocalFixtureAdmission({
     personId: 'owner-chicks',
     clientId: 'desktop-owner',
     capability: 'controlCapable',
   }),
-  _unused?: unknown,
-  downloadGrant?: {
-    readonly issuer: DownloadGrantIssuer
-    readonly now?: () => Date
-  },
-  options: OriginTestApplicationOptions = {},
-) => {
-  const root =
-    databasePath === ':memory:' ? '/tmp/astro-origin-test' : databasePath
-  const previewRoot =
-    options.frameInspectionStorage?.previewsRoot ?? options.previewRoot
-  const originalsRoot =
-    options.frameInspectionStorage?.originalsRoot ??
-    options.capturedFrameStorage?.originalsRoot
-  const config = originTestConfig(root, {
-    runtime: {
-      ...originTestConfig(root).runtime,
-      databasePath,
-      ...(options.webDistPath === undefined
-        ? {}
-        : { webDistPath: options.webDistPath }),
-      ...(previewRoot === undefined ? {} : { previewRoot }),
-      ...(originalsRoot === undefined ? {} : { originalsRoot }),
-    },
-    fixture: options.fixture,
-    simulation: options.simulation,
-  })
-  const graph = await openOriginTestGraph({
+  admissionObservability?: AdmissionObservation,
+) =>
+  openOriginTestGraph({
     config,
+    services,
     admission,
-    dependencies: {
-      ...(options.preflightProvider === undefined
-        ? {}
-        : { preflightProvider: options.preflightProvider }),
-      ...(options.cameraProvider === undefined
-        ? {}
-        : { cameraProvider: options.cameraProvider }),
-      ...(downloadGrant === undefined
-        ? {}
-        : {
-            downloadGrantIssuer: downloadGrant.issuer,
-            ...(downloadGrant.now === undefined
-              ? {}
-              : { downloadGrantNow: downloadGrant.now }),
-          }),
-      ...(options.polarMeasurementProvider === undefined
-        ? {}
-        : { polarMeasurementProvider: options.polarMeasurementProvider }),
-      ...(options.targetAcquisitionProvider === undefined
-        ? {}
-        : { targetAcquisitionProvider: options.targetAcquisitionProvider }),
-      ...(options.configuredTargetProvider === undefined
-        ? {}
-        : { configuredTargetProvider: options.configuredTargetProvider }),
-      ...(options.capturedFrameStorage === undefined
-        ? {}
-        : { capturedFrameStorage: options.capturedFrameStorage }),
-      ...(options.frameInspectionStorage === undefined
-        ? {}
-        : { frameInspectionStorage: options.frameInspectionStorage }),
-      ...(options.plateSolveWorker === undefined
-        ? {}
-        : { plateSolveWorker: options.plateSolveWorker }),
-      ...(options.runExecutionContext === undefined
-        ? {}
-        : { runExecutionContext: options.runExecutionContext }),
-      ...(options.runExecutorProviderOrigin === undefined
-        ? {}
-        : {
-            runExecutorProviderOrigin: options.runExecutorProviderOrigin,
-          }),
-      ...(options.observeProjectionPublication === undefined &&
-      options.telemetry === undefined
-        ? {}
-        : {
-            observeProjectionPublication: (event) => {
-              options.observeProjectionPublication?.(event)
-              options.telemetry?.runSync(
-                recordOperationalEvent({
-                  scope: 'projection',
-                  operation: `sse.${event}`,
-                  outcome: event === 'writeFailure' ? 'unavailable' : 'success',
-                }),
-              )
-            },
-          }),
-      ...(options.processWorkRoot === undefined
-        ? {}
-        : { processWorkRoot: options.processWorkRoot }),
-      ...(options.processWorkAutoRun === undefined
-        ? {}
-        : { processWorkAutoRun: options.processWorkAutoRun }),
-      ...(options.processFailBuildStage === undefined
-        ? {}
-        : { processFailBuildStage: options.processFailBuildStage }),
-    },
-    ...(options.telemetry === undefined
-      ? {}
-      : { telemetry: options.telemetry }),
-    ...(options.admissionObservability === undefined
-      ? {}
-      : { admissionObservability: options.admissionObservability }),
+    ...(admissionObservability === undefined ? {} : { admissionObservability }),
   })
-  return graph
+
+export const openOriginTestApplicationForDatabase = async <R, E>(
+  databasePath = ':memory:',
+  configOverrides: OriginTestConfigOverrides = {},
+  serviceOverrides?: Layer.Layer<R, E, never>,
+  admission: RequestAdmission = createLocalFixtureAdmission({
+    personId: 'owner-chicks',
+    clientId: 'desktop-owner',
+    capability: 'controlCapable',
+  }),
+  admissionObservability?: AdmissionObservation,
+) => {
+  const config = originTestConfigForDatabase(databasePath, configOverrides)
+  return openOriginTestApplication(
+    config,
+    originTestApplicationServices(config, serviceOverrides),
+    admission,
+    admissionObservability,
+  )
+}
+
+type OriginTestConfigOverrides = Partial<
+  Omit<OriginServerConfig, 'runtime'>
+> & {
+  readonly runtime?: Partial<OriginServerConfig['runtime']>
 }

@@ -12,15 +12,24 @@ import {
 } from '@astro-console/protocol'
 import { AcquireEvidence, AcquireSession } from '../services/acquire-domain.ts'
 import { RunExecutionContext } from '../services/run-domain.ts'
-import { Effect, Schema } from 'effect'
+import { Effect, Layer, Schema } from 'effect'
 import {
-  openOriginTestApplication,
+  openOriginTestApplicationForDatabase,
   originTestDatabase,
 } from './origin-test-graph.ts'
 import { alpacaCameraProvider } from '../providers/alpaca-camera-provider.ts'
 import { alpacaPreflightProvider } from '../providers/alpaca-preflight-provider.ts'
 import { createAlpacaSimulator } from '../simulator/alpaca-simulator.ts'
 import { ingestCapturedFrame } from '../services/captured-frame-intake.ts'
+import { configuredCameraProviderSelectionLayer } from '../services/acquire-command-service.ts'
+import { configuredReadOnlyPreflightProviderSelectionLayer } from '../services/preflight-command-service.ts'
+import {
+  configuredOriginCapturedFrameStorageLayer,
+  configuredOriginConfiguredTargetProviderLayer,
+  configuredOriginFrameInspectionStorageLayer,
+  configuredOriginPlateSolveWorkerLayer,
+  configuredOriginRunExecutionLayer,
+} from '../app/origin-application-services.ts'
 
 const repositoryRoot = fileURLToPath(new URL('../../../../', import.meta.url))
 const corpusRoot = join(repositoryRoot, '.tmp/alpaca-simulation-corpus')
@@ -716,39 +725,47 @@ async function deepSkyFixture(
     },
   }
   const camera = alpacaCameraProvider(providerConfig)
-  const serviceOptions = {
-    simulation: {
-      origin: simulatorListener.origin,
-      launchScenario: scenario,
-      corpusRoot,
-    },
-    runExecutorProviderOrigin: simulatorListener.origin,
-    runExecutionContext: RunExecutionContext.make({
-      rigId: providerConfig.rigId,
-      cameraDeviceId: 'sim-camera-asi2600mc-pro',
-      mountDeviceId: 'sim-telescope-am5n',
-      latitudeDegrees: 39.755,
-      longitudeDegrees: -74.2677777778,
-      elevationMeters: 0,
-      completionBehavior: 'hold',
-      unsafeBehavior: 'pauseAndPark',
+  const simulation = {
+    origin: simulatorListener.origin,
+    launchScenario: scenario,
+    corpusRoot,
+  }
+  const runExecutionContext = RunExecutionContext.make({
+    rigId: providerConfig.rigId,
+    cameraDeviceId: 'sim-camera-asi2600mc-pro',
+    mountDeviceId: 'sim-telescope-am5n',
+    latitudeDegrees: 39.755,
+    longitudeDegrees: -74.2677777778,
+    elevationMeters: 0,
+    completionBehavior: 'hold',
+    unsafeBehavior: 'pauseAndPark',
+  })
+  const serviceLayers = Layer.mergeAll(
+    configuredOriginRunExecutionLayer(
+      runExecutionContext,
+      simulatorListener.origin,
+    ),
+    configuredReadOnlyPreflightProviderSelectionLayer(
+      alpacaPreflightProvider(providerConfig),
+    ),
+    configuredCameraProviderSelectionLayer(camera),
+    configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+    configuredOriginFrameInspectionStorageLayer({
+      originalsRoot,
+      previewsRoot,
     }),
-    preflightProvider: alpacaPreflightProvider(providerConfig),
-    cameraProvider: camera,
-    capturedFrameStorage: { originalsRoot },
-    frameInspectionStorage: { originalsRoot, previewsRoot },
     ...(solveExecute === undefined
-      ? {}
-      : {
-          configuredTargetProvider: {
+      ? []
+      : [
+          configuredOriginConfiguredTargetProviderLayer({
             ...providerConfig,
             site: {
               latitudeDegrees: 39.755,
               longitudeDegrees: -74.2677777778,
               elevationMeters: 0,
             },
-          },
-          plateSolveWorker: {
+          }),
+          configuredOriginPlateSolveWorkerLayer({
             originalsRoot,
             executable: '/usr/bin/solve-field',
             indexesRoot: '/var/lib/astro-console/astrometry-indexes',
@@ -758,15 +775,16 @@ async function deepSkyFixture(
             scaleHighDeg: 30,
             searchRadiusDeg: 15,
             execute: solveExecute,
-          },
-        }),
-  }
-  let service = await openOriginTestApplication(
+          }),
+        ]),
+  )
+  let service = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
-    serviceOptions,
+    {
+      simulation,
+      runtime: { originalsRoot, previewRoot: previewsRoot },
+    },
+    serviceLayers,
   )
   let listener = await service.listen()
   let origin = `http://127.0.0.1:${listener.port}`
@@ -877,12 +895,13 @@ async function deepSkyFixture(
     restart: async () => {
       await listener.close()
       await service.close()
-      service = await openOriginTestApplication(
+      service = await openOriginTestApplicationForDatabase(
         databasePath,
-        undefined,
-        undefined,
-        undefined,
-        serviceOptions,
+        {
+          simulation,
+          runtime: { originalsRoot, previewRoot: previewsRoot },
+        },
+        serviceLayers,
       )
       listener = await service.listen()
       origin = `http://127.0.0.1:${listener.port}`

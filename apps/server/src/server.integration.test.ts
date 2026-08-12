@@ -13,7 +13,15 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { generateKeyPairSync, sign } from 'node:crypto'
-import { Cause, ConfigProvider, Context, Effect, Exit, Schema } from 'effect'
+import {
+  Cause,
+  ConfigProvider,
+  Context,
+  Effect,
+  Exit,
+  Layer,
+  Schema,
+} from 'effect'
 import {
   AcquireSnapshot,
   AcquireCommandResponse,
@@ -58,6 +66,7 @@ import {
 } from './app/origin-admission.ts'
 import {
   openOriginTestApplication,
+  openOriginTestApplicationForDatabase,
   originTestDatabase,
 } from './integration/origin-test-graph.ts'
 import { ingestAdapterObservation } from './services/adapter-observation-service.ts'
@@ -82,19 +91,40 @@ import { createPlateSolveWorker } from './workers/plate-solve-worker.ts'
 import { createProcessWorkWorker } from './workers/process-work-worker.ts'
 import { RunSqliteRepository } from './persistence/run-sqlite-repository.ts'
 import type { AdmissionRequest } from './auth/identity.ts'
+import type { RequestAdmission } from './auth/identity.ts'
+import type { DownloadGrantIssuer } from './storage/r2-download-grant.ts'
+import { configuredLibraryDownloadGrantLayer } from './services/library-representation-service.ts'
+import {
+  configuredCameraProviderSelectionLayer,
+  configuredPolarMeasurementProviderSelectionLayer,
+  configuredTargetAcquisitionProviderSelectionLayer,
+} from './services/acquire-command-service.ts'
+import { configuredReadOnlyPreflightProviderSelectionLayer } from './services/preflight-command-service.ts'
+import {
+  configuredOriginCapturedFrameStorageLayer,
+  configuredOriginFrameInspectionStorageLayer,
+  configuredOriginPlateSolveWorkerLayer,
+  originProcessWorkBehaviorLayer,
+} from './app/origin-application-services.ts'
 
 async function createFixtureService(
-  databasePath?: Parameters<typeof openOriginTestApplication>[0],
-  identityResolver?: Parameters<typeof openOriginTestApplication>[1],
-  unused?: Parameters<typeof openOriginTestApplication>[2],
-  downloadGrants?: Parameters<typeof openOriginTestApplication>[3],
+  databasePath = ':memory:',
+  identityResolver?: RequestAdmission,
+  downloadGrants?: {
+    readonly issuer: DownloadGrantIssuer
+    readonly now?: () => Date
+  },
 ) {
-  return await openOriginTestApplication(
+  return await openOriginTestApplicationForDatabase(
     databasePath,
-    identityResolver,
-    unused,
-    downloadGrants,
     { fixture: 'm27' },
+    downloadGrants === undefined
+      ? undefined
+      : configuredLibraryDownloadGrantLayer(
+          downloadGrants.issuer,
+          downloadGrants.now,
+        ),
+    identityResolver,
   )
 }
 
@@ -217,16 +247,16 @@ test('local plate solver records solved and no-solution evidence without a mount
       }
     },
   }
-  const service = await openOriginTestApplication(
+  const service = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
     {
       fixture: 'target-deep-sky',
-      capturedFrameStorage: { originalsRoot },
-      plateSolveWorker,
+      runtime: { originalsRoot: { originalsRoot }.originalsRoot },
     },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+      configuredOriginPlateSolveWorkerLayer(plateSolveWorker),
+    ),
   )
   const intake = {
     assetId: 'asset-capture-plate-solve-001',
@@ -278,7 +308,7 @@ test('local plate solver records solved and no-solution evidence without a mount
   assert.doesNotMatch(session.session, /CorrectionAccepted/)
 
   await service.close()
-  const resumed = await openOriginTestApplication(databasePath)
+  const resumed = await openOriginTestApplicationForDatabase(databasePath)
   t.after(() => resumed.close())
   assert.equal(
     databaseRow(
@@ -295,12 +325,15 @@ test('local plate solver records solved and no-solution evidence without a mount
 test('local plate solver records a bounded failure as typed no-solution and retains its source', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'astro-plate-solve-failure-'))
   const originalsRoot = join(root, 'originals')
-  const service = await openOriginTestApplication(
+  const service = await openOriginTestApplicationForDatabase(
     undefined,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'target-deep-sky', capturedFrameStorage: { originalsRoot } },
+    {
+      fixture: 'target-deep-sky',
+      runtime: { originalsRoot: { originalsRoot }.originalsRoot },
+    },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+    ),
   )
   t.after(() => service.close())
   const assetId = 'asset-capture-plate-solve-timeout'
@@ -358,12 +391,15 @@ test('local plate solver records a bounded failure as typed no-solution and reta
 test('local plate solver records normal solve-field exit 1 as no-solution', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'astro-plate-solve-none-'))
   const originalsRoot = join(root, 'originals')
-  const service = await openOriginTestApplication(
+  const service = await openOriginTestApplicationForDatabase(
     undefined,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'target-deep-sky', capturedFrameStorage: { originalsRoot } },
+    {
+      fixture: 'target-deep-sky',
+      runtime: { originalsRoot: { originalsRoot }.originalsRoot },
+    },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+    ),
   )
   t.after(() => service.close())
   const assetId = 'asset-capture-plate-solve-none'
@@ -417,15 +453,21 @@ test('materializes deterministic captured bytes as an immutable Library asset wi
   const databasePath = join(root, 'state.sqlite')
   const originalsRoot = join(root, 'originals')
   const previewsRoot = join(root, 'previews')
-  const service = await openOriginTestApplication(
+  const service = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
     {
-      capturedFrameStorage: { originalsRoot },
-      frameInspectionStorage: { originalsRoot, previewsRoot },
+      runtime: {
+        originalsRoot: { originalsRoot, previewsRoot }.originalsRoot,
+        previewRoot: { originalsRoot, previewsRoot }.previewsRoot,
+      },
     },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+      configuredOriginFrameInspectionStorageLayer({
+        originalsRoot,
+        previewsRoot,
+      }),
+    ),
   )
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
@@ -560,15 +602,21 @@ test('materializes deterministic captured bytes as an immutable Library asset wi
   await reader.cancel()
   await listener.close()
   await service.close()
-  const recovered = await openOriginTestApplication(
+  const recovered = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
     {
-      capturedFrameStorage: { originalsRoot },
-      frameInspectionStorage: { originalsRoot, previewsRoot },
+      runtime: {
+        originalsRoot: { originalsRoot, previewsRoot }.originalsRoot,
+        previewRoot: { originalsRoot, previewsRoot }.previewsRoot,
+      },
     },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+      configuredOriginFrameInspectionStorageLayer({
+        originalsRoot,
+        previewsRoot,
+      }),
+    ),
   )
   const recoveredListener = await recovered.listen()
   t.after(async () => {
@@ -704,16 +752,22 @@ test('Phase 4 deterministic chain carries one current captured frame through Lib
   const databasePath = join(root, 'state.sqlite')
   const originalsRoot = join(root, 'originals')
   const previewsRoot = join(root, 'previews')
-  let service = await openOriginTestApplication(
+  let service = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
     {
       fixture: 'live-frame',
-      capturedFrameStorage: { originalsRoot },
-      frameInspectionStorage: { originalsRoot, previewsRoot },
+      runtime: {
+        originalsRoot: { originalsRoot, previewsRoot }.originalsRoot,
+        previewRoot: { originalsRoot, previewsRoot }.previewsRoot,
+      },
     },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+      configuredOriginFrameInspectionStorageLayer({
+        originalsRoot,
+        previewsRoot,
+      }),
+    ),
   )
   let listener = await service.listen()
   let base = `http://127.0.0.1:${listener.port}`
@@ -845,15 +899,21 @@ test('Phase 4 deterministic chain carries one current captured frame through Lib
   await reader.cancel()
   await listener.close()
   await service.close()
-  service = await openOriginTestApplication(
+  service = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
     {
-      capturedFrameStorage: { originalsRoot },
-      frameInspectionStorage: { originalsRoot, previewsRoot },
+      runtime: {
+        originalsRoot: { originalsRoot, previewsRoot }.originalsRoot,
+        previewRoot: { originalsRoot, previewsRoot }.previewsRoot,
+      },
     },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+      configuredOriginFrameInspectionStorageLayer({
+        originalsRoot,
+        previewsRoot,
+      }),
+    ),
   )
   listener = await service.listen()
   base = `http://127.0.0.1:${listener.port}`
@@ -879,13 +939,9 @@ test('Phase 4 deterministic chain carries one current captured frame through Lib
 })
 
 test('live-frame-library fixture exposes the available current review without a catalog request', async (t) => {
-  const service = await openOriginTestApplication(
-    ':memory:',
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'live-frame-library' },
-  )
+  const service = await openOriginTestApplicationForDatabase(':memory:', {
+    fixture: 'live-frame-library',
+  })
   const listener = await service.listen()
   t.after(async () => {
     await listener.close()
@@ -903,18 +959,27 @@ test('live-frame-library fixture exposes the available current review without a 
 test('persists truthful unavailable inspection state when a retained original is absent', async () => {
   const root = mkdtempSync(join(tmpdir(), 'astro-inspection-unavailable-'))
   const originalsRoot = join(root, 'originals')
-  const service = await openOriginTestApplication(
-    undefined,
-    undefined,
-    undefined,
+  const service = await openOriginTestApplicationForDatabase(
     undefined,
     {
-      capturedFrameStorage: { originalsRoot },
-      frameInspectionStorage: {
-        originalsRoot,
-        previewsRoot: join(root, 'previews'),
+      runtime: {
+        originalsRoot: {
+          originalsRoot,
+          previewsRoot: join(root, 'previews'),
+        }.originalsRoot,
+        previewRoot: {
+          originalsRoot,
+          previewsRoot: join(root, 'previews'),
+        }.previewsRoot,
       },
     },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+      configuredOriginFrameInspectionStorageLayer({
+        originalsRoot,
+        previewsRoot: join(root, 'previews'),
+      }),
+    ),
   )
   const created = retainCapturedFrame(
     service,
@@ -963,18 +1028,27 @@ test('persists truthful unavailable inspection state when a retained original is
 test('persists truthful failed inspection state when a retained original changes', async () => {
   const root = mkdtempSync(join(tmpdir(), 'astro-inspection-failed-'))
   const originalsRoot = join(root, 'originals')
-  const service = await openOriginTestApplication(
-    undefined,
-    undefined,
-    undefined,
+  const service = await openOriginTestApplicationForDatabase(
     undefined,
     {
-      capturedFrameStorage: { originalsRoot },
-      frameInspectionStorage: {
-        originalsRoot,
-        previewsRoot: join(root, 'previews'),
+      runtime: {
+        originalsRoot: {
+          originalsRoot,
+          previewsRoot: join(root, 'previews'),
+        }.originalsRoot,
+        previewRoot: {
+          originalsRoot,
+          previewsRoot: join(root, 'previews'),
+        }.previewsRoot,
       },
     },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+      configuredOriginFrameInspectionStorageLayer({
+        originalsRoot,
+        previewsRoot: join(root, 'previews'),
+      }),
+    ),
   )
   const created = retainCapturedFrame(
     service,
@@ -1657,15 +1731,14 @@ const refreshCameraPreflight = (
 
 test('camera commands reject stale authority before the provider and retain only reconciled observations', async (t) => {
   let starts = 0
-  const service = await openOriginTestApplication(
+  const service = await openOriginTestApplicationForDatabase(
     undefined,
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'preflight',
-      preflightProvider: readyCameraPreflightProvider,
-      cameraProvider: {
+    { fixture: 'preflight' },
+    Layer.mergeAll(
+      configuredReadOnlyPreflightProviderSelectionLayer(
+        readyCameraPreflightProvider,
+      ),
+      configuredCameraProviderSelectionLayer({
         startExposure: () => {
           starts += 1
           return Effect.succeed(undefined)
@@ -1676,8 +1749,8 @@ test('camera commands reject stale authority before the provider and retain only
             observedAt: '2026-08-05T10:00:00.000Z',
             cameraState: 'exposing',
           }),
-      },
-    },
+      }),
+    ),
   )
   const listener = await service.listen()
   t.after(async () => {
@@ -1739,23 +1812,22 @@ test('camera provider failure persists recover truth and the receipt prevents co
     'state.sqlite',
   )
   let calls = 0
-  const service = await openOriginTestApplication(
+  const service = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'preflight',
-      preflightProvider: readyCameraPreflightProvider,
-      cameraProvider: {
+    { fixture: 'preflight' },
+    Layer.mergeAll(
+      configuredReadOnlyPreflightProviderSelectionLayer(
+        readyCameraPreflightProvider,
+      ),
+      configuredCameraProviderSelectionLayer({
         startExposure: () => {
           calls += 1
           return Effect.fail(new Error('recorded timeout'))
         },
         abortExposure: () => Effect.fail(new Error('recorded disconnect')),
         readState: () => Effect.fail(new Error('unreachable')),
-      },
-    },
+      }),
+    ),
   )
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
@@ -1787,7 +1859,7 @@ test('camera provider failure persists recover truth and the receipt prevents co
   )
   await listener.close()
   await service.close()
-  const recovered = await openOriginTestApplication(databasePath)
+  const recovered = await openOriginTestApplicationForDatabase(databasePath)
   const recoveredListener = await recovered.listen()
   t.after(async () => {
     await recoveredListener.close()
@@ -1808,15 +1880,33 @@ test('completed camera image becomes a durable Library original and duplicate co
   const root = mkdtempSync(join(tmpdir(), 'astro-camera-library-'))
   const databasePath = join(root, 'state.sqlite')
   let reads = 0
-  const service = await openOriginTestApplication(
+  const service = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
     {
       fixture: 'preflight',
-      preflightProvider: readyCameraPreflightProvider,
-      cameraProvider: {
+      runtime: {
+        originalsRoot: {
+          originalsRoot: join(root, 'originals'),
+          previewsRoot: join(root, 'previews'),
+        }.originalsRoot,
+        previewRoot: {
+          originalsRoot: join(root, 'originals'),
+          previewsRoot: join(root, 'previews'),
+        }.previewsRoot,
+      },
+    },
+    Layer.mergeAll(
+      configuredOriginCapturedFrameStorageLayer({
+        originalsRoot: join(root, 'originals'),
+      }),
+      configuredOriginFrameInspectionStorageLayer({
+        originalsRoot: join(root, 'originals'),
+        previewsRoot: join(root, 'previews'),
+      }),
+      configuredReadOnlyPreflightProviderSelectionLayer(
+        readyCameraPreflightProvider,
+      ),
+      configuredCameraProviderSelectionLayer({
         startExposure: () => Effect.succeed(undefined),
         abortExposure: () => Effect.succeed(undefined),
         readState: () =>
@@ -1833,13 +1923,8 @@ test('completed camera image becomes a durable Library original and duplicate co
             format: 'fits' as const,
           })
         },
-      },
-      capturedFrameStorage: { originalsRoot: join(root, 'originals') },
-      frameInspectionStorage: {
-        originalsRoot: join(root, 'originals'),
-        previewsRoot: join(root, 'previews'),
-      },
-    },
+      }),
+    ),
   )
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
@@ -1883,7 +1968,7 @@ test('completed camera image becomes a durable Library original and duplicate co
   )
   await listener.close()
   await service.close()
-  const recovered = await openOriginTestApplication(databasePath)
+  const recovered = await openOriginTestApplicationForDatabase(databasePath)
   const recoveredListener = await recovered.listen()
   t.after(async () => {
     await recoveredListener.close()
@@ -1901,15 +1986,9 @@ test('completed camera image becomes a durable Library original and duplicate co
 
 test('target fixtures keep provisional slew acknowledgement separate from deep-sky and lunar image evidence', async (t) => {
   for (const fixture of ['target-deep-sky', 'target-lunar'] as const) {
-    const service = await openOriginTestApplication(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
-        fixture,
-      },
-    )
+    const service = await openOriginTestApplicationForDatabase(undefined, {
+      fixture: fixture,
+    })
     const listener = await service.listen()
     const base = `http://127.0.0.1:${listener.port}`
     const snapshot = await bootstrapSnapshot(`${base}/api/snapshot`)
@@ -1951,13 +2030,9 @@ test('lunar target acquisition publishes image evidence and survives restart', a
     mkdtempSync(join(tmpdir(), 'astro-target-lunar-')),
     'state.sqlite',
   )
-  let service = await openOriginTestApplication(
-    databasePath,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'target-lunar' },
-  )
+  let service = await openOriginTestApplicationForDatabase(databasePath, {
+    fixture: 'target-lunar',
+  })
   let listener = await service.listen()
   let base = `http://127.0.0.1:${listener.port}`
   const stream = await fetch(`${base}/api/events`)
@@ -1982,7 +2057,7 @@ test('lunar target acquisition publishes image evidence and survives restart', a
   await listener.close()
   await service.close()
 
-  service = await openOriginTestApplication(databasePath)
+  service = await openOriginTestApplicationForDatabase(databasePath)
   listener = await service.listen()
   base = `http://127.0.0.1:${listener.port}`
   const restarted = await bootstrapSnapshot(`${base}/api/snapshot`)
@@ -1998,8 +2073,10 @@ test('lunar target acquisition publishes image evidence and survives restart', a
 test('live frame evidence is durable, idempotent, published over SSE, and stays read-only on phone', async () => {
   const root = mkdtempSync(join(tmpdir(), 'astro-live-frame-'))
   const databasePath = join(root, 'state.sqlite')
-  let service = await openOriginTestApplication(
+  let service = await openOriginTestApplicationForDatabase(
     databasePath,
+    { fixture: 'live-frame' },
+    undefined,
     (request) =>
       request?.headers.authorization === 'Bearer phone'
         ? {
@@ -2014,9 +2091,6 @@ test('live frame evidence is durable, idempotent, published over SSE, and stays 
             role: 'owner' as const,
             capability: 'controlCapable' as const,
           },
-    undefined,
-    undefined,
-    { fixture: 'live-frame' },
   )
   let listener = await service.listen()
   let base = `http://127.0.0.1:${listener.port}`
@@ -2112,7 +2186,7 @@ test('live frame evidence is durable, idempotent, published over SSE, and stays 
   await listener.close()
   await service.close()
 
-  service = await openOriginTestApplication(databasePath)
+  service = await openOriginTestApplicationForDatabase(databasePath)
   listener = await service.listen()
   base = `http://127.0.0.1:${listener.port}`
   const restarted = await bootstrapSnapshot(`${base}/api/snapshot`)
@@ -2144,12 +2218,11 @@ test('managed capture persists guarded progress actions, replay, SSE, restart, a
           role: 'owner' as const,
           capability: 'controlCapable' as const,
         }
-  let service = await openOriginTestApplication(
+  let service = await openOriginTestApplicationForDatabase(
     databasePath,
-    admission,
-    undefined,
-    undefined,
     { fixture: 'managed-capture' },
+    undefined,
+    admission,
   )
   let listener = await service.listen()
   let base = `http://127.0.0.1:${listener.port}`
@@ -2224,7 +2297,12 @@ test('managed capture persists guarded progress actions, replay, SSE, restart, a
   assert.equal(stale.response.status, 409)
   await listener.close()
   await service.close()
-  service = await openOriginTestApplication(databasePath, admission)
+  service = await openOriginTestApplicationForDatabase(
+    databasePath,
+    {},
+    undefined,
+    admission,
+  )
   listener = await service.listen()
   base = `http://127.0.0.1:${listener.port}`
   assert.equal(
@@ -2255,12 +2333,11 @@ test('Acquire recovery is bounded, reconciled, idempotent, streamed, restart-saf
           role: 'owner' as const,
           capability: 'controlCapable' as const,
         }
-  let service = await openOriginTestApplication(
+  let service = await openOriginTestApplicationForDatabase(
     databasePath,
-    admission,
-    undefined,
-    undefined,
     { fixture: 'acquire-recovery' },
+    undefined,
+    admission,
   )
   let listener = await service.listen()
   let base = `http://127.0.0.1:${listener.port}`
@@ -2316,7 +2393,12 @@ test('Acquire recovery is bounded, reconciled, idempotent, streamed, restart-saf
   await listener.close()
   await service.close()
 
-  service = await openOriginTestApplication(databasePath, admission)
+  service = await openOriginTestApplicationForDatabase(
+    databasePath,
+    {},
+    undefined,
+    admission,
+  )
   listener = await service.listen()
   base = `http://127.0.0.1:${listener.port}`
   assert.equal(
@@ -2326,13 +2408,9 @@ test('Acquire recovery is bounded, reconciled, idempotent, streamed, restart-saf
   await listener.close()
   await service.close()
 
-  const skipService = await openOriginTestApplication(
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'acquire-recovery' },
-  )
+  const skipService = await openOriginTestApplicationForDatabase(undefined, {
+    fixture: 'acquire-recovery',
+  })
   const skipListener = await skipService.listen()
   const skipBase = `http://127.0.0.1:${skipListener.port}`
   const skipSnapshot = await bootstrapSnapshot(`${skipBase}/api/snapshot`)
@@ -2364,13 +2442,9 @@ test('AbortAcquire is lease and revision guarded, durable, idempotent, and strea
     mkdtempSync(join(tmpdir(), 'astro-acquire-abort-')),
     'state.sqlite',
   )
-  let service = await openOriginTestApplication(
-    databasePath,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'acquire-recovery' },
-  )
+  let service = await openOriginTestApplicationForDatabase(databasePath, {
+    fixture: 'acquire-recovery',
+  })
   let listener = await service.listen()
   let base = `http://127.0.0.1:${listener.port}`
   const stream = await fetch(`${base}/api/events`)
@@ -2415,7 +2489,7 @@ test('AbortAcquire is lease and revision guarded, durable, idempotent, and strea
   await listener.close()
   await service.close()
 
-  service = await openOriginTestApplication(databasePath)
+  service = await openOriginTestApplicationForDatabase(databasePath)
   listener = await service.listen()
   base = `http://127.0.0.1:${listener.port}`
   assert.equal(
@@ -2427,13 +2501,9 @@ test('AbortAcquire is lease and revision guarded, durable, idempotent, and strea
 })
 
 test('target correction fixture installs a durable large pending proposal without a provider call', async (t) => {
-  const service = await openOriginTestApplication(
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'target-correction' },
-  )
+  const service = await openOriginTestApplicationForDatabase(undefined, {
+    fixture: 'target-correction',
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
@@ -2450,13 +2520,9 @@ test('target correction fixture installs a durable large pending proposal withou
 })
 
 test('target verification fixture exposes provisional acknowledgement and fresh-image verification', async (t) => {
-  const service = await openOriginTestApplication(
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'target-verification' },
-  )
+  const service = await openOriginTestApplicationForDatabase(undefined, {
+    fixture: 'target-verification',
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
@@ -2478,14 +2544,11 @@ test('target verification fixture exposes provisional acknowledgement and fresh-
 test('pointing correction keeps provider acknowledgement provisional until a fresh solved frame verifies it', async (t) => {
   let captures = 0
   let corrections = 0
-  const service = await openOriginTestApplication(
+  const service = await openOriginTestApplicationForDatabase(
     undefined,
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'target-deep-sky',
-      targetAcquisitionProvider: {
+    { fixture: 'target-deep-sky' },
+    Layer.mergeAll(
+      configuredTargetAcquisitionProviderSelectionLayer({
         capture: () => {
           captures += 1
           return Effect.succeed({
@@ -2527,8 +2590,8 @@ test('pointing correction keeps provider acknowledgement provisional until a fre
             acknowledgementRef: 'fixture-correction-acknowledgement',
           })
         },
-      },
-    },
+      }),
+    ),
   )
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
@@ -2577,14 +2640,11 @@ test('pointing correction keeps provider acknowledgement provisional until a fre
 
 test('recovery retains prior solved evidence when later verification frames have no solution', async (t) => {
   let captures = 0
-  const service = await openOriginTestApplication(
+  const service = await openOriginTestApplicationForDatabase(
     undefined,
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'target-deep-sky',
-      targetAcquisitionProvider: {
+    { fixture: 'target-deep-sky' },
+    Layer.mergeAll(
+      configuredTargetAcquisitionProviderSelectionLayer({
         capture: () => {
           captures += 1
           return Effect.succeed({
@@ -2638,8 +2698,8 @@ test('recovery retains prior solved evidence when later verification frames have
             acknowledgedAtEpochMs: 1_722_729_600_200,
             acknowledgementRef: 'fixture-retained-correction',
           }),
-      },
-    },
+      }),
+    ),
   )
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
@@ -2682,14 +2742,11 @@ test('recovery retains prior solved evidence when later verification frames have
 test('pointing correction revision replays idempotently before approval and still requires fresh image verification', async (t) => {
   let captures = 0
   let corrections = 0
-  const service = await openOriginTestApplication(
+  const service = await openOriginTestApplicationForDatabase(
     undefined,
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'target-deep-sky',
-      targetAcquisitionProvider: {
+    { fixture: 'target-deep-sky' },
+    Layer.mergeAll(
+      configuredTargetAcquisitionProviderSelectionLayer({
         capture: () => {
           captures += 1
           return Effect.succeed({
@@ -2731,8 +2788,8 @@ test('pointing correction revision replays idempotently before approval and stil
             acknowledgementRef: 'fixture-revision-acknowledgement',
           })
         },
-      },
-    },
+      }),
+    ),
   )
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
@@ -2838,8 +2895,10 @@ test('read-only preflight persists configured provider facts, survives restart, 
         ],
       }),
   }
-  const service = await openOriginTestApplication(
+  const service = await openOriginTestApplicationForDatabase(
     databasePath,
+    { fixture: 'preflight' },
+    Layer.mergeAll(configuredReadOnlyPreflightProviderSelectionLayer(provider)),
     (request) =>
       request?.headers.authorization === 'Bearer phone'
         ? {
@@ -2854,9 +2913,6 @@ test('read-only preflight persists configured provider facts, survives restart, 
             role: 'owner' as const,
             capability: 'controlCapable' as const,
           },
-    undefined,
-    undefined,
-    { fixture: 'preflight', preflightProvider: provider },
   )
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
@@ -2904,7 +2960,7 @@ test('read-only preflight persists configured provider facts, survives restart, 
   await reader?.cancel()
   await listener.close()
   await service.close()
-  const recovered = await openOriginTestApplication(databasePath)
+  const recovered = await openOriginTestApplicationForDatabase(databasePath)
   const recoveredListener = await recovered.listen()
   t.after(async () => {
     await recoveredListener.close()
@@ -2938,14 +2994,11 @@ test('configured provider failure persists an unavailable preflight snapshot bef
     mkdtempSync(join(tmpdir(), 'astro-preflight-unavailable-')),
     'state.sqlite',
   )
-  const service = await openOriginTestApplication(
+  const service = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'preflight',
-      preflightProvider: {
+    { fixture: 'preflight' },
+    Layer.mergeAll(
+      configuredReadOnlyPreflightProviderSelectionLayer({
         observe: () => Effect.fail(new Error('recorded provider outage')),
         unavailableSnapshot: () => ({
           observedAt: '2026-08-05T10:00:00.000Z',
@@ -2980,8 +3033,8 @@ test('configured provider failure persists an unavailable preflight snapshot bef
             ],
           },
         }),
-      },
-    },
+      }),
+    ),
   )
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
@@ -3007,7 +3060,7 @@ test('configured provider failure persists an unavailable preflight snapshot bef
   )
   await listener.close()
   await service.close()
-  const recovered = await openOriginTestApplication(databasePath)
+  const recovered = await openOriginTestApplicationForDatabase(databasePath)
   const recoveredListener = await recovered.listen()
   t.after(async () => {
     await recoveredListener.close()
@@ -3021,13 +3074,9 @@ test('configured provider failure persists an unavailable preflight snapshot bef
 })
 
 test('polar inspect fixture records deterministic guidance with acceptance available', async (t) => {
-  const service = await openOriginTestApplication(
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'polar' },
-  )
+  const service = await openOriginTestApplicationForDatabase(undefined, {
+    fixture: 'polar',
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
@@ -3070,17 +3119,14 @@ test('polar Acquire records only solved evidence, requires current in-tolerance 
       })
     },
   }
-  const unavailable = await openOriginTestApplication(
+  const unavailable = await openOriginTestApplicationForDatabase(
     ':memory:',
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'polar',
-      polarMeasurementProvider: {
+    { fixture: 'polar' },
+    Layer.mergeAll(
+      configuredPolarMeasurementProviderSelectionLayer({
         measure: () => Effect.fail('fixture provider unavailable'),
-      },
-    },
+      }),
+    ),
   )
   const unavailableListener = await unavailable.listen()
   const unavailableBase = `http://127.0.0.1:${unavailableListener.port}`
@@ -3106,12 +3152,10 @@ test('polar Acquire records only solved evidence, requires current in-tolerance 
   await unavailableListener.close()
   await unavailable.close()
 
-  let service = await openOriginTestApplication(
+  let service = await openOriginTestApplicationForDatabase(
     databasePath,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'polar', polarMeasurementProvider: provider },
+    { fixture: 'polar' },
+    Layer.mergeAll(configuredPolarMeasurementProviderSelectionLayer(provider)),
   )
   let listener = await service.listen()
   let base = `http://127.0.0.1:${listener.port}`
@@ -3183,7 +3227,7 @@ test('polar Acquire records only solved evidence, requires current in-tolerance 
   await listener.close()
   await service.close()
 
-  service = await openOriginTestApplication(databasePath)
+  service = await openOriginTestApplicationForDatabase(databasePath)
   listener = await service.listen()
   base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
@@ -3831,13 +3875,9 @@ test('expired control requests are removed before projection and grant', async (
 })
 
 test('Plan command preview responses preserve persisted notice and disruptive domain results', async (t) => {
-  const service = await openOriginTestApplication(
-    ':memory:',
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'plan-draft' },
-  )
+  const service = await openOriginTestApplicationForDatabase(':memory:', {
+    fixture: 'plan-draft',
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
@@ -4071,16 +4111,12 @@ async function nextEvent(
 
 test('Processing Project HTTP accepts explicit Project changes and exposes settled evidence', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'astro-stage-publication-'))
-  const service = await openOriginTestApplication(
+  const service = await openOriginTestApplicationForDatabase(
     join(root, 'state.sqlite'),
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'm27',
-      processWorkRoot: root,
-      processWorkAutoRun: false,
-    },
+    { fixture: 'm27' },
+    Layer.mergeAll(
+      originProcessWorkBehaviorLayer({ outputRoot: root, autoRun: false }),
+    ),
   )
   const listener = await service.listen()
   t.after(async () => {
@@ -4182,7 +4218,7 @@ test('fresh SQLite initialization creates the current V2 tables', async () => {
     mkdtempSync(join(tmpdir(), 'astro-fresh-schema-')),
     'state.sqlite',
   )
-  const service = await openOriginTestApplication(databasePath)
+  const service = await openOriginTestApplicationForDatabase(databasePath)
   assert.equal(
     databaseRow(
       CountRow,
@@ -5069,13 +5105,9 @@ test('library-published fixture projects one durable Download Eligible M27 asset
     mkdtempSync(join(tmpdir(), 'astro-library-published-fixture-')),
     'state.sqlite',
   )
-  const service = await openOriginTestApplication(
-    databasePath,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'library-published' },
-  )
+  const service = await openOriginTestApplicationForDatabase(databasePath, {
+    fixture: 'library-published',
+  })
   const listener = await service.listen()
   let firstClosed = false
   t.after(async () => {
@@ -5120,13 +5152,9 @@ test('library-published fixture projects one durable Download Eligible M27 asset
   await service.close()
   firstClosed = true
 
-  const recovered = await openOriginTestApplication(
-    databasePath,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'library-published' },
-  )
+  const recovered = await openOriginTestApplicationForDatabase(databasePath, {
+    fixture: 'library-published',
+  })
   const recoveredListener = await recovered.listen()
   t.after(async () => {
     await recoveredListener.close()
@@ -5183,13 +5211,9 @@ test('plan-draft fixture preserves UI-created fake definitions without run or ha
     mkdtempSync(join(tmpdir(), 'astro-plan-draft-fixture-')),
     'state.sqlite',
   )
-  const service = await openOriginTestApplication(
-    databasePath,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'plan-draft' },
-  )
+  const service = await openOriginTestApplicationForDatabase(databasePath, {
+    fixture: 'plan-draft',
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   const initial = await bootstrapSnapshot(`${base}/api/snapshot`)
@@ -5243,13 +5267,9 @@ test('plan-draft fixture preserves UI-created fake definitions without run or ha
   await listener.close()
   await service.close()
 
-  const recovered = await openOriginTestApplication(
-    databasePath,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'plan-draft' },
-  )
+  const recovered = await openOriginTestApplicationForDatabase(databasePath, {
+    fixture: 'plan-draft',
+  })
   t.after(() => recovered.close())
   const definition = JSON.parse(
     databaseRow(
@@ -5536,13 +5556,10 @@ test('serves the web bundle with route fallback while preserving API precedence'
   writeFileSync(join(assets, 'index-abcdefgh.css'), 'body{}')
   writeFileSync(join(root, 'outside.js'), 'outside')
   symlinkSync(join(root, 'outside.js'), join(assets, 'outside.js'))
-  const service = await openOriginTestApplication(
-    ':memory:',
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'm27', webDistPath },
-  )
+  const service = await openOriginTestApplicationForDatabase(':memory:', {
+    fixture: 'm27',
+    runtime: { webDistPath: webDistPath },
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
@@ -5596,16 +5613,10 @@ test('serves the web bundle with route fallback while preserving API precedence'
 })
 
 test('reports a missing web bundle without substituting an inline shell', async (t) => {
-  const service = await openOriginTestApplication(
-    ':memory:',
-    undefined,
-    undefined,
-    undefined,
-    {
-      fixture: 'm27',
-      webDistPath: join(tmpdir(), 'astro-web-bundle-missing'),
-    },
-  )
+  const service = await openOriginTestApplicationForDatabase(':memory:', {
+    fixture: 'm27',
+    runtime: { webDistPath: join(tmpdir(), 'astro-web-bundle-missing') },
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
@@ -5955,13 +5966,9 @@ test('simultaneous pause and stop accept exactly one Run transition', async (t) 
 })
 
 test('simultaneous Run mutation apply requests accept exactly one preview settlement', async (t) => {
-  const service = await openOriginTestApplication(
-    ':memory:',
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'plan-draft' },
-  )
+  const service = await openOriginTestApplicationForDatabase(':memory:', {
+    fixture: 'plan-draft',
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
@@ -6070,13 +6077,9 @@ test('canonical Plan commands persist draft readiness, immutable acceptance, ide
     mkdtempSync(join(tmpdir(), 'astro-canonical-plan-')),
     'state.sqlite',
   )
-  const service = await openOriginTestApplication(
-    databasePath,
-    undefined,
-    undefined,
-    undefined,
-    { fixture: 'plan-draft' },
-  )
+  const service = await openOriginTestApplicationForDatabase(databasePath, {
+    fixture: 'plan-draft',
+  })
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   const stream = await fetch(`${base}/api/events`)
@@ -6497,7 +6500,7 @@ test('canonical Observe pause survives restart and resumes the persisted fake ru
 })
 
 test('non-fixture startup projects unavailable Plan truth through canonical commands', async (t) => {
-  const service = await openOriginTestApplication(':memory:')
+  const service = await openOriginTestApplicationForDatabase(':memory:')
   const listener = await service.listen()
   const base = `http://127.0.0.1:${listener.port}`
   t.after(async () => {

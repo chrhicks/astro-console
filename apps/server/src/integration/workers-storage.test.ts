@@ -15,10 +15,10 @@ import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
 import { ConfigProvider, Effect, Schema } from 'effect'
 import {
-  openOriginTestApplication,
+  openOriginTestApplicationForDatabase,
   originTestDatabase,
 } from './origin-test-graph.ts'
-import type { AdmissionRequest } from '../auth/identity.ts'
+import type { AdmissionRequest, RequestAdmission } from '../auth/identity.ts'
 import { openAppOwnedDatabase } from '../persistence/database.ts'
 import { createPublisherWorker } from '../workers/publisher-worker.ts'
 import {
@@ -29,6 +29,8 @@ import {
 } from '../persistence/sqlite-resilience.ts'
 import { createR2Provider } from '../storage/r2-provider.ts'
 import { createR2DownloadGrantIssuer } from '../storage/r2-download-grant.ts'
+import type { DownloadGrantIssuer } from '../storage/r2-download-grant.ts'
+import { configuredLibraryDownloadGrantLayer } from '../services/library-representation-service.ts'
 import { createDownloadGrantService } from '../workers/download-grant-service.ts'
 import { isSqliteBusy } from '../workers/publisher-service.ts'
 import { ingestSourceAsset } from '../services/source-ingest.ts'
@@ -39,17 +41,23 @@ import {
 } from '../config/environment-config.ts'
 
 async function createFixtureService(
-  databasePath?: Parameters<typeof openOriginTestApplication>[0],
-  identityResolver?: Parameters<typeof openOriginTestApplication>[1],
-  unused?: Parameters<typeof openOriginTestApplication>[2],
-  downloadGrants?: Parameters<typeof openOriginTestApplication>[3],
+  databasePath = ':memory:',
+  identityResolver?: RequestAdmission,
+  downloadGrants?: {
+    readonly issuer: DownloadGrantIssuer
+    readonly now?: () => Date
+  },
 ) {
-  return await openOriginTestApplication(
+  return await openOriginTestApplicationForDatabase(
     databasePath,
-    identityResolver,
-    unused,
-    downloadGrants,
     { fixture: 'm27' },
+    downloadGrants === undefined
+      ? undefined
+      : configuredLibraryDownloadGrantLayer(
+          downloadGrants.issuer,
+          downloadGrants.now,
+        ),
+    identityResolver,
   )
 }
 
@@ -623,7 +631,7 @@ test('authorized Library downloads issue an Asset-ID grant and redirect without 
             capability: 'controlCapable' as const,
           }
         : undefined
-  const service = await createFixtureService(':memory:', admission, undefined, {
+  const service = await createFixtureService(':memory:', admission, {
     now: () => now,
     issuer: {
       issue: async (grant) => {

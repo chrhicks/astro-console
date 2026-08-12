@@ -10,7 +10,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { Effect, Schema } from 'effect'
+import { ConfigProvider, Effect, Layer, Schema } from 'effect'
 import {
   PlanIntent,
   ObserveIntent,
@@ -19,7 +19,7 @@ import {
   BootstrapHttpSuccessEnvelope,
 } from '@astro-console/protocol'
 import { RunExecutionContext } from '../services/run-domain.ts'
-import { openOriginTestApplication } from './origin-test-graph.ts'
+import { openOriginTestApplicationForDatabase } from './origin-test-graph.ts'
 import { openOriginDatabase } from '../persistence/database.ts'
 import {
   RunSqliteRepository,
@@ -41,6 +41,16 @@ import {
 import { createRunExecutorWorker } from '../workers/run-executor-worker.ts'
 import type { CameraProviderShape } from '../services/camera-command-service.ts'
 import { acquireSqliteRepository } from '../persistence/acquire-sqlite-repository.ts'
+import { configuredCameraProviderSelectionLayer } from '../services/acquire-command-service.ts'
+import { configuredReadOnlyPreflightProviderSelectionLayer } from '../services/preflight-command-service.ts'
+import {
+  configuredOriginCapturedFrameStorageLayer,
+  configuredOriginFrameInspectionStorageLayer,
+  configuredOriginRunExecutionLayer,
+  originTelemetryServicesLayer,
+} from '../app/origin-application-services.ts'
+import { createOriginTelemetry } from '../observability/origin-telemetry.ts'
+import { openOtlpTestCollector } from './otlp-test-collector.ts'
 
 const identity = {
   personId: 'owner-chicks',
@@ -1412,25 +1422,47 @@ test('camera-only execution remains eligible when an optional focuser is unavail
 })
 
 test('origin owns the scheduled executor pass and stops it with the service lifecycle', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'astro-executor-telemetry-'))
+  const originalsRoot = join(root, 'originals')
+  const previewsRoot = join(root, 'previews')
+  const collector = await openOtlpTestCollector()
+  const telemetry = createOriginTelemetry({
+    configProvider: ConfigProvider.fromUnknown({
+      OTEL_TRACES_EXPORTER: 'otlp',
+      OTEL_METRICS_EXPORTER: 'otlp',
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.url}/v1/traces`,
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: `${collector.url}/v1/metrics`,
+      OTEL_SERVICE_NAME: 'astro-console-executor-graph-test',
+      OTEL_BSP_SCHEDULE_DELAY: '60000',
+      OTEL_METRIC_EXPORT_INTERVAL: '60000',
+    }),
+  })
+  await telemetry.initialize()
+  let telemetryClosed = false
+  let collectorClosed = false
+  t.after(async () => {
+    if (!telemetryClosed) await telemetry.dispose()
+    if (!collectorClosed) await collector.close()
+  })
   let starts = 0
+  let imageReads = 0
+  let cameraState: 'exposing' | 'idle' = 'exposing'
   let observed!: () => void
   const observation = new Promise<void>((resolve) => {
     observed = resolve
   })
-  const service = await openOriginTestApplication(
+  const service = await openOriginTestApplicationForDatabase(
     ':memory:',
-    undefined,
-    undefined,
-    undefined,
     {
       fixture: 'plan-draft',
       simulation: {
         origin: 'http://127.0.0.1:32324',
         launchScenario: 'exposure-success',
       },
-      runExecutorProviderOrigin: 'http://127.0.0.1:32324',
-      runExecutionContext: context,
-      preflightProvider: {
+      runtime: { originalsRoot, previewRoot: previewsRoot },
+    },
+    Layer.mergeAll(
+      configuredReadOnlyPreflightProviderSelectionLayer({
         observe: () =>
           Effect.succeed({
             observedAt: '2026-08-08T18:00:00.000Z',
@@ -1445,8 +1477,8 @@ test('origin owns the scheduled executor pass and stops it with the service life
               },
             ],
           }),
-      },
-      cameraProvider: {
+      }),
+      configuredCameraProviderSelectionLayer({
         startExposure: () => {
           starts += 1
           return Effect.succeed({ _tag: 'Acknowledged' as const })
@@ -1456,11 +1488,25 @@ test('origin owns the scheduled executor pass and stops it with the service life
           observed()
           return Effect.succeed({
             observedAt: '2026-08-08T18:00:15.000Z',
-            cameraState: 'exposing',
+            cameraState,
           })
         },
-      },
-    },
+        readImageArray: () => {
+          imageReads += 1
+          return Effect.succeed({
+            bytes: imageBytes2x2(),
+            format: 'cameraRaw' as const,
+          })
+        },
+      }),
+      configuredOriginRunExecutionLayer(context, 'http://127.0.0.1:32324'),
+      configuredOriginCapturedFrameStorageLayer({ originalsRoot }),
+      configuredOriginFrameInspectionStorageLayer({
+        originalsRoot,
+        previewsRoot,
+      }),
+      originTelemetryServicesLayer(telemetry),
+    ),
   )
   const listener = await service.listen()
   t.after(async () => {
@@ -1570,9 +1616,25 @@ test('origin owns the scheduled executor pass and stops it with the service life
       ),
     ),
   ])
+  cameraState = 'idle'
+  for (let attempt = 0; attempt < 20 && imageReads === 0; attempt += 1)
+    await Effect.runPromise(Effect.sleep('100 millis'))
   assert.equal(starts, 1)
+  assert.equal(imageReads, 1)
   assert.equal((await snapshot()).activeRun._tag, 'Active')
   await listener.close()
   await service.close()
   assert.equal(starts, 1)
+  await telemetry.dispose()
+  telemetryClosed = true
+  await collector.close()
+  collectorClosed = true
+  const telemetryPayload = Buffer.concat(
+    collector.requests.map((request) => request.body),
+  ).toString('utf8')
+  assert.match(telemetryPayload, /RunExecutor\.work\.execute/)
+  assert.match(telemetryPayload, /FrameIntake\.materialize/)
+  assert.match(telemetryPayload, /FrameInspection\.inspect/)
+  assert.match(telemetryPayload, /SQLite\.executor\.work\.select/)
+  assert.match(telemetryPayload, /astro\.sqlite\.backlog/)
 })

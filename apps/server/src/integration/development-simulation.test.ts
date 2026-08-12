@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createServer } from 'node:http'
-import { ConfigProvider, Effect, Schema } from 'effect'
+import { ConfigProvider, Effect, Layer, Schema } from 'effect'
 import {
   DevelopmentSimulationControlFailure,
   DevelopmentSimulationProjection,
@@ -10,11 +10,14 @@ import {
 import { RunExecutionContext } from '../services/run-domain.ts'
 import {
   openOriginTestApplication,
+  openOriginTestApplicationForDatabase,
   originTestDatabase,
 } from './origin-test-graph.ts'
 import { originServerConfig } from '../config/environment-config.ts'
 import { developmentCaptureMetadata } from '../http/development-simulation.ts'
 import { createAlpacaSimulator } from '../simulator/alpaca-simulator.ts'
+import { configuredCameraProviderSelectionLayer } from '../services/acquire-command-service.ts'
+import { configuredOriginRunExecutionLayer } from '../app/origin-application-services.ts'
 
 const CountRow = Schema.Struct({ count: Schema.Int })
 
@@ -104,24 +107,16 @@ test('mismatched simulation provider origin cannot create real executor work', a
     initialScenario: 'exposure-success',
   })
   const simulatorListener = await simulator.listen()
-  const service = await openOriginTestApplication(
+  const service = await openOriginTestApplicationForDatabase(
     ':memory:',
-    undefined,
-    undefined,
-    undefined,
     {
       simulation: {
         origin: simulatorListener.origin,
         launchScenario: 'exposure-success',
       },
-      runExecutorProviderOrigin: 'http://127.0.0.1:1',
-      runExecutionContext: RunExecutionContext.make({
-        rigId: 'simulated-rig',
-        cameraDeviceId: 'sim-camera',
-        completionBehavior: 'hold',
-        unsafeBehavior: 'pauseAndPark',
-      }),
-      cameraProvider: {
+    },
+    Layer.mergeAll(
+      configuredCameraProviderSelectionLayer({
         startExposure: () => {
           starts += 1
           return Effect.succeed({ _tag: 'Acknowledged' as const })
@@ -132,8 +127,17 @@ test('mismatched simulation provider origin cannot create real executor work', a
             observedAt: '2026-08-08T18:00:00.000Z',
             cameraState: 'idle',
           }),
-      },
-    },
+      }),
+      configuredOriginRunExecutionLayer(
+        RunExecutionContext.make({
+          rigId: 'simulated-rig',
+          cameraDeviceId: 'sim-camera',
+          completionBehavior: 'hold',
+          unsafeBehavior: 'pauseAndPark',
+        }),
+        'http://127.0.0.1:1',
+      ),
+    ),
   )
   const listener = await service.listen()
   t.after(async () => {
@@ -191,18 +195,12 @@ test('origin projects and controls loopback simulation without exposing its cont
     initialScenario: 'exposure-success',
   })
   const simulatorListener = await simulator.listen()
-  const service = await openOriginTestApplication(
-    ':memory:',
-    undefined,
-    undefined,
-    undefined,
-    {
-      simulation: {
-        origin: simulatorListener.origin,
-        launchScenario: 'exposure-success',
-      },
+  const service = await openOriginTestApplicationForDatabase(':memory:', {
+    simulation: {
+      origin: simulatorListener.origin,
+      launchScenario: 'exposure-success',
     },
-  )
+  })
   const listener = await service.listen()
   const origin = `http://127.0.0.1:${listener.port}`
   t.after(async () => {
@@ -303,22 +301,21 @@ test('origin projects and controls loopback simulation without exposing its cont
 test('read-only clients can inspect but cannot control development simulation', async (t) => {
   const simulator = createAlpacaSimulator({ corpusRoot: '/unused' })
   const simulatorListener = await simulator.listen()
-  const service = await openOriginTestApplication(
+  const service = await openOriginTestApplicationForDatabase(
     ':memory:',
-    () => ({
-      personId: 'owner-chicks',
-      clientId: 'phone-monitor',
-      capability: 'readOnly',
-      role: 'owner',
-    }),
-    undefined,
-    undefined,
     {
       simulation: {
         origin: simulatorListener.origin,
         launchScenario: 'ready-rig',
       },
     },
+    undefined,
+    () => ({
+      personId: 'owner-chicks',
+      clientId: 'phone-monitor',
+      capability: 'readOnly',
+      role: 'owner',
+    }),
   )
   const listener = await service.listen()
   const origin = `http://127.0.0.1:${listener.port}`
@@ -361,18 +358,12 @@ test('origin keeps explicit simulation context when the simulator is malformed o
       resolve(address.port)
     })
   })
-  const service = await openOriginTestApplication(
-    ':memory:',
-    undefined,
-    undefined,
-    undefined,
-    {
-      simulation: {
-        origin: `http://127.0.0.1:${malformedPort}`,
-        launchScenario: 'exposure-success',
-      },
+  const service = await openOriginTestApplicationForDatabase(':memory:', {
+    simulation: {
+      origin: `http://127.0.0.1:${malformedPort}`,
+      launchScenario: 'exposure-success',
     },
-  )
+  })
   const listener = await service.listen()
   const origin = `http://127.0.0.1:${listener.port}`
   t.after(async () => {

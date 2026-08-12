@@ -30,6 +30,32 @@ import {
 } from './origin-admission.ts'
 import { makeProductionOriginApplication } from './origin-application.ts'
 import { listenOriginHttp } from '../http/effect-origin-http.ts'
+import {
+  absentCameraProviderSelectionLayer,
+  absentPolarMeasurementProviderSelectionLayer,
+  absentTargetAcquisitionProviderSelectionLayer,
+  configuredCameraProviderSelectionLayer,
+} from '../services/acquire-command-service.ts'
+import {
+  absentReadOnlyPreflightProviderSelectionLayer,
+  configuredReadOnlyPreflightProviderSelectionLayer,
+} from '../services/preflight-command-service.ts'
+import {
+  absentLibraryDownloadGrantLayer,
+  configuredLibraryDownloadGrantLayer,
+  configuredLibraryRepresentationStorageLayer,
+} from '../services/library-representation-service.ts'
+import {
+  configuredOriginCapturedFrameStorageLayer,
+  configuredOriginConfiguredTargetProviderLayer,
+  configuredOriginFrameInspectionStorageLayer,
+  configuredOriginPlateSolveWorkerLayer,
+  configuredOriginRunExecutionLayer,
+  absentOriginConfiguredTargetProviderLayer,
+  absentOriginRunExecutionLayer,
+  originProcessWorkBehaviorLayer,
+  originTelemetryServicesLayer,
+} from './origin-application-services.ts'
 
 export type OriginRuntimeAdapters = {
   readonly preflightProvider: (
@@ -112,73 +138,90 @@ export const originRuntimeLayer = (
           ? undefined
           : adapters.cameraProvider(preflightConfig)
       const issuer = adapters.downloadGrantIssuer(config.downloadGrant)
+      const runContext =
+        cameraProvider === undefined ||
+        preflightConfig?.devices.camera?.uniqueId === undefined
+          ? undefined
+          : RunExecutionContext.make({
+              rigId: preflightConfig.rigId,
+              cameraDeviceId: preflightConfig.devices.camera.uniqueId,
+              ...(preflightConfig.devices.telescope?.uniqueId === undefined
+                ? {}
+                : {
+                    mountDeviceId: preflightConfig.devices.telescope.uniqueId,
+                    ...(preflightConfig.site === undefined
+                      ? config.simulation === undefined
+                        ? {}
+                        : {
+                            latitudeDegrees: 39.755,
+                            longitudeDegrees: -74.2677777778,
+                            elevationMeters: 0,
+                          }
+                      : preflightConfig.site),
+                  }),
+              completionBehavior: 'hold',
+              unsafeBehavior: 'pauseAndPark',
+            })
+      const configuredTarget =
+        config.simulation === undefined &&
+        preflightConfig?.site !== undefined &&
+        preflightConfig.devices.camera?.uniqueId !== undefined &&
+        preflightConfig.devices.telescope?.uniqueId !== undefined
+          ? preflightConfig
+          : undefined
+      const applicationServices = Layer.mergeAll(
+        preflightProvider === undefined
+          ? absentReadOnlyPreflightProviderSelectionLayer
+          : configuredReadOnlyPreflightProviderSelectionLayer(
+              preflightProvider,
+            ),
+        cameraProvider === undefined
+          ? absentCameraProviderSelectionLayer
+          : configuredCameraProviderSelectionLayer(cameraProvider),
+        absentPolarMeasurementProviderSelectionLayer,
+        absentTargetAcquisitionProviderSelectionLayer,
+        configuredOriginCapturedFrameStorageLayer({
+          originalsRoot: config.runtime.originalsRoot,
+        }),
+        configuredOriginFrameInspectionStorageLayer({
+          originalsRoot: config.runtime.originalsRoot,
+          previewsRoot: config.runtime.previewRoot,
+        }),
+        configuredOriginPlateSolveWorkerLayer({
+          originalsRoot: config.runtime.originalsRoot,
+          executable: config.plateSolve.executable,
+          indexesRoot: config.plateSolve.indexesRoot,
+          timeoutMs: config.plateSolve.timeoutMs,
+          solverVersion: config.plateSolve.solverVersion,
+          scaleLowDeg: config.plateSolve.scaleLowDeg,
+          scaleHighDeg: config.plateSolve.scaleHighDeg,
+          searchRadiusDeg: config.plateSolve.searchRadiusDeg,
+        }),
+        configuredTarget === undefined
+          ? absentOriginConfiguredTargetProviderLayer
+          : configuredOriginConfiguredTargetProviderLayer(configuredTarget),
+        runContext === undefined || preflightConfig === undefined
+          ? absentOriginRunExecutionLayer
+          : configuredOriginRunExecutionLayer(
+              runContext,
+              new URL(`http://${preflightConfig.host}:${preflightConfig.port}`)
+                .origin,
+            ),
+        configuredLibraryRepresentationStorageLayer({
+          originalsRoot: config.runtime.originalsRoot,
+          previewsRoot: config.runtime.previewRoot,
+        }),
+        issuer === undefined
+          ? absentLibraryDownloadGrantLayer
+          : configuredLibraryDownloadGrantLayer(issuer),
+        originProcessWorkBehaviorLayer({ autoRun: true }),
+        originTelemetryServicesLayer(telemetry),
+      )
       const application = yield* tracedStartup(
         'service.create',
-        makeProductionOriginApplication(config, {
-          ...(preflightProvider === undefined ? {} : { preflightProvider }),
-          ...(cameraProvider === undefined ? {} : { cameraProvider }),
-          ...(cameraProvider === undefined ||
-          preflightConfig?.devices.camera?.uniqueId === undefined
-            ? {}
-            : {
-                runExecutorProviderOrigin: new URL(
-                  `http://${preflightConfig.host}:${preflightConfig.port}`,
-                ).origin,
-                runExecutionContext: RunExecutionContext.make({
-                  rigId: preflightConfig.rigId,
-                  cameraDeviceId: preflightConfig.devices.camera.uniqueId,
-                  ...(preflightConfig.devices.telescope?.uniqueId === undefined
-                    ? {}
-                    : {
-                        mountDeviceId:
-                          preflightConfig.devices.telescope.uniqueId,
-                        ...(preflightConfig.site === undefined
-                          ? config.simulation === undefined
-                            ? {}
-                            : {
-                                latitudeDegrees: 39.755,
-                                longitudeDegrees: -74.2677777778,
-                                elevationMeters: 0,
-                              }
-                          : preflightConfig.site),
-                      }),
-                  completionBehavior: 'hold',
-                  unsafeBehavior: 'pauseAndPark',
-                }),
-              }),
-          ...(issuer === undefined ? {} : { downloadGrantIssuer: issuer }),
-          observeProjectionPublication: (event) =>
-            telemetry.runSync(
-              recordOperationalEvent({
-                scope: 'projection',
-                operation: `sse.${event}`,
-                outcome: event === 'writeFailure' ? 'unavailable' : 'success',
-              }),
-            ),
-          capturedFrameStorage: {
-            originalsRoot: config.runtime.originalsRoot,
-          },
-          frameInspectionStorage: {
-            originalsRoot: config.runtime.originalsRoot,
-            previewsRoot: config.runtime.previewRoot,
-          },
-          plateSolveWorker: {
-            originalsRoot: config.runtime.originalsRoot,
-            executable: config.plateSolve.executable,
-            indexesRoot: config.plateSolve.indexesRoot,
-            timeoutMs: config.plateSolve.timeoutMs,
-            solverVersion: config.plateSolve.solverVersion,
-            scaleLowDeg: config.plateSolve.scaleLowDeg,
-            scaleHighDeg: config.plateSolve.scaleHighDeg,
-            searchRadiusDeg: config.plateSolve.searchRadiusDeg,
-          },
-          ...(config.simulation === undefined &&
-          preflightConfig?.site !== undefined &&
-          preflightConfig.devices.camera?.uniqueId !== undefined &&
-          preflightConfig.devices.telescope?.uniqueId !== undefined
-            ? { configuredTargetProvider: preflightConfig }
-            : {}),
-        }),
+        makeProductionOriginApplication(config).pipe(
+          Effect.provide(applicationServices),
+        ),
       ).pipe(Effect.mapError((cause) => failure('create', cause)))
       const scope = yield* Effect.scope
       let listening: Promise<BoundOriginRuntime> | undefined
