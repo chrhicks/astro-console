@@ -99,6 +99,5 @@ runtime refactors do not change the visual authority.
 ## Promotion State
 
 Plan, Observe, Library, Library detail, and Process routes render Nightbook.
-The former presentation has been removed. Existing `?ui=beta` and `?ui=legacy`
-links remain compatible and resolve to Nightbook; generated links omit the
-presentation parameter. The root route `/` maps to Plan.
+The former presentation has been removed. Normal workspace routes render
+Nightbook directly. The root route `/` maps to Plan.

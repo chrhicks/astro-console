@@ -332,7 +332,7 @@ export function App() {
   }
   const selectNightbookLibraryAsset = (assetId: typeof AssetId.Type) => {
     const path = `/library/assets/${encodeURIComponent(assetId)}`
-    const href = nightbookHref(path, location.search)
+    const href = nightbookHref(path)
     const url = new URL(href, location.origin)
     const next = parseRoute(url.pathname, url.search)
     if (next.kind !== 'asset') return
@@ -342,7 +342,6 @@ export function App() {
   const openNightbookProcess = (assetId: typeof AssetId.Type) => {
     const href = nightbookHref(
       `/process?sourceAssetId=${encodeURIComponent(assetId)}`,
-      location.search,
     )
     const url = new URL(href, location.origin)
     const next = parseRoute(url.pathname, url.search)

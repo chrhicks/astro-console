@@ -47,8 +47,7 @@ Phase 5 work is owner-observed live provider and physical outdoor proof.
 The official presentation is the Nightbook React demo and `@nightbook/ui`
 package in the external Nightbook workspace. Astro Console renders that
 presentation for Plan, Observe, Library, and Process. The former presentation
-has been removed. Existing `?ui=beta` and `?ui=legacy` links remain compatible,
-but generated links omit the presentation parameter.
+has been removed. Normal workspace routes render Nightbook directly.
 
 Process now has one explicit, project-ID-addressed Processing Project
 lifecycle. Its deep service interface owns Project authority, revisions,

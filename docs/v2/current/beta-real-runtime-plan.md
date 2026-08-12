@@ -98,7 +98,7 @@ representations.
 - Add the unfinished-session restart-to-resume journey.
 - Reconcile the existing Phase 5 task ledger with the implementation already
   present.
-- Keep `?ui=beta` as the integration route.
+- Use the normal workspace routes for integration.
 
 ### 2. Real-frame simulator foundation
 
@@ -289,13 +289,13 @@ not the configured target command path.
 Completed 2026-08-09 against the local M27 service fixtures. Desktop Review
 persists a decision, 1–5 rating, and note through the existing revision and
 idempotency guard. Compare loads only typed peer detail and keeps selection in
-browser state. `/library?ui=beta` is a service-page catalog grouped by exact
+browser state. `/library` is a service-page catalog grouped by exact
 `comparisonGroupId`, with only the supported Role, Sort, cursor, and
 catalog-change controls. Catalog summaries expose review decision and optional
 rating without exposing the note. Availability & delivery uses typed
 representation, Download, and Process eligibility; the published fixture is
 idempotent and invents no expiry or transfer progress. `Open in Process`
-preserves `?ui=beta` and resolves the exact service source. Phone remains
+resolves the exact service source. Phone remains
 read-only. Automated proof passes contracts 187/187, server 157/157, and web
 134/134. Final Designer review passed wide, compact, and 390 px, including the
 long availability-state overflow correction. This closes accepted Item 2 with
@@ -406,8 +406,7 @@ workflow and subsequent route promotion are now complete locally.
 
 Completed locally August 10, 2026. Plan, Observe, Library, Library detail, and
 Process routes render Nightbook. The former presentation has been removed.
-Existing `?ui=beta` and `?ui=legacy` links stay compatible and resolve to
-Nightbook; generated links omit the presentation parameter.
+Normal workspace routes render Nightbook directly.
 The final audit corrected exact Library-to-Process handoff precedence,
 completed Observe evidence, exact final Library operation IDs, compact Develop
 containment, and promoted-shell wording. Functional and Designer proof passed

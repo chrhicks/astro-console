@@ -18,15 +18,6 @@ test('routes parse stable IDs and build escaped URLs', () => {
     kind: 'process-source',
     sourceAssetId: 'asset/one',
   })
-  assert.deepEqual(parseRoute('/process', '?ui=beta'), {
-    kind: 'workspace',
-    workspace: 'process',
-  })
-  assert.deepEqual(parseRoute('/process', '?ui=legacy'), {
-    kind: 'workspace',
-    workspace: 'process',
-  })
-
   const assetRoute = parseRoute('/library/assets/asset%2Fone')
   if (assetRoute.kind !== 'asset') assert.fail('Expected an asset route')
   assert.equal(routePath(assetRoute), '/library/assets/asset%2Fone')

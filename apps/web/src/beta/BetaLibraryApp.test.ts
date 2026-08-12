@@ -453,7 +453,6 @@ test('phone catalog is useful read-only service evidence with navigation only', 
   assert.match(markup, /☆ Not rated/)
   assert.match(markup, /Rejected/)
   assert.match(markup, /Revision 1/)
-  assert.doesNotMatch(markup, /\?ui=/)
   assert.doesNotMatch(markup, /<button|<input|<select|<textarea/)
 })
 

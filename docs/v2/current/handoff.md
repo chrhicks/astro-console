@@ -14,9 +14,8 @@ owner-observed outdoor half remains open.
 
 Nightbook is the only presentation for Plan, Observe, Library, Library detail,
 and Process. The former presentation and its client-only command paths have
-been removed. Existing `?ui=beta` and `?ui=legacy` links remain compatible and
-resolve to Nightbook; generated links omit the presentation parameter. The
-root route `/` maps to Plan.
+been removed. Normal workspace routes render Nightbook directly, and the root
+route `/` maps to Plan.
 
 ## UI Direction
 
@@ -142,7 +141,7 @@ simulator run.
 Accepted follow-on Item 2 is complete. The beta Library now has a service-page
 catalog, revision-guarded decision, 1–5 rating and note, browser-only peer
 comparison from loaded details, exact representation and action eligibility,
-and a typed `Open in Process` handoff that preserves `?ui=beta`. Catalog
+and a typed `Open in Process` handoff that resolves the exact source. Catalog
 summaries expose only the review decision and optional rating; notes remain in
 asset detail. The published fixture is idempotent and invents no grant or
 transfer facts. Long availability states wrap inside compact catalog cards,
