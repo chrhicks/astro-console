@@ -125,11 +125,7 @@ export function App() {
     | undefined
   >()
   const [submitObserve, setSubmitObserve] = useState<
-    | ((
-        action: ObserveAction,
-        key: typeof IdempotencyKey.Type,
-      ) => Promise<ObserveCommandSubmission>)
-    | undefined
+    ((action: ObserveAction) => Promise<ObserveCommandSubmission>) | undefined
   >()
   const [submitControl, setSubmitControl] = useState<
     ((action: ControlAction) => Promise<CommandSubmission>) | undefined
@@ -210,14 +206,12 @@ export function App() {
         )
       },
     )
-    setSubmitObserve(
-      () => async (action: ObserveAction, key: typeof IdempotencyKey.Type) => {
-        return foldWorkspaceSubmission(
-          await submitWorkspace({ _tag: 'Observe', action, key }),
-          { Observe: ({ result }) => result },
-        )
-      },
-    )
+    setSubmitObserve(() => async (action: ObserveAction) => {
+      return foldWorkspaceSubmission(
+        await submitWorkspace({ _tag: 'Observe', action }),
+        { Observe: ({ result }) => result },
+      )
+    })
     setSubmitControl(() => async (action: ControlAction) => {
       return foldWorkspaceSubmission(
         await submitWorkspace({ _tag: 'Control', action }),

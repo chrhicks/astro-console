@@ -142,10 +142,7 @@ export type NightbookWorkspaceIntent = Data.TaggedEnum<{
     readonly action: PlanAction
     readonly key: typeof IdempotencyKey.Type
   }
-  Observe: {
-    readonly action: ObserveAction
-    readonly key: typeof IdempotencyKey.Type
-  }
+  Observe: { readonly action: ObserveAction }
   RefreshPreflight: { readonly _never?: never }
   Acquire: { readonly action: AcquireAction }
   SelectComparisonAsset: {
@@ -230,7 +227,6 @@ export interface NightbookWorkspaceRemoteShape {
   ) => Effect.Effect<PlanCommandSubmission>
   readonly observe: (
     action: ObserveAction,
-    key: typeof IdempotencyKey.Type,
   ) => Effect.Effect<ObserveCommandSubmission>
   readonly refreshPreflight: () => Effect.Effect<PreflightRefreshSubmission>
   readonly acquire: (
@@ -829,9 +825,9 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
                 NightbookWorkspaceSubmission.Plan({ result }),
               ),
             ),
-        Observe: ({ action, key }) =>
+        Observe: ({ action }) =>
           remote
-            .observe(action, key)
+            .observe(action)
             .pipe(
               Effect.map((result) =>
                 NightbookWorkspaceSubmission.Observe({ result }),

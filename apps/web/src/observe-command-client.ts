@@ -48,7 +48,6 @@ export class ObserveCommandTransport extends Context.Service<
 export interface ObserveCommandClientShape {
   readonly submit: (
     action: ObserveAction,
-    idempotencyKey: typeof IdempotencyKey.Type,
   ) => Effect.Effect<ObserveCommandSubmission>
 }
 
@@ -63,10 +62,7 @@ export const layer = Layer.effect(
     const bootstrap = yield* BootstrapClient
     const transport = yield* ObserveCommandTransport
     const submit = Effect.fn('ObserveCommandClient.submit')(
-      function* (
-        action: ObserveAction,
-        idempotencyKey: typeof IdempotencyKey.Type,
-      ) {
+      function* (action: ObserveAction) {
         const state = yield* bootstrap.read()
         if (
           !BootstrapClientState.$is('Current')(state) ||
@@ -79,6 +75,9 @@ export const layer = Layer.effect(
           return unavailable(
             'This action is not available in the current Observe projection.',
           )
+        const idempotencyKey = yield* Effect.sync(() =>
+          IdempotencyKey.make(crypto.randomUUID()),
+        )
         const request = yield* Schema.decodeUnknownEffect(
           ObserveCommandRequest,
         )({
