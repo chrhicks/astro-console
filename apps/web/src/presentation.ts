@@ -153,6 +153,7 @@ export type ObserveView = {
 }
 export type Projection = {
   snapshotVersion: number
+  libraryProcessMutation: { allowed: true } | { allowed: false; reason: string }
   shell: ShellView
   plan: PlanView
   observe: ObserveView

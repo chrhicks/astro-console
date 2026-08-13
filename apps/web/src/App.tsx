@@ -485,34 +485,38 @@ export function App() {
           {...(libraryDetail.state === undefined
             ? {}
             : { detailState: libraryDetail.state })}
-          {...(projection.shell.readOnly
+          {...(!projection.libraryProcessMutation.allowed
             ? {}
             : { onReview: reviewLibraryAsset })}
           comparison={comparison}
           onSelectComparisonAsset={selectComparisonAsset}
           onOpenProcess={openNightbookProcess}
           processProjects={processWorkspace.projects}
-          onCreateProject={createProject}
-          onAddProjectSources={async (
-            projectId,
-            expectedProjectRevision,
-            selection,
-          ) => {
-            const project = foldWorkspaceSubmission(
-              await submitWorkspace({
-                _tag: 'AddProjectSources',
-                projectId,
-                expectedProjectRevision,
-                selection,
-              }),
-              { Project: ({ project }) => project },
-            )
-            location.assign(
-              nightbookHref(
-                `/process/projects/${encodeURIComponent(project.projectId)}`,
-              ),
-            )
-          }}
+          {...(!projection.libraryProcessMutation.allowed
+            ? {}
+            : {
+                onCreateProject: createProject,
+                onAddProjectSources: async (
+                  projectId,
+                  expectedProjectRevision,
+                  selection,
+                ) => {
+                  const project = foldWorkspaceSubmission(
+                    await submitWorkspace({
+                      _tag: 'AddProjectSources',
+                      projectId,
+                      expectedProjectRevision,
+                      selection,
+                    }),
+                    { Project: ({ project }) => project },
+                  )
+                  location.assign(
+                    nightbookHref(
+                      `/process/projects/${encodeURIComponent(project.projectId)}`,
+                    ),
+                  )
+                },
+              })}
         />
       </Suspense>
     )
@@ -542,7 +546,9 @@ export function App() {
             ? {}
             : { sourceHandoffState: processSource.state })}
           process={processWorkspace}
-          onCreateProject={createProject}
+          {...(!projection.libraryProcessMutation.allowed
+            ? {}
+            : { onCreateProject: createProject })}
           onChangeProject={async (project, intent) => {
             foldWorkspaceSubmission(
               await submitWorkspace({

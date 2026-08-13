@@ -95,6 +95,7 @@ function projectSnapshot(
   }
   return {
     snapshotVersion: snapshot.snapshotVersion,
+    libraryProcessMutation: libraryProcessMutation(snapshot, freshness),
     shell,
     plan: plan(snapshot, freshness, reason),
     observe: observe(
@@ -183,6 +184,10 @@ function readinessTone(
 function unavailableProjection(reason: string): Projection {
   return {
     snapshotVersion: 0,
+    libraryProcessMutation: {
+      allowed: false,
+      reason: `Current service truth is unavailable. ${reason}`,
+    },
     shell: {
       service: 'Service unavailable',
       environment: 'Authoritative projection',
@@ -240,6 +245,30 @@ function unavailableProjection(reason: string): Projection {
       lifecycle: lifecycle,
     },
   }
+}
+
+function libraryProcessMutation(
+  snapshot: BootstrapSnapshot,
+  freshness: 'current' | 'stale' | 'reconnecting',
+): Projection['libraryProcessMutation'] {
+  if (freshness !== 'current')
+    return {
+      allowed: false,
+      reason:
+        'Current service truth is required for Library and Process changes.',
+    }
+  if (snapshot.membership.role !== 'owner')
+    return {
+      allowed: false,
+      reason: 'Owner membership is required for Library and Process changes.',
+    }
+  if (snapshot.membership.capability !== 'controlCapable')
+    return {
+      allowed: false,
+      reason:
+        'A mutation-capable desktop is required for Library and Process changes.',
+    }
+  return { allowed: true }
 }
 
 const lifecycle = [

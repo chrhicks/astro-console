@@ -791,14 +791,14 @@ function ReviewEvidence({
 function ReviewDecision({
   detail,
   page,
-  readOnly,
+  mutationAuthority,
   onSelectAsset,
   onReview,
   onOpenProcess,
 }: {
   detail: LibraryAssetDetail
   page: LibraryWorkspaceProps['page']
-  readOnly: boolean
+  mutationAuthority: Projection['libraryProcessMutation']
   onSelectAsset: LibraryWorkspaceProps['onSelectAsset']
   onReview?: LibraryWorkspaceProps['onReview']
   onOpenProcess?: LibraryWorkspaceProps['onOpenProcess']
@@ -809,6 +809,7 @@ function ReviewDecision({
   const [result, setResult] = useState<string>()
   const [rating, setRating] = useState(detail.review?.rating ?? 0)
   const [annotation, setAnnotation] = useState(detail.review?.annotation ?? '')
+  const readOnly = !mutationAuthority.allowed
   useEffect(() => {
     setPending(undefined)
     setResult(undefined)
@@ -845,7 +846,7 @@ function ReviewDecision({
     tone: 'primary',
     disabled: readOnly || !onReview || pending !== undefined,
     description: readOnly
-      ? 'Desktop control is required.'
+      ? mutationAuthority.reason
       : 'Save this review decision; the original remains unchanged.',
     onSelect: () => review('accepted'),
   }
@@ -921,7 +922,7 @@ function ReviewDecision({
         </PanelBody>
       </Panel>
       <ActionPanel
-        eyebrow={readOnly ? 'Review · viewer' : 'Review · controller'}
+        eyebrow={readOnly ? 'Review · protected' : 'Review · owner desktop'}
         title={titleCase(decision)}
         description={
           <StatusIndicator
@@ -968,7 +969,7 @@ function ReviewTab({
       <ReviewDecision
         detail={detail}
         page={page}
-        readOnly={projection.shell.readOnly}
+        mutationAuthority={projection.libraryProcessMutation}
         onSelectAsset={onSelectAsset}
         onReview={onReview}
         onOpenProcess={onOpenProcess}
@@ -1582,22 +1583,16 @@ export function LibraryWorkspace(props: LibraryWorkspaceProps) {
     update(next)
   }
   const disabled =
-    phone ||
-    props.projection.shell.membership !== 'Owner member' ||
-    props.projection.shell.control.readOnly ||
-    pending
+    phone || !props.projection.libraryProcessMutation.allowed || pending
   const submitDisabled =
     disabled ||
     selectedAssetIds.size + selectedCaptureSetIds.size === 0 ||
     (destination === 'new' && projectName.trim() === '')
-  const denial =
-    props.projection.shell.membership !== 'Owner member'
-      ? 'Owner membership is required for Project intake.'
-      : props.projection.shell.control.readOnly
-        ? 'Project intake requires a mutation-capable desktop.'
-        : selectedAssetIds.size + selectedCaptureSetIds.size === 0
-          ? 'Select at least one Asset or Capture Set.'
-          : undefined
+  const denial = !props.projection.libraryProcessMutation.allowed
+    ? props.projection.libraryProcessMutation.reason
+    : selectedAssetIds.size + selectedCaptureSetIds.size === 0
+      ? 'Select at least one Asset or Capture Set.'
+      : undefined
   const intake: LibraryIntake = {
     selectedAssetIds,
     selectedCaptureSetIds,
