@@ -12,6 +12,9 @@ import {
   LibraryQueryId,
   ObserveCommandRequest,
   OpenedProcessingProject,
+  PlanCommandRequest,
+  PlanId,
+  PlanRevision,
   ProcessingProjectEvidence,
   ProcessingProjectId,
   ProcessingProjectRevision,
@@ -48,6 +51,13 @@ import {
   layer as observeCommandClientLayer,
   type ObserveAction,
 } from './observe-command-client'
+import {
+  PlanCommandClient,
+  PlanCommandSubmission,
+  PlanCommandTransport,
+  PlanCommandTransportFailure,
+  layer as planCommandClientLayer,
+} from './plan-command-client'
 import type { CreateProcessingProjectRequest } from './process-client'
 
 const query = (id: string) =>
@@ -199,6 +209,48 @@ const makeRuntime = (remote: NightbookWorkspaceRemoteShape) =>
       ),
     ),
   )
+
+const makeComposedPlanRuntime = (
+  state: BootstrapClientState,
+  transport: (
+    body: unknown,
+  ) => Effect.Effect<
+    { readonly status: number; readonly body: unknown },
+    PlanCommandTransportFailure
+  >,
+) => {
+  const bootstrap = BootstrapClient.of({
+    read: () => Effect.succeed(state),
+    refresh: () => Effect.void,
+    states: Stream.make(state),
+  })
+  const bootstrapLayer = Layer.succeed(BootstrapClient, bootstrap)
+  const planLayer = planCommandClientLayer.pipe(
+    Layer.provide(bootstrapLayer),
+    Layer.provide(
+      Layer.succeed(
+        PlanCommandTransport,
+        PlanCommandTransport.of({ submit: transport }),
+      ),
+    ),
+  )
+  const remoteLayer = Layer.effect(
+    NightbookWorkspaceRemote,
+    Effect.gen(function* () {
+      const plan = yield* PlanCommandClient
+      return NightbookWorkspaceRemote.of(
+        makeRemote({
+          states: bootstrap.states,
+          refresh: bootstrap.refresh,
+          plan: plan.submit,
+        }),
+      )
+    }),
+  ).pipe(Layer.provide(planLayer))
+  return ManagedRuntime.make(
+    nightbookWorkspaceRuntimeLayer.pipe(Layer.provide(remoteLayer)),
+  )
+}
 
 const makeComposedObserveRuntime = (
   state: BootstrapClientState,
@@ -372,6 +424,182 @@ test('preserves rejected and unavailable Shared Control outcomes without replay'
     assert.equal(calls, 1)
     await runtime.dispose()
   }
+})
+
+test('composes semantic Plan acceptance with current revisions and one write without optimistic state', async () => {
+  const bootstrap = BootstrapClientState.Current({
+    snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)({
+      ...bootstrapFixtures.fresh,
+      control: { revision: 23, state: 'held', holderClientId: 'desktop-owner' },
+      plan: {
+        planId: PlanId.make('plan-composed'),
+        revision: PlanRevision.make(17),
+        readiness: 'ready',
+        readinessSummary: 'Ready.',
+        limitations: [],
+        sequences: [
+          {
+            sequenceId: 'seq-composed',
+            window: {
+              startsAt: '2026-08-02T20:00:00Z',
+              endsAt: '2026-08-02T21:00:00Z',
+              usableMinutes: 60,
+              peakAltitudeDeg: 60,
+              horizonClearanceDeg: 20,
+            },
+            horizon: 'clear',
+            storage: 'available',
+            viability: 'viable',
+            definition: {
+              sequenceId: 'seq-composed',
+              targetName: 'M27',
+              acquisitionMode: 'cameraOnly',
+              rightAscensionHours: 19.9934,
+              declinationDegrees: 22.7212,
+              exposureSeconds: 15,
+              frameCount: 1,
+              binning: 1,
+              minimumAltitudeDegrees: 25,
+              horizonClearanceDegrees: 5,
+              recenterThresholdArcsec: 30,
+              maxSolveAttempts: 3,
+              maxCaptureRetries: 2,
+              acquireFailure: 'pause',
+              captureFailure: 'retry',
+              estimatedDurationSeconds: 15,
+              estimatedStorageBytes: 1000,
+              priority: 0,
+            },
+          },
+        ],
+        actions: {
+          saveDraft: { _tag: 'Eligible' },
+          acceptRunDefinition: { _tag: 'Eligible' },
+          startAcceptedRun: {
+            _tag: 'Ineligible',
+            reason: 'acceptedDefinitionRequired',
+          },
+          previewRunMutation: {
+            _tag: 'Ineligible',
+            reason: 'activeRunRequired',
+          },
+          applyRunMutation: {
+            _tag: 'Ineligible',
+            reason: 'activeRunRequired',
+          },
+          approveDisruptiveRunMutation: {
+            _tag: 'Ineligible',
+            reason: 'activeRunRequired',
+          },
+        },
+      },
+    }),
+  })
+  const requests: Array<typeof PlanCommandRequest.Type> = []
+  const runtime = makeComposedPlanRuntime(bootstrap, (body) => {
+    requests.push(Schema.decodeUnknownSync(PlanCommandRequest)(body))
+    return Effect.succeed({
+      status: 202,
+      body: {
+        _tag: 'Accepted',
+        result: { _tag: 'RunDefinitionAccepted' },
+        snapshot: bootstrap.snapshot,
+      },
+    })
+  })
+  const before = await waitFor(runtime, (state) => state.projectionReceived)
+
+  const result = await submit(runtime, {
+    _tag: 'Plan',
+    action: { _tag: 'AcceptRunDefinition' },
+  })
+  const after = await waitFor(runtime, (state) => state.projectionReceived)
+  await runtime.dispose()
+
+  assert.equal(result._tag, 'Plan')
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0]?.intent._tag, 'AcceptRunDefinition')
+  if (requests[0]?.intent._tag === 'AcceptRunDefinition') {
+    assert.equal(requests[0].intent.expectedPlanRevision, 17)
+    assert.equal(requests[0].intent.expectedLeaseRevision, 23)
+    assert.ok(requests[0].intent.idempotencyKey.length > 0)
+  }
+  assert.deepEqual(after.projection.plan, before.projection.plan)
+})
+
+test('stops an incomplete semantic Plan action before transport at the public runtime seam', async () => {
+  const bootstrap = BootstrapClientState.Current({
+    snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)({
+      ...bootstrapFixtures.activeRun,
+      plan: {
+        planId: 'plan-incomplete',
+        revision: 7,
+        readiness: 'ready',
+        readinessSummary: 'Ready.',
+        limitations: [],
+        sequences: [
+          {
+            sequenceId: 'seq-incomplete',
+            window: {
+              startsAt: '2026-08-02T20:00:00Z',
+              endsAt: '2026-08-02T21:00:00Z',
+              usableMinutes: 60,
+              peakAltitudeDeg: 60,
+              horizonClearanceDeg: 20,
+            },
+            horizon: 'clear',
+            storage: 'available',
+            viability: 'viable',
+            definition: {
+              sequenceId: 'seq-incomplete',
+              targetName: 'M27',
+              acquisitionMode: 'cameraOnly',
+              rightAscensionHours: 19.9934,
+              declinationDegrees: 22.7212,
+              exposureSeconds: 15,
+              frameCount: 1,
+              binning: 1,
+              minimumAltitudeDegrees: 25,
+              horizonClearanceDegrees: 5,
+              recenterThresholdArcsec: 30,
+              maxSolveAttempts: 3,
+              maxCaptureRetries: 2,
+              acquireFailure: 'pause',
+              captureFailure: 'retry',
+              estimatedDurationSeconds: 15,
+              estimatedStorageBytes: 1000,
+              priority: 0,
+            },
+          },
+        ],
+        actions: {
+          saveDraft: { _tag: 'Eligible' },
+          acceptRunDefinition: { _tag: 'Eligible' },
+          startAcceptedRun: { _tag: 'Eligible' },
+          previewRunMutation: { _tag: 'Eligible' },
+          applyRunMutation: { _tag: 'Eligible' },
+          approveDisruptiveRunMutation: { _tag: 'Eligible' },
+        },
+      },
+    }),
+  })
+  let writes = 0
+  const runtime = makeComposedPlanRuntime(bootstrap, () => {
+    writes += 1
+    return Effect.die('must not submit without current preview facts')
+  })
+  await waitFor(runtime, (state) => state.projectionReceived)
+
+  const result = await submit(runtime, {
+    _tag: 'Plan',
+    action: { _tag: 'ApplyRunMutation' },
+  })
+  await runtime.dispose()
+
+  assert.equal(result._tag, 'Plan')
+  if (result._tag === 'Plan')
+    assert.equal(PlanCommandSubmission.$is('Unavailable')(result.result), true)
+  assert.equal(writes, 0)
 })
 
 test('submits every semantic Observe lifecycle action without changing projected truth', async () => {

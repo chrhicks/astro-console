@@ -4,35 +4,30 @@ import {
   PlanCommandResult,
   PlanCommandRequest,
   PlanCommandResponse,
-  PreviewId,
   type BootstrapSnapshot,
   type PlanWorkspaceProjection,
 } from '@astro-console/protocol'
 import { BootstrapClient, BootstrapClientState } from './bootstrap-client'
 
 type IdempotencyKeyValue = typeof IdempotencyKey.Type
-type PreviewIdValue = typeof PreviewId.Type
 type PlanCommandResultValue = typeof PlanCommandResult.Type
 
-export type PlanAction =
-  | {
-      readonly _tag: 'SaveDraft'
-      readonly sequences: ReadonlyArray<
-        PlanWorkspaceProjection['sequences'][number]
-      >
-    }
-  | { readonly _tag: 'AcceptRunDefinition' }
-  | { readonly _tag: 'StartAcceptedRun' }
-  | {
-      readonly _tag: 'PreviewRunMutation'
-      readonly mutation: 'shortenSecond' | 'discardCurrent'
-    }
-  | { readonly _tag: 'ApplyRunMutation'; readonly previewId: PreviewIdValue }
-  | {
-      readonly _tag: 'ApproveDisruptiveRunMutation'
-      readonly previewId: PreviewIdValue
-      readonly approvalToken: string
-    }
+export type PlanAction = Data.TaggedEnum<{
+  SaveDraft: {
+    readonly sequences: ReadonlyArray<
+      PlanWorkspaceProjection['sequences'][number]
+    >
+  }
+  AcceptRunDefinition: Record<never, never>
+  StartAcceptedRun: Record<never, never>
+  PreviewRunMutation: {
+    readonly mutation: 'shortenSecond' | 'discardCurrent'
+  }
+  ApplyRunMutation: Record<never, never>
+  ApproveDisruptiveRunMutation: Record<never, never>
+}>
+
+export const PlanAction = Data.taggedEnum<PlanAction>()
 
 export type PlanCommandSubmission = Data.TaggedEnum<{
   Accepted: {
@@ -70,10 +65,7 @@ export class PlanCommandTransport extends Context.Service<
 >()('@astro-console/web/PlanCommandTransport') {}
 
 export interface PlanCommandClientShape {
-  readonly submit: (
-    action: PlanAction,
-    idempotencyKey: IdempotencyKeyValue,
-  ) => Effect.Effect<PlanCommandSubmission>
+  readonly submit: (action: PlanAction) => Effect.Effect<PlanCommandSubmission>
 }
 
 export class PlanCommandClient extends Context.Service<
@@ -87,7 +79,7 @@ export const layer = Layer.effect(
     const bootstrap = yield* BootstrapClient
     const transport = yield* PlanCommandTransport
     const submit = Effect.fn('PlanCommandClient.submit')(
-      function* (action: PlanAction, idempotencyKey: IdempotencyKeyValue) {
+      function* (action: PlanAction) {
         const state = yield* bootstrap.read()
         if (!BootstrapClientState.$is('Current')(state))
           return PlanCommandSubmission.Unavailable({
@@ -103,15 +95,23 @@ export const layer = Layer.effect(
               'Plan detail is unavailable from the current service snapshot.',
             safeNextAction: 'Wait for a Plan projection before trying again.',
           })
-        const eligibility = actionEligibility(action, plan.actions)
-        if (eligibility !== undefined)
+        const prepared = prepareAction(action, state.snapshot, plan)
+        const eligibility = plan.actions?.[prepared.eligibilityKey]
+        const unavailableReason =
+          eligibility?._tag === 'Eligible'
+            ? prepared.unavailableReason
+            : 'This action is not available in the current Plan projection.'
+        if (unavailableReason !== undefined)
           return PlanCommandSubmission.Unavailable({
-            reason: eligibility,
+            reason: unavailableReason,
             safeNextAction:
               'Read the projected Plan availability before trying another action.',
           })
+        const idempotencyKey = yield* Effect.sync(() =>
+          IdempotencyKey.make(crypto.randomUUID()),
+        )
         const request = yield* Schema.decodeUnknownEffect(PlanCommandRequest)(
-          requestFor(action, state.snapshot, idempotencyKey),
+          prepared.request(idempotencyKey),
         ).pipe(
           Effect.mapError(
             () =>
@@ -223,99 +223,117 @@ export const browserPlanCommandTransportLayer = Layer.succeed(
   }),
 )
 
-function actionEligibility(
-  action: PlanAction,
-  actions: PlanWorkspaceProjection['actions'],
-) {
-  const eligibility =
-    actions?.[
-      action._tag === 'SaveDraft'
-        ? 'saveDraft'
-        : action._tag === 'AcceptRunDefinition'
-          ? 'acceptRunDefinition'
-          : action._tag === 'StartAcceptedRun'
-            ? 'startAcceptedRun'
-            : action._tag === 'PreviewRunMutation'
-              ? 'previewRunMutation'
-              : action._tag === 'ApplyRunMutation'
-                ? 'applyRunMutation'
-                : 'approveDisruptiveRunMutation'
-    ]
-  return eligibility?._tag === 'Eligible'
-    ? undefined
-    : 'This action is not available in the current Plan projection.'
+type PlanEligibilityKey = keyof NonNullable<PlanWorkspaceProjection['actions']>
+
+type PreparedAction = {
+  readonly eligibilityKey: PlanEligibilityKey
+  readonly unavailableReason?: string
+  readonly request: (idempotencyKey: IdempotencyKeyValue) => unknown
 }
 
-function requestFor(
+function prepareAction(
   action: PlanAction,
   snapshot: BootstrapSnapshot,
-  idempotencyKey: IdempotencyKeyValue,
-) {
-  const plan = snapshot.plan
-  if (plan === undefined) return {}
-  const base = {
+  plan: PlanWorkspaceProjection,
+): PreparedAction {
+  const expectedRunRevision =
+    snapshot.activeRun._tag === 'Active' ? snapshot.activeRun.run.revision : -1
+  const planRequest = (idempotencyKey: IdempotencyKeyValue) => ({
     planId: plan.planId,
     expectedPlanRevision: plan.revision,
     expectedLeaseRevision: snapshot.control.revision,
     idempotencyKey,
-  }
-  switch (action._tag) {
-    case 'SaveDraft':
-      return {
+  })
+  const prepared = PlanAction.$match(action, {
+    SaveDraft: ({ sequences }) => ({
+      eligibilityKey: 'saveDraft' as const,
+      request: (idempotencyKey: IdempotencyKeyValue) => ({
         intent: {
-          _tag: action._tag,
+          _tag: 'SaveDraft',
           planId: plan.planId,
           expectedPlanRevision: plan.revision,
           idempotencyKey,
-          sequences: action.sequences.map((sequence) => ({
+          sequences: sequences.map((sequence) => ({
             sequenceId: sequence.sequenceId,
             definition: sequence.definition,
           })),
         },
-      }
-    case 'AcceptRunDefinition':
-      return { intent: { _tag: action._tag, ...base } }
-    case 'StartAcceptedRun':
-      return { intent: { _tag: action._tag, ...base } }
-    case 'PreviewRunMutation':
-      return {
+      }),
+    }),
+    AcceptRunDefinition: () => ({
+      eligibilityKey: 'acceptRunDefinition' as const,
+      request: (idempotencyKey: IdempotencyKeyValue) => ({
         intent: {
-          _tag: action._tag,
-          mutation: action.mutation,
+          _tag: 'AcceptRunDefinition',
+          ...planRequest(idempotencyKey),
+        },
+      }),
+    }),
+    StartAcceptedRun: () => ({
+      eligibilityKey: 'startAcceptedRun' as const,
+      request: (idempotencyKey: IdempotencyKeyValue) => ({
+        intent: {
+          _tag: 'StartAcceptedRun',
+          ...planRequest(idempotencyKey),
+        },
+      }),
+    }),
+    PreviewRunMutation: ({ mutation }) => ({
+      eligibilityKey: 'previewRunMutation' as const,
+      request: (idempotencyKey: IdempotencyKeyValue) => ({
+        intent: {
+          _tag: 'PreviewRunMutation',
+          mutation,
           expectedLeaseRevision: snapshot.control.revision,
-          expectedRunRevision:
-            snapshot.activeRun._tag === 'Active'
-              ? snapshot.activeRun.run.revision
-              : -1,
+          expectedRunRevision,
           idempotencyKey,
         },
-      }
-    case 'ApplyRunMutation':
+      }),
+    }),
+    ApplyRunMutation: () => {
+      const preview = plan.runMutationPreview
       return {
-        intent: {
-          _tag: action._tag,
-          previewId: action.previewId,
-          expectedLeaseRevision: snapshot.control.revision,
-          expectedRunRevision:
-            snapshot.activeRun._tag === 'Active'
-              ? snapshot.activeRun.run.revision
-              : -1,
-          idempotencyKey,
-        },
+        eligibilityKey: 'applyRunMutation' as const,
+        ...(preview === undefined
+          ? {
+              unavailableReason:
+                'The current Plan mutation preview is unavailable.',
+            }
+          : {}),
+        request: (idempotencyKey: IdempotencyKeyValue) => ({
+          intent: {
+            _tag: 'ApplyRunMutation',
+            previewId: preview?.previewId,
+            expectedLeaseRevision: snapshot.control.revision,
+            expectedRunRevision,
+            idempotencyKey,
+          },
+        }),
       }
-    case 'ApproveDisruptiveRunMutation':
+    },
+    ApproveDisruptiveRunMutation: () => {
+      const preview = plan.runMutationPreview
+      const unavailableReason =
+        preview === undefined
+          ? 'The current Plan mutation preview is unavailable.'
+          : preview.approvalToken === undefined
+            ? 'The current Plan mutation approval is unavailable.'
+            : undefined
       return {
-        intent: {
-          _tag: action._tag,
-          previewId: action.previewId,
-          approvalToken: action.approvalToken,
-          expectedLeaseRevision: snapshot.control.revision,
-          expectedRunRevision:
-            snapshot.activeRun._tag === 'Active'
-              ? snapshot.activeRun.run.revision
-              : -1,
-          idempotencyKey,
-        },
+        eligibilityKey: 'approveDisruptiveRunMutation' as const,
+        ...(unavailableReason === undefined ? {} : { unavailableReason }),
+        request: (idempotencyKey: IdempotencyKeyValue) => ({
+          intent: {
+            _tag: 'ApproveDisruptiveRunMutation',
+            previewId: preview?.previewId,
+            approvalToken: preview?.approvalToken,
+            expectedLeaseRevision: snapshot.control.revision,
+            expectedRunRevision,
+            idempotencyKey,
+          },
+        }),
       }
-  }
+    },
+  })
+  return prepared
 }
