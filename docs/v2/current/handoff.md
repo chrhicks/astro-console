@@ -318,8 +318,12 @@ correction exposes every projected Shared Control action through one semantic
 runtime interface. React no longer owns command or idempotency identities;
 Request, Release, Grant, Decline, and Take remain service-projected actions,
 and accepted commands remain provisional until the next authoritative
-projection. This refactor and its follow-up corrections add no browser-owned
-domain truth and no new product workflow.
+projection. The five Acquire actions currently reachable from Observe now use
+the same semantic runtime pattern: React states the operator action, while the
+runtime owns current Lease, Run, and Acquire revisions, identity, protocol
+construction, one write, and failure refresh without replay. This refactor and
+its follow-up corrections add no browser-owned domain truth and no new product
+workflow.
 
 After that simulator proof, an indoor GET-only readiness check reached ASCOM
 Remote at `192.168.4.104:11111`. Management and every device-property envelope
@@ -484,8 +488,9 @@ GitHub issues `#2`, `#3`, and `#4`, the shared protocol refocus, origin runtime
 deepening, and Nightbook workspace runtime deepening are complete locally. The
 first four selected corrections from the `apps/web` architecture map in GitHub
 issue `#18` are merged. The fifth selected correction, Shared Control action
-reachability in `#27`, is merged through PR `#28`. No next child is selected.
-The other architecture frontiers remain the durable
+reachability in `#27`, is merged through PR `#28`. The bounded Acquire semantic
+intent slice in `#29` is complete locally and ready for owner review. No later
+child is selected. The other architecture frontiers remain the durable
 work-claim re-audit in `#5` and the origin integration-test harness in `#6`.
 Select and integrate a real processing library only in a later accepted item;
 the current deterministic materializer proves orchestration and evidence, not

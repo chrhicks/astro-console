@@ -17,6 +17,7 @@ import {
   CaptureSetId,
   IdempotencyKey,
   IntentId,
+  LeaseRevision,
   ProcessingProjectId,
   ProcessingProjectRevision,
   type ProcessingProjectIntent,
@@ -80,6 +81,16 @@ export type {
 }
 
 export type AcquireCommandIntent = typeof AcquireIntent.Type
+export type AcquireAction = Data.TaggedEnum<{
+  CaptureTargetAcquisitionEvidence: { readonly _never?: never }
+  RetryPlateSolveWithParameters: { readonly _never?: never }
+  SkipAcquireTarget: { readonly _never?: never }
+  AbortAcquire: { readonly _never?: never }
+  ApprovePointingCorrection: { readonly proposalId: string }
+}>
+
+export const AcquireAction = Data.taggedEnum<AcquireAction>()
+
 export type NightbookProjectSelection = {
   readonly assetIds: ReadonlyArray<typeof AssetId.Type>
   readonly captureSetIds: ReadonlyArray<typeof CaptureSetId.Type>
@@ -136,7 +147,7 @@ export type NightbookWorkspaceIntent = Data.TaggedEnum<{
     readonly key: typeof IdempotencyKey.Type
   }
   RefreshPreflight: { readonly _never?: never }
-  Acquire: { readonly intent: AcquireCommandIntent }
+  Acquire: { readonly action: AcquireAction }
   SelectComparisonAsset: {
     readonly assetId: typeof AssetId.Type | undefined
   }
@@ -338,6 +349,59 @@ const projectCreationKey = (
   name: string,
   selection: NightbookProjectSelection,
 ) => JSON.stringify([name, selection.assetIds, selection.captureSetIds])
+
+const acquireCommandIntent = (
+  current: NightbookWorkspaceState,
+  action: AcquireAction,
+  idempotencyKey: typeof IdempotencyKey.Type,
+): AcquireCommandIntent | undefined => {
+  const observe = current.projection.observe
+  const source = observe.source
+  const acquire = source?.acquire
+  if (
+    !current.projectionReceived ||
+    source === undefined ||
+    acquire === undefined ||
+    observe.leaseRevision === undefined
+  )
+    return undefined
+  if (
+    !acquire.actions.some(
+      (candidate) =>
+        candidate._tag === 'Available' && candidate.action === action._tag,
+    ) ||
+    (action._tag === 'ApprovePointingCorrection' &&
+      acquire.pendingProposal?.proposalId !== action.proposalId)
+  )
+    return undefined
+  const expected = {
+    expectedLeaseRevision: LeaseRevision.make(observe.leaseRevision),
+    expectedRunRevision: source.revision,
+    expectedAcquireRevision: acquire.revision,
+    idempotencyKey,
+  }
+  return AcquireAction.$match(action, {
+    CaptureTargetAcquisitionEvidence: () =>
+      AcquireIntent.cases.CaptureTargetAcquisitionEvidence.make(expected),
+    RetryPlateSolveWithParameters: () =>
+      AcquireIntent.cases.RetryPlateSolveWithParameters.make({
+        ...expected,
+        parameters: {
+          exposureSeconds: 15,
+          binning: 1,
+          solverProfile: 'deep-sky-plate-solve',
+        },
+      }),
+    SkipAcquireTarget: () =>
+      AcquireIntent.cases.SkipAcquireTarget.make(expected),
+    AbortAcquire: () => AcquireIntent.cases.AbortAcquire.make(expected),
+    ApprovePointingCorrection: ({ proposalId }) =>
+      AcquireIntent.cases.ApprovePointingCorrection.make({
+        ...expected,
+        proposalId,
+      }),
+  })
+}
 
 export const nightbookWorkspaceRuntimeLayer = Layer.effect(
   NightbookWorkspaceRuntime,
@@ -781,20 +845,34 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
                 NightbookWorkspaceSubmission.Preflight({ result }),
               ),
             ),
-        Acquire: ({ intent }) =>
-          remote.acquire(intent).pipe(
-            Effect.as(NightbookWorkspaceSubmission.Acquire({ accepted: true })),
-            Effect.catchTag('NightbookWorkspaceRemoteFailure', (error) =>
-              remote.refresh().pipe(
-                Effect.as(
-                  NightbookWorkspaceSubmission.Acquire({
-                    accepted: false,
-                    message: error.message,
-                  }),
+        Acquire: ({ action }) =>
+          Effect.gen(function* () {
+            const current = yield* SubscriptionRef.get(state)
+            const idempotencyKey = yield* Effect.sync(() =>
+              IdempotencyKey.make(crypto.randomUUID()),
+            )
+            const intent = acquireCommandIntent(current, action, idempotencyKey)
+            if (intent === undefined)
+              return NightbookWorkspaceSubmission.Acquire({
+                accepted: false,
+                message: 'Current target acquisition state is unavailable.',
+              })
+            return yield* remote.acquire(intent).pipe(
+              Effect.as(
+                NightbookWorkspaceSubmission.Acquire({ accepted: true }),
+              ),
+              Effect.catchTag('NightbookWorkspaceRemoteFailure', (error) =>
+                remote.refresh().pipe(
+                  Effect.as(
+                    NightbookWorkspaceSubmission.Acquire({
+                      accepted: false,
+                      message: error.message,
+                    }),
+                  ),
                 ),
               ),
-            ),
-          ),
+            )
+          }),
         ReviewLibraryAsset: ({ assetId, request }) =>
           Effect.gen(function* () {
             const generation = routeGeneration

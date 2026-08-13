@@ -11,11 +11,9 @@ import {
 import { type CommandSubmission, type ControlAction } from './command-client'
 import { type PreflightRefreshSubmission } from './preflight-refresh-client'
 import {
-  AcquireIntent,
   AssetRevision,
   AssetId,
   IdempotencyKey,
-  LeaseRevision,
   LibraryQuery as LibraryQuerySchema,
   LibraryQueryId,
   ReviewAssetRequest,
@@ -23,6 +21,7 @@ import {
 import { parseRoute, routeWorkspace, type Route } from './routes'
 import { nightbookHref } from './route-href'
 import {
+  AcquireAction,
   createNightbookWorkspaceRuntime,
   initialNightbookWorkspaceState,
   NightbookWorkspaceRuntime,
@@ -117,8 +116,6 @@ export function App() {
     initialNightbookWorkspaceState,
   )
   const projection = workspaceState.projection
-  const projectionRef = useRef(projection)
-  projectionRef.current = projection
   const [route, setRoute] = useState<Route>(currentRoute)
   const [submitPlan, setSubmitPlan] = useState<
     | ((
@@ -234,20 +231,9 @@ export function App() {
       )
     })
     setTargetAcquisitionCommand(() => async () => {
-      const observe = projectionRef.current.observe
-      if (
-        observe.source?.acquire === undefined ||
-        observe.leaseRevision === undefined
-      )
-        throw new Error('Target acquisition state unavailable')
       const result = await submitWorkspace({
         _tag: 'Acquire',
-        intent: AcquireIntent.cases.CaptureTargetAcquisitionEvidence.make({
-          expectedLeaseRevision: LeaseRevision.make(observe.leaseRevision),
-          expectedRunRevision: observe.source.revision,
-          expectedAcquireRevision: observe.source.acquire.revision,
-          idempotencyKey: IdempotencyKey.make(crypto.randomUUID()),
-        }),
+        action: AcquireAction.CaptureTargetAcquisitionEvidence({}),
       })
       return foldWorkspaceSubmission(result, acceptedAcquireSubmission)
     })
@@ -259,51 +245,23 @@ export function App() {
             | 'SkipAcquireTarget'
             | 'AbortAcquire',
         ) => {
-          const observe = projectionRef.current.observe
-          if (
-            observe.source?.acquire === undefined ||
-            observe.leaseRevision === undefined
-          )
-            throw new Error('Acquire recovery state unavailable')
-          const expected = {
-            expectedLeaseRevision: LeaseRevision.make(observe.leaseRevision),
-            expectedRunRevision: observe.source.revision,
-            expectedAcquireRevision: observe.source.acquire.revision,
-            idempotencyKey: IdempotencyKey.make(crypto.randomUUID()),
-          }
-          const intent =
+          const semanticAction =
             action === 'RetryPlateSolveWithParameters'
-              ? AcquireIntent.cases.RetryPlateSolveWithParameters.make({
-                  ...expected,
-                  parameters: {
-                    exposureSeconds: 15,
-                    binning: 1,
-                    solverProfile: 'deep-sky-plate-solve',
-                  },
-                })
+              ? AcquireAction.RetryPlateSolveWithParameters({})
               : action === 'SkipAcquireTarget'
-                ? AcquireIntent.cases.SkipAcquireTarget.make(expected)
-                : AcquireIntent.cases.AbortAcquire.make(expected)
-          const result = await submitWorkspace({ _tag: 'Acquire', intent })
+                ? AcquireAction.SkipAcquireTarget({})
+                : AcquireAction.AbortAcquire({})
+          const result = await submitWorkspace({
+            _tag: 'Acquire',
+            action: semanticAction,
+          })
           return foldWorkspaceSubmission(result, acceptedAcquireSubmission)
         },
     )
     setApprovePointingCorrection(() => async (proposalId: string) => {
-      const observe = projectionRef.current.observe
-      if (
-        observe.source?.acquire === undefined ||
-        observe.leaseRevision === undefined
-      )
-        throw new Error('Pointing correction state unavailable')
       const result = await submitWorkspace({
         _tag: 'Acquire',
-        intent: AcquireIntent.cases.ApprovePointingCorrection.make({
-          expectedLeaseRevision: LeaseRevision.make(observe.leaseRevision),
-          expectedRunRevision: observe.source.revision,
-          expectedAcquireRevision: observe.source.acquire.revision,
-          proposalId,
-          idempotencyKey: IdempotencyKey.make(crypto.randomUUID()),
-        }),
+        action: AcquireAction.ApprovePointingCorrection({ proposalId }),
       })
       return foldWorkspaceSubmission(result, acceptedAcquireSubmission)
     })

@@ -1,22 +1,19 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  AcquireRevision,
+  AcquireIntent,
   AssetRevision,
   BootstrapSnapshot,
   CaptureSetId,
   CommandId,
-  IdempotencyKey,
   LibraryAssetDetail,
   LibraryPage,
   LibraryQuery,
   LibraryQueryId,
-  LeaseRevision,
   OpenedProcessingProject,
   ProcessingProjectEvidence,
   ProcessingProjectId,
   ProcessingProjectRevision,
-  RunRevision,
 } from '@astro-console/protocol'
 import {
   Deferred,
@@ -30,6 +27,7 @@ import {
 } from 'effect'
 import { BootstrapClientState } from './bootstrap-client'
 import {
+  AcquireAction,
   NightbookWorkspaceRemote,
   NightbookWorkspaceRemoteFailure,
   NightbookWorkspaceIntent,
@@ -325,15 +323,71 @@ test('preserves rejected and unavailable Shared Control outcomes without replay'
   }
 })
 
+const currentAcquireSnapshot = () =>
+  BootstrapClientState.Current({
+    snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)({
+      ...bootstrapFixtures.activeRun,
+      control: { revision: 11, state: 'held', holderClientId: 'desktop-owner' },
+      observe: {
+        runId: 'run-semantic-acquire',
+        revision: 7,
+        executor: 'fixture',
+        phase: 'acquire',
+        target: 'M27',
+        currentSequence: 0,
+        completedSequences: 0,
+        totalSequences: 1,
+        retryUsed: false,
+        acquire: {
+          revision: 3,
+          mode: 'pointing',
+          acquisitionMethod: 'deepSkyPlateSolve',
+          phase: 'solving',
+          recoverySeries: 0,
+          attemptCount: 0,
+          correctionAttemptsRemaining: 3,
+          activeAttemptId: 'target-solve-1',
+          attention: 'Capture and plate-solve a fresh target frame.',
+          pendingProposal: {
+            proposalId: 'proposal-42',
+            correction: {
+              rightAscensionArcsec: 4,
+              declinationArcsec: -2,
+              convention: 'mountRaDec',
+            },
+            expiresAtEpochMs: 1_800_000_000_000,
+          },
+          actions: [
+            {
+              _tag: 'Available',
+              action: 'CaptureTargetAcquisitionEvidence',
+            },
+            {
+              _tag: 'Available',
+              action: 'RetryPlateSolveWithParameters',
+            },
+            { _tag: 'Available', action: 'SkipAcquireTarget' },
+            { _tag: 'Available', action: 'AbortAcquire' },
+            { _tag: 'Available', action: 'ApprovePointingCorrection' },
+          ],
+        },
+        lifecycleFacts: ['Target acquisition is current.'],
+        attemptFacts: ['No evidence recorded yet.'],
+        actions: {
+          pause: { _tag: 'Ineligible', reason: 'policyUnavailable' },
+          resume: { _tag: 'Ineligible', reason: 'policyUnavailable' },
+          stop: { _tag: 'Eligible' },
+          skip: { _tag: 'Ineligible', reason: 'policyUnavailable' },
+          retry: { _tag: 'Ineligible', reason: 'policyUnavailable' },
+          park: { _tag: 'Eligible' },
+        },
+      },
+    }),
+  })
+
 test('constructs closed Acquire and branded resource intents', () => {
   const acquire = NightbookWorkspaceIntent.Acquire({
-    intent: {
-      _tag: 'AbortAcquire',
-      expectedLeaseRevision: LeaseRevision.make(1),
-      expectedRunRevision: RunRevision.make(1),
-      expectedAcquireRevision: AcquireRevision.make(1),
-      idempotencyKey: IdempotencyKey.make('abort-typed'),
-    },
+    action: AcquireAction.AbortAcquire({}),
   })
   const comparison = NightbookWorkspaceIntent.SelectComparisonAsset({
     assetId: detail.assetId,
@@ -344,9 +398,172 @@ test('constructs closed Acquire and branded resource intents', () => {
     selection: { assetIds: [detail.assetId], captureSetIds: [] },
   })
 
-  assert.equal(acquire.intent._tag, 'AbortAcquire')
+  assert.equal(acquire.action._tag, 'AbortAcquire')
   assert.equal(comparison.assetId, detail.assetId)
   assert.equal(intake.projectId, 'project-typed')
+})
+
+test('constructs current Capture intent once without optimistic Acquire state', async () => {
+  const bootstrap = currentAcquireSnapshot()
+  const submitted: Array<typeof AcquireIntent.Type> = []
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(bootstrap),
+      acquire: (intent) => Effect.sync(() => submitted.push(intent)),
+    }),
+  )
+  const before = await waitFor(runtime, (state) => state.projectionReceived)
+
+  const result = await submit(runtime, {
+    _tag: 'Acquire',
+    action: AcquireAction.CaptureTargetAcquisitionEvidence({}),
+  })
+  const after = await waitFor(runtime, (state) => state.projectionReceived)
+  await runtime.dispose()
+
+  assert.equal(result._tag, 'Acquire')
+  assert.equal(submitted.length, 1)
+  assert.equal(submitted[0]?._tag, 'CaptureTargetAcquisitionEvidence')
+  assert.equal(submitted[0]?.expectedLeaseRevision, 11)
+  assert.equal(submitted[0]?.expectedRunRevision, 7)
+  assert.equal(submitted[0]?.expectedAcquireRevision, 3)
+  assert.ok((submitted[0]?.idempotencyKey.length ?? 0) > 0)
+  assert.deepEqual(
+    after.projection.observe.source?.acquire,
+    before.projection.observe.source?.acquire,
+  )
+})
+
+test('maps every semantic Acquire action with current revisions and fixed retry parameters', async () => {
+  const bootstrap = currentAcquireSnapshot()
+  const submitted: Array<typeof AcquireIntent.Type> = []
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(bootstrap),
+      acquire: (intent) => Effect.sync(() => submitted.push(intent)),
+    }),
+  )
+  await waitFor(runtime, (state) => state.projectionReceived)
+  const actions = [
+    AcquireAction.RetryPlateSolveWithParameters({}),
+    AcquireAction.SkipAcquireTarget({}),
+    AcquireAction.AbortAcquire({}),
+    AcquireAction.ApprovePointingCorrection({ proposalId: 'proposal-42' }),
+  ]
+
+  for (const action of actions)
+    await submit(runtime, { _tag: 'Acquire', action })
+  await runtime.dispose()
+
+  assert.deepEqual(
+    submitted.map((intent) => intent._tag),
+    [
+      'RetryPlateSolveWithParameters',
+      'SkipAcquireTarget',
+      'AbortAcquire',
+      'ApprovePointingCorrection',
+    ],
+  )
+  for (const intent of submitted) {
+    assert.equal(intent.expectedLeaseRevision, 11)
+    assert.equal(intent.expectedRunRevision, 7)
+    assert.equal(intent.expectedAcquireRevision, 3)
+    assert.ok(intent.idempotencyKey.length > 0)
+  }
+  const retry = submitted[0]
+  assert.equal(retry?._tag, 'RetryPlateSolveWithParameters')
+  if (retry?._tag === 'RetryPlateSolveWithParameters')
+    assert.deepEqual(retry.parameters, {
+      exposureSeconds: 15,
+      binning: 1,
+      solverProfile: 'deep-sky-plate-solve',
+    })
+  const approval = submitted[3]
+  assert.equal(approval?._tag, 'ApprovePointingCorrection')
+  if (approval?._tag === 'ApprovePointingCorrection')
+    assert.equal(approval.proposalId, 'proposal-42')
+  assert.equal(
+    new Set(submitted.map((intent) => intent.idempotencyKey)).size,
+    4,
+  )
+})
+
+test('fails semantic Acquire before transport for missing, stale, and unavailable state', async () => {
+  const states = [
+    BootstrapClientState.Current({
+      snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)(
+        bootstrapFixtures.noRun,
+      ),
+    }),
+    BootstrapClientState.Stale({
+      snapshot: currentAcquireSnapshot().snapshot,
+      reason: 'Disconnected.',
+    }),
+    BootstrapClientState.Unavailable({ reason: 'Bootstrap unavailable.' }),
+  ]
+
+  for (const state of states) {
+    let submissions = 0
+    let refreshes = 0
+    const runtime = makeRuntime(
+      makeRemote({
+        states: Stream.make(state),
+        acquire: () => Effect.sync(() => void (submissions += 1)),
+        refresh: () => Effect.sync(() => void (refreshes += 1)),
+      }),
+    )
+    await waitFor(runtime, (current) => current.projectionReceived)
+
+    const result = await submit(runtime, {
+      _tag: 'Acquire',
+      action: AcquireAction.AbortAcquire({}),
+    })
+    await runtime.dispose()
+
+    assert.equal(result._tag, 'Acquire')
+    if (result._tag === 'Acquire') assert.equal(result.accepted, false)
+    assert.equal(submissions, 0)
+    assert.equal(refreshes, 0)
+  }
+})
+
+test('rejects unavailable Acquire actions and stale correction proposals before transport', async () => {
+  let submissions = 0
+  const bootstrap = currentAcquireSnapshot()
+  const snapshot = Schema.decodeUnknownSync(BootstrapSnapshot)({
+    ...bootstrap.snapshot,
+    observe: {
+      ...bootstrap.snapshot.observe,
+      acquire: {
+        ...bootstrap.snapshot.observe?.acquire,
+        actions: [{ _tag: 'Available', action: 'ApprovePointingCorrection' }],
+      },
+    },
+  })
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(BootstrapClientState.Current({ snapshot })),
+      acquire: () => Effect.sync(() => void (submissions += 1)),
+    }),
+  )
+  await waitFor(runtime, (state) => state.projectionReceived)
+
+  const unavailable = await submit(runtime, {
+    _tag: 'Acquire',
+    action: AcquireAction.AbortAcquire({}),
+  })
+  const staleProposal = await submit(runtime, {
+    _tag: 'Acquire',
+    action: AcquireAction.ApprovePointingCorrection({ proposalId: 'old' }),
+  })
+  await runtime.dispose()
+
+  assert.equal(unavailable._tag, 'Acquire')
+  if (unavailable._tag === 'Acquire') assert.equal(unavailable.accepted, false)
+  assert.equal(staleProposal._tag, 'Acquire')
+  if (staleProposal._tag === 'Acquire')
+    assert.equal(staleProposal.accepted, false)
+  assert.equal(submissions, 0)
 })
 
 test('reconciles an uncertain Acquire outcome once without replaying it', async () => {
@@ -354,6 +571,7 @@ test('reconciles an uncertain Acquire outcome once without replaying it', async 
   let refreshes = 0
   const runtime = makeRuntime(
     makeRemote({
+      states: Stream.make(currentAcquireSnapshot()),
       refresh: () => Effect.sync(() => void (refreshes += 1)),
       acquire: () =>
         Effect.sync(() => void (submissions += 1)).pipe(
@@ -362,15 +580,10 @@ test('reconciles an uncertain Acquire outcome once without replaying it', async 
     }),
   )
 
+  await waitFor(runtime, (state) => state.projectionReceived)
   const result = await submit(runtime, {
     _tag: 'Acquire',
-    intent: {
-      _tag: 'AbortAcquire',
-      expectedLeaseRevision: LeaseRevision.make(1),
-      expectedRunRevision: RunRevision.make(1),
-      expectedAcquireRevision: AcquireRevision.make(1),
-      idempotencyKey: IdempotencyKey.make('abort-1'),
-    },
+    action: AcquireAction.AbortAcquire({}),
   })
   await runtime.dispose()
 
