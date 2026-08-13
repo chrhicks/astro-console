@@ -321,9 +321,12 @@ and accepted commands remain provisional until the next authoritative
 projection. The five Acquire actions currently reachable from Observe now use
 the same semantic runtime pattern: React states the operator action, while the
 runtime owns current Lease, Run, and Acquire revisions, identity, protocol
-construction, one write, and failure refresh without replay. This refactor and
-its follow-up corrections add no browser-owned domain truth and no new product
-workflow.
+construction, one write, and failure refresh without replay. The remaining six
+Observe lifecycle actions now follow the same rule: React submits Pause, Resume,
+Stop, Skip, Retry, or Park, while the internal Observe command module owns
+identity, current Lease and Run revisions, request construction, one write, and
+established reconciliation. This refactor and its follow-up corrections add no
+browser-owned domain truth and no new product workflow.
 
 After that simulator proof, an indoor GET-only readiness check reached ASCOM
 Remote at `192.168.4.104:11111`. Management and every device-property envelope
@@ -489,8 +492,9 @@ deepening, and Nightbook workspace runtime deepening are complete locally. The
 first four selected corrections from the `apps/web` architecture map in GitHub
 issue `#18` are merged. The fifth selected correction, Shared Control action
 reachability in `#27`, is merged through PR `#28`. The bounded Acquire semantic
-intent slice in `#29` is merged through PR `#30`. No next child is selected.
-The other architecture frontiers remain the durable
+intent slice in `#29` is merged through PR `#30`. The Observe lifecycle semantic
+intent slice in `#31` is complete locally and ready for owner review. No later
+child is selected. The other architecture frontiers remain the durable
 work-claim re-audit in `#5` and the origin integration-test harness in `#6`.
 Select and integrate a real processing library only in a later accepted item;
 the current deterministic materializer proves orchestration and evidence, not

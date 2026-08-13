@@ -10,6 +10,7 @@ import {
   LibraryPage,
   LibraryQuery,
   LibraryQueryId,
+  ObserveCommandRequest,
   OpenedProcessingProject,
   ProcessingProjectEvidence,
   ProcessingProjectId,
@@ -25,7 +26,7 @@ import {
   Schema,
   Stream,
 } from 'effect'
-import { BootstrapClientState } from './bootstrap-client'
+import { BootstrapClient, BootstrapClientState } from './bootstrap-client'
 import {
   AcquireAction,
   NightbookWorkspaceRemote,
@@ -39,6 +40,14 @@ import {
 } from './nightbook-workspace-runtime'
 import { bootstrapFixtures } from './testing/bootstrap-fixtures'
 import { CommandSubmission, ControlAction } from './command-client'
+import {
+  ObserveCommandClient,
+  ObserveCommandSubmission,
+  ObserveCommandTransport,
+  ObserveCommandTransportFailure,
+  layer as observeCommandClientLayer,
+  type ObserveAction,
+} from './observe-command-client'
 import type { CreateProcessingProjectRequest } from './process-client'
 
 const query = (id: string) =>
@@ -191,6 +200,48 @@ const makeRuntime = (remote: NightbookWorkspaceRemoteShape) =>
     ),
   )
 
+const makeComposedObserveRuntime = (
+  state: BootstrapClientState,
+  transport: (
+    body: unknown,
+  ) => Effect.Effect<
+    { readonly body: unknown },
+    ObserveCommandTransportFailure
+  >,
+) => {
+  const bootstrap = BootstrapClient.of({
+    read: () => Effect.succeed(state),
+    refresh: () => Effect.void,
+    states: Stream.make(state),
+  })
+  const bootstrapLayer = Layer.succeed(BootstrapClient, bootstrap)
+  const observeLayer = observeCommandClientLayer.pipe(
+    Layer.provide(bootstrapLayer),
+    Layer.provide(
+      Layer.succeed(
+        ObserveCommandTransport,
+        ObserveCommandTransport.of({ submit: transport }),
+      ),
+    ),
+  )
+  const remoteLayer = Layer.effect(
+    NightbookWorkspaceRemote,
+    Effect.gen(function* () {
+      const observe = yield* ObserveCommandClient
+      return NightbookWorkspaceRemote.of(
+        makeRemote({
+          states: bootstrap.states,
+          refresh: bootstrap.refresh,
+          observe: observe.submit,
+        }),
+      )
+    }),
+  ).pipe(Layer.provide(observeLayer))
+  return ManagedRuntime.make(
+    nightbookWorkspaceRuntimeLayer.pipe(Layer.provide(remoteLayer)),
+  )
+}
+
 const submit = (
   runtime: ReturnType<typeof makeRuntime>,
   intent: NightbookWorkspaceIntent,
@@ -318,6 +369,232 @@ test('preserves rejected and unavailable Shared Control outcomes without replay'
     })
     assert.equal(result._tag, 'Control')
     if (result._tag === 'Control') assert.equal(result.result, outcome)
+    assert.equal(calls, 1)
+    await runtime.dispose()
+  }
+})
+
+test('submits every semantic Observe lifecycle action without changing projected truth', async () => {
+  const bootstrap = BootstrapClientState.Current({
+    snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)({
+      ...bootstrapFixtures.activeRun,
+      control: { revision: 9, state: 'held', holderClientId: 'desktop-owner' },
+      observe: {
+        runId: 'run-observe-semantic',
+        revision: 6,
+        executor: 'fixture',
+        phase: 'capture',
+        target: 'M27',
+        currentSequence: 0,
+        completedSequences: 0,
+        totalSequences: 1,
+        retryUsed: false,
+        lifecycleFacts: ['Observe lifecycle is current.'],
+        attemptFacts: ['No command result is assumed.'],
+        actions: {
+          pause: { _tag: 'Eligible' },
+          resume: { _tag: 'Eligible' },
+          stop: { _tag: 'Eligible' },
+          skip: { _tag: 'Eligible' },
+          retry: { _tag: 'Eligible' },
+          park: { _tag: 'Eligible' },
+        },
+      },
+    }),
+  })
+  const submitted: ObserveAction[] = []
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(bootstrap),
+      observe: (action) =>
+        Effect.sync(() => submitted.push(action)).pipe(
+          Effect.as(
+            ObserveCommandSubmission.Accepted({
+              message: 'Action accepted. Await current lifecycle evidence.',
+            }),
+          ),
+        ),
+    }),
+  )
+  const before = await waitFor(runtime, (state) => state.projectionReceived)
+
+  const actions: ObserveAction[] = [
+    'PauseRun',
+    'ResumeRun',
+    'StopRun',
+    'SkipSequence',
+    'RetryPhase',
+    'RequestPark',
+  ]
+  for (const action of actions) {
+    const result = await submit(runtime, { _tag: 'Observe', action })
+    assert.equal(result._tag, 'Observe')
+  }
+  const after = await waitFor(runtime, (state) => state.projectionReceived)
+  await runtime.dispose()
+
+  assert.deepEqual(submitted, actions)
+  assert.deepEqual(after.projection.observe, before.projection.observe)
+})
+
+test('composes semantic Pause through the runtime and real Observe command client once without optimistic state', async () => {
+  const bootstrap = BootstrapClientState.Current({
+    snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)({
+      ...bootstrapFixtures.activeRun,
+      control: { revision: 23, state: 'held', holderClientId: 'desktop-owner' },
+      observe: {
+        runId: 'run-observe-composed',
+        revision: 17,
+        executor: 'fixture',
+        phase: 'capture',
+        target: 'M27',
+        currentSequence: 0,
+        completedSequences: 0,
+        totalSequences: 1,
+        retryUsed: false,
+        lifecycleFacts: ['Observe lifecycle is current.'],
+        attemptFacts: ['No command result is assumed.'],
+        actions: {
+          pause: { _tag: 'Eligible' },
+          resume: { _tag: 'Ineligible', reason: 'pausedRunRequired' },
+          stop: { _tag: 'Eligible' },
+          skip: { _tag: 'Eligible' },
+          retry: { _tag: 'Eligible' },
+          park: { _tag: 'Eligible' },
+        },
+      },
+    }),
+  })
+  const requests: Array<typeof ObserveCommandRequest.Type> = []
+  const runtime = makeComposedObserveRuntime(bootstrap, (body) => {
+    requests.push(Schema.decodeUnknownSync(ObserveCommandRequest)(body))
+    return Effect.succeed({
+      body: { _tag: 'Accepted', result: { _tag: 'PauseAccepted' } },
+    })
+  })
+  const before = await waitFor(runtime, (state) => state.projectionReceived)
+
+  const result = await submit(runtime, {
+    _tag: 'Observe',
+    action: 'PauseRun',
+  })
+  const after = await waitFor(runtime, (state) => state.projectionReceived)
+  await runtime.dispose()
+
+  assert.equal(result._tag, 'Observe')
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0]?.intent._tag, 'PauseRun')
+  assert.equal(requests[0]?.intent.expectedLeaseRevision, 23)
+  assert.equal(requests[0]?.intent.expectedRunRevision, 17)
+  assert.ok((requests[0]?.intent.idempotencyKey.length ?? 0) > 0)
+  assert.deepEqual(after.projection.observe, before.projection.observe)
+})
+
+test('stops an ineligible semantic Observe action before transport at the public runtime seam', async () => {
+  const bootstrap = BootstrapClientState.Current({
+    snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)({
+      ...bootstrapFixtures.activeRun,
+      observe: {
+        runId: 'run-observe-ineligible',
+        revision: 17,
+        executor: 'fixture',
+        phase: 'capture',
+        target: 'M27',
+        currentSequence: 0,
+        completedSequences: 0,
+        totalSequences: 1,
+        retryUsed: false,
+        lifecycleFacts: ['Observe lifecycle is current.'],
+        attemptFacts: ['No command result is assumed.'],
+        actions: {
+          pause: { _tag: 'Eligible' },
+          resume: { _tag: 'Ineligible', reason: 'pausedRunRequired' },
+          stop: { _tag: 'Eligible' },
+          skip: { _tag: 'Eligible' },
+          retry: { _tag: 'Eligible' },
+          park: { _tag: 'Eligible' },
+        },
+      },
+    }),
+  })
+  let writes = 0
+  const runtime = makeComposedObserveRuntime(bootstrap, () => {
+    writes += 1
+    return Effect.die('must not submit an ineligible Observe action')
+  })
+  await waitFor(runtime, (state) => state.projectionReceived)
+
+  const result = await submit(runtime, {
+    _tag: 'Observe',
+    action: 'ResumeRun',
+  })
+  await runtime.dispose()
+
+  assert.equal(result._tag, 'Observe')
+  if (result._tag === 'Observe')
+    assert.equal(
+      ObserveCommandSubmission.$is('Unavailable')(result.result),
+      true,
+    )
+  assert.equal(writes, 0)
+})
+
+test('preserves rejected and unavailable Observe outcomes without replay', async () => {
+  const bootstrap = BootstrapClientState.Current({
+    snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)({
+      ...bootstrapFixtures.activeRun,
+      observe: {
+        runId: 'run-observe-outcome',
+        revision: 4,
+        executor: 'fixture',
+        phase: 'capture',
+        target: 'M27',
+        currentSequence: 0,
+        completedSequences: 0,
+        totalSequences: 1,
+        retryUsed: false,
+        lifecycleFacts: ['Observe lifecycle is current.'],
+        attemptFacts: ['No command result is assumed.'],
+        actions: {
+          pause: { _tag: 'Eligible' },
+          resume: { _tag: 'Ineligible', reason: 'pausedRunRequired' },
+          stop: { _tag: 'Eligible' },
+          skip: { _tag: 'Eligible' },
+          retry: { _tag: 'Eligible' },
+          park: { _tag: 'Eligible' },
+        },
+      },
+    }),
+  })
+  const outcomes = [
+    ObserveCommandSubmission.Rejected({
+      reason: 'The run is terminal.',
+      safeNextAction: 'Read current Observe truth.',
+    }),
+    ObserveCommandSubmission.Unavailable({
+      reason: 'Observe is unavailable.',
+      safeNextAction: 'Wait for current Observe truth.',
+    }),
+  ]
+
+  for (const outcome of outcomes) {
+    let calls = 0
+    const runtime = makeRuntime(
+      makeRemote({
+        states: Stream.make(bootstrap),
+        observe: () =>
+          Effect.sync(() => {
+            calls += 1
+            return outcome
+          }),
+      }),
+    )
+    const result = await submit(runtime, {
+      _tag: 'Observe',
+      action: 'StopRun',
+    })
+    assert.equal(result._tag, 'Observe')
+    if (result._tag === 'Observe') assert.equal(result.result, outcome)
     assert.equal(calls, 1)
     await runtime.dispose()
   }

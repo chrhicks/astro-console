@@ -16,10 +16,7 @@ import {
   type StepItem,
   type Tone,
 } from '@nightbook/ui'
-import {
-  IdempotencyKey,
-  type ObserveWorkspaceProjection,
-} from '@astro-console/protocol'
+import type { ObserveWorkspaceProjection } from '@astro-console/protocol'
 import { useEffect, useMemo, useState } from 'react'
 import {
   ObserveCommandSubmission,
@@ -35,10 +32,7 @@ import './workspace.css'
 export type ObserveWorkspaceProps = {
   projection: Projection
   loading: boolean
-  submit?: (
-    action: ObserveAction,
-    key: typeof IdempotencyKey.Type,
-  ) => Promise<ObserveCommandSubmission>
+  submit?: (action: ObserveAction) => Promise<ObserveCommandSubmission>
   refreshPreflight?: () => Promise<PreflightRefreshSubmission>
   targetAcquisitionCommand?: () => Promise<void>
   acquireRecoveryCommand?: (
@@ -1005,7 +999,7 @@ function ObserveDesktop({
                 onSelect: () => {
                   setPendingAction(action)
                   setResult(undefined)
-                  void submit(action, IdempotencyKey.make(crypto.randomUUID()))
+                  void submit(action)
                     .then((submission) =>
                       ObserveCommandSubmission.$match(submission, {
                         Accepted: ({ message }) => setResult(message),
