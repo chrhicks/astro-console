@@ -8,7 +8,78 @@ import {
   ProcessingProjectRevision,
 } from '@astro-console/protocol'
 import { Effect, Fiber } from 'effect'
-import { ProcessingProjectRequestError, processClient } from './process-client'
+import {
+  processingProjectFailureCertainty,
+  ProcessingProjectRequestError,
+  processClient,
+} from './process-client'
+
+test('classifies only transport and malformed Project responses as uncertain', () => {
+  assert.equal(
+    processingProjectFailureCertainty({ _tag: 'TransportUnavailable' }),
+    'uncertain',
+  )
+  assert.equal(
+    processingProjectFailureCertainty({ _tag: 'MalformedResponse' }),
+    'uncertain',
+  )
+  assert.equal(
+    processingProjectFailureCertainty({ _tag: 'InvalidRequest' }),
+    'definite',
+  )
+
+  const definite = [
+    ProcessingProjectHttpFailure.cases.InvalidInput.make({
+      message: 'Invalid input.',
+    }),
+    ProcessingProjectHttpFailure.cases.RequestTooLarge.make({
+      message: 'Request too large.',
+    }),
+    ProcessingProjectHttpFailure.cases.ServiceUnavailable.make({
+      message: 'Service unavailable.',
+    }),
+    ProcessingProjectHttpFailure.cases.ProjectRouteNotFound.make({
+      message: 'Route not found.',
+    }),
+    ProcessingProjectHttpFailure.cases.DomainRejected.make({
+      error: {
+        _tag: 'ProjectNotFound',
+        projectId: ProcessingProjectId.make('missing-project'),
+      },
+    }),
+  ]
+  for (const failure of definite)
+    assert.equal(processingProjectFailureCertainty(failure), 'definite')
+})
+
+test('rejects an invalid Project create before fetch as a definite failure', async () => {
+  const originalFetch = globalThis.fetch
+  let fetchCalls = 0
+  globalThis.fetch = async () => {
+    fetchCalls += 1
+    return Response.json({})
+  }
+  try {
+    await assert.rejects(
+      () =>
+        Effect.runPromise(
+          processClient.create({
+            name: '',
+            selection: { assetIds: [], captureSetIds: [] },
+            intentId: IntentId.make('invalid-create'),
+          }),
+        ),
+      (error: unknown) =>
+        error instanceof ProcessingProjectRequestError &&
+        error.detail._tag === 'InvalidRequest' &&
+        processingProjectFailureCertainty(error.detail) === 'definite',
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+
+  assert.equal(fetchCalls, 0)
+})
 
 test('uses explicit Processing Project routes and does not replay changes', async () => {
   const originalFetch = globalThis.fetch
@@ -127,7 +198,8 @@ test('decodes Processing Project failures and rejects malformed JSON responses',
         ),
       (error: unknown) =>
         error instanceof ProcessingProjectRequestError &&
-        error.detail._tag === 'MalformedResponse',
+        error.detail._tag === 'MalformedResponse' &&
+        processingProjectFailureCertainty(error.detail) === 'uncertain',
     )
   } finally {
     globalThis.fetch = originalFetch

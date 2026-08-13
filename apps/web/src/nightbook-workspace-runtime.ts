@@ -57,7 +57,10 @@ import {
 import { projectBootstrapState } from './bootstrap-projection'
 import type { Projection } from './presentation'
 import {
+  processingProjectFailureCertainty,
   processClient,
+  ProcessingProjectRequestError,
+  type CreateProcessingProjectRequest,
   type OpenedProcessingProject,
   type ProcessingProjectEvidence,
   type ProcessingProjectList,
@@ -196,7 +199,12 @@ export class NightbookWorkspaceRemoteFailure extends Schema.TaggedErrorClass<Nig
   'NightbookWorkspaceRemoteFailure',
   {
     operation: NightbookWorkspaceRemoteOperation,
-    reason: Schema.Literals(['not-found', 'not-local', 'unavailable']),
+    reason: Schema.Literals([
+      'not-found',
+      'not-local',
+      'unavailable',
+      'rejected',
+    ]),
     message: Schema.String,
   },
 ) {}
@@ -244,8 +252,7 @@ export interface NightbookWorkspaceRemoteShape {
     projectId: typeof ProcessingProjectId.Type,
   ) => Effect.Effect<ProcessingProjectEvidence, NightbookWorkspaceRemoteFailure>
   readonly createProject: (
-    name: string,
-    selection: NightbookProjectSelection,
+    request: CreateProcessingProjectRequest,
   ) => Effect.Effect<OpenedProcessingProject, NightbookWorkspaceRemoteFailure>
   readonly changeProject: (
     project: OpenedProcessingProject,
@@ -295,7 +302,11 @@ const unavailable = (message: string) =>
 
 const remoteFailure = (
   operation: NightbookWorkspaceRemoteOperation,
-  reason: 'not-found' | 'not-local' | 'unavailable' = 'unavailable',
+  reason:
+    | 'not-found'
+    | 'not-local'
+    | 'unavailable'
+    | 'rejected' = 'unavailable',
   message = 'The Nightbook workspace remote is unavailable.',
 ) =>
   new NightbookWorkspaceRemoteFailure({
@@ -314,6 +325,20 @@ const libraryRemoteFailure = (
       ? remoteFailure(operation, 'not-local')
       : remoteFailure(operation)
 
+const createProjectRemoteFailure = (cause: ProcessingProjectRequestError) =>
+  remoteFailure(
+    'create-project',
+    processingProjectFailureCertainty(cause.detail) === 'uncertain'
+      ? 'unavailable'
+      : 'rejected',
+    cause.message,
+  )
+
+const projectCreationKey = (
+  name: string,
+  selection: NightbookProjectSelection,
+) => JSON.stringify([name, selection.assetIds, selection.captureSetIds])
+
 export const nightbookWorkspaceRuntimeLayer = Layer.effect(
   NightbookWorkspaceRuntime,
   Effect.gen(function* () {
@@ -331,6 +356,11 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
     let processFiber: Fiber.Fiber<void> | undefined
     let comparisonFiber: Fiber.Fiber<void> | undefined
     let latestReviewOperation: string | undefined
+    const pendingProjectCreations = new Map<
+      string,
+      CreateProcessingProjectRequest
+    >()
+    let processListReadGeneration = 0
 
     const set = (
       update: (current: NightbookWorkspaceState) => NightbookWorkspaceState,
@@ -446,9 +476,9 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
         ),
         Effect.asVoid,
       )
-    const loadProcess = (route: Route, generation: number) =>
-      Effect.gen(function* () {
-        if (route.kind === 'process-project') {
+    const loadProcess = (route: Route, generation: number) => {
+      if (route.kind === 'process-project')
+        return Effect.gen(function* () {
           const [project, evidence] = yield* Effect.all(
             [
               remote.openProject(route.projectId),
@@ -470,22 +500,38 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
                 state: 'current',
               },
             }))
-          return
-        }
-        const projects = yield* remote.listProjects()
-        if (generation === routeGeneration)
-          yield* set((current) => ({
-            ...current,
-            process: {
-              projects,
-              project: undefined,
-              evidence: undefined,
-              state: 'current',
-            },
-          }))
-      }).pipe(
+        }).pipe(
+          Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
+            generation === routeGeneration
+              ? set((current) => ({
+                  ...current,
+                  process: { ...current.process, state: 'unavailable' },
+                }))
+              : Effect.void,
+          ),
+          Effect.asVoid,
+        )
+
+      const listReadGeneration = ++processListReadGeneration
+      const ownsProcessListRead = () =>
+        generation === routeGeneration &&
+        listReadGeneration === processListReadGeneration
+      return remote.listProjects().pipe(
+        Effect.tap((projects) =>
+          ownsProcessListRead()
+            ? set((current) => ({
+                ...current,
+                process: {
+                  projects,
+                  project: undefined,
+                  evidence: undefined,
+                  state: 'current',
+                },
+              }))
+            : Effect.void,
+        ),
         Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
-          generation === routeGeneration
+          ownsProcessListRead()
             ? set((current) => ({
                 ...current,
                 process: { ...current.process, state: 'unavailable' },
@@ -494,6 +540,7 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
         ),
         Effect.asVoid,
       )
+    }
     const readProjectPair = (projectId: typeof ProcessingProjectId.Type) =>
       Effect.all(
         {
@@ -846,43 +893,87 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
             )
             return NightbookWorkspaceSubmission.Loaded({})
           }),
-        CreateProject: ({ name, selection }) =>
-          remote.createProject(name, selection).pipe(
+        CreateProject: ({ name, selection }) => {
+          const generation = routeGeneration
+          const key = projectCreationKey(name, selection)
+          const request =
+            pendingProjectCreations.get(key) ??
+            ({
+              name,
+              selection,
+              intentId: IntentId.make(crypto.randomUUID()),
+            } satisfies CreateProcessingProjectRequest)
+          pendingProjectCreations.set(key, request)
+          const clearRequest = () => {
+            if (pendingProjectCreations.get(key) === request)
+              pendingProjectCreations.delete(key)
+          }
+          return remote.createProject(request).pipe(
+            Effect.tap(() => Effect.sync(clearRequest)),
             Effect.map((project) =>
               NightbookWorkspaceSubmission.Project({ project }),
             ),
-            Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
-              remote.listProjects().pipe(
-                Effect.tap((projects) =>
-                  set((current) => ({
-                    ...current,
-                    process: {
-                      ...current.process,
-                      projects,
-                      state: 'current',
-                    },
-                  })),
-                ),
-                Effect.as(
-                  unavailable(
-                    'Project intake was reconciled with the current Project list.',
-                  ),
-                ),
-                Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
-                  set((current) => ({
-                    ...current,
-                    process: { ...current.process, state: 'unavailable' },
-                  })).pipe(
+            Effect.catchTag('NightbookWorkspaceRemoteFailure', (error) =>
+              Effect.sync(() => {
+                if (error.reason === 'rejected') clearRequest()
+                return generation === routeGeneration
+              }).pipe(
+                Effect.flatMap((ownsRoute) => {
+                  if (!ownsRoute)
+                    return Effect.succeed(
+                      error.reason === 'rejected'
+                        ? unavailable(error.message)
+                        : unavailable(
+                            'Project intake is uncertain. Reload current Project truth before another intake.',
+                          ),
+                    )
+
+                  const listReadGeneration = ++processListReadGeneration
+                  const ownsProcessListRead = () =>
+                    generation === routeGeneration &&
+                    listReadGeneration === processListReadGeneration
+                  return remote.listProjects().pipe(
+                    Effect.tap((projects) =>
+                      ownsProcessListRead()
+                        ? set((current) => ({
+                            ...current,
+                            process: {
+                              ...current.process,
+                              projects,
+                              state: 'current',
+                            },
+                          }))
+                        : Effect.void,
+                    ),
                     Effect.as(
                       unavailable(
-                        'Project intake is uncertain. Reload current Project truth before another intake.',
+                        'Project intake was reconciled with the current Project list.',
                       ),
                     ),
-                  ),
-                ),
+                    Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
+                      (ownsProcessListRead()
+                        ? set((current) => ({
+                            ...current,
+                            process: {
+                              ...current.process,
+                              state: 'unavailable',
+                            },
+                          }))
+                        : Effect.void
+                      ).pipe(
+                        Effect.as(
+                          unavailable(
+                            'Project intake is uncertain. Reload current Project truth before another intake.',
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                }),
               ),
             ),
-          ),
+          )
+        },
         ChangeProject: ({ project: selected, intent }) =>
           remote.changeProject(selected, intent).pipe(
             Effect.map((project) => ProjectChangeAttempt.Changed({ project })),
@@ -1009,17 +1100,11 @@ export const productionNightbookWorkspaceRemoteLayer = Layer.effect(
         processClient
           .evidence(projectId)
           .pipe(Effect.mapError(() => remoteFailure('project-evidence'))),
-      createProject: (name, selection) =>
-        processClient
-          .create({
-            name,
-            selection,
-            intentId: IntentId.make(crypto.randomUUID()),
-          })
-          .pipe(
-            Effect.map((changed) => changed.project),
-            Effect.mapError(() => remoteFailure('create-project')),
-          ),
+      createProject: (request) =>
+        processClient.create(request).pipe(
+          Effect.map((changed) => changed.project),
+          Effect.mapError(createProjectRemoteFailure),
+        ),
       changeProject: (project, intent) =>
         processClient
           .change({

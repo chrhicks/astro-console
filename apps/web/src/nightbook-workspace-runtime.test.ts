@@ -4,6 +4,7 @@ import {
   AcquireRevision,
   AssetRevision,
   BootstrapSnapshot,
+  CaptureSetId,
   IdempotencyKey,
   LibraryAssetDetail,
   LibraryPage,
@@ -38,6 +39,7 @@ import {
   type ProcessingProjectList,
 } from './nightbook-workspace-runtime'
 import { bootstrapFixtures } from './testing/bootstrap-fixtures'
+import type { CreateProcessingProjectRequest } from './process-client'
 
 const query = (id: string) =>
   LibraryQuery.make({
@@ -806,6 +808,417 @@ test('reconciles Review and Project intake failures through reads without replay
   assert.equal(listReads, 2)
   assert.equal(projectReads, 1)
   assert.equal(evidenceReads, 1)
+})
+
+test('reuses one Project creation receipt after an uncertain accepted response', async () => {
+  const acceptedProject = openedProject(1)
+  const requests: Array<CreateProcessingProjectRequest> = []
+  let createCalls = 0
+  let listReads = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      createProject: (...args) =>
+        Effect.suspend(() => {
+          createCalls += 1
+          requests.push(args[0])
+          return createCalls === 1
+            ? Effect.fail(failure('create-project'))
+            : Effect.succeed(acceptedProject)
+        }),
+      listProjects: () =>
+        Effect.sync(() => {
+          listReads += 1
+          return projects('project-1')
+        }),
+    }),
+  )
+  const intent = NightbookWorkspaceIntent.CreateProject({
+    name: 'M27',
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+
+  const uncertain = await submit(runtime, intent)
+  assert.equal(uncertain._tag, 'Unavailable')
+  assert.equal(createCalls, 1)
+  assert.equal(listReads, 1)
+
+  const recovered = await submit(
+    runtime,
+    NightbookWorkspaceIntent.CreateProject({
+      name: 'M27',
+      selection: { assetIds: [detail.assetId], captureSetIds: [] },
+    }),
+  )
+
+  assert.equal(recovered._tag, 'Project')
+  if (recovered._tag === 'Project')
+    assert.equal(recovered.project, acceptedProject)
+  assert.equal(createCalls, 2)
+  assert.equal(requests.length, 2)
+  const first = requests[0]
+  const second = requests[1]
+  assert.ok(first !== undefined)
+  assert.ok(second !== undefined)
+  assert.equal(first.name, 'M27')
+  assert.deepEqual(first.selection, intent.selection)
+  assert.equal(typeof first.intentId, 'string')
+  assert.equal(second.intentId, first.intentId)
+
+  const next = await submit(runtime, intent)
+  assert.equal(next._tag, 'Project')
+  assert.equal(requests.length, 3)
+  assert.notEqual(requests[2]?.intentId, first.intentId)
+  await runtime.dispose()
+})
+
+test('starts a new Project creation receipt when the name or exact selection changes', async () => {
+  const intentIds: Array<string> = []
+  const runtime = makeRuntime(
+    makeRemote({
+      createProject: (request) =>
+        Effect.sync(() => {
+          intentIds.push(request.intentId)
+        }).pipe(Effect.andThen(Effect.fail(failure('create-project')))),
+      listProjects: () => Effect.succeed([]),
+    }),
+  )
+
+  await submit(runtime, {
+    _tag: 'CreateProject',
+    name: 'M27',
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+  await submit(runtime, {
+    _tag: 'CreateProject',
+    name: 'M27 Widefield',
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+  await submit(runtime, {
+    _tag: 'CreateProject',
+    name: 'M27 Widefield',
+    selection: {
+      assetIds: [detail.assetId, assetDetail('asset-2').assetId],
+      captureSetIds: [
+        CaptureSetId.make('capture-set-1'),
+        CaptureSetId.make('capture-set-2'),
+      ],
+    },
+  })
+  await submit(runtime, {
+    _tag: 'CreateProject',
+    name: 'M27 Widefield',
+    selection: {
+      assetIds: [assetDetail('asset-2').assetId, detail.assetId],
+      captureSetIds: [
+        CaptureSetId.make('capture-set-1'),
+        CaptureSetId.make('capture-set-2'),
+      ],
+    },
+  })
+  await submit(runtime, {
+    _tag: 'CreateProject',
+    name: 'M27 Widefield',
+    selection: {
+      assetIds: [assetDetail('asset-2').assetId, detail.assetId],
+      captureSetIds: [
+        CaptureSetId.make('capture-set-2'),
+        CaptureSetId.make('capture-set-1'),
+      ],
+    },
+  })
+  await runtime.dispose()
+
+  assert.equal(intentIds.length, 5)
+  assert.equal(new Set(intentIds).size, 5)
+})
+
+test('retains uncertain Project creation receipts for independent semantic requests', async () => {
+  const requests: Array<CreateProcessingProjectRequest> = []
+  let firstA = true
+  const runtime = makeRuntime(
+    makeRemote({
+      createProject: (request) =>
+        Effect.suspend(() => {
+          requests.push(request)
+          if (request.name === 'A' && firstA) {
+            firstA = false
+            return Effect.fail(failure('create-project'))
+          }
+          return Effect.succeed(openedProject(1))
+        }),
+      listProjects: () => Effect.succeed([]),
+    }),
+  )
+
+  await submit(runtime, {
+    _tag: 'CreateProject',
+    name: 'A',
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+  await submit(runtime, {
+    _tag: 'CreateProject',
+    name: 'B',
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+  await submit(runtime, {
+    _tag: 'CreateProject',
+    name: 'A',
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+  await runtime.dispose()
+
+  const aRequests = requests.filter((request) => request.name === 'A')
+  const bRequest = requests.find((request) => request.name === 'B')
+  assert.equal(aRequests.length, 2)
+  assert.ok(aRequests[0] !== undefined)
+  assert.ok(aRequests[1] !== undefined)
+  assert.ok(bRequest !== undefined)
+  assert.equal(aRequests[1].intentId, aRequests[0].intentId)
+  assert.notEqual(bRequest.intentId, aRequests[0].intentId)
+})
+
+test('does not let an older Project-list reconciliation replace newer truth', async () => {
+  const olderListStarted = Effect.runSync(Deferred.make<void>())
+  const releaseOlderList = Effect.runSync(Deferred.make<void>())
+  let listReads = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      createProject: () => Effect.fail(failure('create-project')),
+      listProjects: () =>
+        Effect.suspend(() => {
+          listReads += 1
+          if (listReads === 1)
+            return Deferred.succeed(olderListStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseOlderList)),
+              Effect.as(projects('older-project')),
+            )
+          return Effect.succeed(projects('newer-project'))
+        }),
+    }),
+  )
+
+  const older = submit(runtime, {
+    _tag: 'CreateProject',
+    name: 'Older',
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+  await runtime.runPromise(Deferred.await(olderListStarted))
+  await submit(runtime, {
+    _tag: 'CreateProject',
+    name: 'Newer',
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+  await runtime.runPromise(Deferred.succeed(releaseOlderList, undefined))
+  await older
+  const current = await waitFor(runtime, () => true)
+  await runtime.dispose()
+
+  assert.equal(current.process.projects[0]?.projectId, 'newer-project')
+})
+
+test('does not let an older Create reconciliation replace a newer route Project list', async () => {
+  const createListStarted = Effect.runSync(Deferred.make<void>())
+  const releaseCreateList = Effect.runSync(Deferred.make<void>())
+  let listReads = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      createProject: () => Effect.fail(failure('create-project')),
+      listProjects: () =>
+        Effect.suspend(() => {
+          listReads += 1
+          if (listReads === 1)
+            return Deferred.succeed(createListStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseCreateList)),
+              Effect.as(projects('create-project')),
+            )
+          return Effect.succeed(projects('route-project'))
+        }),
+    }),
+  )
+
+  const create = submit(runtime, {
+    _tag: 'CreateProject',
+    name: 'M27',
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+  await runtime.runPromise(Deferred.await(createListStarted))
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'workspace', workspace: 'process' },
+    libraryQuery: query('process'),
+  })
+  await waitFor(
+    runtime,
+    (state) => state.process.projects[0]?.projectId === 'route-project',
+  )
+  await runtime.runPromise(Deferred.succeed(releaseCreateList, undefined))
+  await create
+  const current = await waitFor(runtime, () => true)
+  await runtime.dispose()
+
+  assert.equal(current.process.projects[0]?.projectId, 'route-project')
+})
+
+test('does not publish Create reconciliation after navigating to an unavailable open Project', async () => {
+  const createListStarted = Effect.runSync(Deferred.make<void>())
+  const releaseCreateList = Effect.runSync(Deferred.make<void>())
+  let createCalls = 0
+  let listReads = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      page: () => Effect.succeed(page('library', 1)),
+      createProject: () =>
+        Effect.sync(() => {
+          createCalls += 1
+        }).pipe(Effect.andThen(Effect.fail(failure('create-project')))),
+      listProjects: () =>
+        Effect.suspend(() => {
+          listReads += 1
+          if (listReads === 1) return Effect.succeed(projects('initial'))
+          return Deferred.succeed(createListStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseCreateList)),
+            Effect.as(projects('stale-create')),
+          )
+        }),
+      openProject: () => Effect.fail(failure('open-project')),
+      projectEvidence: () => Effect.fail(failure('project-evidence')),
+    }),
+  )
+
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'workspace', workspace: 'library' },
+    libraryQuery: query('library'),
+  })
+  await waitFor(
+    runtime,
+    (state) => state.process.projects[0]?.projectId === 'initial',
+  )
+  const create = submit(runtime, {
+    _tag: 'CreateProject',
+    name: 'M27',
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+  await runtime.runPromise(Deferred.await(createListStarted))
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'process-project', projectId: openedProject(1).projectId },
+    libraryQuery: query('process'),
+  })
+  await waitFor(runtime, (state) => state.process.state === 'unavailable')
+  await runtime.runPromise(Deferred.succeed(releaseCreateList, undefined))
+  await create
+  const current = await waitFor(runtime, () => true)
+  await runtime.dispose()
+
+  assert.equal(current.process.state, 'unavailable')
+  assert.equal(current.process.projects[0]?.projectId, 'initial')
+  assert.equal(createCalls, 1)
+  assert.equal(listReads, 2)
+})
+
+test('does not let an old-route Create failure invalidate a current route Project list', async () => {
+  const createStarted = Effect.runSync(Deferred.make<void>())
+  const releaseCreate = Effect.runSync(Deferred.make<void>())
+  const routeListStarted = Effect.runSync(Deferred.make<void>())
+  const releaseRouteList = Effect.runSync(Deferred.make<void>())
+  let createCalls = 0
+  let listReads = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      page: () => Effect.succeed(page('library', 1)),
+      createProject: () =>
+        Effect.sync(() => {
+          createCalls += 1
+        }).pipe(
+          Effect.andThen(Deferred.succeed(createStarted, undefined)),
+          Effect.andThen(Deferred.await(releaseCreate)),
+          Effect.andThen(Effect.fail(failure('create-project'))),
+        ),
+      listProjects: () =>
+        Effect.suspend(() => {
+          listReads += 1
+          if (listReads === 1) return Effect.succeed(projects('initial'))
+          if (listReads === 2)
+            return Deferred.succeed(routeListStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseRouteList)),
+              Effect.as(projects('route-current')),
+            )
+          return Effect.succeed(projects('stale-create'))
+        }),
+    }),
+  )
+
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'workspace', workspace: 'library' },
+    libraryQuery: query('library'),
+  })
+  await waitFor(
+    runtime,
+    (state) => state.process.projects[0]?.projectId === 'initial',
+  )
+  const create = submit(runtime, {
+    _tag: 'CreateProject',
+    name: 'M27',
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+  await runtime.runPromise(Deferred.await(createStarted))
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'workspace', workspace: 'process' },
+    libraryQuery: query('process'),
+  })
+  await runtime.runPromise(Deferred.await(routeListStarted))
+  await runtime.runPromise(Deferred.succeed(releaseCreate, undefined))
+  await create
+  assert.equal(createCalls, 1)
+  assert.equal(listReads, 2)
+  await runtime.runPromise(Deferred.succeed(releaseRouteList, undefined))
+  const current = await waitFor(
+    runtime,
+    (state) => state.process.state !== 'loading',
+  )
+  await runtime.dispose()
+
+  assert.equal(current.process.state, 'current')
+  assert.equal(current.process.projects[0]?.projectId, 'route-current')
+  assert.equal(createCalls, 1)
+  assert.equal(listReads, 2)
+})
+
+test('releases the Project creation receipt after a definite protocol rejection', async () => {
+  const intentIds: Array<string> = []
+  let createCalls = 0
+  const rejected = new NightbookWorkspaceRemoteFailure({
+    operation: 'create-project',
+    reason: 'rejected',
+    message: 'Project creation was rejected.',
+  })
+  const runtime = makeRuntime(
+    makeRemote({
+      createProject: (request) =>
+        Effect.suspend(() => {
+          createCalls += 1
+          intentIds.push(request.intentId)
+          return Effect.fail(
+            createCalls === 1 ? rejected : failure('create-project'),
+          )
+        }),
+      listProjects: () => Effect.succeed([]),
+    }),
+  )
+  const intent = NightbookWorkspaceIntent.CreateProject({
+    name: 'M27',
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+
+  await submit(runtime, intent)
+  await submit(runtime, intent)
+  await runtime.dispose()
+
+  assert.equal(intentIds.length, 2)
+  assert.notEqual(intentIds[1], intentIds[0])
 })
 
 test('keeps a late Review failure reconciliation bound to its Asset route', async () => {

@@ -25,14 +25,35 @@ export type CreateProcessingProjectRequest =
 export type ProcessingProjectChangeRequest =
   typeof ProcessingProjectChangeRequestSchema.Type
 
-const ProcessingProjectClientFailureDetail = Schema.Union([
-  ProcessingProjectHttpFailure,
-  Schema.TaggedStruct('MalformedResponse', {}),
-  Schema.TaggedStruct('TransportUnavailable', {}),
-])
+const ProcessingProjectClientFailureDetail = Schema.TaggedUnion({
+  InvalidInput: ProcessingProjectHttpFailure.cases.InvalidInput.fields,
+  RequestTooLarge: ProcessingProjectHttpFailure.cases.RequestTooLarge.fields,
+  ServiceUnavailable:
+    ProcessingProjectHttpFailure.cases.ServiceUnavailable.fields,
+  ProjectRouteNotFound:
+    ProcessingProjectHttpFailure.cases.ProjectRouteNotFound.fields,
+  DomainRejected: ProcessingProjectHttpFailure.cases.DomainRejected.fields,
+  InvalidRequest: {},
+  MalformedResponse: {},
+  TransportUnavailable: {},
+})
 
 export type ProcessingProjectOperationFailure =
   typeof ProcessingProjectClientFailureDetail.Type
+
+export const processingProjectFailureCertainty = (
+  failure: ProcessingProjectOperationFailure,
+): 'uncertain' | 'definite' =>
+  ProcessingProjectClientFailureDetail.match(failure, {
+    InvalidInput: () => 'definite',
+    RequestTooLarge: () => 'definite',
+    ServiceUnavailable: () => 'definite',
+    ProjectRouteNotFound: () => 'definite',
+    DomainRejected: () => 'definite',
+    InvalidRequest: () => 'definite',
+    MalformedResponse: () => 'uncertain',
+    TransportUnavailable: () => 'uncertain',
+  })
 
 export class ProcessingProjectRequestError extends Schema.TaggedErrorClass<ProcessingProjectRequestError>()(
   'Web.ProcessingProjectRequestError',
@@ -53,7 +74,9 @@ const requestError = (
     message: 'The Processing Project request was not accepted.',
   })
 
-const malformedRequest = (status = 0) =>
+const invalidRequest = () => requestError(0, { _tag: 'InvalidRequest' })
+
+const malformedResponse = (status = 0) =>
   requestError(status, { _tag: 'MalformedResponse' })
 
 const request = Effect.fn('ProcessClient.request')(function* <
@@ -67,7 +90,7 @@ const request = Effect.fn('ProcessClient.request')(function* <
 ) {
   const response = yield* Effect.tryPromise({
     try: async (signal) => {
-      const fetched = await fetch(path, {
+      return await fetch(path, {
         ...init,
         headers: {
           ...(init?.body === undefined
@@ -77,23 +100,23 @@ const request = Effect.fn('ProcessClient.request')(function* <
         },
         signal,
       })
-      return {
-        status: fetched.status,
-        value: (await fetched.json()) as unknown,
-      }
     },
     catch: () =>
       requestError(0, {
         _tag: 'TransportUnavailable',
       }),
   })
-  const decoded = yield* Schema.decodeUnknownEffect(responseSchema)(
-    response.value,
-  ).pipe(Effect.mapError(() => malformedRequest(response.status)))
+  const value = yield* Effect.tryPromise({
+    try: async () => (await response.json()) as unknown,
+    catch: () => malformedResponse(response.status),
+  })
+  const decoded = yield* Schema.decodeUnknownEffect(responseSchema)(value).pipe(
+    Effect.mapError(() => malformedResponse(response.status)),
+  )
   if (Schema.is(ProcessingProjectHttpFailure)(decoded))
     return yield* Effect.fail(requestError(response.status, decoded))
   return yield* Schema.decodeUnknownEffect(successSchema)(decoded).pipe(
-    Effect.mapError(() => malformedRequest(response.status)),
+    Effect.mapError(() => malformedResponse(response.status)),
   )
 })
 
@@ -111,7 +134,7 @@ export const processClient = {
   ) {
     const requestBody = yield* Schema.decodeUnknownEffect(
       CreateProcessingProjectRequestSchema,
-    )(input).pipe(Effect.mapError(() => malformedRequest()))
+    )(input).pipe(Effect.mapError(() => invalidRequest()))
     return yield* request(
       '/api/process/projects',
       ProcessingProjectChangedResponse,
@@ -146,7 +169,7 @@ export const processClient = {
   ) {
     const requestBody = yield* Schema.decodeUnknownEffect(
       ProcessingProjectChangeRequestSchema,
-    )(input).pipe(Effect.mapError(() => malformedRequest()))
+    )(input).pipe(Effect.mapError(() => invalidRequest()))
     return yield* request(
       `/api/process/projects/${encodeURIComponent(input.projectId)}`,
       ProcessingProjectChangedResponse,
