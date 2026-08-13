@@ -138,10 +138,7 @@ export type NightbookWorkspaceIntent = Data.TaggedEnum<{
     readonly request: ReviewRequest
   }
   Control: { readonly action: ControlAction }
-  Plan: {
-    readonly action: PlanAction
-    readonly key: typeof IdempotencyKey.Type
-  }
+  Plan: { readonly action: PlanAction }
   Observe: { readonly action: ObserveAction }
   RefreshPreflight: { readonly _never?: never }
   Acquire: { readonly action: AcquireAction }
@@ -221,10 +218,7 @@ export interface NightbookWorkspaceRemoteShape {
   readonly states: Stream.Stream<BootstrapClientState>
   readonly refresh: () => Effect.Effect<void>
   readonly control: (action: ControlAction) => Effect.Effect<CommandSubmission>
-  readonly plan: (
-    action: PlanAction,
-    key: typeof IdempotencyKey.Type,
-  ) => Effect.Effect<PlanCommandSubmission>
+  readonly plan: (action: PlanAction) => Effect.Effect<PlanCommandSubmission>
   readonly observe: (
     action: ObserveAction,
   ) => Effect.Effect<ObserveCommandSubmission>
@@ -817,9 +811,9 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
                 NightbookWorkspaceSubmission.Control({ result }),
               ),
             ),
-        Plan: ({ action, key }) =>
+        Plan: ({ action }) =>
           remote
-            .plan(action, key)
+            .plan(action)
             .pipe(
               Effect.map((result) =>
                 NightbookWorkspaceSubmission.Plan({ result }),

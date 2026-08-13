@@ -13,7 +13,6 @@ import { type PreflightRefreshSubmission } from './preflight-refresh-client'
 import {
   AssetRevision,
   AssetId,
-  IdempotencyKey,
   LibraryQuery as LibraryQuerySchema,
   LibraryQueryId,
   ReviewAssetRequest,
@@ -118,11 +117,7 @@ export function App() {
   const projection = workspaceState.projection
   const [route, setRoute] = useState<Route>(currentRoute)
   const [submitPlan, setSubmitPlan] = useState<
-    | ((
-        action: PlanAction,
-        key: typeof IdempotencyKey.Type,
-      ) => Promise<PlanCommandSubmission>)
-    | undefined
+    ((action: PlanAction) => Promise<PlanCommandSubmission>) | undefined
   >()
   const [submitObserve, setSubmitObserve] = useState<
     ((action: ObserveAction) => Promise<ObserveCommandSubmission>) | undefined
@@ -198,14 +193,12 @@ export function App() {
         ),
       ),
     )
-    setSubmitPlan(
-      () => async (action: PlanAction, key: typeof IdempotencyKey.Type) => {
-        return foldWorkspaceSubmission(
-          await submitWorkspace({ _tag: 'Plan', action, key }),
-          { Plan: ({ result }) => result },
-        )
-      },
-    )
+    setSubmitPlan(() => async (action: PlanAction) => {
+      return foldWorkspaceSubmission(
+        await submitWorkspace({ _tag: 'Plan', action }),
+        { Plan: ({ result }) => result },
+      )
+    })
     setSubmitObserve(() => async (action: ObserveAction) => {
       return foldWorkspaceSubmission(
         await submitWorkspace({ _tag: 'Observe', action }),

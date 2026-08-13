@@ -20,7 +20,6 @@ import {
   type Tone,
 } from '@nightbook/ui'
 import {
-  IdempotencyKey,
   PlanCommandResult,
   type RunSequenceDefinition,
   type PlanWorkspaceProjection,
@@ -35,7 +34,11 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react'
-import { PlanCommandSubmission, type PlanAction } from '../plan-command-client'
+import {
+  PlanAction,
+  PlanCommandSubmission,
+  type PlanAction as PlanActionValue,
+} from '../plan-command-client'
 import type { Projection, StatusTone } from '../presentation'
 import { CommandBar, type ControlSubmit } from './shared-shell'
 import '@nightbook/ui/styles.css'
@@ -59,10 +62,7 @@ type ConfirmAction =
 export type PlanWorkspaceProps = {
   projection: Projection
   loading: boolean
-  submit?: (
-    action: PlanAction,
-    key: typeof IdempotencyKey.Type,
-  ) => Promise<PlanCommandSubmission>
+  submit?: (action: PlanActionValue) => Promise<PlanCommandSubmission>
   submitControl?: ControlSubmit
 }
 
@@ -978,11 +978,11 @@ function PlanDesktop({ projection, loading, submit }: PlanWorkspaceProps) {
     !projection.shell.readOnly
   const preview = source?.runMutationPreview
 
-  const send = (action: PlanAction, after?: () => void) => {
+  const send = (action: PlanActionValue, after?: () => void) => {
     if (submit === undefined || pending) return
     setPending(true)
     setResult(undefined)
-    void submit(action, IdempotencyKey.make(crypto.randomUUID()))
+    void submit(action)
       .then((submission) =>
         PlanCommandSubmission.$match(submission, {
           Accepted: ({ result: accepted, safeNextAction }) => {
@@ -1011,7 +1011,7 @@ function PlanDesktop({ projection, loading, submit }: PlanWorkspaceProps) {
           'This creates a frozen run definition. Later Plan edits cannot alter it.',
         tone: 'primary' as const,
         label: 'Accept run definition',
-        action: { _tag: 'AcceptRunDefinition' } as PlanAction,
+        action: PlanAction.AcceptRunDefinition(),
       }
     if (confirm?.kind === 'start')
       return {
@@ -1020,7 +1020,7 @@ function PlanDesktop({ projection, loading, submit }: PlanWorkspaceProps) {
           'The service starts Preflight from the accepted definition. Navigation does not stop it.',
         tone: 'primary' as const,
         label: 'Start accepted run',
-        action: { _tag: 'StartAcceptedRun' } as PlanAction,
+        action: PlanAction.StartAcceptedRun(),
       }
     if (confirm?.kind === 'apply-preview' && preview)
       return {
@@ -1034,17 +1034,9 @@ function PlanDesktop({ projection, loading, submit }: PlanWorkspaceProps) {
         label: preview.approvalRequired
           ? 'Approve exact impact'
           : 'Apply exact impact',
-        action:
-          preview.approvalRequired && preview.approvalToken
-            ? ({
-                _tag: 'ApproveDisruptiveRunMutation',
-                previewId: preview.previewId,
-                approvalToken: preview.approvalToken,
-              } as PlanAction)
-            : ({
-                _tag: 'ApplyRunMutation',
-                previewId: preview.previewId,
-              } as PlanAction),
+        action: preview.approvalRequired
+          ? PlanAction.ApproveDisruptiveRunMutation()
+          : PlanAction.ApplyRunMutation(),
       }
     return undefined
   }, [confirm, preview, source?.revision])
@@ -1193,7 +1185,7 @@ function PlanDesktop({ projection, loading, submit }: PlanWorkspaceProps) {
                     <Button
                       disabled={pending || !changed || saveReason !== undefined}
                       onClick={() =>
-                        send({ _tag: 'SaveDraft', sequences: draft })
+                        send(PlanAction.SaveDraft({ sequences: draft }))
                       }
                     >
                       Save draft
@@ -1249,7 +1241,7 @@ function PlanDesktop({ projection, loading, submit }: PlanWorkspaceProps) {
                   draft={draft}
                   pending={pending}
                   onPreview={(mutation) =>
-                    send({ _tag: 'PreviewRunMutation', mutation })
+                    send(PlanAction.PreviewRunMutation({ mutation }))
                   }
                 />
                 <div className="nightbook-plan-action-dock">
@@ -1275,7 +1267,7 @@ function PlanDesktop({ projection, loading, submit }: PlanWorkspaceProps) {
                         tone="primary"
                         disabled={pending || saveReason !== undefined}
                         onClick={() =>
-                          send({ _tag: 'SaveDraft', sequences: draft })
+                          send(PlanAction.SaveDraft({ sequences: draft }))
                         }
                       >
                         Save reviewed draft
