@@ -26,7 +26,7 @@ import { browserBootstrapClientLayer } from './bootstrap-runtime'
 import {
   CommandClient,
   type CommandSubmission,
-  type ControlIntent,
+  type ControlAction,
 } from './command-client'
 import { unavailableProjection } from './future-adapter'
 import {
@@ -126,7 +126,7 @@ export type NightbookWorkspaceIntent = Data.TaggedEnum<{
     readonly assetId: typeof AssetId.Type
     readonly request: ReviewRequest
   }
-  Control: { readonly intent: ControlIntent }
+  Control: { readonly action: ControlAction }
   Plan: {
     readonly action: PlanAction
     readonly key: typeof IdempotencyKey.Type
@@ -212,7 +212,7 @@ export class NightbookWorkspaceRemoteFailure extends Schema.TaggedErrorClass<Nig
 export interface NightbookWorkspaceRemoteShape {
   readonly states: Stream.Stream<BootstrapClientState>
   readonly refresh: () => Effect.Effect<void>
-  readonly control: (intent: ControlIntent) => Effect.Effect<CommandSubmission>
+  readonly control: (action: ControlAction) => Effect.Effect<CommandSubmission>
   readonly plan: (
     action: PlanAction,
     key: typeof IdempotencyKey.Type,
@@ -749,9 +749,9 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
           routeChanged(route, libraryQuery).pipe(
             Effect.as(NightbookWorkspaceSubmission.Loaded({})),
           ),
-        Control: ({ intent }) =>
+        Control: ({ action }) =>
           remote
-            .control(intent)
+            .control(action)
             .pipe(
               Effect.map((result) =>
                 NightbookWorkspaceSubmission.Control({ result }),

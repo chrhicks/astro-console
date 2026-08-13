@@ -5,9 +5,12 @@ import {
   StatusIndicator,
   type Tone,
 } from '@nightbook/ui'
-import { CommandId, IdempotencyKey } from '@astro-console/protocol'
 import { useEffect, useId, useRef, useState } from 'react'
-import type { CommandSubmission, ControlIntent } from '../command-client'
+import {
+  ControlAction,
+  type CommandSubmission,
+  type ControlAction as SemanticControlAction,
+} from '../command-client'
 import type {
   HealthFact,
   Projection,
@@ -18,7 +21,7 @@ import { nightbookHref } from '../route-href'
 import { DevelopmentSimulationStrip } from './development-simulation'
 
 export type ControlSubmit = (
-  intent: ControlIntent,
+  action: SemanticControlAction,
 ) => Promise<CommandSubmission>
 
 export type ControlPresentation = {
@@ -109,10 +112,82 @@ const controlLabel = (shell: ShellView, loading: boolean) => {
   return 'Control · you'
 }
 
-export const projectedTakeControlAction = (shell: ShellView) =>
-  shell.control.readOnly
-    ? undefined
-    : shell.control.actions.find((action) => action.kind === 'take')
+export const projectedControlActions = (shell: ShellView) =>
+  shell.control.readOnly ? [] : shell.control.actions
+
+const semanticControlAction = (
+  action: ShellView['control']['actions'][number],
+): SemanticControlAction => {
+  switch (action.kind) {
+    case 'request':
+      return ControlAction.RequestControl({})
+    case 'release':
+      return ControlAction.ReleaseControl({})
+    case 'take':
+      return ControlAction.TakeControl({})
+    case 'grant':
+      return ControlAction.GrantControl({
+        requestId: action.requestId,
+        targetClientId: action.targetClientId,
+      })
+    case 'decline':
+      return ControlAction.DeclineControl({ requestId: action.requestId })
+  }
+}
+
+const controlActionKey = (action: ShellView['control']['actions'][number]) =>
+  action.kind === 'grant' || action.kind === 'decline'
+    ? `${action.kind}-${action.requestId}`
+    : action.kind
+
+export function ControlActionList({
+  actions,
+  loading,
+  pending,
+  pendingAction,
+  submitControl,
+  submitAction,
+}: {
+  actions: ShellView['control']['actions']
+  loading: boolean
+  pending: boolean
+  pendingAction?: string | undefined
+  submitControl: ControlSubmit | undefined
+  submitAction: (action: ShellView['control']['actions'][number]) => void
+}) {
+  return (
+    <div className="nightbook-control-actions">
+      {actions.map((action) => {
+        const actionKey = controlActionKey(action)
+        return (
+          <Button
+            key={actionKey}
+            tone={
+              action.kind === 'release'
+                ? 'danger'
+                : action.kind === 'decline'
+                  ? 'neutral'
+                  : 'primary'
+            }
+            size="small"
+            disabled={loading || pending || submitControl === undefined}
+            title={
+              submitControl === undefined
+                ? 'Control command service is not ready.'
+                : undefined
+            }
+            onClick={() => submitAction(action)}
+          >
+            {pending &&
+            (pendingAction === undefined || pendingAction === actionKey)
+              ? `${action.label} pending…`
+              : action.label}
+          </Button>
+        )
+      })}
+    </div>
+  )
+}
 
 function Control({
   shell,
@@ -128,28 +203,23 @@ function Control({
   allowAction: boolean
 }) {
   const [open, setOpen] = useState(false)
-  const [pending, setPending] = useState(false)
+  const [pendingAction, setPendingAction] = useState<string | undefined>()
   const [message, setMessage] = useState<string | undefined>()
   const panelId = useId()
   const triggerRef = useRef<HTMLButtonElement>(null)
-  const takeAction = allowAction ? projectedTakeControlAction(shell) : undefined
-  const takeControl = () => {
+  const actions = allowAction ? projectedControlActions(shell) : []
+  const submitAction = (action: ShellView['control']['actions'][number]) => {
     if (
-      takeAction === undefined ||
       shell.control.readOnly ||
       submitControl === undefined ||
-      pending
+      pendingAction !== undefined
     )
       return
-    setPending(true)
+    setPendingAction(controlActionKey(action))
     setMessage(undefined)
-    void submitControl({
-      _tag: 'TakeControl',
-      commandId: CommandId.make(crypto.randomUUID()),
-      idempotencyKey: IdempotencyKey.make(crypto.randomUUID()),
-    }).then(
+    void submitControl(semanticControlAction(action)).then(
       (result) => {
-        setPending(false)
+        setPendingAction(undefined)
         setMessage(
           result._tag === 'Accepted'
             ? 'Control action recorded. Waiting for the current service projection.'
@@ -157,7 +227,7 @@ function Control({
         )
       },
       () => {
-        setPending(false)
+        setPendingAction(undefined)
         setMessage('Control action could not reach the service.')
       },
     )
@@ -215,24 +285,22 @@ function Control({
               value={String(shell.control.revision)}
             />
           </DataList>
-          <p>{presentation?.protection ?? shell.protection}</p>
+          <p>
+            {presentation?.protection ??
+              (actions.length > 0 && shell.readOnly
+                ? 'Workspace actions remain read-only until the service grants control.'
+                : shell.protection)}
+          </p>
           {message ? <p role="status">{message}</p> : null}
-          {takeAction !== undefined && !shell.control.readOnly ? (
-            <div className="nightbook-control-actions">
-              <Button
-                tone="primary"
-                size="small"
-                disabled={loading || pending || submitControl === undefined}
-                title={
-                  submitControl === undefined
-                    ? 'Control command service is not ready.'
-                    : undefined
-                }
-                onClick={takeControl}
-              >
-                {pending ? 'Taking control…' : takeAction.label}
-              </Button>
-            </div>
+          {actions.length > 0 && !shell.control.readOnly ? (
+            <ControlActionList
+              actions={actions}
+              loading={loading}
+              pending={pendingAction !== undefined}
+              pendingAction={pendingAction}
+              submitControl={submitControl}
+              submitAction={submitAction}
+            />
           ) : null}
         </section>
       ) : null}

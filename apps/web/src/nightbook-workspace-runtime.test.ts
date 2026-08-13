@@ -5,6 +5,7 @@ import {
   AssetRevision,
   BootstrapSnapshot,
   CaptureSetId,
+  CommandId,
   IdempotencyKey,
   LibraryAssetDetail,
   LibraryPage,
@@ -39,6 +40,7 @@ import {
   type ProcessingProjectList,
 } from './nightbook-workspace-runtime'
 import { bootstrapFixtures } from './testing/bootstrap-fixtures'
+import { CommandSubmission, ControlAction } from './command-client'
 import type { CreateProcessingProjectRequest } from './process-client'
 
 const query = (id: string) =>
@@ -214,6 +216,114 @@ const waitFor = (
       ),
     ),
   )
+
+test('submits each semantic Shared Control action once without changing projected lease truth', async () => {
+  const bootstrap = BootstrapClientState.Current({
+    snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)({
+      ...bootstrapFixtures.noRun,
+      control: {
+        revision: 7,
+        state: 'held',
+        holderClientId: 'desktop-other',
+        pendingRequests: [
+          {
+            requestId: 'request-1',
+            personId: 'member-person',
+            clientId: 'desktop-member',
+            expiresAt: '2026-08-02T20:05:00Z',
+          },
+        ],
+      },
+    }),
+  })
+  const actions = [
+    ControlAction.RequestControl({}),
+    ControlAction.ReleaseControl({}),
+    ControlAction.GrantControl({
+      requestId: 'request-1',
+      targetClientId: 'desktop-member',
+    }),
+    ControlAction.DeclineControl({ requestId: 'request-1' }),
+    ControlAction.TakeControl({}),
+  ]
+  const submitted: ControlAction[] = []
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(bootstrap),
+      control: (action) =>
+        Effect.sync(() => submitted.push(action)).pipe(
+          Effect.as(
+            CommandSubmission.Accepted({
+              snapshot: bootstrap.snapshot,
+              current: bootstrap,
+              safeNextAction: 'Await authoritative projection.',
+            }),
+          ),
+        ),
+    }),
+  )
+
+  for (const action of actions) {
+    const result = await submit(runtime, { _tag: 'Control', action })
+    assert.equal(result._tag, 'Control')
+  }
+
+  assert.deepEqual(submitted, actions)
+  const state = await waitFor(runtime, (value) => value.projectionReceived)
+  assert.equal(state.projection.shell.control.revision, 7)
+  assert.equal(state.projection.shell.control.state, 'held')
+  await runtime.dispose()
+})
+
+test('preserves rejected and unavailable Shared Control outcomes without replay', async () => {
+  const bootstrap = BootstrapClientState.Current({
+    snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)(
+      bootstrapFixtures.noRun,
+    ),
+  })
+  const outcomes = [
+    CommandSubmission.Rejected({
+      failure: {
+        _tag: 'AuthorizationFailure',
+        commandId: CommandId.make('control-command'),
+        summary: 'Control was lost.',
+        retryable: false,
+        refreshFromSnapshot: true,
+        safeAlternatives: ['Read current control truth.'],
+        reason: 'ControlLeaseLost',
+      },
+      current: bootstrap,
+      safeNextAction: 'Read current control truth.',
+    }),
+    CommandSubmission.Unavailable({
+      current: bootstrap,
+      reason: 'The command response was unavailable.',
+      safeNextAction: 'Wait for current control truth.',
+    }),
+  ]
+
+  for (const outcome of outcomes) {
+    let calls = 0
+    const runtime = makeRuntime(
+      makeRemote({
+        states: Stream.make(bootstrap),
+        control: () =>
+          Effect.sync(() => {
+            calls += 1
+            return outcome
+          }),
+      }),
+    )
+    const result = await submit(runtime, {
+      _tag: 'Control',
+      action: ControlAction.TakeControl({}),
+    })
+    assert.equal(result._tag, 'Control')
+    if (result._tag === 'Control') assert.equal(result.result, outcome)
+    assert.equal(calls, 1)
+    await runtime.dispose()
+  }
+})
 
 test('constructs closed Acquire and branded resource intents', () => {
   const acquire = NightbookWorkspaceIntent.Acquire({

@@ -8,7 +8,7 @@ import {
   type ObserveAction,
   type ObserveCommandSubmission,
 } from './observe-command-client'
-import { type CommandSubmission, type ControlIntent } from './command-client'
+import { type CommandSubmission, type ControlAction } from './command-client'
 import { type PreflightRefreshSubmission } from './preflight-refresh-client'
 import {
   AcquireIntent,
@@ -135,7 +135,7 @@ export function App() {
     | undefined
   >()
   const [submitControl, setSubmitControl] = useState<
-    ((intent: ControlIntent) => Promise<CommandSubmission>) | undefined
+    ((action: ControlAction) => Promise<CommandSubmission>) | undefined
   >()
   const [refreshPreflight, setRefreshPreflight] = useState<
     (() => Promise<PreflightRefreshSubmission>) | undefined
@@ -221,9 +221,9 @@ export function App() {
         )
       },
     )
-    setSubmitControl(() => async (intent: ControlIntent) => {
+    setSubmitControl(() => async (action: ControlAction) => {
       return foldWorkspaceSubmission(
-        await submitWorkspace({ _tag: 'Control', intent }),
+        await submitWorkspace({ _tag: 'Control', action }),
         { Control: ({ result }) => result },
       )
     })

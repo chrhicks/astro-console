@@ -21,7 +21,7 @@ route `/` maps to Plan.
 
 The official UI and UX reference is the composed React demo in:
 
-`/Users/chicks/dev/personal/kimi_workspace/nightbook-prototype/apps/nightbook-demo`
+`.gh/clone/nightbook-prototype/apps/nightbook-demo`
 
 The same workspace owns the `@nightbook/ui` source, component Gallery, and
 package verification. Astro Console's promoted workspaces are an integration
@@ -311,8 +311,15 @@ submission, and uncertain-outcome reconciliation. Production HTTP and
 EventSource adapters remain internal to its layer, while deterministic tests
 cross the same public state-and-intent interface through an in-memory remote
 adapter. Explicit Processing Project URLs and client-only stage navigation are
-unchanged. This refactor adds no browser-owned domain truth and no new product
-workflow.
+unchanged. The runtime also retains one Processing Project creation receipt
+identity after an uncertain response and reuses it only for an explicit
+unchanged retry; acceptance or definite rejection clears it. The next web
+correction exposes every projected Shared Control action through one semantic
+runtime interface. React no longer owns command or idempotency identities;
+Request, Release, Grant, Decline, and Take remain service-projected actions,
+and accepted commands remain provisional until the next authoritative
+projection. This refactor and its follow-up corrections add no browser-owned
+domain truth and no new product workflow.
 
 After that simulator proof, an indoor GET-only readiness check reached ASCOM
 Remote at `192.168.4.104:11111`. Management and every device-property envelope
@@ -474,14 +481,17 @@ covered indoor frame.
 ## Next Owner Action
 
 GitHub issues `#2`, `#3`, and `#4`, the shared protocol refocus, origin runtime
-deepening, and Nightbook workspace runtime deepening, are complete locally. The
-remaining architecture frontiers are the durable work-claim re-audit in `#5`
-and the origin integration-test harness in `#6`. Select and integrate a real
-processing library only in a later accepted item; the current deterministic
-materializer proves orchestration and evidence, not astronomy processing
-quality. The remaining accepted delivery list continues with the host backup
-repair and owner-observed outdoor Acquire proof when its operating window is
-available.
+deepening, and Nightbook workspace runtime deepening are complete locally. The
+first four selected corrections from the `apps/web` architecture map in GitHub
+issue `#18` are merged. The fifth selected correction, Shared Control action
+reachability in `#27`, is implemented and ready for owner review in PR `#28`.
+No later child is selected. The other architecture frontiers remain the durable
+work-claim re-audit in `#5` and the origin integration-test harness in `#6`.
+Select and integrate a real processing library only in a later accepted item;
+the current deterministic materializer proves orchestration and evidence, not
+astronomy processing quality. The remaining accepted delivery list continues
+with the host backup repair and owner-observed outdoor Acquire proof when its
+operating window is available.
 
 ## Later Accepted Items
 
