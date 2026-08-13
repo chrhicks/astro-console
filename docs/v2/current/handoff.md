@@ -484,8 +484,8 @@ GitHub issues `#2`, `#3`, and `#4`, the shared protocol refocus, origin runtime
 deepening, and Nightbook workspace runtime deepening are complete locally. The
 first four selected corrections from the `apps/web` architecture map in GitHub
 issue `#18` are merged. The fifth selected correction, Shared Control action
-reachability in `#27`, is implemented and ready for owner review in PR `#28`.
-No later child is selected. The other architecture frontiers remain the durable
+reachability in `#27`, is merged through PR `#28`. No next child is selected.
+The other architecture frontiers remain the durable
 work-claim re-audit in `#5` and the origin integration-test harness in `#6`.
 Select and integrate a real processing library only in a later accepted item;
 the current deterministic materializer proves orchestration and evidence, not
