@@ -323,6 +323,8 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
       initialNightbookWorkspaceState,
     )
     let routeGeneration = 0
+    let currentRoute: Route | undefined
+    let lastBootstrapCursor: number | undefined
     let pageFiber: Fiber.Fiber<void> | undefined
     let detailFiber: Fiber.Fiber<void> | undefined
     let sourceFiber: Fiber.Fiber<void> | undefined
@@ -453,7 +455,11 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
             ],
             { concurrency: 'unbounded' },
           )
-          if (generation === routeGeneration)
+          if (
+            generation === routeGeneration &&
+            project.projectId === route.projectId &&
+            evidence.projectId === route.projectId
+          )
             yield* set((current) => ({
               ...current,
               process: {
@@ -531,6 +537,7 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
     const routeChanged = (route: Route, libraryQuery: LibraryQuery) =>
       Effect.gen(function* () {
         const generation = ++routeGeneration
+        currentRoute = route
         const keepsLibraryPage =
           (route.kind === 'workspace' && route.workspace === 'library') ||
           route.kind === 'asset'
@@ -654,11 +661,34 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
 
     yield* remote.states.pipe(
       Stream.runForEach((bootstrap) =>
-        set((current) => ({
-          ...current,
-          projection: projectBootstrapState(bootstrap),
-          projectionReceived: true,
-        })),
+        Effect.gen(function* () {
+          yield* set((current) => ({
+            ...current,
+            projection: projectBootstrapState(bootstrap),
+            projectionReceived: true,
+          }))
+          const cursor =
+            bootstrap._tag === 'Unavailable'
+              ? undefined
+              : bootstrap.snapshot.eventCursor
+          const route = currentRoute
+          const refreshesOpenProject =
+            route?.kind === 'process-project' &&
+            cursor !== undefined &&
+            lastBootstrapCursor !== undefined &&
+            cursor > lastBootstrapCursor
+          if (
+            cursor !== undefined &&
+            (lastBootstrapCursor === undefined || cursor > lastBootstrapCursor)
+          )
+            lastBootstrapCursor = cursor
+          if (refreshesOpenProject) {
+            processFiber = yield* replace(
+              processFiber,
+              loadProcess(route, routeGeneration),
+            )
+          }
+        }),
       ),
       Effect.forkScoped,
     )

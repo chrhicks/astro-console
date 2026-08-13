@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   AcquireRevision,
   AssetRevision,
+  BootstrapSnapshot,
   IdempotencyKey,
   LibraryAssetDetail,
   LibraryPage,
@@ -21,9 +22,11 @@ import {
   Layer,
   ManagedRuntime,
   Option,
+  Queue,
   Schema,
   Stream,
 } from 'effect'
+import { BootstrapClientState } from './bootstrap-client'
 import {
   NightbookWorkspaceRemote,
   NightbookWorkspaceRemoteFailure,
@@ -34,6 +37,7 @@ import {
   type NightbookWorkspaceState,
   type ProcessingProjectList,
 } from './nightbook-workspace-runtime'
+import { bootstrapFixtures } from './testing/bootstrap-fixtures'
 
 const query = (id: string) =>
   LibraryQuery.make({
@@ -595,6 +599,101 @@ test('retains the last-confirmed Process pair when changed evidence stays unavai
   assert.equal(changeCalls, 1)
   assert.equal(evidenceCalls, 3)
 })
+
+test(
+  'refreshes the open Process pair after a later bootstrap state',
+  { timeout: 2_000 },
+  async () => {
+    const states = Effect.runSync(Queue.unbounded<BootstrapClientState>())
+    const confirmed = openedProject(1)
+    const settled = openedProject(2)
+    const confirmedEvidence = projectEvidence()
+    const settledEvidence = projectEvidence()
+    let openCalls = 0
+    let evidenceCalls = 0
+    let changeCalls = 0
+    const runtime = makeRuntime(
+      makeRemote({
+        states: Stream.fromQueue(states),
+        openProject: () =>
+          Effect.sync(() => (++openCalls === 1 ? confirmed : settled)),
+        projectEvidence: () =>
+          Effect.sync(() =>
+            ++evidenceCalls === 1 ? confirmedEvidence : settledEvidence,
+          ),
+        changeProject: () =>
+          Effect.sync(() => {
+            changeCalls += 1
+            return settled
+          }),
+      }),
+    )
+
+    const initialBootstrap = Schema.decodeUnknownSync(BootstrapSnapshot)(
+      bootstrapFixtures.fresh,
+    )
+    await runtime.runPromise(
+      Queue.offer(
+        states,
+        BootstrapClientState.Current({ snapshot: initialBootstrap }),
+      ),
+    )
+    await waitFor(
+      runtime,
+      (state) =>
+        state.projection.snapshotVersion === initialBootstrap.snapshotVersion,
+    )
+    await submit(runtime, {
+      _tag: 'RouteChanged',
+      route: { kind: 'process-project', projectId: confirmed.projectId },
+      libraryQuery: query('process'),
+    })
+    await waitFor(
+      runtime,
+      (state) =>
+        state.process.project === confirmed &&
+        state.process.evidence === confirmedEvidence,
+    )
+    await runtime.runPromise(
+      Queue.offer(
+        states,
+        BootstrapClientState.Reconnecting({
+          snapshot: initialBootstrap,
+          reason: 'Reconnect without a new service event.',
+        }),
+      ),
+    )
+    await waitFor(runtime, (state) =>
+      state.projection.shell.freshness.startsWith('Reconnecting snapshot'),
+    )
+    assert.equal(openCalls, 1)
+    assert.equal(evidenceCalls, 1)
+
+    const settledBootstrap = Schema.decodeUnknownSync(BootstrapSnapshot)({
+      ...initialBootstrap,
+      snapshotVersion: initialBootstrap.snapshotVersion + 1,
+      eventCursor: initialBootstrap.eventCursor + 1,
+    })
+    await runtime.runPromise(
+      Queue.offer(
+        states,
+        BootstrapClientState.Current({ snapshot: settledBootstrap }),
+      ),
+    )
+    const refreshed = await waitFor(
+      runtime,
+      (state) =>
+        state.process.project === settled &&
+        state.process.evidence === settledEvidence,
+    )
+    await runtime.dispose()
+
+    assert.equal(refreshed.process.project?.revision, settled.revision)
+    assert.equal(openCalls, 2)
+    assert.equal(evidenceCalls, 2)
+    assert.equal(changeCalls, 0)
+  },
+)
 
 test('reconciles Review and Project intake failures through reads without replay', async () => {
   const confirmedProject = openedProject(1)
