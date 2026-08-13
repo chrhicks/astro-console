@@ -58,7 +58,7 @@ export type ProcessWorkspaceProps = {
     evidence: ProcessingProjectEvidence | undefined
     state: 'loading' | 'current' | 'unavailable'
   }
-  onCreateProject: (
+  onCreateProject?: (
     name: string,
     selection: {
       readonly assetIds: ReadonlyArray<typeof AssetId.Type>
@@ -204,6 +204,7 @@ export default function ProcessWorkspace(props: ProcessWorkspaceProps) {
       ) : props.sourceAssetId !== undefined ? (
         <SourceIntake
           assetId={props.sourceAssetId}
+          mutationAuthority={props.projection.libraryProcessMutation}
           {...(props.sourceHandoff === undefined
             ? {}
             : { handoff: props.sourceHandoff })}
@@ -213,7 +214,11 @@ export default function ProcessWorkspace(props: ProcessWorkspaceProps) {
           {...(pending === undefined ? {} : { pending })}
           {...(message === undefined ? {} : { message })}
           onCreate={async (name) => {
-            if (props.sourceHandoff === undefined) return
+            if (
+              props.sourceHandoff === undefined ||
+              props.onCreateProject === undefined
+            )
+              return
             setPending('Creating Project')
             try {
               await props.onCreateProject(name, {
@@ -310,6 +315,7 @@ function SourceIntake({
   assetId,
   handoff,
   handoffState,
+  mutationAuthority,
   pending,
   message,
   onCreate,
@@ -317,6 +323,7 @@ function SourceIntake({
   assetId: string
   handoff?: ProcessSourceHandoff | undefined
   handoffState?: HandoffState | undefined
+  mutationAuthority: Projection['libraryProcessMutation']
   pending?: string | undefined
   message?: string | undefined
   onCreate: (name: string) => Promise<void>
@@ -353,6 +360,7 @@ function SourceIntake({
               <span>Project name</span>
               <input
                 value={name}
+                disabled={!mutationAuthority.allowed}
                 onChange={(event) => setName(event.target.value)}
               />
             </label>
@@ -360,6 +368,7 @@ function SourceIntake({
               tone="primary"
               disabled={
                 handoff === undefined ||
+                !mutationAuthority.allowed ||
                 pending !== undefined ||
                 name.trim() === ''
               }
@@ -367,6 +376,11 @@ function SourceIntake({
             >
               Create Project
             </Button>
+            {!mutationAuthority.allowed ? (
+              <p className="nightbook-process-denial">
+                {mutationAuthority.reason}
+              </p>
+            ) : null}
             {message ? <p role="status">{message}</p> : null}
           </Stack>
         </PanelBody>

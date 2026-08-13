@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
+  BootstrapSnapshot,
   LibraryAssetDetail as LibraryAssetDetailSchema,
   LibraryPage as LibraryPageSchema,
   LibraryQuery as LibraryQuerySchema,
@@ -10,7 +11,10 @@ import {
 import { Schema } from 'effect'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { BootstrapClientState } from '../bootstrap-client'
+import { projectBootstrapState } from '../bootstrap-projection'
 import { unavailableProjection } from '../future-adapter'
+import { bootstrapFixtures } from '../testing/bootstrap-fixtures'
 import { LibraryWorkspace, LibraryPhone } from './LibraryWorkspace'
 
 const query = LibraryQuerySchema.make({
@@ -113,20 +117,29 @@ const page = Schema.decodeUnknownSync(LibraryPageSchema)({
   catalogChanged: false,
 })
 
-const controllerProjection = {
-  ...unavailableProjection,
-  shell: {
-    ...unavailableProjection.shell,
-    readOnly: false,
-    membership: 'Owner member',
-    control: { ...unavailableProjection.shell.control, readOnly: false },
-  },
-}
+const ownerProjection = (holderClientId: string) =>
+  projectBootstrapState(
+    BootstrapClientState.Current({
+      snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)({
+        ...bootstrapFixtures.fresh,
+        control: {
+          revision: 5,
+          state: 'held',
+          holderClientId,
+        },
+      }),
+    }),
+  )
+
+const controllerProjection = ownerProjection('desktop-owner')
 
 test('allows a desktop owner to select Project sources without the Control Lease', () => {
+  const nonControllerProjection = ownerProjection('desktop-other-owner')
+  assert.equal(nonControllerProjection.shell.readOnly, true)
+
   const markup = renderToStaticMarkup(
     createElement(LibraryWorkspace, {
-      projection: controllerProjection,
+      projection: nonControllerProjection,
       loading: false,
       page: { query, value: page },
       onSelectAsset: () => undefined,
@@ -136,6 +149,25 @@ test('allows a desktop owner to select Project sources without the Control Lease
   assert.match(markup, /Select frame/)
   assert.doesNotMatch(markup, /type="checkbox" disabled=""/)
   assert.match(markup, /Select at least one Asset or Capture Set/)
+})
+
+test('allows a desktop owner to review without the Control Lease', () => {
+  const nonControllerProjection = ownerProjection('desktop-other-owner')
+  const markup = renderToStaticMarkup(
+    createElement(LibraryWorkspace, {
+      projection: nonControllerProjection,
+      loading: false,
+      assetId: detail.assetId,
+      page: { query, value: page },
+      detail,
+      onSelectAsset: () => undefined,
+      onReview: async () => undefined,
+    }),
+  )
+
+  assert.match(markup, /Review · owner desktop/)
+  assert.doesNotMatch(markup, /<button[^>]*disabled=""[^>]*>Accept<\/button>/)
+  assert.doesNotMatch(markup, /<button[^>]*disabled=""[^>]*>Reject<\/button>/)
 })
 
 test('renders one real frame-review task from Library contracts', () => {
@@ -240,7 +272,7 @@ test('disables every Library intake control for a read-only shell', () => {
       onSelectAsset: () => undefined,
     }),
   )
-  assert.match(markup, /Owner membership is required for Project intake/)
+  assert.match(markup, /Current service truth is unavailable/)
   assert.doesNotMatch(markup, /<input type="checkbox"(?! disabled)/)
   assert.match(markup, /<select class="nb-select" disabled=""/)
 })
@@ -487,7 +519,7 @@ test('does not expose a review action without current asset detail', () => {
   assert.doesNotMatch(markup, />Reject</)
 })
 
-test('keeps desktop review controls disabled for a read-only or stale projection', () => {
+test('keeps desktop review controls disabled without current mutation authority', () => {
   const markup = renderToStaticMarkup(
     createElement(LibraryWorkspace, {
       projection: unavailableProjection,
@@ -498,8 +530,8 @@ test('keeps desktop review controls disabled for a read-only or stale projection
     }),
   )
 
-  assert.match(markup, /Review · viewer/)
-  assert.match(markup, /Desktop control is required/)
+  assert.match(markup, /Review · protected/)
+  assert.match(markup, /Current service truth is unavailable/)
   assert.match(markup, /<button[^>]*disabled=""[^>]*>Accept<\/button>/)
   assert.match(markup, /<button[^>]*disabled=""[^>]*>Reject<\/button>/)
 })

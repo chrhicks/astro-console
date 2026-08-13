@@ -369,6 +369,73 @@ test('projects membership and server capability independently', () => {
   )
 })
 
+test('projects current Library and Process mutation authority independently of Control', () => {
+  const ownerWithoutControl = Schema.decodeUnknownSync(BootstrapSnapshot)({
+    ...bootstrapFixtures.fresh,
+    control: {
+      revision: 5,
+      state: 'held',
+      holderClientId: 'desktop-other-owner',
+    },
+  })
+  const projection = projectBootstrapState(
+    BootstrapClientState.Current({ snapshot: ownerWithoutControl }),
+  )
+
+  assert.equal(projection.shell.readOnly, true)
+  assert.deepEqual(projection.libraryProcessMutation, { allowed: true })
+})
+
+test('protects Library and Process mutations without current owner desktop authority', () => {
+  const holder = projectBootstrapState(
+    BootstrapClientState.Current({ snapshot: snapshot('fresh') }),
+  )
+  const viewer = projectBootstrapState(
+    BootstrapClientState.Current({ snapshot: snapshot('viewer') }),
+  )
+  const phone = projectBootstrapState(
+    BootstrapClientState.Current({ snapshot: snapshot('phone') }),
+  )
+  const stale = projectBootstrapState(
+    BootstrapClientState.Stale({
+      snapshot: snapshot('fresh'),
+      reason: 'Snapshot expired.',
+    }),
+  )
+  const reconnecting = projectBootstrapState(
+    BootstrapClientState.Reconnecting({
+      snapshot: snapshot('fresh'),
+      reason: 'Event stream disconnected.',
+    }),
+  )
+  const unavailable = projectBootstrapState(
+    BootstrapClientState.Unavailable({ reason: 'Bootstrap unavailable.' }),
+  )
+
+  assert.deepEqual(holder.libraryProcessMutation, { allowed: true })
+  assert.match(
+    viewer.libraryProcessMutation.allowed
+      ? ''
+      : viewer.libraryProcessMutation.reason,
+    /Owner membership/,
+  )
+  assert.match(
+    phone.libraryProcessMutation.allowed
+      ? ''
+      : phone.libraryProcessMutation.reason,
+    /mutation-capable desktop/,
+  )
+  for (const projection of [stale, reconnecting, unavailable]) {
+    assert.equal(projection.libraryProcessMutation.allowed, false)
+    assert.match(
+      projection.libraryProcessMutation.allowed
+        ? ''
+        : projection.libraryProcessMutation.reason,
+      /Current service truth/,
+    )
+  }
+})
+
 test('projects current controller actions and Manage only when eligible', () => {
   const projection = projectBootstrapState(
     BootstrapClientState.Current({
