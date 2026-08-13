@@ -14,7 +14,20 @@ import {
   type BootstrapClientState as ClientState,
 } from './bootstrap-client'
 
-export const ControlIntent = Schema.TaggedUnion({
+export type ControlAction = Data.TaggedEnum<{
+  RequestControl: { readonly _never?: never }
+  GrantControl: {
+    readonly requestId: string
+    readonly targetClientId: string
+  }
+  DeclineControl: { readonly requestId: string }
+  ReleaseControl: { readonly _never?: never }
+  TakeControl: { readonly _never?: never }
+}>
+
+export const ControlAction = Data.taggedEnum<ControlAction>()
+
+const ControlIntent = Schema.TaggedUnion({
   RequestControl: {
     commandId: CommandId,
     idempotencyKey: IdempotencyKey,
@@ -40,7 +53,7 @@ export const ControlIntent = Schema.TaggedUnion({
   },
 })
 
-export type ControlIntent = typeof ControlIntent.Type
+type ControlIntent = typeof ControlIntent.Type
 
 export type CommandSubmission = Data.TaggedEnum<{
   Accepted: {
@@ -84,7 +97,7 @@ export class CommandTransport extends Context.Service<
 >()('@astro-console/web/CommandTransport') {}
 
 export interface CommandClientShape {
-  readonly submit: (intent: ControlIntent) => Effect.Effect<CommandSubmission>
+  readonly submit: (action: ControlAction) => Effect.Effect<CommandSubmission>
 }
 
 export class CommandClient extends Context.Service<
@@ -99,11 +112,11 @@ export const layer = Layer.effect(
     const transport = yield* CommandTransport
 
     const submit = Effect.fn('CommandClient.submit')(function* (
-      intent: ControlIntent,
+      action: ControlAction,
     ) {
       const current = yield* bootstrap.read()
       const snapshot = currentSnapshot(current)
-      const unavailable = eligibility(current, intent)
+      const unavailable = eligibility(current, action)
       if (unavailable !== undefined || snapshot === undefined)
         return CommandSubmission.Unavailable({
           current,
@@ -112,8 +125,12 @@ export const layer = Layer.effect(
         })
 
       const response = yield* Effect.gen(function* () {
+        const identity = yield* createControlIdentity()
         const envelope = yield* Schema.decodeUnknownEffect(CommandEnvelope)(
-          commandEnvelope(intent, snapshot.control.revision),
+          commandEnvelope(
+            controlIntent(action, identity),
+            snapshot.control.revision,
+          ),
         ).pipe(
           Effect.mapError(
             () =>
@@ -181,6 +198,42 @@ export const browserCommandTransportLayer = Layer.succeed(
     }),
   }),
 )
+
+const createControlIdentity = Effect.fn('CommandClient.createControlIdentity')(
+  () =>
+    Effect.sync(() => ({
+      commandId: CommandId.make(crypto.randomUUID()),
+      idempotencyKey: IdempotencyKey.make(crypto.randomUUID()),
+    })),
+)
+
+function controlIntent(
+  action: ControlAction,
+  identity: {
+    readonly commandId: typeof CommandId.Type
+    readonly idempotencyKey: typeof IdempotencyKey.Type
+  },
+): ControlIntent {
+  return ControlAction.$match(action, {
+    RequestControl: () => ({ _tag: 'RequestControl' as const, ...identity }),
+    GrantControl: ({ requestId, targetClientId }) => ({
+      _tag: 'GrantControl' as const,
+      requestId,
+      targetClientId,
+      ...identity,
+    }),
+    DeclineControl: ({ requestId }) => ({
+      _tag: 'DeclineControl' as const,
+      requestId,
+      ...identity,
+    }),
+    ReleaseControl: () => ({
+      _tag: 'ReleaseControl' as const,
+      ...identity,
+    }),
+    TakeControl: () => ({ _tag: 'TakeControl' as const, ...identity }),
+  })
+}
 
 function commandEnvelope(
   intent: ControlIntent,
@@ -295,7 +348,7 @@ function decodeResponse(
 
 function eligibility(
   state: ClientState,
-  intent: ControlIntent,
+  action: ControlAction,
 ): string | undefined {
   return BootstrapClientState.$match(state, {
     Unavailable: () => 'No authoritative snapshot is available.',
@@ -304,19 +357,40 @@ function eligibility(
     Current: ({ snapshot }) => {
       if (snapshot.membership.capability !== 'controlCapable')
         return 'This client is read-only.'
-      return ControlIntent.match(intent, {
+      return ControlAction.$match(action, {
         RequestControl: () =>
-          snapshot.control.holderClientId === snapshot.membership.clientId
-            ? 'This client already holds control.'
-            : undefined,
-        GrantControl: () =>
+          snapshot.membership.role !== 'viewer'
+            ? 'Viewer membership is required to request control.'
+            : snapshot.control.holderClientId === snapshot.membership.clientId
+              ? 'This client already holds control.'
+              : snapshot.control.pendingRequests?.some(
+                    (request) =>
+                      request.clientId === snapshot.membership.clientId,
+                  )
+                ? 'This client already requested control.'
+                : undefined,
+        GrantControl: ({ requestId, targetClientId }) =>
           snapshot.membership.role !== 'owner'
             ? 'Owner membership is required for this control command.'
-            : undefined,
-        DeclineControl: () =>
+            : snapshot.control.holderClientId === snapshot.membership.clientId
+              ? 'This client already holds control.'
+              : snapshot.control.pendingRequests?.some(
+                    (request) =>
+                      request.requestId === requestId &&
+                      request.clientId === targetClientId,
+                  ) !== true
+                ? 'The projected control request is no longer available.'
+                : undefined,
+        DeclineControl: ({ requestId }) =>
           snapshot.membership.role !== 'owner'
             ? 'Owner membership is required for this control command.'
-            : undefined,
+            : snapshot.control.holderClientId === snapshot.membership.clientId
+              ? 'This client already holds control.'
+              : snapshot.control.pendingRequests?.some(
+                    (request) => request.requestId === requestId,
+                  ) !== true
+                ? 'The projected control request is no longer available.'
+                : undefined,
         ReleaseControl: () =>
           snapshot.control.holderClientId !== snapshot.membership.clientId
             ? 'This client does not hold control.'

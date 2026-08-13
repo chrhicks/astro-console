@@ -96,10 +96,15 @@ export type ShellView = {
       | { kind: 'release'; label: string }
       | { kind: 'take'; label: string }
       | {
-          kind: 'grant' | 'decline'
+          kind: 'grant'
           label: string
           requestId: string
-          targetClientId?: string
+          targetClientId: string
+        }
+      | {
+          kind: 'decline'
+          label: string
+          requestId: string
         }
     )[]
   }

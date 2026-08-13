@@ -11,7 +11,7 @@ import { projectBootstrapState } from '../bootstrap-projection'
 import { unavailableProjection } from '../future-adapter'
 import { PreflightRefreshSubmission } from '../preflight-refresh-client'
 import { ObserveWorkspace, ObservePhone } from './ObserveWorkspace'
-import { projectedTakeControlAction } from './shared-shell'
+import { ControlActionList, projectedControlActions } from './shared-shell'
 
 const preflightProjection = () =>
   projectBootstrapState(
@@ -44,7 +44,7 @@ const preflightProjection = () =>
     }),
   )
 
-test('uses only the service-projected Take control action in owner view mode', () => {
+test('uses the complete service-projected control actions and suppresses read-only actions', () => {
   const ownerView = projectBootstrapState(
     BootstrapClientState.Current({
       snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)(
@@ -60,15 +60,61 @@ test('uses only the service-projected Take control action in owner view mode', (
     }),
   )
   assert.equal(ownerView.shell.readOnly, true)
-  assert.deepEqual(projectedTakeControlAction(ownerView.shell), {
-    kind: 'take',
-    label: 'Take control',
-  })
-  assert.equal(projectedTakeControlAction(phoneView.shell), undefined)
-  assert.equal(
-    projectedTakeControlAction(unavailableProjection.shell),
-    undefined,
+  assert.deepEqual(projectedControlActions(ownerView.shell), [
+    { kind: 'take', label: 'Take control' },
+  ])
+  assert.deepEqual(projectedControlActions(phoneView.shell), [])
+  assert.deepEqual(projectedControlActions(unavailableProjection.shell), [])
+
+  const ownerRequests = projectBootstrapState(
+    BootstrapClientState.Current({
+      snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)({
+        ...bootstrapFixtures.noRun,
+        control: {
+          revision: 5,
+          state: 'held',
+          holderClientId: 'desktop-other',
+          pendingRequests: [
+            {
+              requestId: 'request-1',
+              personId: 'viewer-ada',
+              clientId: 'desktop-ada',
+              expiresAt: '2026-08-02T20:05:00Z',
+            },
+          ],
+        },
+      }),
+    }),
   )
+  const actions = projectedControlActions(ownerRequests.shell)
+  assert.deepEqual(actions, [
+    {
+      kind: 'grant',
+      label: 'Grant desktop-ada',
+      requestId: 'request-1',
+      targetClientId: 'desktop-ada',
+    },
+    {
+      kind: 'decline',
+      label: 'Decline desktop-ada',
+      requestId: 'request-1',
+    },
+    { kind: 'take', label: 'Take control' },
+  ])
+  const markup = renderToStaticMarkup(
+    createElement(ControlActionList, {
+      actions,
+      loading: false,
+      pending: false,
+      submitControl: async () => {
+        throw new Error('Static rendering does not submit actions.')
+      },
+      submitAction: () => undefined,
+    }),
+  )
+  assert.match(markup, />Grant desktop-ada</)
+  assert.match(markup, />Decline desktop-ada</)
+  assert.match(markup, />Take control</)
 })
 
 const targetSnapshot = (
