@@ -330,6 +330,7 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
     let sourceFiber: Fiber.Fiber<void> | undefined
     let processFiber: Fiber.Fiber<void> | undefined
     let comparisonFiber: Fiber.Fiber<void> | undefined
+    let latestReviewOperation: string | undefined
 
     const set = (
       update: (current: NightbookWorkspaceState) => NightbookWorkspaceState,
@@ -748,55 +749,72 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
             ),
           ),
         ReviewLibraryAsset: ({ assetId, request }) =>
-          remote.review(assetId, request).pipe(
-            Effect.tap((review) =>
-              set((current) =>
-                current.libraryDetail.value?.assetId === assetId
-                  ? {
-                      ...current,
-                      libraryDetail: {
-                        value: {
-                          ...current.libraryDetail.value,
-                          ...(review === undefined ? {} : { review }),
-                        },
-                        state: undefined,
-                      },
-                    }
-                  : current,
+          Effect.gen(function* () {
+            const generation = routeGeneration
+            const operation = request.idempotencyKey
+            latestReviewOperation = operation
+            const ownsCurrentAssetRoute = () =>
+              generation === routeGeneration &&
+              currentRoute?.kind === 'asset' &&
+              currentRoute.assetId === assetId &&
+              latestReviewOperation === operation
+            return yield* remote.review(assetId, request).pipe(
+              Effect.tap((review) =>
+                ownsCurrentAssetRoute()
+                  ? set((current) =>
+                      current.libraryDetail.value?.assetId === assetId
+                        ? {
+                            ...current,
+                            libraryDetail: {
+                              value: {
+                                ...current.libraryDetail.value,
+                                ...(review === undefined ? {} : { review }),
+                              },
+                              state: undefined,
+                            },
+                          }
+                        : current,
+                    )
+                  : Effect.void,
               ),
-            ),
-            Effect.as(NightbookWorkspaceSubmission.Loaded({})),
-            Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
-              remote.detail(assetId).pipe(
-                Effect.tap((value) =>
-                  set((current) => ({
-                    ...current,
-                    libraryDetail: { value, state: undefined },
-                  })),
-                ),
-                Effect.as(
-                  unavailable(
-                    'The review outcome was reloaded from current Library truth.',
+              Effect.as(NightbookWorkspaceSubmission.Loaded({})),
+              Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
+                remote.detail(assetId).pipe(
+                  Effect.tap((value) =>
+                    ownsCurrentAssetRoute()
+                      ? set((current) => ({
+                          ...current,
+                          libraryDetail: { value, state: undefined },
+                        }))
+                      : Effect.void,
                   ),
-                ),
-                Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
-                  set((current) => ({
-                    ...current,
-                    libraryDetail: {
-                      value: current.libraryDetail.value,
-                      state: 'unavailable',
-                    },
-                  })).pipe(
-                    Effect.as(
-                      unavailable(
-                        'The review outcome is uncertain. Reload current Library truth before another review.',
+                  Effect.as(
+                    unavailable(
+                      'The review outcome was reloaded from current Library truth.',
+                    ),
+                  ),
+                  Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
+                    (ownsCurrentAssetRoute()
+                      ? set((current) => ({
+                          ...current,
+                          libraryDetail: {
+                            value: current.libraryDetail.value,
+                            state: 'unavailable',
+                          },
+                        }))
+                      : Effect.void
+                    ).pipe(
+                      Effect.as(
+                        unavailable(
+                          'The review outcome is uncertain. Reload current Library truth before another review.',
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
-          ),
+            )
+          }),
         SelectComparisonAsset: ({ assetId }) =>
           Effect.gen(function* () {
             if (assetId === undefined) {
