@@ -31,7 +31,7 @@ import {
 } from './nightbook-workspace-runtime'
 
 const currentRoute = () => parseRoute(location.pathname, location.search)
-const ObserveWorkspace = lazy(() => import('./nightbook/ObserveWorkspace'))
+const ObserveWorkspace = lazy(() => import('./components/workspaces/observe/ObserveWorkspace'))
 const LibraryWorkspace = lazy(() => import('./nightbook/LibraryWorkspace'))
 const PlanWorkspace = lazy(() => import('./components/workspaces/plan/PlanWorkspace'))
 const ProcessWorkspace = lazy(() => import('./nightbook/ProcessWorkspace'))

@@ -15,18 +15,18 @@ import {
   type AttemptItem,
   type StepItem,
   type Tone,
-} from '../components/ui'
+} from '../../ui'
 import type { ObserveWorkspaceProjection } from '@astro-console/protocol'
 import { useEffect, useMemo, useState } from 'react'
 import {
   ObserveCommandSubmission,
   type ObserveAction,
-} from '../observe-command-client'
-import type { PreflightRefreshSubmission } from '../preflight-refresh-client'
-import type { ObserveView, Projection, StatusTone } from '../presentation'
-import { nightbookHref } from '../route-href'
-import { CommandBar, type ControlSubmit } from '../components/shell/WorkspaceShell'
-import '../components/workspaces/Workspace.css'
+} from '../../../observe-command-client'
+import type { PreflightRefreshSubmission } from '../../../preflight-refresh-client'
+import type { ObserveView, Projection, StatusTone } from '../../../presentation'
+import { nightbookHref } from '../../../route-href'
+import { CommandBar, type ControlSubmit } from '../../shell/WorkspaceShell'
+import '../Workspace.css'
 
 export type ObserveWorkspaceProps = {
   projection: Projection
