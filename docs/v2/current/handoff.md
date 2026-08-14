@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–4 complete locally; Processing Project lifecycle, shared protocol, origin runtime, and Nightbook workspace runtime refactors complete locally; application presentation naming retirement complete locally for owner review**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–4 complete locally; Processing Project lifecycle, shared protocol, origin runtime, and Nightbook workspace runtime refactors complete locally; application presentation naming retirement complete**
 
 ## Current Position
 
@@ -539,7 +539,7 @@ stylesheet imports, and deployment-copy assumption are removed. Its complete
 web check, deployment image build, functional inspection, and Designer review
 passed at wide, compact, and 390 px.
 
-Issue `#50` now retires the remaining presentation-only prototype naming. Plan,
+Issue `#50` and PR `#53` retire the remaining presentation-only prototype naming. Plan,
 Observe, Library, Process, shared shell, development simulation, tests, and
 styles live in the purpose-organized application component tree. Active
 selectors, presentation identifiers, product wording, and current UI authority
@@ -550,8 +550,8 @@ inspection and Designer review pass Plan, Observe, Library catalog/detail, and
 Process list/project at wide, compact, and 390 px with no P0, P1, P2, or P3
 finding; phone remains read-only. Repeated inspect-runner navigation sometimes
 required one reload to finish a lazy module load, matching the pre-change runner
-behavior. Evidenced lower-priority interface and test concerns remain in `#49`.
-After owner review of `#50`, `#51` is the next bounded task. The other
+behavior. Evidenced lower-priority interface and test concerns remain in `#49`. Issue
+`#51` is the next bounded task after `#50`. The other
 architecture frontiers remain the durable work-claim re-audit in `#5` and the
 origin integration-test harness in `#6`.
 Select and integrate a real processing library only in a later accepted item;
