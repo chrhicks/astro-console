@@ -1,4 +1,4 @@
-export function nightbookHref(path: string) {
+export function routeHref(path: string) {
   const separator = path.indexOf('?')
   const pathname = separator < 0 ? path : path.slice(0, separator)
   const routeSearch = separator < 0 ? '' : path.slice(separator + 1)

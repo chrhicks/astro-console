@@ -16,7 +16,7 @@ import {
   LibraryQueryId,
 } from '@astro-console/protocol'
 import { parseRoute, routeWorkspace, type Route } from './routes'
-import { nightbookHref } from './route-href'
+import { routeHref } from './route-href'
 import {
   AcquireAction,
   createNightbookWorkspaceRuntime,
@@ -284,7 +284,7 @@ export function App() {
   }
   const selectLibraryAsset = (assetId: typeof AssetId.Type) => {
     const path = `/library/assets/${encodeURIComponent(assetId)}`
-    const href = nightbookHref(path)
+    const href = routeHref(path)
     const url = new URL(href, location.origin)
     const next = parseRoute(url.pathname, url.search)
     if (next.kind !== 'asset') return
@@ -292,7 +292,7 @@ export function App() {
     setRoute(next)
   }
   const openProcess = (assetId: typeof AssetId.Type) => {
-    const href = nightbookHref(
+    const href = routeHref(
       `/process?sourceAssetId=${encodeURIComponent(assetId)}`,
     )
     const url = new URL(href, location.origin)
@@ -329,7 +329,7 @@ export function App() {
         { Project: ({ project }) => project },
       )
       location.assign(
-        nightbookHref(
+        routeHref(
           `/process/projects/${encodeURIComponent(project.projectId)}`,
         ),
       )
@@ -448,7 +448,7 @@ export function App() {
                     { Project: ({ project }) => project },
                   )
                   location.assign(
-                    nightbookHref(
+                    routeHref(
                       `/process/projects/${encodeURIComponent(project.projectId)}`,
                     ),
                   )

@@ -37,7 +37,7 @@ import {
 } from '../../../nightbook-workspace-runtime'
 import type { Projection } from '../../../presentation'
 import { latestSavedStackingMasterAssetIdFromCompleteEvidence } from '../../../processing-project-evidence'
-import { nightbookHref } from '../../../route-href'
+import { routeHref } from '../../../route-href'
 import {
   CommandBar,
   type ControlPresentation,
@@ -293,7 +293,7 @@ function ProjectList({
                 actions={
                   <a
                     className="ui-button ui-button--primary ui-button--medium"
-                    href={nightbookHref('/library')}
+                    href={routeHref('/library')}
                   >
                     Open Library
                   </a>
@@ -304,7 +304,7 @@ function ProjectList({
                 <a
                   key={project.projectId}
                   className="process-project-link"
-                  href={nightbookHref(
+                  href={routeHref(
                     `/process/projects/${encodeURIComponent(project.projectId)}`,
                   )}
                 >

@@ -39,7 +39,7 @@ import type {
 } from '../../../library-client'
 import type { Projection } from '../../../presentation'
 import type { ProcessingProjectList } from '../../../nightbook-workspace-runtime'
-import { nightbookHref } from '../../../route-href'
+import { routeHref } from '../../../route-href'
 import { CommandBar, type ControlSubmit } from '../../shell/WorkspaceShell'
 import '../Workspace.css'
 import './LibraryWorkspace.css'
@@ -227,10 +227,10 @@ function AssetNavigator({
   }
   return (
     <nav className="library-assets" aria-label="Frame review navigation">
-      <a href={nightbookHref('/library')}>Catalog</a>
+      <a href={routeHref('/library')}>Catalog</a>
       {previous ? (
         <a
-          href={nightbookHref(
+          href={routeHref(
             `/library/assets/${encodeURIComponent(previous.assetId)}`,
           )}
           onClick={(event) => follow(event, previous.assetId)}
@@ -247,7 +247,7 @@ function AssetNavigator({
       </div>
       {next ? (
         <a
-          href={nightbookHref(
+          href={routeHref(
             `/library/assets/${encodeURIComponent(next.assetId)}`,
           )}
           onClick={(event) => follow(event, next.assetId)}
@@ -537,7 +537,7 @@ function LibraryCatalog({
                           Select frame
                         </label>
                         <a
-                          href={nightbookHref(
+                          href={routeHref(
                             `/library/assets/${encodeURIComponent(asset.assetId)}`,
                           )}
                           onClick={(event) => follow(event, asset.assetId)}
@@ -1500,7 +1500,7 @@ export function LibraryPhone({
                   {assets.map((asset) => (
                     <a
                       key={asset.assetId}
-                      href={nightbookHref(
+                      href={routeHref(
                         `/library/assets/${encodeURIComponent(asset.assetId)}`,
                       )}
                     >
