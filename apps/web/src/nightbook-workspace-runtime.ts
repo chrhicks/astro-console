@@ -20,10 +20,13 @@ import {
   IdempotencyKey,
   IntentId,
   LeaseRevision,
+  ProcessingProjectAuthority,
   ProcessingProjectChangeRequest,
   ProcessingProjectId,
   ReviewAssetRequest,
+  type ExecutableProcessingStage,
   type ProcessingProjectIntent,
+  type ProcessingStageDraftValue,
 } from '@astro-console/protocol'
 import { BootstrapClient, type BootstrapClientState } from './bootstrap-client'
 import { browserBootstrapClientLayer } from './bootstrap-runtime'
@@ -94,6 +97,20 @@ export type AcquireAction = Data.TaggedEnum<{
 
 export const AcquireAction = Data.taggedEnum<AcquireAction>()
 
+export type ProcessAction = Data.TaggedEnum<{
+  ReplaceDraft: { readonly draft: ProcessingStageDraftValue }
+  SyncDevelopPreview: { readonly _never?: never }
+  RunCurrentDraft: { readonly stage: ExecutableProcessingStage }
+  UndoDraft: { readonly stage: ExecutableProcessingStage }
+  RedoDraft: { readonly stage: ExecutableProcessingStage }
+  UndoCurrentResult: { readonly stage: ExecutableProcessingStage }
+  RedoCurrentResult: { readonly stage: ExecutableProcessingStage }
+  SaveCurrentResult: { readonly stage: 'Stacking' | 'Develop' }
+  OpenSavedMasterInDevelop: { readonly _never?: never }
+}>
+
+export const ProcessAction = Data.taggedEnum<ProcessAction>()
+
 export type NightbookProjectSelection = {
   readonly assetIds: ReadonlyArray<typeof AssetId.Type>
   readonly captureSetIds: ReadonlyArray<typeof CaptureSetId.Type>
@@ -163,10 +180,7 @@ export type NightbookWorkspaceIntent = Data.TaggedEnum<{
     readonly projectId: typeof ProcessingProjectId.Type
     readonly selection: NightbookProjectSelection
   }
-  ChangeProject: {
-    readonly project: OpenedProcessingProject
-    readonly intent: ProcessingProjectIntent
-  }
+  Process: { readonly action: ProcessAction }
 }>
 
 export const NightbookWorkspaceIntent =
@@ -265,8 +279,7 @@ export interface NightbookWorkspaceRemoteShape {
     request: CreateProcessingProjectRequest,
   ) => Effect.Effect<OpenedProcessingProject, NightbookWorkspaceRemoteFailure>
   readonly changeProject: (
-    project: OpenedProcessingProject,
-    intent: ProcessingProjectIntent,
+    request: typeof ProcessingProjectChangeRequest.Type,
   ) => Effect.Effect<OpenedProcessingProject, NightbookWorkspaceRemoteFailure>
   readonly addProjectSources: (
     request: typeof ProcessingProjectChangeRequest.Type,
@@ -347,6 +360,89 @@ const projectCreationKey = (
   selection: NightbookProjectSelection,
 ) => JSON.stringify([name, selection.assetIds, selection.captureSetIds])
 
+type ProcessIntentPreparation = Data.TaggedEnum<{
+  Ready: { readonly intent: ProcessingProjectIntent }
+  Unavailable: { readonly message: string }
+}>
+
+const ProcessIntentPreparation = Data.taggedEnum<ProcessIntentPreparation>()
+
+const processIntent = (
+  action: ProcessAction,
+  project: OpenedProcessingProject,
+  evidence: ProcessingProjectEvidence | undefined,
+): ProcessIntentPreparation =>
+  ProcessAction.$match(action, {
+    ReplaceDraft: ({ draft }) =>
+      ProcessIntentPreparation.Ready({
+        intent: { _tag: 'ReplaceDraft', draft },
+      }),
+    SyncDevelopPreview: () => {
+      const develop = project.stages.find((stage) => stage.stage === 'Develop')
+      return develop === undefined
+        ? ProcessIntentPreparation.Unavailable({
+            message: 'The current Develop draft is unavailable.',
+          })
+        : ProcessIntentPreparation.Ready({
+            intent: {
+              _tag: 'SyncDevelopPreview',
+              expectedDraftRevision: develop.draft.revision,
+            },
+          })
+    },
+    RunCurrentDraft: ({ stage }) =>
+      ProcessIntentPreparation.Ready({
+        intent: {
+          _tag: 'RunStage',
+          stage,
+          from: { _tag: 'CurrentDraft' },
+        },
+      }),
+    UndoDraft: ({ stage }) =>
+      ProcessIntentPreparation.Ready({
+        intent: { _tag: 'UndoDraft', stage },
+      }),
+    RedoDraft: ({ stage }) =>
+      ProcessIntentPreparation.Ready({
+        intent: { _tag: 'RedoDraft', stage },
+      }),
+    UndoCurrentResult: ({ stage }) =>
+      ProcessIntentPreparation.Ready({
+        intent: { _tag: 'UndoCurrentResult', stage },
+      }),
+    RedoCurrentResult: ({ stage }) =>
+      ProcessIntentPreparation.Ready({
+        intent: { _tag: 'RedoCurrentResult', stage },
+      }),
+    SaveCurrentResult: ({ stage }) =>
+      ProcessIntentPreparation.Ready({
+        intent: { _tag: 'SaveCurrentResult', stage },
+      }),
+    OpenSavedMasterInDevelop: () => {
+      const stackingAttempt =
+        evidence?.projectId === project.projectId
+          ? evidence.attempts
+              .toReversed()
+              .find(
+                (attempt) =>
+                  attempt.evidence._tag === 'Stacking' &&
+                  attempt.evidence.savedMasterAssetId !== undefined,
+              )
+          : undefined
+      const assetId =
+        stackingAttempt?.evidence._tag === 'Stacking'
+          ? stackingAttempt.evidence.savedMasterAssetId
+          : undefined
+      return assetId === undefined
+        ? ProcessIntentPreparation.Unavailable({
+            message: 'The current saved Master is unavailable.',
+          })
+        : ProcessIntentPreparation.Ready({
+            intent: { _tag: 'OpenDevelop', assetId },
+          })
+    },
+  })
+
 const acquireCommandIntent = (
   current: NightbookWorkspaceState,
   action: AcquireAction,
@@ -417,6 +513,8 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
     let processFiber: Fiber.Fiber<void> | undefined
     let comparisonFiber: Fiber.Fiber<void> | undefined
     let latestReviewOperation: string | undefined
+    let latestProcessOperation: typeof IntentId.Type | undefined
+    let processPairCommitGeneration = 0
     const pendingProjectCreations = new Map<
       string,
       CreateProcessingProjectRequest
@@ -537,33 +635,45 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
         ),
         Effect.asVoid,
       )
+    const readProjectPair = (projectId: typeof ProcessingProjectId.Type) =>
+      Effect.gen(function* () {
+        const pair = yield* Effect.all(
+          {
+            project: remote.openProject(projectId),
+            evidence: remote.projectEvidence(projectId),
+          },
+          { concurrency: 'unbounded' },
+        )
+        if (pair.project.projectId !== projectId)
+          return yield* Effect.fail(
+            remoteFailure(
+              'open-project',
+              'unavailable',
+              'Opened Project identity did not match the requested Project.',
+            ),
+          )
+        if (pair.evidence.projectId !== projectId)
+          return yield* Effect.fail(
+            remoteFailure(
+              'project-evidence',
+              'unavailable',
+              'Project evidence identity did not match the requested Project.',
+            ),
+          )
+        return pair
+      })
     const loadProcess = (route: Route, generation: number) => {
-      if (route.kind === 'process-project')
-        return Effect.gen(function* () {
-          const [project, evidence] = yield* Effect.all(
-            [
-              remote.openProject(route.projectId),
-              remote.projectEvidence(route.projectId),
-            ],
-            { concurrency: 'unbounded' },
-          )
-          if (
-            generation === routeGeneration &&
-            project.projectId === route.projectId &&
-            evidence.projectId === route.projectId
-          )
-            yield* set((current) => ({
-              ...current,
-              process: {
-                ...current.process,
-                project,
-                evidence,
-                state: 'current',
-              },
-            }))
-        }).pipe(
+      if (route.kind === 'process-project') {
+        const commitGeneration = ++processPairCommitGeneration
+        const ownsResult = () =>
+          generation === routeGeneration &&
+          commitGeneration === processPairCommitGeneration
+        return readProjectPair(route.projectId).pipe(
+          Effect.tap((pair) =>
+            ownsResult() ? publishProjectPair(pair) : Effect.void,
+          ),
           Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
-            generation === routeGeneration
+            ownsResult()
               ? set((current) => ({
                   ...current,
                   process: { ...current.process, state: 'unavailable' },
@@ -572,6 +682,7 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
           ),
           Effect.asVoid,
         )
+      }
 
       const listReadGeneration = ++processListReadGeneration
       const ownsProcessListRead = () =>
@@ -602,14 +713,6 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
         Effect.asVoid,
       )
     }
-    const readProjectPair = (projectId: typeof ProcessingProjectId.Type) =>
-      Effect.all(
-        {
-          project: remote.openProject(projectId),
-          evidence: remote.projectEvidence(projectId),
-        },
-        { concurrency: 'unbounded' },
-      )
     const publishProjectPair = (pair: {
       readonly project: OpenedProcessingProject
       readonly evidence: ProcessingProjectEvidence
@@ -1087,50 +1190,119 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
             ),
           )
         },
-        ChangeProject: ({ project: selected, intent }) =>
-          remote.changeProject(selected, intent).pipe(
-            Effect.map((project) => ProjectChangeAttempt.Changed({ project })),
-            Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
-              Effect.succeed(ProjectChangeAttempt.Failed({})),
-            ),
-            Effect.flatMap((attempt) =>
-              ProjectChangeAttempt.$match(attempt, {
-                Failed: () =>
-                  reconcileProjectPair(
-                    selected.projectId,
-                    'The Project was reloaded after an uncertain outcome.',
-                  ),
-                Changed: ({ project }) =>
-                  remote.projectEvidence(project.projectId).pipe(
-                    Effect.map((evidence) => ({ project, evidence })),
-                    Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
-                      readProjectPair(project.projectId),
-                    ),
-                    Effect.tap(publishProjectPair),
-                    Effect.map(({ project: confirmed }) =>
-                      NightbookWorkspaceSubmission.Project({
-                        project: confirmed,
-                      }),
-                    ),
-                    Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
-                      set((current) => ({
-                        ...current,
-                        process: {
-                          ...current.process,
-                          state: 'unavailable',
-                        },
-                      })).pipe(
-                        Effect.as(
-                          unavailable(
-                            'The Project outcome is uncertain. Reload current Project truth before another change.',
+        Process: ({ action }) =>
+          Effect.gen(function* () {
+            const current = yield* SubscriptionRef.get(state)
+            const route = currentRoute
+            const project = current.process.project
+            if (
+              route?.kind !== 'process-project' ||
+              project === undefined ||
+              project.projectId !== route.projectId ||
+              current.process.state !== 'current' ||
+              !ProcessingProjectAuthority.guards.Allowed(project.authority) ||
+              !current.projection.libraryProcessMutation.allowed
+            )
+              return unavailable(
+                'Current Processing Project truth and Process Authority are required before this action.',
+              )
+            const preparation = processIntent(
+              action,
+              project,
+              current.process.evidence,
+            )
+            if (ProcessIntentPreparation.$is('Unavailable')(preparation))
+              return unavailable(preparation.message)
+            const intentId = yield* Effect.sync(() =>
+              IntentId.make(crypto.randomUUID()),
+            )
+            const requestResult = yield* Schema.decodeUnknownEffect(
+              ProcessingProjectChangeRequest,
+            )({
+              projectId: project.projectId,
+              expectedProjectRevision: project.revision,
+              intentId,
+              intent: preparation.intent,
+            }).pipe(Effect.result)
+            if (Result.isFailure(requestResult))
+              return unavailable('The Processing Project action is invalid.')
+            const generation = routeGeneration
+            const commitGeneration = ++processPairCommitGeneration
+            latestProcessOperation = intentId
+            const ownsResult = () =>
+              generation === routeGeneration &&
+              commitGeneration === processPairCommitGeneration &&
+              currentRoute?.kind === 'process-project' &&
+              currentRoute.projectId === project.projectId &&
+              latestProcessOperation === intentId
+            const attempt = yield* remote
+              .changeProject(requestResult.success)
+              .pipe(
+                Effect.map((changed) =>
+                  ProjectChangeAttempt.Changed({ project: changed }),
+                ),
+                Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
+                  Effect.succeed(ProjectChangeAttempt.Failed({})),
+                ),
+              )
+            return yield* ProjectChangeAttempt.$match(attempt, {
+              Failed: () =>
+                reconcileProjectPair(
+                  project.projectId,
+                  'The Project was reloaded after an uncertain outcome.',
+                  ownsResult,
+                ),
+              Changed: ({ project: changed }) =>
+                changed.projectId !== project.projectId
+                  ? reconcileProjectPair(
+                      project.projectId,
+                      'The Project response identity was invalid, so current Project truth was reloaded.',
+                      ownsResult,
+                    )
+                  : remote.projectEvidence(project.projectId).pipe(
+                      Effect.flatMap((evidence) =>
+                        evidence.projectId === project.projectId
+                          ? Effect.succeed({ project: changed, evidence })
+                          : Effect.fail(
+                              remoteFailure(
+                                'project-evidence',
+                                'unavailable',
+                                'Project evidence identity did not match the changed Project.',
+                              ),
+                            ),
+                      ),
+                      Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
+                        readProjectPair(project.projectId),
+                      ),
+                      Effect.tap((pair) =>
+                        ownsResult() ? publishProjectPair(pair) : Effect.void,
+                      ),
+                      Effect.map(({ project: confirmed }) =>
+                        NightbookWorkspaceSubmission.Project({
+                          project: confirmed,
+                        }),
+                      ),
+                      Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
+                        (ownsResult()
+                          ? set((current) => ({
+                              ...current,
+                              process: {
+                                ...current.process,
+                                state: 'unavailable',
+                              },
+                            }))
+                          : Effect.void
+                        ).pipe(
+                          Effect.as(
+                            unavailable(
+                              'The Project outcome is uncertain. Reload current Project truth before another change.',
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-              }),
-            ),
-          ),
+            })
+          }),
         AddProjectSources: ({ projectId, selection }) =>
           Effect.gen(function* () {
             const current = yield* SubscriptionRef.get(state)
@@ -1242,18 +1414,11 @@ export const productionNightbookWorkspaceRemoteLayer = Layer.effect(
           Effect.map((changed) => changed.project),
           Effect.mapError(createProjectRemoteFailure),
         ),
-      changeProject: (project, intent) =>
-        processClient
-          .change({
-            projectId: project.projectId,
-            expectedProjectRevision: project.revision,
-            intentId: IntentId.make(crypto.randomUUID()),
-            intent,
-          })
-          .pipe(
-            Effect.map((changed) => changed.project),
-            Effect.mapError(() => remoteFailure('change-project')),
-          ),
+      changeProject: (request) =>
+        processClient.change(request).pipe(
+          Effect.map((changed) => changed.project),
+          Effect.mapError(() => remoteFailure('change-project')),
+        ),
       addProjectSources: (request) =>
         processClient.change(request).pipe(
           Effect.map((changed) => changed.project),

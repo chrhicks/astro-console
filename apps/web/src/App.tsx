@@ -26,6 +26,7 @@ import {
   type LibraryQuery,
   type NightbookProjectSelection,
   type NightbookWorkspaceIntent,
+  type ProcessAction,
   type NightbookWorkspaceState,
 } from './nightbook-workspace-runtime'
 
@@ -477,13 +478,9 @@ export function App() {
           {...(!projection.libraryProcessMutation.allowed
             ? {}
             : { onCreateProject: createProject })}
-          onChangeProject={async (project, intent) => {
+          onChangeProject={async (action: ProcessAction) => {
             foldWorkspaceSubmission(
-              await submitWorkspace({
-                _tag: 'ChangeProject',
-                project,
-                intent,
-              }),
+              await submitWorkspace({ _tag: 'Process', action }),
               { Project: () => undefined },
             )
           }}
