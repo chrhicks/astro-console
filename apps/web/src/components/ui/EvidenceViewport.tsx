@@ -7,6 +7,10 @@ import {
 import { classes } from './foundations/utils'
 import './EvidenceViewport.css'
 
+interface EvidenceStyle extends CSSProperties {
+  '--ui-evidence-ratio'?: string
+}
+
 export interface EvidenceViewportProps extends HTMLAttributes<HTMLElement> {
   media?: ReactNode
   overlays?: ReactNode
@@ -35,15 +39,17 @@ export const EvidenceViewport = forwardRef<HTMLElement, EvidenceViewportProps>(
     },
     ref,
   ) {
+    const evidenceStyle: EvidenceStyle = {
+      ...style,
+      '--ui-evidence-ratio': aspectRatio,
+    }
     return (
       <figure
-        ref={ref as never}
+        ref={ref}
         aria-label={label}
         data-fit={fit}
         className={classes('ui-evidence', className)}
-        style={
-          { ...style, '--ui-evidence-ratio': aspectRatio } as CSSProperties
-        }
+        style={evidenceStyle}
         {...props}
       >
         <div className="ui-evidence-canvas">

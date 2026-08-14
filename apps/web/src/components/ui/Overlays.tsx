@@ -8,7 +8,6 @@ import {
   useState,
   type HTMLAttributes,
   type KeyboardEvent,
-  type ReactElement,
   type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'

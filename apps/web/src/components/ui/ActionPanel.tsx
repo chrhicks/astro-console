@@ -45,7 +45,7 @@ export const ActionPanel = forwardRef<HTMLElement, ActionPanelProps>(
     )
     return (
       <section
-        ref={ref as never}
+        ref={ref}
         className={classes('ui-action-panel', className)}
         {...props}
       >

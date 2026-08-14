@@ -4,17 +4,21 @@ import './Layout.css'
 
 type LayoutProps = HTMLAttributes<HTMLDivElement> & { gap?: number | string }
 
+interface LayoutStyle extends CSSProperties {
+  '--ui-layout-gap'?: string
+}
+
 function gapStyle(
   gap: number | string | undefined,
   style: CSSProperties | undefined,
-): CSSProperties {
+): LayoutStyle {
   return {
     ...style,
     ...(gap == null
       ? {}
-      : ({
+      : {
           '--ui-layout-gap': typeof gap === 'number' ? `${gap}px` : gap,
-        } as CSSProperties)),
+        }),
   }
 }
 

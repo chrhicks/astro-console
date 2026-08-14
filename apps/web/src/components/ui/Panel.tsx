@@ -1,4 +1,9 @@
-import { forwardRef, type HTMLAttributes, type ReactNode } from 'react'
+import {
+  createElement,
+  forwardRef,
+  type HTMLAttributes,
+  type ReactNode,
+} from 'react'
 import { classes } from './foundations/utils'
 import './Panel.css'
 
@@ -10,13 +15,11 @@ export const Panel = forwardRef<HTMLElement, PanelProps>(function Panel(
   { as: Element = 'section', className, ...props },
   ref,
 ) {
-  return (
-    <Element
-      ref={ref as never}
-      className={classes('ui-panel', className)}
-      {...props}
-    />
-  )
+  return createElement(Element, {
+    ...props,
+    ref,
+    className: classes('ui-panel', className),
+  })
 })
 
 export interface PanelHeaderProps

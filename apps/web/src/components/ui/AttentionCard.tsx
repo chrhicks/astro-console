@@ -24,15 +24,16 @@ export const AttentionCard = forwardRef<HTMLElement, AttentionCardProps>(
       description,
       evidence,
       actions,
-      action: _ignoredAction,
+      action: ignoredAction,
       className,
       ...props
     },
     ref,
   ) {
+    void ignoredAction
     return (
       <article
-        ref={ref as never}
+        ref={ref}
         className={classes('ui-attention', `ui-attention--${tone}`, className)}
         {...props}
       >
