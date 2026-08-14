@@ -51,9 +51,3 @@
 .ui-button--full {
   width: 100%;
 }
-.ui-icon-button {
-  display: inline-grid;
-  place-items: center;
-  width: var(--ui-control-height, 34px);
-  padding: 0;
-}

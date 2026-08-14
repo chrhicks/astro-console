@@ -1,23 +1,4 @@
 .nightbook-app {
-  --ui-bg: #090d11;
-  --ui-surface: #10161c;
-  --ui-surface-raised: #171f27;
-  --ui-line: #2b3640;
-  --ui-line-strong: #485661;
-  --ui-text: #e8edf0;
-  --ui-muted: #8f9ba5;
-  --ui-accent: #c89c55;
-  --ui-accent-surface: #2c2418;
-  --ui-positive: #59ad84;
-  --ui-warning: #d2a04d;
-  --ui-danger: #d06a5a;
-  --ui-info: #6e91b7;
-  --ui-focus: #edbd70;
-  --ui-font-sans:
-    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    sans-serif;
-  --ui-font-mono:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   min-width: 320px;
   height: 100dvh;
   overflow: hidden;
