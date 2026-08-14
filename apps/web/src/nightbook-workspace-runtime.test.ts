@@ -34,6 +34,7 @@ import {
 import { BootstrapClient, BootstrapClientState } from './bootstrap-client'
 import {
   AcquireAction,
+  ProcessAction,
   NightbookWorkspaceRemote,
   NightbookWorkspaceRemoteFailure,
   NightbookWorkspaceIntent,
@@ -1336,6 +1337,628 @@ test('retains last-confirmed Library and Process values while reload fails', asy
   assert.equal(failed.process.projects[0]?.projectId, 'confirmed-project')
 })
 
+const semanticProcessDraft = {
+  _tag: 'Develop',
+  operation: { _tag: 'Stretch', method: 'asinh', amount: 0.5 },
+} as const
+
+const semanticProcessActions = [
+  ProcessAction.ReplaceDraft({ draft: semanticProcessDraft }),
+  ProcessAction.SyncDevelopPreview({}),
+  ProcessAction.RunCurrentDraft({ stage: 'Calibration' }),
+  ProcessAction.UndoDraft({ stage: 'Calibration' }),
+  ProcessAction.RedoDraft({ stage: 'Registration' }),
+  ProcessAction.UndoCurrentResult({ stage: 'Stacking' }),
+  ProcessAction.RedoCurrentResult({ stage: 'Develop' }),
+  ProcessAction.SaveCurrentResult({ stage: 'Stacking' }),
+  ProcessAction.OpenSavedMasterInDevelop({}),
+] as const satisfies ReadonlyArray<ProcessAction>
+
+const everySemanticProcessActionIsCovered = true satisfies Exclude<
+  ProcessAction['_tag'],
+  (typeof semanticProcessActions)[number]['_tag']
+> extends never
+  ? true
+  : false
+
+const semanticProcessProject = () =>
+  Schema.decodeUnknownSync(OpenedProcessingProject)({
+    ...openedProject(7),
+    stages: processingStages.map((stage) =>
+      stage.stage === 'Develop'
+        ? { ...stage, draft: { ...stage.draft, revision: 12 } }
+        : stage,
+    ),
+    savedAssetIds: ['asset-master-old', 'asset-master', 'asset-developed'],
+  })
+
+const semanticProcessEvidence = () =>
+  Schema.decodeUnknownSync(ProcessingProjectEvidence)({
+    projectId: 'project-1',
+    attempts: [
+      {
+        attemptId: 'stacking-attempt-old',
+        stage: 'Stacking',
+        state: 'succeeded',
+        draftRevision: 1,
+        draft: { _tag: 'Stacking', settings: [], frameChoices: [] },
+        sources: [],
+        frozenAt: '2026-08-11T00:00:01.000Z',
+        settledAt: '2026-08-11T00:00:02.000Z',
+        outcome: 'Succeeded',
+        outputs: [
+          {
+            outputId: 'stacking-output-old',
+            checksum: 'stacking-checksum-old',
+            relation: 'CurrentResult',
+          },
+        ],
+        evidence: {
+          _tag: 'Stacking',
+          recommendations: [],
+          frameChoices: [],
+          includedAssetIds: [],
+          savedMasterAssetId: 'asset-master-old',
+        },
+        diagnostics: [],
+      },
+      {
+        attemptId: 'stacking-attempt-current',
+        stage: 'Stacking',
+        state: 'succeeded',
+        draftRevision: 2,
+        draft: { _tag: 'Stacking', settings: [], frameChoices: [] },
+        sources: [],
+        frozenAt: '2026-08-11T00:00:03.000Z',
+        settledAt: '2026-08-11T00:00:04.000Z',
+        outcome: 'Succeeded',
+        outputs: [
+          {
+            outputId: 'stacking-output-current',
+            checksum: 'stacking-checksum-current',
+            relation: 'CurrentResult',
+          },
+        ],
+        evidence: {
+          _tag: 'Stacking',
+          recommendations: [],
+          frameChoices: [],
+          includedAssetIds: [],
+          savedMasterAssetId: 'asset-master',
+        },
+        diagnostics: [],
+      },
+      {
+        attemptId: 'develop-attempt-current',
+        stage: 'Develop',
+        state: 'succeeded',
+        draftRevision: 12,
+        draft: semanticProcessDraft,
+        sources: [],
+        inputCheckpointId: 'checkpoint-develop',
+        previewId: 'preview-develop',
+        frozenAt: '2026-08-11T00:00:05.000Z',
+        settledAt: '2026-08-11T00:00:06.000Z',
+        outcome: 'Succeeded',
+        outputs: [
+          {
+            outputId: 'develop-output-current',
+            checksum: 'develop-checksum-current',
+            relation: 'CurrentResult',
+          },
+        ],
+        evidence: {
+          _tag: 'Develop',
+          previewId: 'preview-develop',
+          inputCheckpointId: 'checkpoint-develop',
+          relatedOutputIds: [],
+        },
+        diagnostics: [],
+      },
+    ],
+  })
+
+test('maps every semantic Process action with current facts, fresh identity, and one write', async () => {
+  assert.equal(everySemanticProcessActionIsCovered, true)
+  const project = semanticProcessProject()
+  const evidence = semanticProcessEvidence()
+  const requests: Array<typeof ProcessingProjectChangeRequest.Type> = []
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(currentBootstrap),
+      openProject: () => Effect.succeed(project),
+      projectEvidence: () => Effect.succeed(evidence),
+      changeProject: (request) =>
+        Effect.sync(() => {
+          requests.push(
+            Schema.decodeUnknownSync(ProcessingProjectChangeRequest)(request),
+          )
+          return project
+        }),
+    }),
+  )
+
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'process-project', projectId: project.projectId },
+    libraryQuery: query('semantic-process'),
+  })
+  const before = await waitFor(
+    runtime,
+    (state) => state.process.project?.revision === project.revision,
+  )
+  for (const action of semanticProcessActions) {
+    const result = await submit(runtime, { _tag: 'Process', action })
+    assert.equal(result._tag, 'Project')
+  }
+  const after = await waitFor(
+    runtime,
+    (state) => state.process.state === 'current',
+  )
+  await runtime.dispose()
+
+  assert.equal(requests.length, semanticProcessActions.length)
+  assert.equal(
+    requests.every((request) => request.expectedProjectRevision === 7),
+    true,
+  )
+  assert.deepEqual(
+    requests.map((request) => request.intent),
+    [
+      { _tag: 'ReplaceDraft', draft: semanticProcessDraft },
+      { _tag: 'SyncDevelopPreview', expectedDraftRevision: 12 },
+      {
+        _tag: 'RunStage',
+        stage: 'Calibration',
+        from: { _tag: 'CurrentDraft' },
+      },
+      { _tag: 'UndoDraft', stage: 'Calibration' },
+      { _tag: 'RedoDraft', stage: 'Registration' },
+      { _tag: 'UndoCurrentResult', stage: 'Stacking' },
+      { _tag: 'RedoCurrentResult', stage: 'Develop' },
+      { _tag: 'SaveCurrentResult', stage: 'Stacking' },
+      { _tag: 'OpenDevelop', assetId: 'asset-master' },
+    ],
+  )
+  const identities = requests.map((request) => request.intentId)
+  assert.equal(
+    identities.every((identity) => identity.length > 0),
+    true,
+  )
+  assert.equal(new Set(identities).size, semanticProcessActions.length)
+  assert.equal(before.process.project, project)
+  assert.equal(after.process.project, project)
+})
+
+test('keeps current Project truth while a semantic Process write is pending', async () => {
+  const confirmed = semanticProcessProject()
+  const changed = Schema.decodeUnknownSync(OpenedProcessingProject)({
+    ...confirmed,
+    revision: 8,
+    updatedAt: '2026-08-11T00:00:08.000Z',
+  })
+  const evidence = projectEvidence()
+  const writeStarted = Deferred.makeUnsafe<void>()
+  const releaseWrite = Deferred.makeUnsafe<void>()
+  let writes = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(currentBootstrap),
+      openProject: () => Effect.succeed(confirmed),
+      projectEvidence: () => Effect.succeed(evidence),
+      changeProject: () =>
+        Effect.sync(() => {
+          writes += 1
+        }).pipe(
+          Effect.andThen(Deferred.succeed(writeStarted, undefined)),
+          Effect.andThen(Deferred.await(releaseWrite)),
+          Effect.as(changed),
+        ),
+    }),
+  )
+
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'process-project', projectId: confirmed.projectId },
+    libraryQuery: query('process-provisional'),
+  })
+  await waitFor(runtime, (state) => state.process.project === confirmed)
+  const submission = submit(runtime, {
+    _tag: 'Process',
+    action: ProcessAction.UndoDraft({ stage: 'Calibration' }),
+  })
+  await runtime.runPromise(Deferred.await(writeStarted))
+  const provisional = await waitFor(
+    runtime,
+    (state) => state.process.project?.revision === confirmed.revision,
+  )
+  await runtime.runPromise(Deferred.succeed(releaseWrite, undefined))
+  const result = await submission
+  const accepted = await waitFor(
+    runtime,
+    (state) => state.process.project?.revision === changed.revision,
+  )
+  await runtime.dispose()
+
+  assert.equal(provisional.process.project, confirmed)
+  assert.equal(result._tag, 'Project')
+  assert.equal(accepted.process.project, changed)
+  assert.equal(writes, 1)
+})
+
+test('stops semantic Process actions without current routed truth or Process Authority', async () => {
+  const allowed = semanticProcessProject()
+  const denied = Schema.decodeUnknownSync(OpenedProcessingProject)({
+    ...allowed,
+    authority: { _tag: 'Denied', reason: 'OwnerRequired' },
+  })
+  const staleBootstrap = BootstrapClientState.Stale({
+    snapshot: currentBootstrap.snapshot,
+    reason: 'stale',
+  })
+  const cases = [
+    {
+      name: 'no Project route',
+      state: currentBootstrap,
+      project: allowed,
+      routeProjectId: undefined,
+    },
+    {
+      name: 'mismatched routed Project',
+      state: currentBootstrap,
+      project: allowed,
+      routeProjectId: ProcessingProjectId.make('project-other'),
+    },
+    {
+      name: 'denied Process Authority',
+      state: currentBootstrap,
+      project: denied,
+      routeProjectId: denied.projectId,
+    },
+    {
+      name: 'stale projection',
+      state: staleBootstrap,
+      project: allowed,
+      routeProjectId: allowed.projectId,
+    },
+  ] as const
+
+  for (const value of cases) {
+    let writes = 0
+    const runtime = makeRuntime(
+      makeRemote({
+        states: Stream.make(value.state),
+        openProject: () => Effect.succeed(value.project),
+        projectEvidence: () => Effect.succeed(projectEvidence()),
+        changeProject: () =>
+          Effect.sync(() => {
+            writes += 1
+            return value.project
+          }),
+      }),
+    )
+    if (value.routeProjectId !== undefined) {
+      await submit(runtime, {
+        _tag: 'RouteChanged',
+        route: {
+          kind: 'process-project',
+          projectId: value.routeProjectId,
+        },
+        libraryQuery: query(`process-${value.name}`),
+      })
+      if (value.project.projectId === value.routeProjectId)
+        await waitFor(runtime, (state) => state.process.state === 'current')
+    }
+    const result = await submit(runtime, {
+      _tag: 'Process',
+      action: ProcessAction.UndoDraft({ stage: 'Calibration' }),
+    })
+    await runtime.dispose()
+
+    assert.equal(result._tag, 'Unavailable', value.name)
+    assert.equal(writes, 0, value.name)
+  }
+})
+
+test('stops incomplete or invalid semantic Process actions before transport', async () => {
+  const current = semanticProcessProject()
+  const withoutDevelop = Schema.decodeUnknownSync(OpenedProcessingProject)({
+    ...current,
+    stages: current.stages.filter((stage) => stage.stage !== 'Develop'),
+  })
+  const cases = [
+    {
+      name: 'missing Develop draft',
+      project: withoutDevelop,
+      action: ProcessAction.SyncDevelopPreview({}),
+    },
+    {
+      name: 'missing matched saved Master evidence',
+      project: current,
+      action: ProcessAction.OpenSavedMasterInDevelop({}),
+    },
+    {
+      name: 'invalid draft request',
+      project: current,
+      action: ProcessAction.ReplaceDraft({
+        draft: {
+          _tag: 'Develop',
+          operation: {
+            _tag: 'Stretch',
+            method: 'asinh',
+            amount: Number.POSITIVE_INFINITY,
+          },
+        },
+      }),
+    },
+  ] as const satisfies ReadonlyArray<{
+    readonly name: string
+    readonly project: typeof OpenedProcessingProject.Type
+    readonly action: ProcessAction
+  }>
+
+  for (const value of cases) {
+    let writes = 0
+    const runtime = makeRuntime(
+      makeRemote({
+        states: Stream.make(currentBootstrap),
+        openProject: () => Effect.succeed(value.project),
+        projectEvidence: () => Effect.succeed(projectEvidence()),
+        changeProject: () =>
+          Effect.sync(() => {
+            writes += 1
+            return value.project
+          }),
+      }),
+    )
+    await submit(runtime, {
+      _tag: 'RouteChanged',
+      route: {
+        kind: 'process-project',
+        projectId: value.project.projectId,
+      },
+      libraryQuery: query(`process-${value.name}`),
+    })
+    await waitFor(runtime, (state) => state.process.state === 'current')
+    const result = await submit(runtime, {
+      _tag: 'Process',
+      action: value.action,
+    })
+    await runtime.dispose()
+
+    assert.equal(result._tag, 'Unavailable', value.name)
+    assert.equal(writes, 0, value.name)
+  }
+})
+
+test('stops semantic Process actions while Project truth is loading or unavailable', async () => {
+  const project = semanticProcessProject()
+  const openStarted = Deferred.makeUnsafe<void>()
+  const releaseOpen = Deferred.makeUnsafe<void>()
+  let loadingWrites = 0
+  const loadingRuntime = makeRuntime(
+    makeRemote({
+      states: Stream.make(currentBootstrap),
+      openProject: () =>
+        Deferred.succeed(openStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseOpen)),
+          Effect.as(project),
+        ),
+      projectEvidence: () => Effect.succeed(projectEvidence()),
+      changeProject: () =>
+        Effect.sync(() => {
+          loadingWrites += 1
+          return project
+        }),
+    }),
+  )
+  await submit(loadingRuntime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'process-project', projectId: project.projectId },
+    libraryQuery: query('process-loading'),
+  })
+  await loadingRuntime.runPromise(Deferred.await(openStarted))
+  const loading = await submit(loadingRuntime, {
+    _tag: 'Process',
+    action: ProcessAction.UndoDraft({ stage: 'Calibration' }),
+  })
+  await loadingRuntime.dispose()
+
+  let unavailableWrites = 0
+  const unavailableRuntime = makeRuntime(
+    makeRemote({
+      states: Stream.make(currentBootstrap),
+      openProject: () => Effect.fail(failure('open-project')),
+      projectEvidence: () => Effect.succeed(projectEvidence()),
+      changeProject: () =>
+        Effect.sync(() => {
+          unavailableWrites += 1
+          return project
+        }),
+    }),
+  )
+  await submit(unavailableRuntime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'process-project', projectId: project.projectId },
+    libraryQuery: query('process-unavailable'),
+  })
+  await waitFor(
+    unavailableRuntime,
+    (state) => state.process.state === 'unavailable',
+  )
+  const unavailableResult = await submit(unavailableRuntime, {
+    _tag: 'Process',
+    action: ProcessAction.UndoDraft({ stage: 'Calibration' }),
+  })
+  await unavailableRuntime.dispose()
+
+  assert.equal(loading._tag, 'Unavailable')
+  assert.equal(loadingWrites, 0)
+  assert.equal(unavailableResult._tag, 'Unavailable')
+  assert.equal(unavailableWrites, 0)
+})
+
+test('does not publish failed old-route Process reconciliation over a newer Project', async () => {
+  const projectA = semanticProcessProject()
+  const projectB = Schema.decodeUnknownSync(OpenedProcessingProject)({
+    ...projectA,
+    projectId: 'project-2',
+    revision: 20,
+    updatedAt: '2026-08-11T00:00:20.000Z',
+  })
+  const evidenceA = Schema.decodeUnknownSync(ProcessingProjectEvidence)({
+    projectId: projectA.projectId,
+    attempts: [],
+  })
+  const evidenceB = Schema.decodeUnknownSync(ProcessingProjectEvidence)({
+    projectId: projectB.projectId,
+    attempts: [],
+  })
+  const changeStarted = Deferred.makeUnsafe<void>()
+  const releaseChange = Deferred.makeUnsafe<void>()
+  let writes = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(currentBootstrap),
+      openProject: (projectId) =>
+        Effect.succeed(projectId === projectB.projectId ? projectB : projectA),
+      projectEvidence: (projectId) =>
+        Effect.succeed(
+          projectId === projectB.projectId ? evidenceB : evidenceA,
+        ),
+      changeProject: () =>
+        Effect.sync(() => {
+          writes += 1
+        }).pipe(
+          Effect.andThen(Deferred.succeed(changeStarted, undefined)),
+          Effect.andThen(Deferred.await(releaseChange)),
+          Effect.andThen(Effect.fail(failure('change-project'))),
+        ),
+    }),
+  )
+
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'process-project', projectId: projectA.projectId },
+    libraryQuery: query('process-a'),
+  })
+  await waitFor(
+    runtime,
+    (state) => state.process.project?.projectId === projectA.projectId,
+  )
+  const oldChange = submit(runtime, {
+    _tag: 'Process',
+    action: ProcessAction.UndoDraft({ stage: 'Calibration' }),
+  })
+  await runtime.runPromise(Deferred.await(changeStarted))
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'process-project', projectId: projectB.projectId },
+    libraryQuery: query('process-b'),
+  })
+  await waitFor(
+    runtime,
+    (state) => state.process.project?.projectId === projectB.projectId,
+  )
+  await runtime.runPromise(Deferred.succeed(releaseChange, undefined))
+  const oldResult = await oldChange
+  const final = await waitFor(
+    runtime,
+    (state) =>
+      state.process.state === 'current' &&
+      state.process.project?.projectId === projectB.projectId,
+  )
+  await runtime.dispose()
+
+  assert.equal(oldResult._tag, 'Unavailable')
+  assert.equal(final.process.project, projectB)
+  assert.equal(final.process.evidence, evidenceB)
+  assert.equal(writes, 1)
+})
+
+test('does not let an older same-route Process failure make a newer result unavailable', async () => {
+  const confirmed = semanticProcessProject()
+  const changed = Schema.decodeUnknownSync(OpenedProcessingProject)({
+    ...confirmed,
+    revision: 9,
+    updatedAt: '2026-08-11T00:00:09.000Z',
+  })
+  const confirmedEvidence = projectEvidence()
+  const changedEvidence = projectEvidence()
+  const olderStarted = Deferred.makeUnsafe<void>()
+  const newerStarted = Deferred.makeUnsafe<void>()
+  const releaseOlder = Deferred.makeUnsafe<void>()
+  const releaseNewer = Deferred.makeUnsafe<void>()
+  let writes = 0
+  let openCalls = 0
+  let evidenceCalls = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(currentBootstrap),
+      openProject: () =>
+        ++openCalls === 1
+          ? Effect.succeed(confirmed)
+          : Effect.fail(failure('open-project')),
+      projectEvidence: () =>
+        ++evidenceCalls === 1
+          ? Effect.succeed(confirmedEvidence)
+          : evidenceCalls === 2
+            ? Effect.succeed(changedEvidence)
+            : Effect.fail(failure('project-evidence')),
+      changeProject: () => {
+        writes += 1
+        return writes === 1
+          ? Deferred.succeed(olderStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseOlder)),
+              Effect.andThen(Effect.fail(failure('change-project'))),
+            )
+          : Deferred.succeed(newerStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseNewer)),
+              Effect.as(changed),
+            )
+      },
+    }),
+  )
+
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'process-project', projectId: confirmed.projectId },
+    libraryQuery: query('process-overlap'),
+  })
+  await waitFor(runtime, (state) => state.process.project === confirmed)
+  const older = submit(runtime, {
+    _tag: 'Process',
+    action: ProcessAction.UndoDraft({ stage: 'Calibration' }),
+  })
+  await runtime.runPromise(Deferred.await(olderStarted))
+  const newer = submit(runtime, {
+    _tag: 'Process',
+    action: ProcessAction.RedoDraft({ stage: 'Calibration' }),
+  })
+  await runtime.runPromise(Deferred.await(newerStarted))
+  await runtime.runPromise(Deferred.succeed(releaseNewer, undefined))
+  const newerResult = await newer
+  await waitFor(
+    runtime,
+    (state) => state.process.project?.revision === changed.revision,
+  )
+  await runtime.runPromise(Deferred.succeed(releaseOlder, undefined))
+  const olderResult = await older
+  const final = await waitFor(
+    runtime,
+    (state) =>
+      state.process.state === 'current' &&
+      state.process.project?.revision === changed.revision,
+  )
+  await runtime.dispose()
+
+  assert.equal(newerResult._tag, 'Project')
+  assert.equal(olderResult._tag, 'Unavailable')
+  assert.equal(final.process.project, changed)
+  assert.equal(final.process.evidence, changedEvidence)
+  assert.equal(writes, 2)
+})
+
 test('publishes a matched Process pair when post-change evidence needs reconciliation', async () => {
   const confirmed = openedProject(1)
   const changed = openedProject(2)
@@ -1346,6 +1969,7 @@ test('publishes a matched Process pair when post-change evidence needs reconcili
   let changeCalls = 0
   const runtime = makeRuntime(
     makeRemote({
+      states: Stream.make(currentBootstrap),
       openProject: () =>
         Effect.succeed(++openCalls === 1 ? confirmed : changed),
       projectEvidence: () => {
@@ -1374,9 +1998,8 @@ test('publishes a matched Process pair when post-change evidence needs reconcili
       state.process.evidence === confirmedEvidence,
   )
   const result = await submit(runtime, {
-    _tag: 'ChangeProject',
-    project: confirmed,
-    intent: { _tag: 'UndoDraft', stage: 'Calibration' },
+    _tag: 'Process',
+    action: ProcessAction.UndoDraft({ stage: 'Calibration' }),
   })
   const reconciled = await waitFor(
     runtime,
@@ -1402,6 +2025,7 @@ test('retains the last-confirmed Process pair when changed evidence stays unavai
   let changeCalls = 0
   const runtime = makeRuntime(
     makeRemote({
+      states: Stream.make(currentBootstrap),
       openProject: () =>
         Effect.succeed(evidenceCalls === 0 ? confirmed : changed),
       projectEvidence: () =>
@@ -1423,9 +2047,8 @@ test('retains the last-confirmed Process pair when changed evidence stays unavai
   })
   await waitFor(runtime, (state) => state.process.state === 'current')
   const result = await submit(runtime, {
-    _tag: 'ChangeProject',
-    project: confirmed,
-    intent: { _tag: 'UndoDraft', stage: 'Calibration' },
+    _tag: 'Process',
+    action: ProcessAction.UndoDraft({ stage: 'Calibration' }),
   })
   const unavailableState = await waitFor(
     runtime,
@@ -1437,6 +2060,364 @@ test('retains the last-confirmed Process pair when changed evidence stays unavai
   assert.equal(unavailableState.process.project, confirmed)
   assert.equal(unavailableState.process.evidence, confirmedEvidence)
   assert.equal(changeCalls, 1)
+  assert.equal(evidenceCalls, 3)
+})
+
+test('keeps a newer bootstrap Process pair after an older write completes', async () => {
+  const states = Effect.runSync(Queue.unbounded<BootstrapClientState>())
+  const confirmed = semanticProcessProject()
+  const changed = Schema.decodeUnknownSync(OpenedProcessingProject)({
+    ...confirmed,
+    revision: 8,
+    updatedAt: '2026-08-11T00:00:08.000Z',
+  })
+  const refreshed = Schema.decodeUnknownSync(OpenedProcessingProject)({
+    ...confirmed,
+    revision: 9,
+    updatedAt: '2026-08-11T00:00:09.000Z',
+  })
+  const confirmedEvidence = projectEvidence()
+  const refreshedEvidence = semanticProcessEvidence()
+  const changedEvidence = projectEvidence()
+  const writeStarted = Deferred.makeUnsafe<void>()
+  const releaseWrite = Deferred.makeUnsafe<void>()
+  let openCalls = 0
+  let evidenceCalls = 0
+  let writes = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.fromQueue(states),
+      openProject: () =>
+        Effect.sync(() => (++openCalls === 1 ? confirmed : refreshed)),
+      projectEvidence: () =>
+        Effect.sync(() => {
+          evidenceCalls += 1
+          return evidenceCalls === 1
+            ? confirmedEvidence
+            : evidenceCalls === 2
+              ? refreshedEvidence
+              : changedEvidence
+        }),
+      changeProject: () =>
+        Effect.sync(() => {
+          writes += 1
+        }).pipe(
+          Effect.andThen(Deferred.succeed(writeStarted, undefined)),
+          Effect.andThen(Deferred.await(releaseWrite)),
+          Effect.as(changed),
+        ),
+    }),
+  )
+  const initialBootstrap = Schema.decodeUnknownSync(BootstrapSnapshot)(
+    bootstrapFixtures.fresh,
+  )
+  await runtime.runPromise(
+    Queue.offer(
+      states,
+      BootstrapClientState.Current({ snapshot: initialBootstrap }),
+    ),
+  )
+  await waitFor(
+    runtime,
+    (state) =>
+      state.projection.snapshotVersion === initialBootstrap.snapshotVersion,
+  )
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'process-project', projectId: confirmed.projectId },
+    libraryQuery: query('process-bootstrap-wins'),
+  })
+  await waitFor(runtime, (state) => state.process.project === confirmed)
+  const submission = submit(runtime, {
+    _tag: 'Process',
+    action: ProcessAction.UndoDraft({ stage: 'Calibration' }),
+  })
+  await runtime.runPromise(Deferred.await(writeStarted))
+  await runtime.runPromise(
+    Queue.offer(
+      states,
+      BootstrapClientState.Current({
+        snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)({
+          ...initialBootstrap,
+          snapshotVersion: initialBootstrap.snapshotVersion + 1,
+          eventCursor: initialBootstrap.eventCursor + 1,
+        }),
+      }),
+    ),
+  )
+  await waitFor(runtime, (state) => state.process.project === refreshed)
+  await runtime.runPromise(Deferred.succeed(releaseWrite, undefined))
+  const result = await submission
+  const final = await waitFor(
+    runtime,
+    (state) =>
+      state.process.project === refreshed &&
+      state.process.evidence === refreshedEvidence,
+  )
+  await runtime.dispose()
+
+  assert.equal(result._tag, 'Project')
+  assert.equal(final.process.project?.revision, 9)
+  assert.equal(writes, 1)
+  assert.equal(openCalls, 2)
+  assert.equal(evidenceCalls, 3)
+})
+
+test('keeps a newer Process mutation after an older bootstrap load completes', async () => {
+  const states = Effect.runSync(Queue.unbounded<BootstrapClientState>())
+  const confirmed = semanticProcessProject()
+  const loading = Schema.decodeUnknownSync(OpenedProcessingProject)({
+    ...confirmed,
+    revision: 8,
+    updatedAt: '2026-08-11T00:00:08.000Z',
+  })
+  const changed = Schema.decodeUnknownSync(OpenedProcessingProject)({
+    ...confirmed,
+    revision: 9,
+    updatedAt: '2026-08-11T00:00:09.000Z',
+  })
+  const confirmedEvidence = projectEvidence()
+  const loadingEvidence = projectEvidence()
+  const changedEvidence = semanticProcessEvidence()
+  const loadStarted = Deferred.makeUnsafe<void>()
+  const loadEvidenceStarted = Deferred.makeUnsafe<void>()
+  const releaseLoad = Deferred.makeUnsafe<void>()
+  let openCalls = 0
+  let evidenceCalls = 0
+  let writes = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.fromQueue(states),
+      openProject: () => {
+        openCalls += 1
+        return openCalls === 1
+          ? Effect.succeed(confirmed)
+          : Deferred.succeed(loadStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseLoad)),
+              Effect.as(loading),
+            )
+      },
+      projectEvidence: () => {
+        evidenceCalls += 1
+        if (evidenceCalls === 1) return Effect.succeed(confirmedEvidence)
+        if (evidenceCalls === 2)
+          return Deferred.succeed(loadEvidenceStarted, undefined).pipe(
+            Effect.as(loadingEvidence),
+          )
+        return Effect.succeed(changedEvidence)
+      },
+      changeProject: () =>
+        Effect.sync(() => {
+          writes += 1
+          return changed
+        }),
+    }),
+  )
+  const initialBootstrap = Schema.decodeUnknownSync(BootstrapSnapshot)(
+    bootstrapFixtures.fresh,
+  )
+  await runtime.runPromise(
+    Queue.offer(
+      states,
+      BootstrapClientState.Current({ snapshot: initialBootstrap }),
+    ),
+  )
+  await waitFor(
+    runtime,
+    (state) =>
+      state.projection.snapshotVersion === initialBootstrap.snapshotVersion,
+  )
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'process-project', projectId: confirmed.projectId },
+    libraryQuery: query('process-mutation-wins'),
+  })
+  await waitFor(runtime, (state) => state.process.project === confirmed)
+  await runtime.runPromise(
+    Queue.offer(
+      states,
+      BootstrapClientState.Current({
+        snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)({
+          ...initialBootstrap,
+          snapshotVersion: initialBootstrap.snapshotVersion + 1,
+          eventCursor: initialBootstrap.eventCursor + 1,
+        }),
+      }),
+    ),
+  )
+  await runtime.runPromise(
+    Effect.all([
+      Deferred.await(loadStarted),
+      Deferred.await(loadEvidenceStarted),
+    ]),
+  )
+  const result = await submit(runtime, {
+    _tag: 'Process',
+    action: ProcessAction.RedoDraft({ stage: 'Calibration' }),
+  })
+  await waitFor(runtime, (state) => state.process.project === changed)
+  await runtime.runPromise(Deferred.succeed(releaseLoad, undefined))
+  const final = await waitFor(
+    runtime,
+    (state) =>
+      state.process.project === changed &&
+      state.process.evidence === changedEvidence,
+  )
+  await runtime.dispose()
+
+  assert.equal(result._tag, 'Project')
+  assert.equal(final.process.project?.revision, 9)
+  assert.equal(writes, 1)
+  assert.equal(openCalls, 2)
+  assert.equal(evidenceCalls, 3)
+})
+
+test('reconciles the routed Project without publishing a mismatched change response', async () => {
+  const confirmed = semanticProcessProject()
+  const mismatched = Schema.decodeUnknownSync(OpenedProcessingProject)({
+    ...confirmed,
+    projectId: 'project-other',
+    revision: 40,
+    updatedAt: '2026-08-11T00:00:40.000Z',
+  })
+  const evidence = projectEvidence()
+  let writes = 0
+  let openCalls = 0
+  const publishedProjectIds: Array<typeof ProcessingProjectId.Type> = []
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(currentBootstrap),
+      openProject: () =>
+        Effect.sync(() => {
+          openCalls += 1
+          return confirmed
+        }),
+      projectEvidence: () => Effect.succeed(evidence),
+      changeProject: () =>
+        Effect.sync(() => {
+          writes += 1
+          return mismatched
+        }),
+    }),
+  )
+  runtime.runFork(
+    Effect.gen(function* () {
+      const workspace = yield* NightbookWorkspaceRuntime
+      yield* workspace.states.pipe(
+        Stream.runForEach((state) =>
+          Effect.sync(() => {
+            if (state.process.project !== undefined)
+              publishedProjectIds.push(state.process.project.projectId)
+          }),
+        ),
+      )
+    }),
+  )
+
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'process-project', projectId: confirmed.projectId },
+    libraryQuery: query('process-mismatched-change'),
+  })
+  await waitFor(runtime, (state) => state.process.project === confirmed)
+  const result = await submit(runtime, {
+    _tag: 'Process',
+    action: ProcessAction.UndoDraft({ stage: 'Calibration' }),
+  })
+  const final = await waitFor(
+    runtime,
+    (state) =>
+      state.process.state === 'current' && state.process.project === confirmed,
+  )
+  await runtime.dispose()
+
+  assert.equal(result._tag, 'Unavailable')
+  assert.notEqual(final.process.project?.projectId, mismatched.projectId)
+  assert.equal(publishedProjectIds.includes(mismatched.projectId), false)
+  assert.equal(writes, 1)
+  assert.equal(openCalls, 2)
+})
+
+test('reconciles matched truth without publishing mismatched changed evidence', async () => {
+  const confirmed = semanticProcessProject()
+  const changed = Schema.decodeUnknownSync(OpenedProcessingProject)({
+    ...confirmed,
+    revision: 8,
+    updatedAt: '2026-08-11T00:00:08.000Z',
+  })
+  const confirmedEvidence = projectEvidence()
+  const mismatchedEvidence = Schema.decodeUnknownSync(
+    ProcessingProjectEvidence,
+  )({ projectId: 'project-other', attempts: [] })
+  const changedEvidence = semanticProcessEvidence()
+  let evidenceCalls = 0
+  let openCalls = 0
+  let writes = 0
+  const publishedEvidenceIds: Array<typeof ProcessingProjectId.Type> = []
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(currentBootstrap),
+      openProject: () =>
+        Effect.sync(() => (++openCalls === 1 ? confirmed : changed)),
+      projectEvidence: () =>
+        Effect.sync(() => {
+          evidenceCalls += 1
+          return evidenceCalls === 1
+            ? confirmedEvidence
+            : evidenceCalls === 2
+              ? mismatchedEvidence
+              : changedEvidence
+        }),
+      changeProject: () =>
+        Effect.sync(() => {
+          writes += 1
+          return changed
+        }),
+    }),
+  )
+  runtime.runFork(
+    Effect.gen(function* () {
+      const workspace = yield* NightbookWorkspaceRuntime
+      yield* workspace.states.pipe(
+        Stream.runForEach((state) =>
+          Effect.sync(() => {
+            if (state.process.evidence !== undefined)
+              publishedEvidenceIds.push(state.process.evidence.projectId)
+          }),
+        ),
+      )
+    }),
+  )
+
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'process-project', projectId: confirmed.projectId },
+    libraryQuery: query('process-mismatched-evidence'),
+  })
+  await waitFor(runtime, (state) => state.process.project === confirmed)
+  const result = await submit(runtime, {
+    _tag: 'Process',
+    action: ProcessAction.UndoDraft({ stage: 'Calibration' }),
+  })
+  const final = await waitFor(
+    runtime,
+    (state) =>
+      state.process.project === changed &&
+      state.process.evidence === changedEvidence,
+  )
+  await runtime.dispose()
+
+  assert.equal(result._tag, 'Project')
+  assert.notEqual(
+    final.process.evidence?.projectId,
+    mismatchedEvidence.projectId,
+  )
+  assert.equal(
+    publishedEvidenceIds.includes(mismatchedEvidence.projectId),
+    false,
+  )
+  assert.equal(writes, 1)
+  assert.equal(openCalls, 2)
   assert.equal(evidenceCalls, 3)
 })
 

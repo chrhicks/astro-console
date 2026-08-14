@@ -19,7 +19,6 @@ import {
   CaptureSetId,
   type ExecutableProcessingStage,
   ProcessingProjectId,
-  type ProcessingProjectIntent,
   type ProcessingStageDraftValue,
 } from '@astro-console/protocol'
 import {
@@ -30,10 +29,11 @@ import {
   type ChangeEvent,
 } from 'react'
 import type { ProcessSourceHandoff } from '../library-client'
-import type {
-  OpenedProcessingProject,
-  ProcessingProjectEvidence,
-  ProcessingProjectList,
+import {
+  ProcessAction,
+  type OpenedProcessingProject,
+  type ProcessingProjectEvidence,
+  type ProcessingProjectList,
 } from '../nightbook-workspace-runtime'
 import type { Projection } from '../presentation'
 import { nightbookHref } from '../route-href'
@@ -65,10 +65,7 @@ export type ProcessWorkspaceProps = {
       readonly captureSetIds: ReadonlyArray<typeof CaptureSetId.Type>
     },
   ) => Promise<void>
-  onChangeProject: (
-    project: OpenedProcessingProject,
-    intent: ProcessingProjectIntent,
-  ) => Promise<void>
+  onChangeProject: (action: ProcessAction) => Promise<void>
 }
 
 const stages: ReadonlyArray<ViewedStage> = [
@@ -152,12 +149,12 @@ export default function ProcessWorkspace(props: ProcessWorkspaceProps) {
   const [stretch, setStretch] = useState(0.35)
 
   const change = useCallback(
-    async (intent: ProcessingProjectIntent, label: string) => {
+    async (action: ProcessAction, label: string) => {
       if (props.process.project === undefined || pending !== undefined) return
       setPending(label)
       setMessage(undefined)
       try {
-        await props.onChangeProject(props.process.project, intent)
+        await props.onChangeProject(action)
         setMessage(`${label} accepted.`)
       } catch {
         setMessage(`${label} was not accepted. The Project was reloaded.`)
@@ -408,7 +405,7 @@ function ProjectWorkspace({
   message?: string | undefined
   stretch: number
   setStretch: (value: number) => void
-  change: (intent: ProcessingProjectIntent, label: string) => Promise<void>
+  change: (action: ProcessAction, label: string) => Promise<void>
 }) {
   const stage = project.stages.find(
     (candidate) => candidate.stage === viewedStage,
@@ -632,7 +629,7 @@ function StageControls({
   disabled: boolean
   stretch: number
   setStretch: (value: number) => void
-  change: (intent: ProcessingProjectIntent, label: string) => Promise<void>
+  change: (action: ProcessAction, label: string) => Promise<void>
 }) {
   const runUnavailable =
     stage.run._tag === 'Unavailable' ? stage.run.reason : undefined
@@ -669,7 +666,7 @@ function StageControls({
             disabled={disabled}
             onClick={() =>
               void change(
-                { _tag: 'ReplaceDraft', draft },
+                ProcessAction.ReplaceDraft({ draft }),
                 'Updating Develop draft',
               )
             }
@@ -680,10 +677,7 @@ function StageControls({
             disabled={disabled || project.developBase === undefined}
             onClick={() =>
               void change(
-                {
-                  _tag: 'SyncDevelopPreview',
-                  expectedDraftRevision: stage.draft.revision,
-                },
+                ProcessAction.SyncDevelopPreview({}),
                 'Synchronizing Develop preview',
               )
             }
@@ -698,11 +692,7 @@ function StageControls({
         title={runUnavailable}
         onClick={() =>
           void change(
-            {
-              _tag: 'RunStage',
-              stage: stage.stage,
-              from: { _tag: 'CurrentDraft' },
-            },
+            ProcessAction.RunCurrentDraft({ stage: stage.stage }),
             `${runLabel} ${stage.stage}`,
           )
         }
@@ -719,7 +709,7 @@ function StageControls({
           disabled={disabled || !stage.draft.canUndo}
           onClick={() =>
             void change(
-              { _tag: 'UndoDraft', stage: stage.stage },
+              ProcessAction.UndoDraft({ stage: stage.stage }),
               'Undoing draft',
             )
           }
@@ -730,7 +720,7 @@ function StageControls({
           disabled={disabled || !stage.draft.canRedo}
           onClick={() =>
             void change(
-              { _tag: 'RedoDraft', stage: stage.stage },
+              ProcessAction.RedoDraft({ stage: stage.stage }),
               'Redoing draft',
             )
           }
@@ -743,7 +733,7 @@ function StageControls({
           disabled={disabled || !stage.resultHistory.canUndo}
           onClick={() =>
             void change(
-              { _tag: 'UndoCurrentResult', stage: stage.stage },
+              ProcessAction.UndoCurrentResult({ stage: stage.stage }),
               'Undoing Current Result',
             )
           }
@@ -754,7 +744,7 @@ function StageControls({
           disabled={disabled || !stage.resultHistory.canRedo}
           onClick={() =>
             void change(
-              { _tag: 'RedoCurrentResult', stage: stage.stage },
+              ProcessAction.RedoCurrentResult({ stage: stage.stage }),
               'Redoing Current Result',
             )
           }
@@ -767,7 +757,7 @@ function StageControls({
           disabled={disabled || stage.currentResult === undefined}
           onClick={() => {
             void change(
-              { _tag: 'SaveCurrentResult', stage: saveStage },
+              ProcessAction.SaveCurrentResult({ stage: saveStage }),
               `Saving ${stage.stage} Current Result`,
             )
           }}
@@ -786,9 +776,9 @@ function Master({
 }: {
   project: OpenedProcessingProject
   disabled: boolean
-  change: (intent: ProcessingProjectIntent, label: string) => Promise<void>
+  change: (action: ProcessAction, label: string) => Promise<void>
 }) {
-  const assetId = project.savedAssetIds.at(-1)
+  const hasSavedMaster = project.savedAssetIds.length > 0
   return (
     <Stack>
       <DataList>
@@ -808,11 +798,10 @@ function Master({
         />
       </DataList>
       <Button
-        disabled={disabled || assetId === undefined}
+        disabled={disabled || !hasSavedMaster}
         onClick={() =>
-          assetId &&
           void change(
-            { _tag: 'OpenDevelop', assetId },
+            ProcessAction.OpenSavedMasterInDevelop({}),
             'Opening saved Master in Develop',
           )
         }
