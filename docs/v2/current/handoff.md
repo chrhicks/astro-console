@@ -552,7 +552,8 @@ Observe, Library catalog/detail, and Process list/project at wide, compact, and
 inspect-runner navigation sometimes required one reload to finish a lazy module
 load, matching the pre-change runner behavior.
 
-Issue `#51` now gives the non-React runtime and route helper purpose names. The
+Issue `#51` and PR `#54` give the non-React runtime and route helper purpose
+names. The
 deep external interface remains exactly `WorkspaceRuntime.states + submit`, and
 request identity values remain unchanged. Focused runtime and route-helper tests
 and the complete web check pass. Functional browser smoke passes Plan, Observe,
