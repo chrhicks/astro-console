@@ -3,9 +3,9 @@ import { classes } from './foundations/utils'
 import './Button.css'
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  tone?: 'primary' | 'secondary' | 'danger' | 'quiet'
-  size?: 'small' | 'medium'
-  fullWidth?: boolean
+  tone?: 'primary' | 'secondary' | 'danger' | 'quiet' | 'neutral' | undefined
+  size?: 'small' | 'medium' | undefined
+  fullWidth?: boolean | undefined
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(

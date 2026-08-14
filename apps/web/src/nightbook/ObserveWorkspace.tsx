@@ -15,7 +15,7 @@ import {
   type AttemptItem,
   type StepItem,
   type Tone,
-} from '@nightbook/ui'
+} from '../components/ui'
 import type { ObserveWorkspaceProjection } from '@astro-console/protocol'
 import { useEffect, useMemo, useState } from 'react'
 import {
@@ -26,7 +26,6 @@ import type { PreflightRefreshSubmission } from '../preflight-refresh-client'
 import type { ObserveView, Projection, StatusTone } from '../presentation'
 import { nightbookHref } from '../route-href'
 import { CommandBar, type ControlSubmit } from './shared-shell'
-import '@nightbook/ui/styles.css'
 import './workspace.css'
 
 export type ObserveWorkspaceProps = {
@@ -1188,9 +1187,9 @@ export function ObserveWorkspace(props: ObserveWorkspaceProps) {
   const phone = usePhoneProjection()
   return (
     <div
-      className="nightbook-app nb-theme"
-      data-nb-theme="nightbook"
-      data-nb-density="compact"
+      className="nightbook-app ui-theme"
+      data-ui-theme="default"
+      data-ui-density="compact"
     >
       <a className="nightbook-skip-link" href="#nightbook-workspace">
         Skip to Observe evidence

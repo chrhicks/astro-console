@@ -9,8 +9,8 @@ export interface ActionPanelProps
   eyebrow?: ReactNode
   title: ReactNode
   description?: ReactNode
-  primary?: ActionDescriptor
-  secondary?: ActionDescriptor[]
+  primary?: ActionDescriptor | undefined
+  secondary?: ActionDescriptor[] | undefined
   footer?: ReactNode
 }
 

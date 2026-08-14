@@ -12,8 +12,8 @@ export interface StepItem {
 export interface StepRailProps
   extends Omit<HTMLAttributes<HTMLOListElement>, 'onChange'> {
   items: StepItem[]
-  activeId?: string
-  onActiveChange?: (id: string) => void
+  activeId?: string | undefined
+  onActiveChange?: ((id: string) => void) | undefined
   label: string
   orientation?: 'horizontal' | 'vertical'
 }

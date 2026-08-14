@@ -8,7 +8,7 @@ import {
   Stack,
   StatusIndicator,
   type FlyoutTriggerProps,
-} from '@nightbook/ui'
+} from '../components/ui'
 import { Effect, Schema } from 'effect'
 import {
   DevelopmentSimulationControlRequest,

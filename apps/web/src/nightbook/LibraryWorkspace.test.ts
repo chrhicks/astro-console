@@ -274,7 +274,7 @@ test('disables every Library intake control for a read-only shell', () => {
   )
   assert.match(markup, /Current service truth is unavailable/)
   assert.doesNotMatch(markup, /<input type="checkbox"(?! disabled)/)
-  assert.match(markup, /<select class="nb-select" disabled=""/)
+  assert.match(markup, /<select class="ui-select" disabled=""/)
 })
 
 test('wraps long catalog availability and revision inside the card', () => {
@@ -604,7 +604,7 @@ test('keeps both Library preview modes inside the bounded wide review row', () =
     .map((match) => match[1])
     .find((rule) => rule?.includes('height: 100%'))
   const canvasRule = styles.match(
-    /\.nightbook-library-evidence \.nb-evidence-canvas\s*\{([^}]*)\}/s,
+    /\.nightbook-library-evidence \.ui-evidence-canvas\s*\{([^}]*)\}/s,
   )?.[1]
   assert.ok(evidenceRule)
   assert.ok(canvasRule)
@@ -617,11 +617,11 @@ test('keeps both Library preview modes inside the bounded wide review row', () =
   assert.match(canvasRule, /aspect-ratio:\s*auto/)
   assert.match(
     styles,
-    /\.nightbook-library-evidence\[data-fit='aspect'\] \.nb-evidence-canvas > img\s*\{[^}]*object-fit:\s*contain/,
+    /\.nightbook-library-evidence\[data-fit='aspect'\] \.ui-evidence-canvas > img\s*\{[^}]*object-fit:\s*contain/,
   )
   assert.match(
     styles,
-    /\.nightbook-library-evidence\[data-fit='fill'\] \.nb-evidence-canvas > img\s*\{[^}]*object-fit:\s*cover/,
+    /\.nightbook-library-evidence\[data-fit='fill'\] \.ui-evidence-canvas > img\s*\{[^}]*object-fit:\s*cover/,
   )
 })
 

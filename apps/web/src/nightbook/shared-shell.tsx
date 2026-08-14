@@ -4,7 +4,7 @@ import {
   DataListItem,
   StatusIndicator,
   type Tone,
-} from '@nightbook/ui'
+} from '../components/ui'
 import { useEffect, useId, useRef, useState } from 'react'
 import {
   ControlAction,
