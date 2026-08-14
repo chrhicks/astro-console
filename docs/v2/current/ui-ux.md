@@ -10,16 +10,14 @@ is not a separate design authority.
 
 ## Visual And Interaction Authority
 
-The authoritative source is the external Nightbook workspace:
+The authoritative source is the external Nightbook workspace, available in this
+checkout as an ignored local reference:
 
-- composed product demo:
-  `/Users/chicks/dev/personal/kimi_workspace/nightbook-prototype/apps/nightbook-demo`
-- React component package:
-  `/Users/chicks/dev/personal/kimi_workspace/nightbook-prototype/packages/ui`
-- isolated component gallery:
-  `/Users/chicks/dev/personal/kimi_workspace/nightbook-prototype/apps/gallery`
+- composed product demo: `.gh/clone/nightbook-prototype/apps/nightbook-demo`
+- React component package: `.gh/clone/nightbook-prototype/ui`
+- isolated component gallery: `.gh/clone/nightbook-prototype/apps/gallery`
 - containment consumer:
-  `/Users/chicks/dev/personal/kimi_workspace/nightbook-prototype/apps/resetless-consumer`
+  `.gh/clone/nightbook-prototype/apps/resetless-consumer`
 
 Use the rendered React demo as the authority for page composition, hierarchy,
 interaction, responsive behavior, and visual treatment. Use the Gallery and

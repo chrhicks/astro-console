@@ -2,6 +2,8 @@
 .references/
 .agents/
 .codex/
+.gh/
+.pi/
 .env
 .env.local
 .env.development.local

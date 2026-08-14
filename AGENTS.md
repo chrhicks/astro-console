@@ -127,4 +127,4 @@ Keep your memory updated throughout this session
 - Emerging requirements, future troubleshooting reminders, discoveries
 - Anything you think important to remember between sessions where your context gets reset or compacted
 
-2. Look at the `docs/v2` directory and especially `handoff.md`
+2. Look at `docs/v2/README.md` and `docs/v2/current/handoff.md`.
