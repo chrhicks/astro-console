@@ -58,7 +58,7 @@ as execution authority, the service owns a real durable executor, accepted work
 is persisted before provider calls, and uncertain writes reconcile through
 GET-only observation without replay. Observe projects the exact work states,
 timestamps, eligibility, consequences, and Verify boundary through the
-the application evidence grammar.
+application evidence grammar.
 
 The next simulator-first slice is also complete. After the service observes an
 exposure return to idle, it durably records separate image-retrieval work while
@@ -545,9 +545,15 @@ styles live in the purpose-organized application component tree. Active
 selectors, presentation identifiers, product wording, and current UI authority
 use workspace, feature, or Astro Console names. The non-React Nightbook
 workspace runtime, navigation names, semantic intents, URLs, and behavior remain
-unchanged for `#51`. Evidenced lower-priority interface and test concerns remain
-in `#49`. After owner review of `#50`, `#51` is the next bounded task. The other architecture frontiers remain the durable
-work-claim re-audit in `#5` and the origin integration-test harness in `#6`.
+unchanged for `#51`. The complete web check passes 186/186. Functional browser
+inspection and Designer review pass Plan, Observe, Library catalog/detail, and
+Process list/project at wide, compact, and 390 px with no P0, P1, P2, or P3
+finding; phone remains read-only. Repeated inspect-runner navigation sometimes
+required one reload to finish a lazy module load, matching the pre-change runner
+behavior. Evidenced lower-priority interface and test concerns remain in `#49`.
+After owner review of `#50`, `#51` is the next bounded task. The other
+architecture frontiers remain the durable work-claim re-audit in `#5` and the
+origin integration-test harness in `#6`.
 Select and integrate a real processing library only in a later accepted item;
 the current deterministic materializer proves orchestration and evidence, not
 astronomy processing quality. The remaining accepted delivery list continues
