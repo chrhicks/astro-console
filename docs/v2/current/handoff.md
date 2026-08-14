@@ -515,7 +515,11 @@ slice in `#33` is merged through PR `#34`. The Library Asset Review semantic-
 intent slice in `#35` is merged through PR `#36`. The Processing Project intake
 semantic-intent slice in `#37` is merged through PR `#38`. The current Process
 mutation semantic-intent slice in `#39` is merged through PR `#40`. The bounded
-review correction in issue `#41` is merged through PR `#45`. Production
+review correction in issue `#41` is merged through PR `#45`. The follow-up local
+state correction in issue `#46` is complete at `a02ca2f`. Process now binds the
+Develop editor to the exact routed Project and authoritative Develop draft, and
+binds source-handoff naming to the exact routed Library Asset. Route-leading
+projection gaps fail closed without exposing stale mutation controls. Production
 Processing Project lifecycle evidence now projects the saved Library Master onto
 its exact Stacking attempt without mutating stored attempt evidence.
 `NightbookWorkspaceRuntime.states + submit` tests prove fail-closed Process stage
@@ -523,8 +527,13 @@ eligibility, complete latest saved Stacking Master evidence, and latest-operatio
 ownership for overlapping same-route existing-Project intake reconciliation,
 with one write and no replay. The Master presentation is eligible only from that
 same complete, matched Stacking evidence; an incomplete page remains unavailable.
-No later architecture opportunity is selected. The other architecture frontiers
-remain the durable work-claim re-audit in `#5` and the origin integration-test harness in `#6`.
+Focused mounted React proof and functional browser evidence cover successive
+Project, draft, and Asset identities. The complete web check passes 186/186, and
+Designer review passes wide, compact, and 390 px phone states with no P0, P1, or
+P2 finding; phone remains read-only. The handled optional simulation 404 remains
+unrelated development-console noise. No later architecture opportunity is
+selected. The other architecture frontiers remain the durable work-claim re-audit
+in `#5` and the origin integration-test harness in `#6`.
 Select and integrate a real processing library only in a later accepted item;
 the current deterministic materializer proves orchestration and evidence, not
 astronomy processing quality. The remaining accepted delivery list continues
