@@ -18,6 +18,7 @@ import {
   ProcessingProjectEvidence,
   ProcessingProjectId,
   ProcessingProjectRevision,
+  type ReviewAssetRequest,
 } from '@astro-console/protocol'
 import {
   Deferred,
@@ -90,6 +91,12 @@ const assetDetail = (assetId: string) =>
   })
 
 const detail = assetDetail('asset-1')
+
+const currentBootstrap = BootstrapClientState.Current({
+  snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)(
+    bootstrapFixtures.fresh,
+  ),
+})
 
 const projects = (id: string): ProcessingProjectList => [
   {
@@ -1528,6 +1535,254 @@ test(
   },
 )
 
+test('submits sequential semantic current-Asset reviews with fresh identities and no optimistic state', async () => {
+  const reviewedDetail = Schema.decodeUnknownSync(LibraryAssetDetail)({
+    ...detail,
+    revision: 7,
+    review: {
+      revision: 3,
+      decision: 'unreviewed',
+      updatedAt: '2026-08-11T00:00:00.000Z',
+    },
+  })
+  const firstStarted = Effect.runSync(Deferred.make<void>())
+  const releaseFirst = Effect.runSync(Deferred.make<void>())
+  const secondStarted = Effect.runSync(Deferred.make<void>())
+  const releaseSecond = Effect.runSync(Deferred.make<void>())
+  const requests: Array<ReviewAssetRequest> = []
+  let reviewCalls = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(currentBootstrap),
+      page: () => Effect.succeed(page('review', 1)),
+      listProjects: () => Effect.succeed([]),
+      detail: () => Effect.succeed(reviewedDetail),
+      review: (_assetId, request) =>
+        Effect.gen(function* () {
+          reviewCalls += 1
+          requests.push(request)
+          if (reviewCalls === 1) {
+            yield* Deferred.succeed(firstStarted, undefined)
+            yield* Deferred.await(releaseFirst)
+            return {
+              revision: AssetRevision.make(4),
+              decision: 'accepted' as const,
+              rating: 4,
+              annotation: 'Clean stars.',
+              updatedAt: '2026-08-11T00:00:01.000Z',
+            }
+          }
+          yield* Deferred.succeed(secondStarted, undefined)
+          yield* Deferred.await(releaseSecond)
+          return {
+            revision: AssetRevision.make(5),
+            decision: 'rejected' as const,
+            annotation: 'Tracking trail.',
+            updatedAt: '2026-08-11T00:00:02.000Z',
+          }
+        }),
+    }),
+  )
+
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'asset', assetId: reviewedDetail.assetId },
+    libraryQuery: query('review'),
+  })
+  await waitFor(
+    runtime,
+    (state) => state.libraryDetail.value?.assetId === reviewedDetail.assetId,
+  )
+
+  const firstReview = submit(runtime, {
+    _tag: 'ReviewCurrentLibraryAsset',
+    review: {
+      decision: 'accepted',
+      rating: 4,
+      annotation: 'Clean stars.',
+    },
+  })
+  await runtime.runPromise(Deferred.await(firstStarted))
+  const firstPending = await waitFor(runtime, () => true)
+  assert.equal(firstPending.libraryDetail.value?.review?.revision, 3)
+  await runtime.runPromise(Deferred.succeed(releaseFirst, undefined))
+  const firstResult = await firstReview
+  await waitFor(
+    runtime,
+    (state) => state.libraryDetail.value?.review?.revision === 4,
+  )
+
+  const secondReview = submit(runtime, {
+    _tag: 'ReviewCurrentLibraryAsset',
+    review: {
+      decision: 'rejected',
+      annotation: 'Tracking trail.',
+    },
+  })
+  await runtime.runPromise(Deferred.await(secondStarted))
+  const secondPending = await waitFor(runtime, () => true)
+  assert.equal(secondPending.libraryDetail.value?.review?.revision, 4)
+  await runtime.runPromise(Deferred.succeed(releaseSecond, undefined))
+  const secondResult = await secondReview
+  const rejected = await waitFor(
+    runtime,
+    (state) => state.libraryDetail.value?.review?.revision === 5,
+  )
+  await runtime.dispose()
+
+  assert.equal(firstResult._tag, 'Loaded')
+  assert.equal(secondResult._tag, 'Loaded')
+  assert.equal(reviewCalls, 2)
+  assert.equal(requests.length, 2)
+  assert.equal(requests[0]?.expectedAssetRevision, 7)
+  assert.equal(requests[0]?.expectedReviewRevision, 3)
+  assert.equal(requests[0]?.decision, 'accepted')
+  assert.equal(requests[0]?.rating, 4)
+  assert.equal(requests[0]?.annotation, 'Clean stars.')
+  assert.equal(requests[1]?.expectedAssetRevision, 7)
+  assert.equal(requests[1]?.expectedReviewRevision, 4)
+  assert.equal(requests[1]?.decision, 'rejected')
+  assert.equal(requests[1]?.annotation, 'Tracking trail.')
+  const identities = requests.map(({ idempotencyKey }) => idempotencyKey)
+  assert.equal(
+    identities.every((identity) => identity.length > 0),
+    true,
+  )
+  assert.equal(new Set(identities).size, 2)
+  assert.equal(rejected.libraryDetail.value?.review?.decision, 'rejected')
+})
+
+test('stops malformed semantic review before transport with current routed truth', async () => {
+  let reviewCalls = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(currentBootstrap),
+      page: () => Effect.succeed(page('invalid-review', 1)),
+      listProjects: () => Effect.succeed([]),
+      detail: () => Effect.succeed(detail),
+      review: () =>
+        Effect.sync(() => {
+          reviewCalls += 1
+          return undefined
+        }),
+    }),
+  )
+
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'asset', assetId: detail.assetId },
+    libraryQuery: query('invalid-review'),
+  })
+  await waitFor(
+    runtime,
+    (state) => state.libraryDetail.value?.assetId === detail.assetId,
+  )
+  const result = await submit(runtime, {
+    _tag: 'ReviewCurrentLibraryAsset',
+    review: { decision: 'accepted', rating: 6 },
+  })
+  await runtime.dispose()
+
+  assert.equal(result._tag, 'Unavailable')
+  assert.equal(reviewCalls, 0)
+})
+
+test('stops semantic review without current routed detail or mutation authority', async () => {
+  const deniedBootstrap = BootstrapClientState.Current({
+    snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)(
+      bootstrapFixtures.viewer,
+    ),
+  })
+  const cases = [
+    {
+      name: 'no current Asset route',
+      states: Stream.make(currentBootstrap),
+      prepare: async (runtime: ReturnType<typeof makeRuntime>) => {
+        await submit(runtime, {
+          _tag: 'RouteChanged',
+          route: { kind: 'workspace', workspace: 'library' },
+          libraryQuery: query('library'),
+        })
+      },
+      detail: () => Effect.succeed(detail),
+    },
+    {
+      name: 'missing current detail',
+      states: Stream.make(currentBootstrap),
+      prepare: async (runtime: ReturnType<typeof makeRuntime>) => {
+        await submit(runtime, {
+          _tag: 'RouteChanged',
+          route: { kind: 'asset', assetId: detail.assetId },
+          libraryQuery: query('missing'),
+        })
+        await waitFor(
+          runtime,
+          (state) => state.libraryDetail.state === 'unavailable',
+        )
+      },
+      detail: () => Effect.fail(failure('detail')),
+    },
+    {
+      name: 'mismatched current detail',
+      states: Stream.make(currentBootstrap),
+      prepare: async (runtime: ReturnType<typeof makeRuntime>) => {
+        await submit(runtime, {
+          _tag: 'RouteChanged',
+          route: { kind: 'asset', assetId: detail.assetId },
+          libraryQuery: query('mismatch'),
+        })
+        await waitFor(
+          runtime,
+          (state) => state.libraryDetail.value !== undefined,
+        )
+      },
+      detail: () => Effect.succeed(assetDetail('different-asset')),
+    },
+    {
+      name: 'denied mutation authority',
+      states: Stream.make(deniedBootstrap),
+      prepare: async (runtime: ReturnType<typeof makeRuntime>) => {
+        await submit(runtime, {
+          _tag: 'RouteChanged',
+          route: { kind: 'asset', assetId: detail.assetId },
+          libraryQuery: query('denied'),
+        })
+        await waitFor(
+          runtime,
+          (state) => state.libraryDetail.value?.assetId === detail.assetId,
+        )
+      },
+      detail: () => Effect.succeed(detail),
+    },
+  ]
+
+  for (const value of cases) {
+    let reviewCalls = 0
+    const runtime = makeRuntime(
+      makeRemote({
+        states: value.states,
+        page: () => Effect.succeed(page(value.name, 1)),
+        listProjects: () => Effect.succeed([]),
+        detail: value.detail,
+        review: () =>
+          Effect.sync(() => {
+            reviewCalls += 1
+            return undefined
+          }),
+      }),
+    )
+    await value.prepare(runtime)
+    const result = await submit(runtime, {
+      _tag: 'ReviewCurrentLibraryAsset',
+      review: { decision: 'accepted' },
+    })
+    await runtime.dispose()
+
+    assert.equal(result._tag, 'Unavailable', value.name)
+    assert.equal(reviewCalls, 0, value.name)
+  }
+})
+
 test('reconciles Review and Project intake failures through reads without replay', async () => {
   const confirmedProject = openedProject(1)
   const confirmedEvidence = projectEvidence()
@@ -1540,6 +1795,7 @@ test('reconciles Review and Project intake failures through reads without replay
   let evidenceReads = 0
   const runtime = makeRuntime(
     makeRemote({
+      states: Stream.make(currentBootstrap),
       page: () => Effect.succeed(page('review', 1)),
       review: () =>
         Effect.sync(() => void (reviewCalls += 1)).pipe(
@@ -1586,14 +1842,8 @@ test('reconciles Review and Project intake failures through reads without replay
     (state) => state.libraryDetail.value?.assetId === detail.assetId,
   )
   const reviewResult = await submit(runtime, {
-    _tag: 'ReviewLibraryAsset',
-    assetId: detail.assetId,
-    request: {
-      expectedAssetRevision: detail.revision,
-      expectedReviewRevision: AssetRevision.make(0),
-      decision: 'accepted',
-      idempotencyKey: 'review-1',
-    },
+    _tag: 'ReviewCurrentLibraryAsset',
+    review: { decision: 'accepted' },
   })
   const reviewState = await waitFor(
     runtime,
@@ -2058,6 +2308,7 @@ test('keeps a late Review failure reconciliation bound to its Asset route', asyn
   let detailReads = 0
   const runtime = makeRuntime(
     makeRemote({
+      states: Stream.make(currentBootstrap),
       page: () => Effect.succeed(page('library', 1)),
       listProjects: () => Effect.succeed([]),
       review: () =>
@@ -2085,14 +2336,8 @@ test('keeps a late Review failure reconciliation bound to its Asset route', asyn
     (state) => state.libraryDetail.value?.assetId === assetA.assetId,
   )
   const reviewResult = submit(runtime, {
-    _tag: 'ReviewLibraryAsset',
-    assetId: assetA.assetId,
-    request: {
-      expectedAssetRevision: assetA.revision,
-      expectedReviewRevision: AssetRevision.make(0),
-      decision: 'accepted',
-      idempotencyKey: 'review-asset-a',
-    },
+    _tag: 'ReviewCurrentLibraryAsset',
+    review: { decision: 'accepted' },
   })
   await runtime.runPromise(Deferred.await(reviewStarted))
   await submit(runtime, {
@@ -2128,6 +2373,7 @@ test('keeps a late failed Review read-back from making the newer Asset unavailab
   let assetAReads = 0
   const runtime = makeRuntime(
     makeRemote({
+      states: Stream.make(currentBootstrap),
       page: () => Effect.succeed(page('library', 1)),
       listProjects: () => Effect.succeed([]),
       review: () =>
@@ -2157,14 +2403,8 @@ test('keeps a late failed Review read-back from making the newer Asset unavailab
     (state) => state.libraryDetail.value?.assetId === assetA.assetId,
   )
   const reviewResult = submit(runtime, {
-    _tag: 'ReviewLibraryAsset',
-    assetId: assetA.assetId,
-    request: {
-      expectedAssetRevision: assetA.revision,
-      expectedReviewRevision: AssetRevision.make(0),
-      decision: 'accepted',
-      idempotencyKey: 'review-asset-a-failed-read-back',
-    },
+    _tag: 'ReviewCurrentLibraryAsset',
+    review: { decision: 'accepted' },
   })
   await runtime.runPromise(Deferred.await(reviewStarted))
   await submit(runtime, {
@@ -2199,6 +2439,7 @@ test('does not publish a late Review success after returning to the same Asset',
   let reviewCalls = 0
   const runtime = makeRuntime(
     makeRemote({
+      states: Stream.make(currentBootstrap),
       page: () => Effect.succeed(page('library', 1)),
       listProjects: () => Effect.succeed([]),
       detail: (assetId) =>
@@ -2229,14 +2470,8 @@ test('does not publish a late Review success after returning to the same Asset',
     (state) => state.libraryDetail.value?.assetId === assetA.assetId,
   )
   const reviewResult = submit(runtime, {
-    _tag: 'ReviewLibraryAsset',
-    assetId: assetA.assetId,
-    request: {
-      expectedAssetRevision: assetA.revision,
-      expectedReviewRevision: AssetRevision.make(0),
-      decision: 'accepted',
-      idempotencyKey: 'review-asset-a-first-route',
-    },
+    _tag: 'ReviewCurrentLibraryAsset',
+    review: { decision: 'accepted' },
   })
   await runtime.runPromise(Deferred.await(reviewStarted))
   await openAsset(assetB.assetId, 'asset-b')
@@ -2272,13 +2507,14 @@ test('keeps an older overlapping Review from replacing the newer Review', async 
   let reviewCalls = 0
   const runtime = makeRuntime(
     makeRemote({
+      states: Stream.make(currentBootstrap),
       page: () => Effect.succeed(page('library', 1)),
       listProjects: () => Effect.succeed([]),
       detail: () => Effect.succeed(asset),
-      review: (_assetId, request) =>
+      review: () =>
         Effect.gen(function* () {
           reviewCalls += 1
-          const isOlder = request.idempotencyKey === 'review-older'
+          const isOlder = reviewCalls === 1
           yield* Deferred.succeed(
             isOlder ? olderStarted : newerStarted,
             undefined,
@@ -2305,25 +2541,13 @@ test('keeps an older overlapping Review from replacing the newer Review', async 
     (state) => state.libraryDetail.value?.assetId === asset.assetId,
   )
   const olderResult = submit(runtime, {
-    _tag: 'ReviewLibraryAsset',
-    assetId: asset.assetId,
-    request: {
-      expectedAssetRevision: asset.revision,
-      expectedReviewRevision: AssetRevision.make(0),
-      decision: 'rejected',
-      idempotencyKey: 'review-older',
-    },
+    _tag: 'ReviewCurrentLibraryAsset',
+    review: { decision: 'rejected' },
   })
   await runtime.runPromise(Deferred.await(olderStarted))
   const newerResult = submit(runtime, {
-    _tag: 'ReviewLibraryAsset',
-    assetId: asset.assetId,
-    request: {
-      expectedAssetRevision: asset.revision,
-      expectedReviewRevision: AssetRevision.make(0),
-      decision: 'accepted',
-      idempotencyKey: 'review-newer',
-    },
+    _tag: 'ReviewCurrentLibraryAsset',
+    review: { decision: 'accepted' },
   })
   await runtime.runPromise(Deferred.await(newerStarted))
   await runtime.runPromise(Deferred.succeed(releaseNewer, undefined))

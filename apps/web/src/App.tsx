@@ -11,11 +11,9 @@ import {
 import { type CommandSubmission, type ControlAction } from './command-client'
 import { type PreflightRefreshSubmission } from './preflight-refresh-client'
 import {
-  AssetRevision,
   AssetId,
   LibraryQuery as LibraryQuerySchema,
   LibraryQueryId,
-  ReviewAssetRequest,
 } from '@astro-console/protocol'
 import { parseRoute, routeWorkspace, type Route } from './routes'
 import { nightbookHref } from './route-href'
@@ -305,19 +303,9 @@ export function App() {
     rating?: number
     annotation?: string
   }) => {
-    const detail = libraryDetail.value
-    if (!detail) throw new Error('Asset detail is unavailable.')
     const result = await submitWorkspace({
-      _tag: 'ReviewLibraryAsset',
-      assetId: detail.assetId,
-      request: ReviewAssetRequest.make({
-        expectedAssetRevision: detail.revision,
-        expectedReviewRevision: AssetRevision.make(
-          detail.review?.revision ?? 0,
-        ),
-        ...review,
-        idempotencyKey: crypto.randomUUID(),
-      }),
+      _tag: 'ReviewCurrentLibraryAsset',
+      review,
     })
     return foldWorkspaceSubmission(result, { Loaded: () => undefined })
   }

@@ -329,9 +329,12 @@ established reconciliation. Plan now uses the same semantic interface for its
 six current actions. React retains only operator-edited sequences and the
 selected mutation; the internal Plan command module owns identity, current
 Plan, Lease, and Run revisions, current preview and approval facts, request
-construction, one write, and established reconciliation. This refactor and its
-follow-up corrections add no browser-owned domain truth and no new product
-workflow.
+construction, one write, and established reconciliation. Library Asset Review
+now follows the same semantic interface: React supplies only the decision,
+rating, and annotation, while the runtime owns the current routed Asset, Asset
+and Review revisions, identity, request construction, one write, and route-safe
+reconciliation. This refactor and its follow-up corrections add no browser-owned
+domain truth and no new product workflow.
 
 After that simulator proof, an indoor GET-only readiness check reached ASCOM
 Remote at `192.168.4.104:11111`. Management and every device-property envelope
@@ -499,8 +502,9 @@ issue `#18` are merged. The fifth selected correction, Shared Control action
 reachability in `#27`, is merged through PR `#28`. The bounded Acquire semantic
 intent slice in `#29` is merged through PR `#30`. The Observe lifecycle semantic
 intent slice in `#31` is merged through PR `#32`. The Plan semantic-intent
-slice in `#33` is merged through PR `#34`. No later child is selected. The
-other architecture frontiers remain the durable
+slice in `#33` is merged through PR `#34`. The Library Asset Review semantic-
+intent slice in `#35` is complete locally and ready for owner review. No later
+child is selected. The other architecture frontiers remain the durable
 work-claim re-audit in `#5` and the origin integration-test harness in `#6`.
 Select and integrate a real processing library only in a later accepted item;
 the current deterministic materializer proves orchestration and evidence, not
