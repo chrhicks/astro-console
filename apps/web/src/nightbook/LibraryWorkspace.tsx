@@ -19,7 +19,7 @@ import {
   Toolbar,
   type ActionDescriptor,
   type Tone,
-} from '@nightbook/ui'
+} from '../components/ui'
 import {
   AssetId,
   CaptureSetId,
@@ -41,7 +41,6 @@ import type { Projection } from '../presentation'
 import type { ProcessingProjectList } from '../nightbook-workspace-runtime'
 import { nightbookHref } from '../route-href'
 import { CommandBar, type ControlSubmit } from './shared-shell'
-import '@nightbook/ui/styles.css'
 import './workspace.css'
 import './library.css'
 
@@ -1637,9 +1636,9 @@ export function LibraryWorkspace(props: LibraryWorkspaceProps) {
   }
   return (
     <div
-      className="nightbook-app nb-theme"
-      data-nb-theme="nightbook"
-      data-nb-density="compact"
+      className="nightbook-app ui-theme"
+      data-ui-theme="default"
+      data-ui-density="compact"
     >
       <a className="nightbook-skip-link" href="#nightbook-workspace">
         Skip to Library evidence

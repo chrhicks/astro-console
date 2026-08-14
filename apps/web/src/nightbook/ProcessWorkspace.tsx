@@ -13,7 +13,7 @@ import {
   Stack,
   StatusIndicator,
   StepRail,
-} from '@nightbook/ui'
+} from '../components/ui'
 import {
   AssetId,
   CaptureSetId,
@@ -39,7 +39,6 @@ import type { Projection } from '../presentation'
 import { latestSavedStackingMasterAssetIdFromCompleteEvidence } from '../processing-project-evidence'
 import { nightbookHref } from '../route-href'
 import { CommandBar, type ControlPresentation } from './shared-shell'
-import '@nightbook/ui/styles.css'
 import './workspace.css'
 import './process.css'
 
@@ -189,9 +188,9 @@ export default function ProcessWorkspace(props: ProcessWorkspaceProps) {
   const authority = processControlPresentation(project, phone)
   return (
     <div
-      className="nightbook-app nb-theme"
-      data-nb-theme="nightbook"
-      data-nb-density="compact"
+      className="nightbook-app ui-theme"
+      data-ui-theme="default"
+      data-ui-density="compact"
     >
       <CommandBar
         projection={props.projection}
@@ -290,7 +289,7 @@ function ProjectList({
                 description="A Library selection creates one Processing Project and stops at Sources."
                 actions={
                   <a
-                    className="nb-button nb-button--primary nb-button--medium"
+                    className="ui-button ui-button--primary ui-button--medium"
                     href={nightbookHref('/library')}
                   >
                     Open Library

@@ -1,0 +1,99 @@
+.ui-flyout {
+  position: relative;
+  display: inline-flex;
+}
+.ui-flyout-content {
+  position: absolute;
+  z-index: 15;
+  top: calc(100% + 5px);
+  min-width: 210px;
+  max-width: min(320px, calc(100vw - 24px));
+  padding: var(--ui-space-3, 12px);
+  border: 1px solid var(--ui-line-strong, #49525b);
+  border-radius: var(--ui-radius, 3px);
+  background: var(--ui-surface-raised, #20272d);
+  box-shadow: var(--ui-shadow, 0 8px 24px #0008);
+  color: var(--ui-text, #eef2f4);
+}
+.ui-flyout-content[data-placement='start'] {
+  inset-inline-start: 0;
+}
+.ui-flyout-content[data-placement='end'] {
+  inset-inline-end: 0;
+}
+.ui-dialog-backdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: #05080bb8;
+  backdrop-filter: blur(3px);
+}
+.ui-dialog {
+  width: min(520px, 100%);
+  max-height: min(720px, calc(100vh - 32px));
+  overflow: auto;
+  border: 1px solid var(--ui-line-strong, #49525b);
+  border-radius: var(--ui-radius, 3px);
+  background: var(--ui-surface, #171d22);
+  box-shadow: 0 22px 70px #000c;
+  color: var(--ui-text, #eef2f4);
+  outline: none;
+}
+.ui-dialog:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--ui-focus, #7aa2c7),
+    0 22px 70px #000c;
+}
+.ui-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: var(--ui-space-3, 12px);
+  border-bottom: 1px solid var(--ui-line, #303840);
+}
+.ui-dialog-header h2 {
+  margin: 0;
+  font: 650 var(--ui-font-title, 16px/1.2 ui-sans-serif, sans-serif);
+}
+.ui-dialog-header p {
+  margin: 4px 0 0;
+  color: var(--ui-muted, #9ba6ad);
+  font-size: var(--ui-font-size-small, 11px);
+}
+.ui-dialog-close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius, 3px);
+  background: transparent;
+  color: var(--ui-muted, #9ba6ad);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ui-dialog-close:hover {
+  border-color: var(--ui-line-strong, #49525b);
+  background: var(--ui-surface-raised, #20272d);
+  color: var(--ui-text, #eef2f4);
+}
+.ui-dialog-body {
+  padding: var(--ui-space-3, 12px);
+}
+.ui-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ui-space-1, 4px);
+  padding: var(--ui-space-2, 8px) var(--ui-space-3, 12px);
+  border-top: 1px solid var(--ui-line, #303840);
+}
+.ui-flyout .ui-flyout-content {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  overflow-wrap: anywhere;
+}

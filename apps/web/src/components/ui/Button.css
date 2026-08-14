@@ -1,0 +1,53 @@
+.ui-button {
+  min-width: 0;
+  min-height: var(--ui-control-height, 34px);
+  border: 1px solid var(--ui-line-strong, #9ca7b1);
+  border-radius: var(--ui-radius, 2px);
+  background: var(--ui-surface-raised, #f0f2f4);
+  color: var(--ui-text, #1a2229);
+  padding: 0 var(--ui-space-3, 12px);
+  font: 650 var(--ui-font-size, 13px) / 1 var(--ui-font-mono, monospace);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.ui-button:hover:not(:disabled) {
+  border-color: var(--ui-accent, #76552b);
+  background: color-mix(
+    in srgb,
+    var(--ui-surface-raised, #f0f2f4) 82%,
+    var(--ui-accent, #76552b)
+  );
+}
+.ui-button:focus-visible {
+  outline: 2px solid var(--ui-focus, #326fa8);
+  outline-offset: 2px;
+}
+.ui-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+.ui-button--primary {
+  border-color: var(--ui-accent, #76552b);
+  background: var(--ui-accent-surface, #f0e8da);
+  color: var(--ui-accent, #76552b);
+}
+.ui-button--danger {
+  border-color: var(--ui-danger, #a33c32);
+  background: transparent;
+  color: var(--ui-danger, #a33c32);
+}
+.ui-button--quiet {
+  background: transparent;
+}
+.ui-button--small {
+  min-height: 26px;
+  padding-inline: 8px;
+  font-size: 11px;
+}
+.ui-button--full {
+  width: 100%;
+}

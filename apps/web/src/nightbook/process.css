@@ -12,24 +12,24 @@
   min-width: 0;
   height: 100%;
 }
-.nightbook-process-source .nb-panel-body,
-.nightbook-process-operation .nb-panel-body,
-.nightbook-process-stage .nb-panel-body {
+.nightbook-process-source .ui-panel-body,
+.nightbook-process-operation .ui-panel-body,
+.nightbook-process-stage .ui-panel-body {
   overflow: auto;
 }
-.nightbook-process-stage .nb-panel-body {
+.nightbook-process-stage .ui-panel-body {
   height: calc(100% - 34px);
 }
-.nightbook-process-stage .nb-evidence {
+.nightbook-process-stage .ui-evidence {
   min-height: 360px;
 }
-.nightbook-process-stage .nb-evidence-canvas {
+.nightbook-process-stage .ui-evidence-canvas {
   min-height: 330px;
 }
 .nightbook-process-message,
 .nightbook-process-denial,
 .nightbook-process-phone-protection {
-  color: var(--nb-muted);
+  color: var(--ui-muted);
   font-size: 10px;
 }
 .nightbook-process-denial {
@@ -38,19 +38,19 @@
 .nightbook-process-empty {
   align-self: start;
 }
-.nightbook-process-empty .nb-attention {
+.nightbook-process-empty .ui-attention {
   max-width: 760px;
 }
 .nightbook-process-review {
   min-width: 0;
 }
-.nightbook-process-review .nb-evidence,
-.nightbook-process-review .nb-evidence-canvas {
+.nightbook-process-review .ui-evidence,
+.nightbook-process-review .ui-evidence-canvas {
   min-height: 150px;
 }
 .nightbook-process-operation a {
-  color: var(--nb-accent);
-  font: 9px var(--nb-font-mono);
+  color: var(--ui-accent);
+  font: 9px var(--ui-font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -66,7 +66,7 @@
     grid-column: 1/-1;
     height: auto;
   }
-  .nightbook-process-operation .nb-panel-body > .nb-stack {
+  .nightbook-process-operation .ui-panel-body > .ui-stack {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     align-items: start;
   }
@@ -91,8 +91,8 @@
     align-self: start;
     height: max-content;
   }
-  .nightbook-process-source .nb-panel-body,
-  .nightbook-process-operation .nb-panel-body {
+  .nightbook-process-source .ui-panel-body,
+  .nightbook-process-operation .ui-panel-body {
     overflow: visible;
   }
 }
@@ -107,9 +107,9 @@
   }
   .nightbook-process-phone-source {
     min-width: 0;
-    border: 1px solid var(--nb-line);
-    border-radius: var(--nb-radius);
-    background: var(--nb-surface-raised);
+    border: 1px solid var(--ui-line);
+    border-radius: var(--ui-radius);
+    background: var(--ui-surface-raised);
     padding: 8px;
     display: grid;
     gap: 3px;
@@ -119,10 +119,10 @@
     overflow-wrap: anywhere;
   }
   .nightbook-process-phone-source span {
-    color: var(--nb-muted);
-    font: 600 10px/1.4 var(--nb-font-mono);
+    color: var(--ui-muted);
+    font: 600 10px/1.4 var(--ui-font-mono);
   }
-  .nightbook-process-phone .nb-evidence-canvas {
+  .nightbook-process-phone .ui-evidence-canvas {
     min-height: 220px;
   }
   .nightbook-operational-status.nightbook-process-status {
@@ -160,7 +160,7 @@
   overflow: hidden;
 }
 
-.nightbook-process-project-sources .nb-panel-body {
+.nightbook-process-project-sources .ui-panel-body {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
@@ -174,9 +174,9 @@
 }
 
 .nightbook-process-source-row {
-  border: 1px solid var(--nb-line);
-  border-radius: var(--nb-radius);
-  background: var(--nb-surface-raised);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius);
+  background: var(--ui-surface-raised);
   padding: 8px;
   display: grid;
   grid-template-columns:
@@ -214,8 +214,8 @@
   align-items: start;
 }
 
-.nightbook-process-develop-grid .nb-evidence,
-.nightbook-process-develop-grid .nb-evidence-canvas {
+.nightbook-process-develop-grid .ui-evidence,
+.nightbook-process-develop-grid .ui-evidence-canvas {
   min-height: 280px;
 }
 
@@ -233,8 +233,8 @@
 
 .nightbook-process-calibration-intro {
   margin: 0;
-  color: var(--nb-muted);
-  font: 600 10px/1.5 var(--nb-font-mono);
+  color: var(--ui-muted);
+  font: 600 10px/1.5 var(--ui-font-mono);
 }
 
 .nightbook-process-calibration-matches {
@@ -255,16 +255,16 @@
 }
 
 .nightbook-process-phone-source > .nightbook-process-calibration-reasons {
-  color: var(--nb-muted);
-  font: 600 10px/1.4 var(--nb-font-mono);
+  color: var(--ui-muted);
+  font: 600 10px/1.4 var(--ui-font-mono);
 }
 
 .nightbook-process-attempts article {
   display: grid;
   gap: 3px;
-  border: 1px solid var(--nb-line);
-  border-radius: var(--nb-radius);
-  background: var(--nb-surface-raised);
+  border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius);
+  background: var(--ui-surface-raised);
   padding: 8px;
 }
 
@@ -277,12 +277,12 @@
 .nightbook-process-attempts span,
 .nightbook-process-attempts strong,
 .nightbook-process-attempts p {
-  color: var(--nb-muted);
-  font: 600 10px/1.4 var(--nb-font-mono);
+  color: var(--ui-muted);
+  font: 600 10px/1.4 var(--ui-font-mono);
 }
 
 .nightbook-process-attempts strong {
-  color: var(--nb-warning);
+  color: var(--ui-warning);
 }
 
 @media (max-width: 900px) and (min-width: 601px) {
@@ -301,6 +301,6 @@
 }
 
 .nightbook-process-source-row span {
-  color: var(--nb-muted);
-  font: 600 11px var(--nb-font-mono);
+  color: var(--ui-muted);
+  font: 600 11px var(--ui-font-mono);
 }

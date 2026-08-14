@@ -20,7 +20,7 @@ specific detail.
 
 | Need                                                      | Read                                                                                                                                                      |
 | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| UI or UX work, beta alignment, or route promotion         | [Current UI and UX direction](current/ui-ux.md), then the external Nightbook demo it names                                                                |
+| UI or UX work, beta alignment, or route promotion         | [Current UI and UX direction](current/ui-ux.md), then the local web routes and states it names                                                            |
 | Accepted beta real-runtime delivery or Alpaca simulation  | [Nightbook beta real-runtime plan](current/beta-real-runtime-plan.md)                                                                                     |
 | Explicit Process workflow and Item 3.5 delivery           | [Item 3.5 Process workflow plan](current/process-workflow-plan.md)                                                                                        |
 | Workspace behavior or product entities                    | [Current product specification](current/product-spec.md); use it for domain truth, not visual composition                                                 |
@@ -44,10 +44,11 @@ live-shaped path is proven through the simulator from target slew through
 correction, verification, modest capture, and Library handoff. The remaining
 Phase 5 work is owner-observed live provider and physical outdoor proof.
 
-The official presentation is the Nightbook React demo and `@nightbook/ui`
-package in the external Nightbook workspace. Astro Console renders that
-presentation for Plan, Observe, Library, and Process. The former presentation
-has been removed. Normal workspace routes render Nightbook directly.
+The official presentation is the app-private UI implementation under
+`apps/web/src/components/ui` and its composition in the Plan, Observe, Library,
+and Process workspaces. The former presentation and borrowed `@nightbook/ui`
+package seam have been removed. Normal workspace routes render this local
+presentation directly.
 
 Process now has one explicit, project-ID-addressed Processing Project
 lifecycle. Its deep service interface owns Project authority, revisions,

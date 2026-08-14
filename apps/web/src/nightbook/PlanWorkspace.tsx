@@ -18,7 +18,7 @@ import {
   Tabs,
   TextField,
   type Tone,
-} from '@nightbook/ui'
+} from '../components/ui'
 import {
   PlanCommandResult,
   type RunSequenceDefinition,
@@ -41,7 +41,6 @@ import {
 } from '../plan-command-client'
 import type { Projection, StatusTone } from '../presentation'
 import { CommandBar, type ControlSubmit } from './shared-shell'
-import '@nightbook/ui/styles.css'
 import './workspace.css'
 import './plan.css'
 
@@ -1340,9 +1339,9 @@ export function PlanWorkspace(props: PlanWorkspaceProps) {
   const phone = usePhoneProjection()
   return (
     <div
-      className="nightbook-app nb-theme"
-      data-nb-theme="nightbook"
-      data-nb-density="compact"
+      className="nightbook-app ui-theme"
+      data-ui-theme="default"
+      data-ui-density="compact"
     >
       <a className="nightbook-skip-link" href="#nightbook-workspace">
         Skip to Plan

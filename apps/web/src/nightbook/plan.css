@@ -19,14 +19,14 @@
   align-items: center;
   min-width: 0;
   gap: 12px;
-  border: 1px solid var(--nb-positive);
-  background: color-mix(in srgb, var(--nb-surface) 92%, var(--nb-positive));
+  border: 1px solid var(--ui-positive);
+  background: color-mix(in srgb, var(--ui-surface) 92%, var(--ui-positive));
   padding: 6px 8px;
 }
 
 .nightbook-plan-freeze-copy {
   overflow: hidden;
-  color: var(--nb-muted);
+  color: var(--ui-muted);
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -45,8 +45,8 @@
 
 .nightbook-plan-tabs > [role='tablist'] {
   justify-content: flex-end;
-  border: 1px solid var(--nb-line);
-  background: var(--nb-surface);
+  border: 1px solid var(--ui-line);
+  background: var(--ui-surface);
 }
 
 .nightbook-plan-tabs > [role='tabpanel'] {
@@ -69,15 +69,15 @@
   height: 100%;
 }
 
-.nightbook-plan-sequences .nb-panel-body,
-.nightbook-plan-editor .nb-panel-body {
+.nightbook-plan-sequences .ui-panel-body,
+.nightbook-plan-editor .ui-panel-body {
   overflow: auto;
 }
 
 .nightbook-plan-section-label {
   margin: 2px 0 4px;
-  color: var(--nb-muted);
-  font: 650 8px var(--nb-font-mono);
+  color: var(--ui-muted);
+  font: 650 8px var(--ui-font-mono);
   text-transform: uppercase;
 }
 
@@ -87,11 +87,11 @@
   width: 100%;
   min-width: 0;
   gap: 3px 8px;
-  border: 1px solid var(--nb-line);
+  border: 1px solid var(--ui-line);
   border-radius: 0;
   background: transparent;
   padding: 8px;
-  color: var(--nb-text);
+  color: var(--ui-text);
   font: inherit;
   text-align: left;
 }
@@ -110,17 +110,17 @@
 }
 
 .nightbook-plan-sequence b {
-  font: 650 10px var(--nb-font-sans);
+  font: 650 10px var(--ui-font-sans);
 }
 
 .nightbook-plan-sequence span {
-  color: var(--nb-muted);
-  font: 9px var(--nb-font-mono);
+  color: var(--ui-muted);
+  font: 9px var(--ui-font-mono);
 }
 
 .nightbook-plan-sequence small {
   grid-column: 1 / -1;
-  color: var(--nb-muted);
+  color: var(--ui-muted);
   font-size: 9px;
 }
 
@@ -129,15 +129,15 @@
 }
 
 .nightbook-plan-sequence[data-state='live'] {
-  border-color: var(--nb-positive);
+  border-color: var(--ui-positive);
 }
 
 .nightbook-plan-sequence[data-selected='true'] {
-  border-color: var(--nb-accent);
-  background: var(--nb-accent-surface);
+  border-color: var(--ui-accent);
+  background: var(--ui-accent-surface);
 }
 
-.nightbook-plan-schedule .nb-panel-body {
+.nightbook-plan-schedule .ui-panel-body {
   display: grid;
   grid-template-rows: minmax(260px, 1fr) auto auto;
   min-height: 0;
@@ -157,28 +157,28 @@
 
 .nightbook-plan-altitude path {
   fill: none;
-  stroke: var(--nb-info);
+  stroke: var(--ui-info);
   stroke-width: 2;
   stroke-dasharray: 6 5;
   opacity: 0.55;
 }
 
 .nightbook-plan-altitude path.grid {
-  stroke: var(--nb-line);
+  stroke: var(--ui-line);
   stroke-width: 1;
   stroke-dasharray: none;
   opacity: 1;
 }
 
 .nightbook-plan-altitude path.selected {
-  stroke: var(--nb-text);
+  stroke: var(--ui-text);
   stroke-dasharray: none;
   opacity: 1;
 }
 
 .nightbook-plan-altitude span,
 .nightbook-plan-muted {
-  color: var(--nb-muted);
+  color: var(--ui-muted);
   font-size: 9px;
 }
 
@@ -187,11 +187,11 @@
   min-height: 105px;
   margin-top: 10px;
   overflow: hidden;
-  border: 1px solid var(--nb-line);
+  border: 1px solid var(--ui-line);
   background: repeating-linear-gradient(
     90deg,
     transparent 0 calc(12.5% - 1px),
-    var(--nb-line) calc(12.5% - 1px) 12.5%
+    var(--ui-line) calc(12.5% - 1px) 12.5%
   );
   padding: 28px 6% 20px;
 }
@@ -210,14 +210,14 @@
   width: var(--timeline-width);
   min-width: 0;
   min-height: 44px;
-  border: 1px solid var(--nb-line-strong);
-  background: var(--nb-surface-raised);
+  border: 1px solid var(--ui-line-strong);
+  background: var(--ui-surface-raised);
   padding: 6px;
   overflow: hidden;
 }
 
 .nightbook-plan-timeline article[data-selected='true'] {
-  border-color: var(--nb-positive);
+  border-color: var(--ui-positive);
 }
 
 .nightbook-plan-timeline b,
@@ -229,7 +229,7 @@
 }
 
 .nightbook-plan-timeline small {
-  color: var(--nb-muted);
+  color: var(--ui-muted);
 }
 
 .nightbook-plan-field-group {
@@ -243,12 +243,12 @@
 .nightbook-plan-field-group legend {
   width: 100%;
   margin-bottom: 3px;
-  color: var(--nb-muted);
-  font: 650 8px var(--nb-font-mono);
+  color: var(--ui-muted);
+  font: 650 8px var(--ui-font-mono);
   text-transform: uppercase;
 }
 
-.nightbook-plan-field-group .nb-field {
+.nightbook-plan-field-group .ui-field {
   display: grid;
   grid-template-columns: 82px minmax(0, 1fr);
   align-items: center;
@@ -256,13 +256,13 @@
   gap: 6px;
 }
 
-.nightbook-plan-field-group .nb-field-label,
-.nightbook-plan-field-group .nb-field-hint {
-  color: var(--nb-muted);
+.nightbook-plan-field-group .ui-field-label,
+.nightbook-plan-field-group .ui-field-hint {
+  color: var(--ui-muted);
   font-size: 9px;
 }
 
-.nightbook-plan-field-group .nb-field-hint {
+.nightbook-plan-field-group .ui-field-hint {
   grid-column: 2;
 }
 
@@ -272,8 +272,8 @@
   justify-content: space-between;
   min-width: 0;
   gap: 12px;
-  border: 1px solid var(--nb-line);
-  background: var(--nb-surface);
+  border: 1px solid var(--ui-line);
+  background: var(--ui-surface);
   padding: 7px;
 }
 
@@ -286,13 +286,13 @@
 .nightbook-plan-action-dock b,
 .nightbook-plan-action-dock small {
   overflow: hidden;
-  color: var(--nb-muted);
+  color: var(--ui-muted);
   font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.nightbook-plan-action-dock .nb-cluster {
+.nightbook-plan-action-dock .ui-cluster {
   flex: none;
   flex-wrap: nowrap;
 }
@@ -314,13 +314,13 @@
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  border-bottom: 1px solid var(--nb-line);
+  border-bottom: 1px solid var(--ui-line);
   padding: 9px 0;
 }
 
 .nightbook-plan-frozen-row span {
-  color: var(--nb-muted);
-  font: 9px var(--nb-font-mono);
+  color: var(--ui-muted);
+  font: 9px var(--ui-font-mono);
 }
 
 .nightbook-plan-change-list,
@@ -334,7 +334,7 @@
   grid-template-columns: 18px minmax(0, 1fr);
   min-width: 0;
   gap: 5px 8px;
-  border: 1px solid var(--nb-line);
+  border: 1px solid var(--ui-line);
   padding: 8px;
 }
 
@@ -349,7 +349,7 @@
 .nightbook-plan-change p {
   grid-column: 2;
   margin: 0;
-  color: var(--nb-muted);
+  color: var(--ui-muted);
   font-size: 9px;
 }
 
@@ -361,13 +361,13 @@
 .nightbook-plan-phone-sequences article {
   display: grid;
   gap: 2px;
-  border: 1px solid var(--nb-line);
+  border: 1px solid var(--ui-line);
   padding: 8px;
 }
 
 .nightbook-plan-phone-sequences span,
 .nightbook-plan-phone-sequences small {
-  color: var(--nb-muted);
+  color: var(--ui-muted);
   font-size: 9px;
 }
 
@@ -381,7 +381,7 @@
     height: auto;
   }
 
-  .nightbook-plan-editor .nb-panel-body {
+  .nightbook-plan-editor .ui-panel-body {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 12px;
@@ -408,7 +408,7 @@
     flex-direction: column;
   }
 
-  .nightbook-plan-action-dock .nb-cluster {
+  .nightbook-plan-action-dock .ui-cluster {
     align-self: flex-end;
   }
 }

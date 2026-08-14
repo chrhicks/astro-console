@@ -1,0 +1,39 @@
+.ui-status {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ui-muted, #697680);
+  font: 10px var(--ui-font-mono, monospace);
+  white-space: nowrap;
+}
+.ui-status > i {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.ui-status > b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.ui-status > small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ui-muted, #697680);
+}
+.ui-status--positive {
+  color: var(--ui-positive, #267354);
+}
+.ui-status--warning {
+  color: var(--ui-warning, #9b6516);
+}
+.ui-status--danger {
+  color: var(--ui-danger, #a33c32);
+}
+.ui-status--info {
+  color: var(--ui-info, #376e9f);
+}

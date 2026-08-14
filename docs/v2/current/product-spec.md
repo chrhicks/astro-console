@@ -28,7 +28,7 @@ Those belong in accepted [gate records](../gates/README.md), the
 [delivery plan](delivery-plan.md). The [UI and UX direction](ui-ux.md) defines
 the current presentation source and working method. This specification supplies
 domain truth, ownership, and product behavior; its layout examples do not
-override the official Nightbook demo.
+override the current local web implementation.
 
 ## 1. Product Definition
 
@@ -568,7 +568,7 @@ Control Lease. Phone remains read-only.
 Its accepted interaction model is recorded in the
 [Gate 4 Process reference](../gates/gate-04-process.md). Current composition and
 interaction authority lives in the [UI and UX direction](ui-ux.md) and the
-external Nightbook demo it names. The accepted explicit project and stage
+local web implementation it names. The accepted explicit project and stage
 expansion is in the [Item 3.5 Process workflow plan](process-workflow-plan.md).
 
 ### Responsibilities

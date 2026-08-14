@@ -11,9 +11,10 @@ Library, and Process use service-owned projections and complete their accepted
 workflows. Hardware-facing milestones must use real provider, device, or image
 evidence. Deterministic fixtures remain regression tools, not delivery proof.
 
-The rendered Nightbook demo remains the authority for composition,
-interaction, responsive behavior, and visual treatment. Astro Console owns
+The local web implementation now owns composition, interaction, responsive
+behavior, and visual treatment. Astro Console runtime and service modules own
 contracts, commands, durable state, provider adapters, eligibility, and proof.
+The disposable Nightbook demo is retained only as historical migration input.
 
 ## Real-Frame Development Corpus
 

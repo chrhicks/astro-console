@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–4 complete locally; Processing Project lifecycle, shared protocol, origin runtime, and Nightbook workspace runtime refactors complete locally; semantic-intent review corrections merged**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–4 complete locally; Processing Project lifecycle, shared protocol, origin runtime, and Nightbook workspace runtime refactors complete locally; local UI package localization complete for owner review**
 
 ## Current Position
 
@@ -19,18 +19,17 @@ route `/` maps to Plan.
 
 ## UI Direction
 
-The official UI and UX reference is the composed React demo in:
+The official UI implementation is app-private source under
+`apps/web/src/components/ui`, composed by the promoted Plan, Observe, Library,
+and Process workspaces. It owns the domain-neutral visual modules and contained
+styles. The former borrowed `@nightbook/ui` package seam and trial archives are
+removed.
 
-`.gh/clone/nightbook-prototype/apps/nightbook-demo`
-
-The same workspace owns the `@nightbook/ui` source, component Gallery, and
-package verification. Astro Console's promoted workspaces are an integration
-of that authority with local service projections; they are not a separate
-design authority.
-
-Keep the promoted presentation aligned with real Astro Console projections and
-the lightweight [UI and UX direction](ui-ux.md). Former Astro Console visual
-guides, UX catalogs, component grammar, and Phase 0.5 material are archived.
+The disposable Nightbook checkout, demo, and Gallery supplied migration input;
+they are not ongoing design, build, or verification authority. Keep the local
+presentation aligned with real Astro Console projections and the lightweight
+[UI and UX direction](ui-ux.md). Former Astro Console visual guides, UX
+catalogs, component grammar, and Phase 0.5 material remain archived.
 
 The accepted implementation sequence is the
 [Nightbook beta real-runtime plan](beta-real-runtime-plan.md). It uses a small,
@@ -531,9 +530,24 @@ Focused mounted React proof and functional browser evidence cover successive
 Project, draft, and Asset identities. The complete web check passes 186/186, and
 Designer review passes wide, compact, and 390 px phone states with no P0, P1, or
 P2 finding; phone remains read-only. The handled optional simulation 404 remains
-unrelated development-console noise. No later architecture opportunity is
-selected. The other architecture frontiers remain the durable work-claim re-audit
-in `#5` and the origin integration-test harness in `#6`.
+unrelated development-console noise.
+
+The owner then opened component-layer map `#47` and selected `#48` as its first
+bounded implementation slice. The web app now owns only the shared visual
+modules it uses behind one local UI interface. Neutral `ui` identifiers replace
+package-level Nightbook identifiers, and the borrowed package, trial archives,
+lockfile entry, stylesheet imports, and deployment-copy assumption are removed.
+The complete web check passes 186/186; the full server deployment image builds;
+and Designer review passes Plan, Observe, Library catalog/detail, and Process
+list/project at wide, compact, and 390 px with no P0, P1, or P2 finding. Tabs
+keyboard behavior, Flyout entry and Escape focus restoration, phone read-only
+behavior, overflow, console health, and sampled WCAG A/AA checks passed. The
+simulation Flyout and active Observe lifecycle were not available in this
+inspection state. Evidenced lower-priority interface and test concerns are in
+`#49`. The next action is owner review of the `#48` branch; blocked presentation
+and runtime naming tasks `#50` and `#51` expose the accepted horizon without
+running in parallel. The other architecture frontiers remain the durable
+work-claim re-audit in `#5` and the origin integration-test harness in `#6`.
 Select and integrate a real processing library only in a later accepted item;
 the current deterministic materializer proves orchestration and evidence, not
 astronomy processing quality. The remaining accepted delivery list continues

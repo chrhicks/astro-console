@@ -1,0 +1,34 @@
+.ui-metric-overlay {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ui-space-1, 4px);
+  margin: 0;
+  color: var(--ui-muted, #697680);
+  font: 11px/1.2 var(--ui-font-mono, monospace);
+}
+
+.ui-metric-overlay > div {
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--ui-space-1, 4px);
+  border: 1px solid var(--ui-line-strong, #9ca7b1);
+  border-radius: var(--ui-radius, 2px);
+  background: color-mix(in srgb, var(--ui-surface, #fff) 88%, transparent);
+  padding: var(--ui-space-1, 4px) 6px;
+}
+
+.ui-metric-overlay dt,
+.ui-metric-overlay dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-metric-overlay dd {
+  color: var(--ui-text, #1a2229);
+  font-weight: 650;
+}
