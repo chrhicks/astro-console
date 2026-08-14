@@ -36,6 +36,7 @@ import {
   type ProcessingProjectList,
 } from '../nightbook-workspace-runtime'
 import type { Projection } from '../presentation'
+import { latestSavedStackingMasterAssetIdFromCompleteEvidence } from '../processing-project-evidence'
 import { nightbookHref } from '../route-href'
 import { CommandBar, type ControlPresentation } from './shared-shell'
 import '@nightbook/ui/styles.css'
@@ -412,6 +413,8 @@ function ProjectWorkspace({
   )
   const mutable =
     project.authority._tag === 'Allowed' && project.activeAttempt === undefined
+  const savedMasterAssetId =
+    latestSavedStackingMasterAssetIdFromCompleteEvidence(project, evidence)
   const steps = useMemo(
     () =>
       stages.map((name) => {
@@ -422,7 +425,7 @@ function ProjectWorkspace({
           name === 'Sources'
             ? project.sources.length > 0
             : name === 'Master'
-              ? project.savedAssetIds.length > 0
+              ? savedMasterAssetId !== undefined
               : state?.currentResult !== undefined
         return {
           id: name,
@@ -440,7 +443,7 @@ function ProjectWorkspace({
                 : ('pending' as const),
         }
       }),
-    [project, viewedStage],
+    [project, savedMasterAssetId, viewedStage],
   )
   return (
     <main
@@ -500,6 +503,7 @@ function ProjectWorkspace({
             ) : viewedStage === 'Master' ? (
               <Master
                 project={project}
+                savedMasterAssetId={savedMasterAssetId}
                 disabled={!mutable || pending !== undefined}
                 change={change}
               />
@@ -771,14 +775,15 @@ function StageControls({
 
 function Master({
   project,
+  savedMasterAssetId,
   disabled,
   change,
 }: {
   project: OpenedProcessingProject
+  savedMasterAssetId: typeof AssetId.Type | undefined
   disabled: boolean
   change: (action: ProcessAction, label: string) => Promise<void>
 }) {
-  const hasSavedMaster = project.savedAssetIds.length > 0
   return (
     <Stack>
       <DataList>
@@ -798,7 +803,7 @@ function Master({
         />
       </DataList>
       <Button
-        disabled={disabled || !hasSavedMaster}
+        disabled={disabled || savedMasterAssetId === undefined}
         onClick={() =>
           void change(
             ProcessAction.OpenSavedMasterInDevelop({}),

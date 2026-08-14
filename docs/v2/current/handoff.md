@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–4 complete locally; Processing Project lifecycle, shared protocol, origin runtime, and Nightbook workspace runtime refactors complete locally**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–4 complete locally; Processing Project lifecycle, shared protocol, origin runtime, and Nightbook workspace runtime refactors complete locally; issue #41 implemented locally and not merged**
 
 ## Current Position
 
@@ -514,11 +514,16 @@ intent slice in `#31` is merged through PR `#32`. The Plan semantic-intent
 slice in `#33` is merged through PR `#34`. The Library Asset Review semantic-
 intent slice in `#35` is merged through PR `#36`. The Processing Project intake
 semantic-intent slice in `#37` is merged through PR `#38`. The current Process
-mutation semantic-intent slice in `#39` is merged through PR `#40`. A cumulative
-review confirmed the semantic caller/runtime interface across all selected
-workspaces and identified bounded follow-up questions around Process eligibility,
-paged saved-Master evidence, and overlapping Project-intake reconciliation. No
-follow-up child is selected. The other architecture frontiers remain the durable
+mutation semantic-intent slice in `#39` is merged through PR `#40`. The bounded
+correction in issue `#41` is implemented locally and is not merged. Production
+Processing Project lifecycle evidence now projects the saved Library
+Master onto its exact Stacking attempt without mutating stored attempt evidence.
+`NightbookWorkspaceRuntime.states + submit` tests prove fail-closed Process stage
+eligibility, complete latest saved Stacking Master evidence, and latest-operation
+ownership for overlapping same-route existing-Project intake reconciliation,
+with one write and no replay. The Master presentation is eligible only from that
+same complete, matched Stacking evidence; an incomplete page remains unavailable.
+The other architecture frontiers remain the durable
 work-claim re-audit in `#5` and the origin integration-test harness in `#6`.
 Select and integrate a real processing library only in a later accepted item;
 the current deterministic materializer proves orchestration and evidence, not

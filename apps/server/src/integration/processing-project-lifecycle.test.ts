@@ -293,6 +293,13 @@ test('Processing Project callers use one interface while work ownership and sett
     assert.equal(worker.pass().outcome, 'completed')
   }
 
+  const unsavedStackingEvidence = lifecycle
+    .evidence(owner, { projectId })
+    ?.attempts.find((attempt) => attempt.stage === 'Stacking')
+  assert.equal(unsavedStackingEvidence?.evidence._tag, 'Stacking')
+  if (unsavedStackingEvidence?.evidence._tag === 'Stacking')
+    assert.equal(unsavedStackingEvidence.evidence.savedMasterAssetId, undefined)
+
   let current = lifecycle.open(owner, projectId)
   assert.ok(current)
   const saved = lifecycle.change(owner, {
@@ -307,6 +314,17 @@ test('Processing Project callers use one interface while work ownership and sett
   if (!('outcome' in saved)) return
   const masterAssetId = saved.project.savedAssetIds[0]
   assert.ok(masterAssetId)
+  const savedStackingResult = saved.project.stages.find(
+    (stage) => stage.stage === 'Stacking',
+  )?.currentResult
+  assert.ok(savedStackingResult)
+  const savedMasterEvidence = lifecycle.evidence(owner, { projectId })
+  const savedMasterAttempt = savedMasterEvidence?.attempts.find(
+    (attempt) => attempt.attemptId === savedStackingResult.attemptId,
+  )
+  assert.equal(savedMasterAttempt?.evidence._tag, 'Stacking')
+  if (savedMasterAttempt?.evidence._tag === 'Stacking')
+    assert.equal(savedMasterAttempt.evidence.savedMasterAssetId, masterAssetId)
 
   current = lifecycle.open(owner, projectId)
   assert.ok(current)
@@ -355,6 +373,33 @@ test('Processing Project callers use one interface while work ownership and sett
     .open(owner, projectId)
     ?.stages.find((stage) => stage.stage === 'Develop')?.currentResult
   assert.equal(developResult?.lineage, 'Current')
+
+  current = lifecycle.open(owner, projectId)
+  assert.ok(current)
+  const savedDevelop = lifecycle.change(owner, {
+    projectId,
+    expectedProjectRevision: current.revision,
+    intentId: IntentId.make('lifecycle-save-develop'),
+    intent: ProcessingProjectIntent.cases.SaveCurrentResult.make({
+      stage: 'Develop',
+    }),
+  })
+  assert.ok('outcome' in savedDevelop, JSON.stringify(savedDevelop))
+  if (!('outcome' in savedDevelop)) return
+  const finalDevelopAssetId = savedDevelop.project.savedAssetIds.find(
+    (assetId) => assetId !== masterAssetId,
+  )
+  assert.ok(finalDevelopAssetId)
+  const evidenceAfterDevelopSave = lifecycle.evidence(owner, { projectId })
+  const projectedSavedMasters = evidenceAfterDevelopSave?.attempts.flatMap(
+    (attempt) =>
+      attempt.evidence._tag === 'Stacking' &&
+      attempt.evidence.savedMasterAssetId !== undefined
+        ? [attempt.evidence.savedMasterAssetId]
+        : [],
+  )
+  assert.deepEqual(projectedSavedMasters, [masterAssetId])
+  assert.ok(!projectedSavedMasters?.includes(finalDevelopAssetId))
 
   current = lifecycle.open(owner, projectId)
   assert.ok(current)

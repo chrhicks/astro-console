@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   BootstrapSnapshot,
+  OpenedProcessingProject,
+  ProcessingProjectEvidence,
   ProcessSourceHandoff as ProcessSourceHandoffSchema,
 } from '@astro-console/protocol'
 import { Schema } from 'effect'
@@ -63,6 +65,92 @@ test('allows source-handoff Project creation without the Control Lease', () => {
     markup,
     /<button[^>]*disabled=""[^>]*>Create Project<\/button>/,
   )
+})
+
+const projectWithSavedAssets = Schema.decodeUnknownSync(
+  OpenedProcessingProject,
+)({
+  projectId: 'project-1',
+  revision: 7,
+  name: 'M27',
+  authority: { _tag: 'Allowed' },
+  sources: [],
+  warnings: [],
+  stages: [],
+  savedAssetIds: ['asset-developed', 'asset-master'],
+  createdAt: '2026-08-11T00:00:00.000Z',
+  updatedAt: '2026-08-11T00:00:07.000Z',
+})
+
+const savedMasterEvidence = (incomplete: boolean) =>
+  Schema.decodeUnknownSync(ProcessingProjectEvidence)({
+    projectId: projectWithSavedAssets.projectId,
+    attempts: [
+      {
+        attemptId: 'stacking-attempt',
+        stage: 'Stacking',
+        state: 'succeeded',
+        draftRevision: 2,
+        draft: { _tag: 'Stacking', settings: [], frameChoices: [] },
+        sources: [],
+        frozenAt: '2026-08-11T00:00:03.000Z',
+        settledAt: '2026-08-11T00:00:04.000Z',
+        outcome: 'Succeeded',
+        outputs: [
+          {
+            outputId: 'stacking-output',
+            checksum: 'stacking-checksum',
+            relation: 'CurrentResult',
+          },
+        ],
+        evidence: {
+          _tag: 'Stacking',
+          recommendations: [],
+          frameChoices: [],
+          includedAssetIds: [],
+          savedMasterAssetId: 'asset-master',
+        },
+        diagnostics: [],
+      },
+    ],
+    ...(incomplete ? { nextAttemptId: 'stacking-attempt-next' } : {}),
+  })
+
+const renderProject = (
+  evidence: typeof ProcessingProjectEvidence.Type | undefined,
+) =>
+  renderToStaticMarkup(
+    createElement(ProcessWorkspace, {
+      projection: projectBootstrapState(
+        BootstrapClientState.Current({
+          snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)(
+            bootstrapFixtures.fresh,
+          ),
+        }),
+      ),
+      loading: false,
+      projectId: projectWithSavedAssets.projectId,
+      process: {
+        projects: [],
+        project: projectWithSavedAssets,
+        evidence,
+        state: 'current',
+      },
+      onChangeProject: async () => undefined,
+    }),
+  )
+
+const masterStep =
+  /<li data-status="(pending|complete)"><button(?:(?!<\/li>).)*<b>Master<\/b>/s
+
+test('shows Master eligible only from complete matched saved Stacking evidence', () => {
+  const withoutEvidence = renderProject(undefined)
+  const incomplete = renderProject(savedMasterEvidence(true))
+  const complete = renderProject(savedMasterEvidence(false))
+
+  assert.equal(withoutEvidence.match(masterStep)?.[1], 'pending')
+  assert.equal(incomplete.match(masterStep)?.[1], 'pending')
+  assert.equal(complete.match(masterStep)?.[1], 'complete')
 })
 
 test('protects source-handoff Project creation without current authority', () => {
