@@ -15,6 +15,7 @@ import {
   PlanCommandRequest,
   PlanId,
   PlanRevision,
+  ProcessingProjectChangeRequest,
   ProcessingProjectEvidence,
   ProcessingProjectId,
   ProcessingProjectRevision,
@@ -906,7 +907,6 @@ test('constructs closed Acquire and branded resource intents', () => {
   })
   const intake = NightbookWorkspaceIntent.AddProjectSources({
     projectId: ProcessingProjectId.make('project-typed'),
-    expectedProjectRevision: ProcessingProjectRevision.make(1),
     selection: { assetIds: [detail.assetId], captureSetIds: [] },
   })
 
@@ -1783,6 +1783,346 @@ test('stops semantic review without current routed detail or mutation authority'
   }
 })
 
+test('submits semantic existing-Project intake once with current revision and fresh identity without optimistic state', async () => {
+  const listed = projects('project-1')[0]
+  assert.notEqual(listed, undefined)
+  if (listed === undefined) return
+  const destination = {
+    ...listed,
+    revision: ProcessingProjectRevision.make(9),
+  } satisfies ProcessingProjectList[number]
+  const selection = {
+    assetIds: [detail.assetId],
+    captureSetIds: [CaptureSetId.make('capture-set-1')],
+  }
+  const requests: Array<typeof ProcessingProjectChangeRequest.Type> = []
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(currentBootstrap),
+      page: () => Effect.succeed(page('intake', 1)),
+      listProjects: () => Effect.succeed([destination]),
+      addProjectSources: (request) =>
+        Effect.sync(() => {
+          requests.push(
+            Schema.decodeUnknownSync(ProcessingProjectChangeRequest)(request),
+          )
+          return openedProject(10)
+        }),
+    }),
+  )
+
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'workspace', workspace: 'library' },
+    libraryQuery: query('intake'),
+  })
+  const current = await waitFor(
+    runtime,
+    (state) =>
+      state.process.state === 'current' &&
+      state.process.projects[0]?.revision === destination.revision,
+  )
+  const result = await submit(runtime, {
+    _tag: 'AddProjectSources',
+    projectId: destination.projectId,
+    selection,
+  })
+  const after = await waitFor(
+    runtime,
+    (state) => state.process.state === 'current',
+  )
+  await runtime.dispose()
+
+  assert.equal(result._tag, 'Project')
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0]?.projectId, destination.projectId)
+  assert.equal(requests[0]?.expectedProjectRevision, 9)
+  assert.notEqual(requests[0]?.intentId, '')
+  assert.deepEqual(requests[0]?.intent, { _tag: 'AddSources', selection })
+  assert.equal(current.process.project, undefined)
+  assert.equal(after.process.project, undefined)
+})
+
+test('creates a distinct identity for each semantic existing-Project intake', async () => {
+  const destination = projects('project-1')[0]
+  assert.notEqual(destination, undefined)
+  if (destination === undefined) return
+  const identities: string[] = []
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(currentBootstrap),
+      page: () => Effect.succeed(page('intake-identities', 1)),
+      listProjects: () => Effect.succeed([destination]),
+      addProjectSources: (request) =>
+        Effect.sync(() => {
+          identities.push(request.intentId)
+          return openedProject(2)
+        }),
+    }),
+  )
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'workspace', workspace: 'library' },
+    libraryQuery: query('intake-identities'),
+  })
+  await waitFor(
+    runtime,
+    (state) =>
+      state.process.state === 'current' && state.process.projects.length === 1,
+  )
+  const intent = NightbookWorkspaceIntent.AddProjectSources({
+    projectId: destination.projectId,
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+
+  await submit(runtime, intent)
+  await submit(runtime, intent)
+  await runtime.dispose()
+
+  assert.equal(identities.length, 2)
+  assert.notEqual(identities[0], '')
+  assert.notEqual(identities[1], '')
+  assert.notEqual(identities[0], identities[1])
+})
+
+test('stops invalid semantic existing-Project intake before transport', async () => {
+  const destination = projects('project-1')[0]
+  assert.notEqual(destination, undefined)
+  if (destination === undefined) return
+  let writes = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(currentBootstrap),
+      page: () => Effect.succeed(page('invalid-intake', 1)),
+      listProjects: () => Effect.succeed([destination]),
+      addProjectSources: () =>
+        Effect.sync(() => {
+          writes += 1
+          return openedProject(2)
+        }),
+    }),
+  )
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'workspace', workspace: 'library' },
+    libraryQuery: query('invalid-intake'),
+  })
+  await waitFor(
+    runtime,
+    (state) =>
+      state.process.state === 'current' && state.process.projects.length === 1,
+  )
+  const result = await submit(runtime, {
+    _tag: 'AddProjectSources',
+    projectId: destination.projectId,
+    selection: { assetIds: [], captureSetIds: [] },
+  })
+  await runtime.dispose()
+
+  assert.equal(result._tag, 'Unavailable')
+  assert.equal(writes, 0)
+})
+
+test('stops semantic existing-Project intake without current destination truth or authority', async () => {
+  const destination = projects('project-1')[0]
+  assert.notEqual(destination, undefined)
+  if (destination === undefined) return
+  const deniedBootstrap = BootstrapClientState.Current({
+    snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)(
+      bootstrapFixtures.viewer,
+    ),
+  })
+  const staleBootstrap = BootstrapClientState.Stale({
+    snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)(
+      bootstrapFixtures.fresh,
+    ),
+    reason: 'Project projection is stale.',
+  })
+  const loadingList = await Effect.runPromise(Deferred.make<void>())
+  const cases = [
+    {
+      name: 'destination missing',
+      states: Stream.make(currentBootstrap),
+      listProjects: () => Effect.succeed([]),
+      ready: (state: NightbookWorkspaceState) =>
+        state.projectionReceived && state.process.state === 'current',
+      release: () => Effect.void,
+    },
+    {
+      name: 'Project list loading',
+      states: Stream.make(currentBootstrap),
+      listProjects: () =>
+        Deferred.await(loadingList).pipe(Effect.as([destination])),
+      ready: (state: NightbookWorkspaceState) =>
+        state.projectionReceived && state.process.state === 'loading',
+      release: () => Deferred.succeed(loadingList, undefined),
+    },
+    {
+      name: 'Project list unavailable',
+      states: Stream.make(currentBootstrap),
+      listProjects: () => Effect.fail(failure('list-projects')),
+      ready: (state: NightbookWorkspaceState) =>
+        state.projectionReceived && state.process.state === 'unavailable',
+      release: () => Effect.void,
+    },
+    {
+      name: 'stale projection',
+      states: Stream.make(staleBootstrap),
+      listProjects: () => Effect.succeed([destination]),
+      ready: (state: NightbookWorkspaceState) =>
+        state.projectionReceived &&
+        state.process.state === 'current' &&
+        state.process.projects.length === 1,
+      release: () => Effect.void,
+    },
+    {
+      name: 'mutation authority denied',
+      states: Stream.make(deniedBootstrap),
+      listProjects: () => Effect.succeed([destination]),
+      ready: (state: NightbookWorkspaceState) =>
+        state.projectionReceived &&
+        state.process.state === 'current' &&
+        state.process.projects.length === 1,
+      release: () => Effect.void,
+    },
+  ]
+
+  for (const value of cases) {
+    let writes = 0
+    const runtime = makeRuntime(
+      makeRemote({
+        states: value.states,
+        page: () => Effect.succeed(page(value.name, 1)),
+        listProjects: value.listProjects,
+        addProjectSources: () =>
+          Effect.sync(() => {
+            writes += 1
+            return openedProject(2)
+          }),
+      }),
+    )
+    await submit(runtime, {
+      _tag: 'RouteChanged',
+      route: { kind: 'workspace', workspace: 'library' },
+      libraryQuery: query(value.name),
+    })
+    await waitFor(runtime, value.ready)
+    const result = await submit(runtime, {
+      _tag: 'AddProjectSources',
+      projectId: destination.projectId,
+      selection: { assetIds: [detail.assetId], captureSetIds: [] },
+    })
+    await runtime.runPromise(value.release())
+    await runtime.dispose()
+
+    assert.equal(result._tag, 'Unavailable', value.name)
+    assert.equal(writes, 0, value.name)
+  }
+})
+
+test('does not publish failed old-route intake reconciliation over a newer Project', async () => {
+  const destination = projects('project-1')[0]
+  assert.notEqual(destination, undefined)
+  if (destination === undefined) return
+  const projectA = openedProject(1)
+  const projectB = {
+    ...openedProject(2),
+    projectId: ProcessingProjectId.make('project-b'),
+    name: 'M31',
+  }
+  const evidenceA = projectEvidence()
+  const evidenceB = {
+    ...projectEvidence(),
+    projectId: ProcessingProjectId.make('project-b'),
+  }
+  const addStarted = Effect.runSync(Deferred.make<void>())
+  const releaseAdd = Effect.runSync(Deferred.make<void>())
+  const openAStarted = Effect.runSync(Deferred.make<void>())
+  const evidenceAStarted = Effect.runSync(Deferred.make<void>())
+  const releaseAReads = Effect.runSync(Deferred.make<void>())
+  let addWrites = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(currentBootstrap),
+      page: () => Effect.succeed(page('route-safe-intake', 1)),
+      listProjects: () => Effect.succeed([destination]),
+      addProjectSources: () =>
+        Effect.gen(function* () {
+          addWrites += 1
+          yield* Deferred.succeed(addStarted, undefined)
+          yield* Deferred.await(releaseAdd)
+          return yield* Effect.fail(failure('add-project-sources'))
+        }),
+      openProject: (projectId) =>
+        projectId === projectB.projectId
+          ? Effect.succeed(projectB)
+          : Effect.gen(function* () {
+              yield* Deferred.succeed(openAStarted, undefined)
+              yield* Deferred.await(releaseAReads)
+              return projectA
+            }),
+      projectEvidence: (projectId) =>
+        projectId === projectB.projectId
+          ? Effect.succeed(evidenceB)
+          : Effect.gen(function* () {
+              yield* Deferred.succeed(evidenceAStarted, undefined)
+              yield* Deferred.await(releaseAReads)
+              return evidenceA
+            }),
+    }),
+  )
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'workspace', workspace: 'library' },
+    libraryQuery: query('route-safe-intake'),
+  })
+  await waitFor(
+    runtime,
+    (state) =>
+      state.process.state === 'current' && state.process.projects.length === 1,
+  )
+
+  const addResult = submit(runtime, {
+    _tag: 'AddProjectSources',
+    projectId: destination.projectId,
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+  await runtime.runPromise(Deferred.await(addStarted))
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'process-project', projectId: projectB.projectId },
+    libraryQuery: query('project-b'),
+  })
+  await waitFor(
+    runtime,
+    (state) =>
+      state.process.project?.projectId === projectB.projectId &&
+      state.process.evidence?.projectId === projectB.projectId,
+  )
+  await runtime.runPromise(Deferred.succeed(releaseAdd, undefined))
+  await runtime.runPromise(
+    Effect.all([
+      Deferred.await(openAStarted),
+      Deferred.await(evidenceAStarted),
+    ]),
+  )
+  await runtime.runPromise(Deferred.succeed(releaseAReads, undefined))
+  const result = await addResult
+  const final = await waitFor(
+    runtime,
+    (state) =>
+      state.process.project?.projectId === projectB.projectId &&
+      state.process.evidence?.projectId === projectB.projectId,
+  )
+  await runtime.dispose()
+
+  assert.equal(result._tag, 'Unavailable')
+  assert.equal(addWrites, 1)
+  assert.equal(final.process.state, 'current')
+  assert.equal(final.process.project?.projectId, projectB.projectId)
+  assert.equal(final.process.evidence?.projectId, projectB.projectId)
+})
+
 test('reconciles Review and Project intake failures through reads without replay', async () => {
   const confirmedProject = openedProject(1)
   const confirmedEvidence = projectEvidence()
@@ -1861,7 +2201,6 @@ test('reconciles Review and Project intake failures through reads without replay
   const addResult = await submit(runtime, {
     _tag: 'AddProjectSources',
     projectId: confirmedProject.projectId,
-    expectedProjectRevision: confirmedProject.revision,
     selection: { assetIds: [detail.assetId], captureSetIds: [] },
   })
   const pairState = await waitFor(

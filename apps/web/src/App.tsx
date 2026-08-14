@@ -429,16 +429,11 @@ export function App() {
             ? {}
             : {
                 onCreateProject: createProject,
-                onAddProjectSources: async (
-                  projectId,
-                  expectedProjectRevision,
-                  selection,
-                ) => {
+                onAddProjectSources: async (projectId, selection) => {
                   const project = foldWorkspaceSubmission(
                     await submitWorkspace({
                       _tag: 'AddProjectSources',
                       projectId,
-                      expectedProjectRevision,
                       selection,
                     }),
                     { Project: ({ project }) => project },

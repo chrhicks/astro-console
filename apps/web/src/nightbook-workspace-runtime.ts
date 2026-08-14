@@ -20,8 +20,8 @@ import {
   IdempotencyKey,
   IntentId,
   LeaseRevision,
+  ProcessingProjectChangeRequest,
   ProcessingProjectId,
-  ProcessingProjectRevision,
   ReviewAssetRequest,
   type ProcessingProjectIntent,
 } from '@astro-console/protocol'
@@ -161,7 +161,6 @@ export type NightbookWorkspaceIntent = Data.TaggedEnum<{
   }
   AddProjectSources: {
     readonly projectId: typeof ProcessingProjectId.Type
-    readonly expectedProjectRevision: typeof ProcessingProjectRevision.Type
     readonly selection: NightbookProjectSelection
   }
   ChangeProject: {
@@ -270,9 +269,7 @@ export interface NightbookWorkspaceRemoteShape {
     intent: ProcessingProjectIntent,
   ) => Effect.Effect<OpenedProcessingProject, NightbookWorkspaceRemoteFailure>
   readonly addProjectSources: (
-    projectId: typeof ProcessingProjectId.Type,
-    expectedProjectRevision: typeof ProcessingProjectRevision.Type,
-    selection: NightbookProjectSelection,
+    request: typeof ProcessingProjectChangeRequest.Type,
   ) => Effect.Effect<OpenedProcessingProject, NightbookWorkspaceRemoteFailure>
 }
 
@@ -629,15 +626,21 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
     const reconcileProjectPair = (
       projectId: typeof ProcessingProjectId.Type,
       message: string,
+      ownsResult: () => boolean = () => true,
     ) =>
       readProjectPair(projectId).pipe(
-        Effect.tap(publishProjectPair),
+        Effect.tap((pair) =>
+          ownsResult() ? publishProjectPair(pair) : Effect.void,
+        ),
         Effect.as(unavailable(message)),
         Effect.catchTag('NightbookWorkspaceRemoteFailure', () =>
-          set((current) => ({
-            ...current,
-            process: { ...current.process, state: 'unavailable' },
-          })).pipe(
+          (ownsResult()
+            ? set((current) => ({
+                ...current,
+                process: { ...current.process, state: 'unavailable' },
+              }))
+            : Effect.void
+          ).pipe(
             Effect.as(
               unavailable(
                 'The Project outcome is uncertain. Reload current Project truth before another change.',
@@ -1128,14 +1131,36 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
               }),
             ),
           ),
-        AddProjectSources: ({
-          projectId,
-          expectedProjectRevision,
-          selection,
-        }) =>
-          remote
-            .addProjectSources(projectId, expectedProjectRevision, selection)
-            .pipe(
+        AddProjectSources: ({ projectId, selection }) =>
+          Effect.gen(function* () {
+            const current = yield* SubscriptionRef.get(state)
+            const destination = current.process.projects.find(
+              (project) => project.projectId === projectId,
+            )
+            if (
+              !current.projection.libraryProcessMutation.allowed ||
+              current.process.state !== 'current' ||
+              destination === undefined
+            )
+              return unavailable(
+                'Current destination Project truth and mutation authority are required before intake.',
+              )
+            const generation = routeGeneration
+            const ownsResult = () => generation === routeGeneration
+            const intentId = yield* Effect.sync(() =>
+              IntentId.make(crypto.randomUUID()),
+            )
+            const requestResult = yield* Schema.decodeUnknownEffect(
+              ProcessingProjectChangeRequest,
+            )({
+              projectId,
+              expectedProjectRevision: destination.revision,
+              intentId,
+              intent: { _tag: 'AddSources', selection },
+            }).pipe(Effect.result)
+            if (Result.isFailure(requestResult))
+              return unavailable('The Project intake selection is invalid.')
+            return yield* remote.addProjectSources(requestResult.success).pipe(
               Effect.map((project) =>
                 NightbookWorkspaceSubmission.Project({ project }),
               ),
@@ -1143,9 +1168,11 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
                 reconcileProjectPair(
                   projectId,
                   'Project intake was reconciled with current Project truth.',
+                  ownsResult,
                 ),
               ),
-            ),
+            )
+          }),
       }),
     )
     return NightbookWorkspaceRuntime.of({
@@ -1227,21 +1254,11 @@ export const productionNightbookWorkspaceRemoteLayer = Layer.effect(
             Effect.map((changed) => changed.project),
             Effect.mapError(() => remoteFailure('change-project')),
           ),
-      addProjectSources: (projectId, expectedProjectRevision, selection) =>
-        processClient
-          .change({
-            projectId,
-            expectedProjectRevision,
-            intentId: IntentId.make(crypto.randomUUID()),
-            intent: {
-              _tag: 'AddSources',
-              selection,
-            },
-          })
-          .pipe(
-            Effect.map((changed) => changed.project),
-            Effect.mapError(() => remoteFailure('add-project-sources')),
-          ),
+      addProjectSources: (request) =>
+        processClient.change(request).pipe(
+          Effect.map((changed) => changed.project),
+          Effect.mapError(() => remoteFailure('add-project-sources')),
+        ),
     } satisfies NightbookWorkspaceRemoteShape)
   }),
 )
