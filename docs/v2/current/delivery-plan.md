@@ -242,15 +242,15 @@ with a target-owned Processing Project and explicit, inspectable stages:
 - **3.5.6 Complete —** Astronomy Develop workspace.
 - **3.5.7 Complete —** Integrated operator review and closeout.
 
-4. **Complete —** Audit all four Nightbook workspaces and promote Nightbook to
+4. **Complete —** Audit all four application workspaces and promote them to
    the normal routes. The follow-up cleanup removed the temporary legacy
-   fallback; old presentation query parameters resolve to Nightbook.
+   fallback; old presentation query parameters resolve to the application workspaces.
 
 **Ad-hoc architecture item — Complete.** The audit selected the Processing
 Project lifecycle as the highest-leverage seam. The implementation now has one
 deep Project module, explicit Project routes, one closed intent surface,
 Project-owned authority and revisions, immutable attempts, linear Current
-Result history, internal work ownership, and a Project-only Nightbook UI. The
+Result history, internal work ownership, and a Project-only application UI. The
 retired Processing Session data and models are deleted. A production processor
 adapter remains deferred until a real library is selected.
 
@@ -258,7 +258,7 @@ The accepted follow-on Nightbook workspace runtime deepening is also complete.
 One streamed state and closed intent interface now owns browser loading,
 freshness, cancellation, last-confirmed values, command submission, and
 uncertain-outcome reconciliation across all four workspaces. This is an
-ownership refactor only; service-owned product truth and the promoted Nightbook
+ownership refactor only; service-owned product truth and the promoted application
 presentation remain unchanged.
 
 5. Repair the scheduled host backup container-name mismatch.
@@ -267,7 +267,7 @@ presentation remain unchanged.
    backup.
 
 The detailed scope and proof boundaries remain in the
-[Nightbook beta real-runtime plan](beta-real-runtime-plan.md) and the
+[Beta real-runtime plan](beta-real-runtime-plan.md) and the
 [Item 3.5 Process workflow plan](process-workflow-plan.md).
 
 ## Implementation Rules

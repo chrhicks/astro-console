@@ -1,12 +1,12 @@
-# Nightbook Beta Real-Runtime Plan
+# Beta Real-Runtime Plan
 
-Status: **accepted — Nightbook routes promoted locally; configured Acquire prepared and simulator-proven; outdoor proof and optional live abort pending**
+Status: **accepted — application routes promoted locally; configured Acquire prepared and simulator-proven; outdoor proof and optional live abort pending**
 
 Accepted: August 8, 2026
 
 ## Outcome
 
-Promote the Nightbook beta to the main Astro Console UI after Plan, Observe,
+Promote the beta to the main Astro Console UI after Plan, Observe,
 Library, and Process use service-owned projections and complete their accepted
 workflows. Hardware-facing milestones must use real provider, device, or image
 evidence. Deterministic fixtures remain regression tools, not delivery proof.
@@ -14,7 +14,7 @@ evidence. Deterministic fixtures remain regression tools, not delivery proof.
 The local web implementation now owns composition, interaction, responsive
 behavior, and visual treatment. Astro Console runtime and service modules own
 contracts, commands, durable state, provider adapters, eligibility, and proof.
-The disposable Nightbook demo is retained only as historical migration input.
+The disposable prototype demo is retained only as historical migration input.
 
 ## Real-Frame Development Corpus
 
@@ -105,14 +105,14 @@ representations.
 
 - Add the manifest, preparation script, bounded simulator, scenario state
   machine, and recorded-response contract tests.
-- Run one exact Nightbook Observe-to-Library path against the simulator with
+- Run one exact Observe-to-Library path against the simulator with
   real frame bytes.
 - Prove checksum, intake, preview or explicit preview limitation, restart, and
   browser projection.
 
 The development inspection path is now `npm run dev:sim:inspect` from
 `apps/server`. It verifies all scenario-selected FITS copies before startup and
-opens the Nightbook beta with a persistent simulation context strip. Its first
+opens the Astro Console beta with a persistent simulation context strip. Its first
 interactive capture is deliberately limited to truthful 15-second M101 frames;
 the 120-second NGC 7000 frames remain display and workflow evidence until the
 camera command accepts that duration.
@@ -397,7 +397,7 @@ workflow and subsequent route promotion are now complete locally.
 
 ### 9. Audit and promote the beta
 
-- Verify every exact Nightbook workflow and shell state against current service
+- Verify every exact application workflow and shell state against current service
   truth.
 - Complete functional browser proof and Designer review at wide, compact, and
   390 px phone widths.
@@ -406,8 +406,8 @@ workflow and subsequent route promotion are now complete locally.
 - Retire the old presentation after promotion.
 
 Completed locally August 10, 2026. Plan, Observe, Library, Library detail, and
-Process routes render Nightbook. The former presentation has been removed.
-Normal workspace routes render Nightbook directly.
+Process routes render the application presentation. The former presentation has been removed.
+Normal workspace routes render the application workspaces directly.
 The final audit corrected exact Library-to-Process handoff precedence,
 completed Observe evidence, exact final Library operation IDs, compact Develop
 containment, and promoted-shell wording. Functional and Designer proof passed
@@ -436,7 +436,7 @@ The first approved bundle is the **beta real-truth development foundation**:
 2. prepare the checksum-pinned real-frame scenario pack;
 3. implement the bounded Alpaca simulator;
 4. drive one real-frame simulated exposure through Observe, Library intake,
-   restart, and the Nightbook UI; and
+   restart, and the Astro Console UI; and
 5. finish with live GET-only configured-rig activation, without a hardware
    command.
 
@@ -454,7 +454,7 @@ The first approved bundle is the **beta real-truth development foundation**:
   Library intake, service restart, and no-replay checks. Browser proof separately
   validated the same service-owned Process and Library projections.
 - The first bundle's contract, server, and web proof passed.
-- Designer review passed against Nightbook at wide, 768 px, and 390 px widths.
+- Designer review passed against Astro Console at wide, 768 px, and 390 px widths.
   It found one restart Resume replay defect; the fix is included in the server
   suite.
 - Live GET-only activation matched Telescope 0 ASI Mount, Camera 1 ZWO
