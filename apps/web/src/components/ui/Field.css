@@ -1,0 +1,43 @@
+.ui-field {
+  min-width: 0;
+  display: grid;
+  gap: var(--ui-space-1, 4px);
+  color: var(--ui-text, #1a2229);
+  font: var(--ui-font-size, 13px) / 1.35 var(--ui-font-sans, sans-serif);
+}
+
+.ui-field-label {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ui-space-2, 8px);
+  color: var(--ui-muted, #697680);
+  font-size: 0.88em;
+}
+
+.ui-field-label span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-field-label b {
+  flex: none;
+  color: var(--ui-warning, #9b6516);
+  font: 650 0.72em var(--ui-font-mono, monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ui-field-hint,
+.ui-field-error {
+  color: var(--ui-muted, #697680);
+  font-size: 0.78em;
+  overflow-wrap: anywhere;
+}
+
+.ui-field-error {
+  color: var(--ui-danger, #a33c32);
+}

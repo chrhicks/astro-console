@@ -1,0 +1,36 @@
+.ui-panel {
+  min-width: 0;
+  border: 1px solid var(--ui-line, #ccd2d8);
+  border-radius: var(--ui-radius, 2px);
+  background: var(--ui-surface, #fff);
+  color: var(--ui-text, #1a2229);
+  font: var(--ui-font-size, 13px) / 1.45 var(--ui-font-sans, sans-serif);
+  overflow: hidden;
+}
+.ui-panel-header {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--ui-line, #ccd2d8);
+  padding: 0 var(--ui-panel-padding, 12px);
+  font: 650 10px var(--ui-font-mono, monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ui-panel-header > span {
+  margin-left: auto;
+  color: var(--ui-muted, #697680);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.ui-panel-header > div {
+  margin-left: auto;
+}
+.ui-panel-header > span + div {
+  margin-left: 0;
+}
+.ui-panel-body {
+  padding: var(--ui-panel-padding, 12px);
+}

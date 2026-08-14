@@ -1,0 +1,31 @@
+.ui-data-list {
+  margin: 0;
+}
+.ui-data-list-item {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) minmax(0, 1.5fr);
+  align-items: start;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--ui-line, #ccd2d8);
+}
+.ui-data-list-item:last-child {
+  border-bottom: 0;
+}
+.ui-data-list-item dt {
+  color: var(--ui-muted, #697680);
+}
+.ui-data-list-item dd {
+  min-width: 0;
+  margin: 0;
+  text-align: right;
+  font-family: var(--ui-font-mono, monospace);
+  overflow-wrap: anywhere;
+}
+.ui-data-list-item dd small {
+  display: block;
+  margin-top: 2px;
+  color: var(--ui-muted, #697680);
+  font-size: 10px;
+}
