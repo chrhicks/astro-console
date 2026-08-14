@@ -19,18 +19,17 @@ route `/` maps to Plan.
 
 ## UI Direction
 
-The official UI and UX reference is the composed React demo in:
+The official UI implementation is app-private source under
+`apps/web/src/components/ui`, composed by the promoted Plan, Observe, Library,
+and Process workspaces. It owns the domain-neutral visual modules and contained
+styles. The former borrowed `@nightbook/ui` package seam and trial archives are
+removed.
 
-`.gh/clone/nightbook-prototype/apps/nightbook-demo`
-
-The same workspace owns the `@nightbook/ui` source, component Gallery, and
-package verification. Astro Console's promoted workspaces are an integration
-of that authority with local service projections; they are not a separate
-design authority.
-
-Keep the promoted presentation aligned with real Astro Console projections and
-the lightweight [UI and UX direction](ui-ux.md). Former Astro Console visual
-guides, UX catalogs, component grammar, and Phase 0.5 material are archived.
+The disposable Nightbook checkout, demo, and Gallery supplied migration input;
+they are not ongoing design, build, or verification authority. Keep the local
+presentation aligned with real Astro Console projections and the lightweight
+[UI and UX direction](ui-ux.md). Former Astro Console visual guides, UX
+catalogs, component grammar, and Phase 0.5 material remain archived.
 
 The accepted implementation sequence is the
 [Nightbook beta real-runtime plan](beta-real-runtime-plan.md). It uses a small,

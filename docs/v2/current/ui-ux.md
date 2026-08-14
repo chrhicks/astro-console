@@ -4,43 +4,39 @@ Status: **current direction after Nightbook route promotion**
 
 ## Goal
 
-Keep the promoted Astro Console presentation aligned with the official
-Nightbook demo and `@nightbook/ui`. Astro Console is an integration client; it
-is not a separate design authority.
+Keep the promoted Astro Console presentation coherent through its local visual
+modules and application-owned workspace composition.
 
 ## Visual And Interaction Authority
 
-The authoritative source is the external Nightbook workspace, available in this
-checkout as an ignored local reference:
+The authoritative implementation is:
 
-- composed product demo: `.gh/clone/nightbook-prototype/apps/nightbook-demo`
-- React component package: `.gh/clone/nightbook-prototype/ui`
-- isolated component gallery: `.gh/clone/nightbook-prototype/apps/gallery`
-- containment consumer:
-  `.gh/clone/nightbook-prototype/apps/resetless-consumer`
+- domain-neutral visual modules and contained styles:
+  `apps/web/src/components/ui`
+- product composition and interaction: `apps/web/src/nightbook`
+- rendered application verification: the normal Plan, Observe, Library, and
+  Process routes
 
-Use the rendered React demo as the authority for page composition, hierarchy,
-interaction, responsive behavior, and visual treatment. Use the Gallery and
-package source for component behavior and public APIs. `READINESS.md` and
-`COMPONENT-CONTRACTS.md` in that workspace explain the package boundary and
-verification surface.
-
-The older Astro Console visual guides, component grammar, UX catalog, and
-Phase 0.5 material are historical. The former Astro Console presentation has
-been removed.
+The disposable Nightbook checkout, product demo, Gallery, and package source
+were migration input only. They are not ongoing design, build, synchronization,
+or verification authority. The older Astro Console visual guides, component
+grammar, UX catalog, and Phase 0.5 material are also historical. Preserve those
+records and use the current local web implementation for further work.
 
 ## Ownership Boundary
 
-- `@nightbook/ui` owns domain-neutral, tested React components and their
-  contained styling.
-- The Nightbook demo owns product composition and interaction reference.
-- Astro Console owns service projections, routes, product wording, action
-  eligibility, commands, revisions, and reconciliation with service truth.
-- Astro Console must not copy workflow rules into the package or recreate
-  package components in local hard-coded component layers.
-- Demo fixtures demonstrate states and interactions. They do not prove Astro
-  Console persistence, provider behavior, hardware results, or physical
-  capture.
+- The local UI implementation owns domain-neutral React visual modules, their
+  accessibility and controlled interaction behavior, and their contained
+  styling.
+- Application workspace modules own product composition and local interaction
+  state.
+- Astro Console runtime and service modules own projections, routes, product
+  wording, action eligibility, commands, revisions, and reconciliation with
+  service truth.
+- Do not copy workflow rules into the visual modules or create another package,
+  Gallery, or compatibility layer.
+- Historical demo fixtures do not prove Astro Console persistence, provider
+  behavior, hardware results, or physical capture.
 
 ## Working Method
 
@@ -51,7 +47,7 @@ For one demo workflow or state at a time:
 3. Map existing Astro Console projections to that composition.
 4. Add the smallest missing service or contract projection. Do not replace a
    missing fact with a client fixture or inferred eligibility.
-5. Compose the beta from `@nightbook/ui` and application-owned adapters.
+5. Compose the beta from the local UI interface and application-owned adapters.
 6. Compare the result with the demo at wide, compact, and 390 px phone widths;
    also check keyboard, focus, overflow, console, and read-only behavior.
 7. Keep normal routes on Nightbook after changes pass the agreed functional

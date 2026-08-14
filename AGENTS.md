@@ -32,9 +32,9 @@ table. It is the authority for the default context and task-specific documents.
 
 - Load one accepted gate document or one infrastructure section only when the
   task requires that detail.
-- For UI or UX work, use `docs/v2/current/ui-ux.md` and the external Nightbook
-  demo it names. Archived Astro Console visual guidance, existing non-beta UI
-  code, and local hard-coded components are not design authority.
+- For UI or UX work, use `docs/v2/current/ui-ux.md` and the local web
+  implementation it names. Archived Astro Console visual guidance and
+  disposable prototype inputs are not design authority.
 - Do not broadly ingest `docs/v2/archive/`. Archived material is
   non-authoritative and is used only to answer a specific historical question.
 - Retired SDK, Electron desktop, and prototype UI artifacts are available only
