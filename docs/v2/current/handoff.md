@@ -508,8 +508,8 @@ intent slice in `#29` is merged through PR `#30`. The Observe lifecycle semantic
 intent slice in `#31` is merged through PR `#32`. The Plan semantic-intent
 slice in `#33` is merged through PR `#34`. The Library Asset Review semantic-
 intent slice in `#35` is merged through PR `#36`. The Processing Project intake
-semantic-intent slice in `#37` is complete locally and ready for owner review.
-No later child is selected. The other architecture frontiers remain the durable
+semantic-intent slice in `#37` is merged through PR `#38`. No later child is
+selected. The other architecture frontiers remain the durable
 work-claim re-audit in `#5` and the origin integration-test harness in `#6`.
 Select and integrate a real processing library only in a later accepted item;
 the current deterministic materializer proves orchestration and evidence, not
