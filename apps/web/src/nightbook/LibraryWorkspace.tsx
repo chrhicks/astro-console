@@ -24,7 +24,6 @@ import {
   AssetId,
   CaptureSetId,
   ProcessingProjectId,
-  ProcessingProjectRevision,
 } from '@astro-console/protocol'
 import {
   useEffect,
@@ -101,7 +100,6 @@ export type LibraryWorkspaceProps = {
   ) => Promise<void>
   onAddProjectSources?: (
     projectId: typeof ProcessingProjectId.Type,
-    expectedProjectRevision: typeof ProcessingProjectRevision.Type,
     selection: {
       readonly assetIds: ReadonlyArray<typeof AssetId.Type>
       readonly captureSetIds: ReadonlyArray<typeof CaptureSetId.Type>
@@ -1629,11 +1627,8 @@ export function LibraryWorkspace(props: LibraryWorkspaceProps) {
             Promise.reject(new Error('Project intake unavailable')))
           : project === undefined
             ? Promise.reject(new Error('Project unavailable'))
-            : (props.onAddProjectSources?.(
-                project.projectId,
-                project.revision,
-                selection,
-              ) ?? Promise.reject(new Error('Project intake unavailable')))
+            : (props.onAddProjectSources?.(project.projectId, selection) ??
+              Promise.reject(new Error('Project intake unavailable')))
       void accepted
         .then(() => undefined)
         .catch(() => setMessage('The project intake was not accepted.'))
