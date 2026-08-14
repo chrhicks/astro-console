@@ -24,7 +24,10 @@ import {
   type RunSequenceDefinition,
   type PlanWorkspaceProjection,
 } from '@astro-console/protocol'
-import { planSequencePresentation, planSequenceWindow } from '../../../presentation'
+import {
+  planSequencePresentation,
+  planSequenceWindow,
+} from '../../../presentation'
 import {
   useEffect,
   useMemo,
@@ -239,7 +242,7 @@ function PlanFieldGroup({
   children: ReactNode
 }) {
   return (
-    <fieldset className="nightbook-plan-field-group">
+    <fieldset className="plan-field-group">
       <legend>{title}</legend>
       {children}
     </fieldset>
@@ -541,14 +544,14 @@ function PlanSequenceList({
           sequences.length,
         )
   return (
-    <Panel as="aside" className="nightbook-plan-sequences">
+    <Panel as="aside" className="plan-sequences">
       <PanelHeader
         title="Plan order"
         meta={`rev ${projection.plan.source?.revision ?? '—'}`}
       />
       <PanelBody>
         {run ? (
-          <div className="nightbook-plan-section-label">Accepted / current</div>
+          <div className="plan-section-label">Accepted / current</div>
         ) : null}
         {sequences.map((sequence, index) => {
           const state = run
@@ -562,7 +565,7 @@ function PlanSequenceList({
             <button
               key={sequence.sequenceId}
               type="button"
-              className="nightbook-plan-sequence"
+              className="plan-sequence"
               data-state={state}
               data-selected={index === selected ? 'true' : 'false'}
               aria-pressed={index === selected}
@@ -601,10 +604,10 @@ function PlanSchedule({
 }) {
   const timeline = allocatePlanTimeline(sequences)
   return (
-    <Panel as="section" className="nightbook-plan-schedule">
+    <Panel as="section" className="plan-schedule">
       <PanelHeader title="Sky & schedule" meta="Plan projection" />
       <PanelBody>
-        <div className="nightbook-plan-altitude">
+        <div className="plan-altitude">
           <svg
             viewBox="0 0 800 220"
             aria-label="Planned target altitude curves"
@@ -625,9 +628,9 @@ function PlanSchedule({
             Planned sky evidence; selecting a row highlights its curve.
           </span>
         </div>
-        <div className="nightbook-plan-timeline" aria-label="Plan timeline">
+        <div className="plan-timeline" aria-label="Plan timeline">
           <div
-            className="nightbook-plan-timeline-track"
+            className="plan-timeline-track"
             style={
               {
                 '--timeline-lane-count': Math.max(1, timeline.laneCount),
@@ -662,7 +665,7 @@ function PlanSchedule({
             )}
           </div>
         </div>
-        <p className="nightbook-plan-muted">
+        <p className="plan-muted">
           Accepted execution stays immutable. Draft changes update only the
           saved plan revision.
         </p>
@@ -698,7 +701,7 @@ function PlanReview({
     : eligibilityReason(source?.actions?.previewRunMutation)
   return (
     <Stack gap={8}>
-      <div className="nightbook-plan-review-grid">
+      <div className="plan-review-grid">
         <Panel>
           <PanelHeader
             title={
@@ -715,10 +718,7 @@ function PlanReview({
           <PanelBody>
             <Stack gap={6}>
               {draft.map((sequence, index) => (
-                <div
-                  className="nightbook-plan-frozen-row"
-                  key={sequence.sequenceId}
-                >
+                <div className="plan-frozen-row" key={sequence.sequenceId}>
                   <b>
                     {String(index + 1).padStart(2, '0')} ·{' '}
                     {sequence.definition.targetName}
@@ -728,7 +728,7 @@ function PlanReview({
                   </span>
                 </div>
               ))}
-              <p className="nightbook-plan-muted">
+              <p className="plan-muted">
                 An accepted run is a frozen service-owned definition. Plan edits
                 cannot change it.
               </p>
@@ -746,12 +746,9 @@ function PlanReview({
           />
           <PanelBody>
             {changed.length > 0 ? (
-              <div className="nightbook-plan-change-list">
+              <div className="plan-change-list">
                 {changed.map(({ sequence, accepted: prior }) => (
-                  <label
-                    className="nightbook-plan-change"
-                    key={sequence.sequenceId}
-                  >
+                  <label className="plan-change" key={sequence.sequenceId}>
                     <Checkbox checked readOnly />
                     <div>
                       <b>{sequence.definition.targetName}</b>
@@ -784,7 +781,7 @@ function PlanReview({
                 description={source.runMutationPreview.consequences}
               />
             ) : projection.shell.currentRun ? (
-              <div className="nightbook-plan-preview-options">
+              <div className="plan-preview-options">
                 <AttentionCard
                   tone="neutral"
                   statusLabel="Preview first"
@@ -833,11 +830,11 @@ export function PlanPhone({
   const source = view.source
   return (
     <main
-      id="nightbook-workspace"
-      className="nightbook-phone-workspace nightbook-plan-phone"
+      id="workspace-content"
+      className="workspace-phone-workspace plan-phone"
       aria-label="Read-only phone Plan projection"
     >
-      <header className="nightbook-phone-header">
+      <header className="workspace-phone-header">
         <div>
           <p>Plan / read only</p>
           <h1>{loading ? 'Loading plan' : view.title}</h1>
@@ -891,7 +888,7 @@ export function PlanPhone({
       <Panel>
         <PanelHeader title="Sequence order" meta="Saved plan" />
         <PanelBody>
-          <div className="nightbook-plan-phone-sequences">
+          <div className="plan-phone-sequences">
             {(source?.sequences ?? []).map((sequence, index) => (
               <article key={sequence.sequenceId}>
                 <b>
@@ -917,25 +914,25 @@ function PlanStatusStrip({ projection }: { projection: Projection }) {
   const current = projection.shell.freshness.startsWith('Current ')
   return (
     <footer
-      className="nightbook-operational-status nightbook-plan-status-strip"
+      className="workspace-operational-status plan-status-strip"
       aria-label="Operational status"
     >
-      <span className="nightbook-plan-status-desktop">
+      <span className="plan-status-desktop">
         <i data-tone={tone(planTone(projection.plan))} aria-hidden="true" />
         <b>
           {source?.acceptedRunDefinition ? 'Accepted plan' : 'Plan draft'}
         </b>{' '}
         · {projection.plan.readiness}
       </span>
-      <span className="nightbook-plan-status-desktop">
+      <span className="plan-status-desktop">
         Plan · {current ? 'service-owned truth' : 'service truth unavailable'} ·
         revision {source?.revision ?? '—'}
       </span>
-      <span className="nightbook-plan-status-desktop">
+      <span className="plan-status-desktop">
         {projection.shell.currentRun?.target ?? 'No active run'} ·{' '}
         {projection.shell.controller}
       </span>
-      <span className="nightbook-plan-status-mobile">
+      <span className="plan-status-mobile">
         <i data-tone={tone(planTone(projection.plan))} aria-hidden="true" />
         <b>
           {source?.acceptedRunDefinition ? 'Accepted plan' : 'Plan draft'}
@@ -1065,10 +1062,7 @@ function PlanDesktop({ projection, loading, submit }: PlanWorkspaceProps) {
 
   if (!loading && source === undefined)
     return (
-      <main
-        id="nightbook-workspace"
-        className="nightbook-desktop-workspace nightbook-plan-workspace"
-      >
+      <main id="workspace-content" className="workspace-desktop plan-workspace">
         <PageHeader
           eyebrow="Plan / Authoritative intent"
           title="Plan unavailable"
@@ -1085,13 +1079,13 @@ function PlanDesktop({ projection, loading, submit }: PlanWorkspaceProps) {
 
   return (
     <main
-      id="nightbook-workspace"
-      className="nightbook-desktop-workspace nightbook-plan-workspace"
+      id="workspace-content"
+      className="workspace-desktop plan-workspace"
       aria-busy={loading}
     >
-      <div ref={portalRoot} className="nightbook-plan-portal" />
+      <div ref={portalRoot} className="plan-portal" />
       <PageHeader
-        className="nightbook-plan-header"
+        className="plan-header"
         eyebrow={
           projection.shell.currentRun
             ? 'Plan / Observing now'
@@ -1103,13 +1097,13 @@ function PlanDesktop({ projection, loading, submit }: PlanWorkspaceProps) {
             : 'Plan the next accepted run'
         }
       />
-      <div className="nightbook-plan-freeze-banner">
+      <div className="plan-freeze-banner">
         <StatusIndicator
           tone={banner.tone}
           label={banner.label}
           detail={banner.detail}
         />
-        <span className="nightbook-plan-freeze-copy">{banner.copy}</span>
+        <span className="plan-freeze-copy">{banner.copy}</span>
         <Button
           size="small"
           disabled={!preview && changed === 0}
@@ -1119,7 +1113,7 @@ function PlanDesktop({ projection, loading, submit }: PlanWorkspaceProps) {
         </Button>
       </div>
       <Tabs
-        className="nightbook-plan-tabs"
+        className="plan-tabs"
         label="Plan views"
         activeId={tab}
         onActiveChange={(id: string) => setTab(id as PlanTab)}
@@ -1129,7 +1123,7 @@ function PlanDesktop({ projection, loading, submit }: PlanWorkspaceProps) {
             label: 'Night editor',
             content: sequence ? (
               <Stack gap={8}>
-                <div className="nightbook-plan-active-grid">
+                <div className="plan-active-grid">
                   <PlanSequenceList
                     projection={projection}
                     sequences={draft}
@@ -1137,7 +1131,7 @@ function PlanDesktop({ projection, loading, submit }: PlanWorkspaceProps) {
                     onSelect={setSelected}
                   />
                   <PlanSchedule sequences={draft} selected={selected} />
-                  <Panel as="aside" className="nightbook-plan-editor">
+                  <Panel as="aside" className="plan-editor">
                     <PanelHeader
                       title={`Sequence ${String(selected + 1).padStart(2, '0')} · editor`}
                       meta={
@@ -1160,14 +1154,14 @@ function PlanDesktop({ projection, loading, submit }: PlanWorkspaceProps) {
                             : 'Draft matches saved plan'
                         }
                       />
-                      <p className="nightbook-plan-muted">
+                      <p className="plan-muted">
                         Only the saved Plan revision is editable. Accepted
                         execution remains frozen.
                       </p>
                     </PanelBody>
                   </Panel>
                 </div>
-                <div className="nightbook-plan-action-dock">
+                <div className="plan-action-dock">
                   <div>
                     <b>
                       {result ??
@@ -1243,7 +1237,7 @@ function PlanDesktop({ projection, loading, submit }: PlanWorkspaceProps) {
                     send(PlanAction.PreviewRunMutation({ mutation }))
                   }
                 />
-                <div className="nightbook-plan-action-dock">
+                <div className="plan-action-dock">
                   <div>
                     <b>
                       {result ??
@@ -1339,11 +1333,11 @@ export function PlanWorkspace(props: PlanWorkspaceProps) {
   const phone = usePhoneProjection()
   return (
     <div
-      className="nightbook-app ui-theme"
+      className="workspace-app ui-theme"
       data-ui-theme="default"
       data-ui-density="compact"
     >
-      <a className="nightbook-skip-link" href="#nightbook-workspace">
+      <a className="workspace-skip-link" href="#workspace-content">
         Skip to Plan
       </a>
       <CommandBar

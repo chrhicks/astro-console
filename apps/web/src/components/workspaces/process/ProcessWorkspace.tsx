@@ -38,7 +38,10 @@ import {
 import type { Projection } from '../../../presentation'
 import { latestSavedStackingMasterAssetIdFromCompleteEvidence } from '../../../processing-project-evidence'
 import { nightbookHref } from '../../../route-href'
-import { CommandBar, type ControlPresentation } from '../../shell/WorkspaceShell'
+import {
+  CommandBar,
+  type ControlPresentation,
+} from '../../shell/WorkspaceShell'
 import '../Workspace.css'
 import './ProcessWorkspace.css'
 
@@ -188,7 +191,7 @@ export default function ProcessWorkspace(props: ProcessWorkspaceProps) {
   const authority = processControlPresentation(project, phone)
   return (
     <div
-      className="nightbook-app ui-theme"
+      className="workspace-app ui-theme"
       data-ui-theme="default"
       data-ui-density="compact"
     >
@@ -273,8 +276,8 @@ function ProjectList({
 }) {
   return (
     <main
-      id="nightbook-workspace"
-      className="nightbook-desktop-workspace nightbook-process-workspace"
+      id="workspace-content"
+      className="workspace-desktop process-workspace"
     >
       <PageHeader eyebrow="Process / Projects" title="Processing Projects" />
       <Panel>
@@ -300,7 +303,7 @@ function ProjectList({
               projects.map((project) => (
                 <a
                   key={project.projectId}
-                  className="nightbook-process-project-link"
+                  className="process-project-link"
                   href={nightbookHref(
                     `/process/projects/${encodeURIComponent(project.projectId)}`,
                   )}
@@ -340,8 +343,8 @@ function SourceIntake({
   const [name, setName] = useState(`Process ${assetId}`)
   return (
     <main
-      id="nightbook-workspace"
-      className="nightbook-desktop-workspace nightbook-process-workspace"
+      id="workspace-content"
+      className="workspace-desktop process-workspace"
     >
       <PageHeader
         eyebrow="Process / Library handoff"
@@ -386,9 +389,7 @@ function SourceIntake({
               Create Project
             </Button>
             {!mutationAuthority.allowed ? (
-              <p className="nightbook-process-denial">
-                {mutationAuthority.reason}
-              </p>
+              <p className="process-denial">{mutationAuthority.reason}</p>
             ) : null}
             {message ? <p role="status">{message}</p> : null}
           </Stack>
@@ -463,8 +464,8 @@ function ProjectWorkspace({
   )
   return (
     <main
-      id="nightbook-workspace"
-      className="nightbook-desktop-workspace nightbook-process-workspace"
+      id="workspace-content"
+      className="workspace-desktop process-workspace"
       aria-busy={pending !== undefined}
     >
       <PageHeader
@@ -481,8 +482,8 @@ function ProjectWorkspace({
           />
         }
       />
-      <div className="nightbook-process-grid">
-        <Panel className="nightbook-process-source">
+      <div className="process-grid">
+        <Panel className="process-source">
           <PanelHeader
             title="Project"
             meta={`${project.sources.length} sources`}
@@ -511,7 +512,7 @@ function ProjectWorkspace({
             </Stack>
           </PanelBody>
         </Panel>
-        <Panel className="nightbook-process-stage">
+        <Panel className="process-stage">
           <PanelHeader title={viewedStage} meta="Current Result" />
           <PanelBody>
             {viewedStage === 'Sources' ? (
@@ -528,7 +529,7 @@ function ProjectWorkspace({
             ) : null}
           </PanelBody>
         </Panel>
-        <Panel className="nightbook-process-operation">
+        <Panel className="process-operation">
           <PanelHeader
             title="Controls"
             meta={mutable ? 'Project intent' : 'Protected'}
@@ -552,7 +553,7 @@ function ProjectWorkspace({
               />
             )}
             {message ? (
-              <p className="nightbook-process-message" role="status">
+              <p className="process-message" role="status">
                 {message}
               </p>
             ) : null}
@@ -720,7 +721,7 @@ function StageControls({
         {runLabel} {stage.stage}
       </Button>
       {runUnavailable ? (
-        <p className="nightbook-process-denial">
+        <p className="process-denial">
           <b>Unavailable:</b> {titleCase(runUnavailable)}
         </p>
       ) : null}
@@ -851,10 +852,10 @@ function ProcessPhone({
       .length ?? 0
   return (
     <main
-      id="nightbook-workspace"
-      className="nightbook-phone-workspace nightbook-process-phone"
+      id="workspace-content"
+      className="workspace-phone-workspace process-phone"
     >
-      <header className="nightbook-phone-header">
+      <header className="workspace-phone-header">
         <div>
           <p>Process / read only</p>
           <h1>{project?.name ?? sourceAssetId ?? 'Processing Projects'}</h1>
@@ -957,7 +958,7 @@ function ProcessStatus({
 }) {
   return (
     <footer
-      className="nightbook-operational-status nightbook-process-status"
+      className="workspace-operational-status process-status"
       aria-label="Operational status"
     >
       <span>

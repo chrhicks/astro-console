@@ -168,7 +168,7 @@ const projection = (
     }),
   )
 
-test('renders the Nightbook Plan shell and real typed editor controls', () => {
+test('renders the Plan workspace shell and real typed editor controls', () => {
   const markup = renderToStaticMarkup(
     createElement(PlanWorkspace, {
       projection: projection(),

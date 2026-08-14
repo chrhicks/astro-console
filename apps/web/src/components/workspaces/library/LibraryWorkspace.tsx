@@ -201,7 +201,7 @@ function AssetNavigator({
   const assets = page.value?.results ?? []
   if (assets.length === 0)
     return page.message ? (
-      <p className="nightbook-library-message" role="status">
+      <p className="library-message" role="status">
         {page.message}
       </p>
     ) : null
@@ -226,10 +226,7 @@ function AssetNavigator({
     onSelectAsset(assetId)
   }
   return (
-    <nav
-      className="nightbook-library-assets"
-      aria-label="Frame review navigation"
-    >
+    <nav className="library-assets" aria-label="Frame review navigation">
       <a href={nightbookHref('/library')}>Catalog</a>
       {previous ? (
         <a
@@ -286,7 +283,7 @@ function CatalogReview({
     review.rating === undefined ? '☆ Not rated' : `★ ${review.rating}/5`
   return (
     <div
-      className="nightbook-library-catalog-review"
+      className="library-catalog-review"
       data-decision={review.decision}
       aria-label={`Review: ${titleCase(review.decision)}; ${rating}`}
     >
@@ -345,7 +342,7 @@ function LibraryCatalog({
     })
 
   return (
-    <main id="nightbook-workspace" className="nightbook-library-catalog">
+    <main id="workspace-content" className="library-catalog">
       <PageHeader
         eyebrow="Library / Durable evidence"
         title="Catalog"
@@ -375,10 +372,10 @@ function LibraryCatalog({
           />
         }
       />
-      <Panel className="nightbook-library-catalog-controls">
+      <Panel className="library-catalog-controls">
         <PanelHeader title="Organize" meta="Service query" />
         <PanelBody>
-          <div className="nightbook-library-catalog-fields">
+          <div className="library-catalog-fields">
             <Field label="Role">
               <Select
                 value={page.query.role ?? ''}
@@ -418,20 +415,20 @@ function LibraryCatalog({
               </Select>
             </Field>
           </div>
-          <p className="nightbook-library-message">
+          <p className="library-message">
             Assets are grouped by the service comparison-group identity. Night,
             target, and review-status facets are not projected by the current
             query contract.
           </p>
         </PanelBody>
       </Panel>
-      <Panel className="nightbook-library-intake">
+      <Panel className="library-intake">
         <PanelHeader
           title="Processing Project intake"
           meta={`${intake.selectedAssetIds.size} frames · ${intake.selectedCaptureSetIds.size} Capture Sets`}
         />
         <PanelBody>
-          <div className="nightbook-library-intake-fields">
+          <div className="library-intake-fields">
             <Field label="Destination">
               <Select
                 value={intake.destination}
@@ -478,12 +475,12 @@ function LibraryCatalog({
                   : 'Add to project'}
             </Button>
           </div>
-          <p className="nightbook-library-message" role="status">
+          <p className="library-message" role="status">
             {intake.message ??
               intake.denial ??
               'Project intake is ready for an exact source selection.'}
           </p>
-          <p className="nightbook-library-message">
+          <p className="library-message">
             Capture Sets resolve to the exact asset revisions currently
             retained. Intake does not start Calibration.
           </p>
@@ -499,7 +496,7 @@ function LibraryCatalog({
       ) : null}
       {groups.length ? (
         <section
-          className="nightbook-library-catalog-groups"
+          className="library-catalog-groups"
           aria-label="Loaded Library groups"
         >
           {groups.map(([groupId, assets]) => {
@@ -507,14 +504,14 @@ function LibraryCatalog({
               (asset) => asset.captureSetId !== undefined,
             )?.captureSetId
             return (
-              <Panel key={groupId} className="nightbook-library-catalog-group">
+              <Panel key={groupId} className="library-catalog-group">
                 <PanelHeader
                   title={groupId}
                   meta={`${assets.length} loaded representation${assets.length === 1 ? '' : 's'}`}
                 />
                 <PanelBody>
                   {captureSetId ? (
-                    <label className="nightbook-library-set-selector">
+                    <label className="library-set-selector">
                       <input
                         type="checkbox"
                         disabled={intake.disabled}
@@ -524,10 +521,10 @@ function LibraryCatalog({
                       Select whole Capture Set
                     </label>
                   ) : null}
-                  <div className="nightbook-library-catalog-assets">
+                  <div className="library-catalog-assets">
                     {assets.map((asset) => (
                       <div
-                        className="nightbook-library-selectable-asset"
+                        className="library-selectable-asset"
                         key={asset.assetId}
                       >
                         <label>
@@ -553,7 +550,7 @@ function LibraryCatalog({
                           </span>
                           <CatalogReview review={asset.review} />
                           <StatusIndicator
-                            className="nightbook-library-catalog-availability"
+                            className="library-catalog-availability"
                             label={titleCase(asset.availability)}
                             tone={availabilityTone(asset.availability)}
                             detail={`Revision ${asset.revision}`}
@@ -576,10 +573,7 @@ function LibraryCatalog({
         />
       )}
       {page.value ? (
-        <nav
-          className="nightbook-library-catalog-paging"
-          aria-label="Catalog pages"
-        >
+        <nav className="library-catalog-paging" aria-label="Catalog pages">
           <Button
             size="small"
             disabled={!page.query.cursor || !onQuery}
@@ -615,7 +609,7 @@ function LibraryCatalog({
 
 function LineagePanel({ detail }: { detail: LibraryAssetDetail }) {
   return (
-    <Panel as="aside" className="nightbook-library-lineage">
+    <Panel as="aside" className="library-lineage">
       <PanelHeader title="Lineage" meta="Immutable evidence" />
       <PanelBody>
         <DataList aria-label="Asset lineage">
@@ -711,7 +705,7 @@ function ReviewEvidence({
   const metrics = inspection?._tag === 'Available' ? inspection.metrics : null
   return (
     <EvidenceViewport
-      className="nightbook-library-evidence"
+      className="library-evidence"
       label={`Preview for ${detail.assetId}`}
       fit={fit}
       media={
@@ -856,18 +850,18 @@ function ReviewDecision({
     onSelect: () => review('rejected'),
   }
   return (
-    <aside className="nightbook-library-decision">
+    <aside className="library-decision">
       <AssetNavigator
         page={page}
         selectedAssetId={detail.assetId}
         onSelectAsset={onSelectAsset}
       />
-      <Panel className="nightbook-library-review-fields">
+      <Panel className="library-review-fields">
         <PanelHeader title="Review" meta="Durable rating and note" />
         <PanelBody>
           <Stack gap={8}>
             <div
-              className="nightbook-library-rating"
+              className="library-rating"
               role="radiogroup"
               aria-label="Frame rating"
             >
@@ -957,10 +951,7 @@ function ReviewTab({
 >) {
   if (!detail) return null
   return (
-    <section
-      className="nightbook-library-review-grid"
-      aria-label="Frame review"
-    >
+    <section className="library-review-grid" aria-label="Frame review">
       <LineagePanel detail={detail} />
       <ReviewEvidence detail={detail} />
       <ReviewDecision
@@ -1018,8 +1009,8 @@ function CompareTab({
     `${left} · ${right ?? 'Not loaded'}`
 
   return (
-    <section className="nightbook-library-compare" aria-label="Frame compare">
-      <div className="nightbook-library-compare-picker">
+    <section className="library-compare" aria-label="Frame compare">
+      <div className="library-compare-picker">
         <b>Comparison peer</b>
         {peers.length ? (
           peers.map((candidate) => (
@@ -1062,7 +1053,7 @@ function CompareTab({
           }
         />
       )}
-      <Panel className="nightbook-library-compare-facts">
+      <Panel className="library-compare-facts">
         <PanelHeader title="Loaded service facts" meta="Browser-only view" />
         <PanelBody>
           <DataList aria-label="Compared service facts">
@@ -1135,7 +1126,7 @@ function CompareTab({
               />
             )}
           </DataList>
-          <p className="nightbook-library-message">
+          <p className="library-message">
             Left · right. Compare selection is browser-only and changes no asset
             or review.
           </p>
@@ -1155,10 +1146,7 @@ function AvailabilityTab({ detail }: { detail: LibraryAssetDetail }) {
     (representation) => representation.state === 'published',
   )
   return (
-    <section
-      className="nightbook-library-availability"
-      aria-label="Asset availability"
-    >
+    <section className="library-availability" aria-label="Asset availability">
       <Panel>
         <PanelHeader
           title="Representations"
@@ -1226,7 +1214,7 @@ function AvailabilityTab({ detail }: { detail: LibraryAssetDetail }) {
         actions={
           eligible ? (
             <a
-              className="nightbook-library-download"
+              className="library-download"
               href={`/api/library/assets/${encodeURIComponent(detail.assetId)}/download`}
             >
               Download original
@@ -1283,7 +1271,7 @@ function LibraryDesktop(
     )
 
   return (
-    <main id="nightbook-workspace" className="nightbook-library-workspace">
+    <main id="workspace-content" className="library-workspace">
       <PageHeader
         eyebrow="Library / Frame review"
         title={title}
@@ -1304,7 +1292,7 @@ function LibraryDesktop(
       />
       {props.detail ? (
         <Tabs
-          className="nightbook-library-tabs"
+          className="library-tabs"
           items={tabs}
           activeId={activeTab}
           onActiveChange={setActiveTab}
@@ -1348,8 +1336,8 @@ export function LibraryPhone({
   }, [page.value])
   return (
     <main
-      id="nightbook-workspace"
-      className="nightbook-library-phone"
+      id="workspace-content"
+      className="library-phone"
       aria-label="Read-only Library phone projection"
     >
       <PageHeader
@@ -1498,7 +1486,7 @@ export function LibraryPhone({
         </>
       ) : !assetId && catalogGroups.length ? (
         <section
-          className="nightbook-library-phone-groups"
+          className="library-phone-groups"
           aria-label="Phone Library catalog"
         >
           {catalogGroups.map(([groupId, assets]) => (
@@ -1539,7 +1527,7 @@ function LibraryStatusStrip({ projection }: { projection: Projection }) {
   const current = projection.shell.freshness.startsWith('Current ')
   return (
     <footer
-      className="nightbook-operational-status"
+      className="workspace-operational-status"
       aria-label="Operational status"
     >
       <span>
@@ -1636,11 +1624,11 @@ export function LibraryWorkspace(props: LibraryWorkspaceProps) {
   }
   return (
     <div
-      className="nightbook-app ui-theme"
+      className="workspace-app ui-theme"
       data-ui-theme="default"
       data-ui-density="compact"
     >
-      <a className="nightbook-skip-link" href="#nightbook-workspace">
+      <a className="workspace-skip-link" href="#workspace-content">
         Skip to Library evidence
       </a>
       <CommandBar

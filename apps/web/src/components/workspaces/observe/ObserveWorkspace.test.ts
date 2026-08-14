@@ -11,7 +11,10 @@ import { projectBootstrapState } from '../../../bootstrap-projection'
 import { unavailableProjection } from '../../../future-adapter'
 import { PreflightRefreshSubmission } from '../../../preflight-refresh-client'
 import { ObserveWorkspace, ObservePhone } from './ObserveWorkspace'
-import { ControlActionList, projectedControlActions } from '../../shell/WorkspaceShell'
+import {
+  ControlActionList,
+  projectedControlActions,
+} from '../../shell/WorkspaceShell'
 
 const preflightProjection = () =>
   projectBootstrapState(
@@ -19,7 +22,7 @@ const preflightProjection = () =>
       snapshot: Schema.decodeUnknownSync(BootstrapSnapshot)({
         ...bootstrapFixtures.activeRun,
         observe: {
-          runId: 'run-nightbook-preflight',
+          runId: 'run-observe-preflight',
           revision: 4,
           executor: 'fixture',
           phase: 'preflight',
@@ -124,7 +127,7 @@ const targetSnapshot = (
   Schema.decodeUnknownSync(BootstrapSnapshot)({
     ...bootstrapFixtures.activeRun,
     observe: {
-      runId: 'run-nightbook-target',
+      runId: 'run-observe-target',
       revision: 7,
       executor: 'fixture',
       phase,
@@ -227,7 +230,7 @@ test('renders truthful loading and unavailable evidence without inert content', 
   assert.match(unavailable, /Control · view/)
   assert.match(unavailable, /service truth unavailable/)
   assert.equal(
-    (unavailable.match(/class="nightbook-health-item"/g) ?? []).length,
+    (unavailable.match(/class="shell-health-item"/g) ?? []).length,
     5,
   )
   assert.match(
@@ -462,7 +465,7 @@ test('leaves completed Acquire evidence behind and exposes the exact captured Li
   const phoneMarkup = renderToStaticMarkup(
     createElement(ObservePhone, { projection, loading: false }),
   )
-  assert.doesNotMatch(phoneMarkup, /nightbook-phone-target-evidence/)
+  assert.doesNotMatch(phoneMarkup, /workspace-phone-target-evidence/)
   assert.match(phoneMarkup, /Review captured frame in Library/)
 })
 
@@ -635,17 +638,12 @@ test('pins every health control to one fixed square dimension', () => {
     new URL('../Workspace.css', import.meta.url),
     'utf8',
   )
-  const rule = styles.match(
-    /\.nightbook-health-item > button\s*\{([^}]*)\}/s,
-  )?.[1]
+  const rule = styles.match(/\.shell-health-item > button\s*\{([^}]*)\}/s)?.[1]
   assert.ok(rule)
-  assert.match(rule, /inline-size:\s*var\(--nightbook-health-control-size\)/)
-  assert.match(rule, /block-size:\s*var\(--nightbook-health-control-size\)/)
-  assert.match(
-    rule,
-    /min-inline-size:\s*var\(--nightbook-health-control-size\)/,
-  )
-  assert.match(rule, /min-block-size:\s*var\(--nightbook-health-control-size\)/)
+  assert.match(rule, /inline-size:\s*var\(--shell-health-control-size\)/)
+  assert.match(rule, /block-size:\s*var\(--shell-health-control-size\)/)
+  assert.match(rule, /min-inline-size:\s*var\(--shell-health-control-size\)/)
+  assert.match(rule, /min-block-size:\s*var\(--shell-health-control-size\)/)
 })
 
 test('defines the approved target-acquire and recovery responsive geometry', () => {
@@ -655,26 +653,26 @@ test('defines the approved target-acquire and recovery responsive geometry', () 
   )
   assert.match(
     styles,
-    /\.nightbook-target-stage\[data-mode='acquire'\][^{]*\{[^}]*grid-template-columns:\s*240px minmax\(420px, 1fr\) 280px/s,
+    /\.observe-target-stage\[data-mode='acquire'\][^{]*\{[^}]*grid-template-columns:\s*240px minmax\(420px, 1fr\) 280px/s,
   )
   assert.match(
     styles,
-    /@media \(min-width: 601px\) and \(max-width: 1120px\)[\s\S]*?\.nightbook-target-stage\[data-mode='acquire'\][^{]*\{[^}]*grid-template-columns:\s*240px minmax\(0, 1fr\)/,
+    /@media \(min-width: 601px\) and \(max-width: 1120px\)[\s\S]*?\.observe-target-stage\[data-mode='acquire'\][^{]*\{[^}]*grid-template-columns:\s*240px minmax\(0, 1fr\)/,
   )
   assert.match(
     styles,
-    /@media \(min-width: 601px\) and \(max-width: 780px\)[\s\S]*?\.nightbook-target-stage\[data-mode='acquire'\],[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/,
+    /@media \(min-width: 601px\) and \(max-width: 780px\)[\s\S]*?\.observe-target-stage\[data-mode='acquire'\],[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/,
   )
   assert.match(
     styles,
-    /@media \(min-width: 601px\) and \(max-width: 780px\)[\s\S]*?\.nightbook-observe-stage\s*\{[^}]*height:\s*max-content[\s\S]*?\.nightbook-context-rail,\s*\.nightbook-evidence-panel\s*\{[^}]*height:\s*auto/,
+    /@media \(min-width: 601px\) and \(max-width: 780px\)[\s\S]*?\.observe-stage\s*\{[^}]*height:\s*max-content[\s\S]*?\.observe-context-rail,\s*\.observe-evidence-panel\s*\{[^}]*height:\s*auto/,
   )
   assert.match(
     styles,
-    /\.nightbook-target-stage\[data-mode='recover'\][^{]*\{[^}]*grid-template-columns:\s*minmax\(520px, 1fr\) 280px/s,
+    /\.observe-target-stage\[data-mode='recover'\][^{]*\{[^}]*grid-template-columns:\s*minmax\(520px, 1fr\) 280px/s,
   )
   assert.match(
     styles,
-    /@media \(min-width: 601px\) and \(max-width: 1120px\)[\s\S]*?\.nightbook-target-stage\[data-mode='recover'\][^{]*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 280px[\s\S]*?\.nightbook-target-stage\[data-mode='recover'\] > \.nightbook-decision-rail[^{]*\{[^}]*grid-column:\s*auto/,
+    /@media \(min-width: 601px\) and \(max-width: 1120px\)[\s\S]*?\.observe-target-stage\[data-mode='recover'\][^{]*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 280px[\s\S]*?\.observe-target-stage\[data-mode='recover'\] > \.observe-decision-rail[^{]*\{[^}]*grid-column:\s*auto/,
   )
 })

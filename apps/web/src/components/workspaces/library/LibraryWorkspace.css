@@ -1,11 +1,11 @@
-.nightbook-library-workspace,
-.nightbook-library-catalog,
-.nightbook-library-phone {
+.library-workspace,
+.library-catalog,
+.library-phone {
   min-width: 0;
   color: var(--ui-text);
 }
 
-.nightbook-library-catalog {
+.library-catalog {
   min-height: 0;
   overflow: auto;
   padding: 10px 12px 44px;
@@ -15,31 +15,31 @@
   gap: 8px;
 }
 
-.nightbook-library-catalog-fields {
+.library-catalog-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(180px, 260px));
   gap: 8px;
 }
 
-.nightbook-library-catalog-groups {
+.library-catalog-groups {
   min-width: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(340px, 1fr));
   gap: 8px;
 }
 
-.nightbook-library-catalog-group {
+.library-catalog-group {
   min-width: 0;
 }
 
-.nightbook-library-catalog-assets {
+.library-catalog-assets {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 6px;
 }
 
-.nightbook-library-selectable-asset > a,
-.nightbook-library-phone-groups nav > a {
+.library-selectable-asset > a,
+.library-phone-groups nav > a {
   min-width: 0;
   border: 1px solid var(--ui-line);
   border-radius: var(--ui-radius);
@@ -51,39 +51,39 @@
   gap: 5px;
 }
 
-.nightbook-library-selectable-asset > a:hover,
-.nightbook-library-phone-groups nav > a:hover {
+.library-selectable-asset > a:hover,
+.library-phone-groups nav > a:hover {
   border-color: var(--ui-accent);
 }
 
-.nightbook-library-selectable-asset > a:focus-visible,
-.nightbook-library-phone-groups nav > a:focus-visible {
+.library-selectable-asset > a:focus-visible,
+.library-phone-groups nav > a:focus-visible {
   outline: 2px solid var(--ui-focus);
   outline-offset: 2px;
 }
 
-.nightbook-library-selectable-asset > a > b,
-.nightbook-library-phone-groups nav > a > b {
+.library-selectable-asset > a > b,
+.library-phone-groups nav > a > b {
   overflow: hidden;
   font: 700 12px var(--ui-font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.nightbook-library-selectable-asset > a > span,
-.nightbook-library-phone-groups nav > a > span {
+.library-selectable-asset > a > span,
+.library-phone-groups nav > a > span {
   color: var(--ui-muted);
   font: 600 11px var(--ui-font-mono);
 }
 
-.nightbook-library-selectable-asset {
+.library-selectable-asset {
   min-width: 0;
   display: grid;
   gap: 4px;
 }
 
-.nightbook-library-selectable-asset > label,
-.nightbook-library-set-selector {
+.library-selectable-asset > label,
+.library-set-selector {
   color: var(--ui-muted);
   font: 650 11px var(--ui-font-mono);
   display: flex;
@@ -91,18 +91,18 @@
   gap: 5px;
 }
 
-.nightbook-library-intake-fields {
+.library-intake-fields {
   display: grid;
   grid-template-columns: minmax(190px, 280px) minmax(190px, 1fr) auto;
   align-items: end;
   gap: 8px;
 }
 
-.nightbook-library-set-selector {
+.library-set-selector {
   margin-bottom: 7px;
 }
 
-.nightbook-library-catalog-review {
+.library-catalog-review {
   min-width: 0;
   display: flex;
   align-items: center;
@@ -112,26 +112,26 @@
   font: 650 11px var(--ui-font-mono);
 }
 
-.nightbook-library-catalog-review > span {
+.library-catalog-review > span {
   color: var(--ui-accent);
 }
 
-.nightbook-library-catalog-review > b {
+.library-catalog-review > b {
   overflow: hidden;
   color: var(--ui-text);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.nightbook-library-catalog-review[data-decision='accepted'] > b {
+.library-catalog-review[data-decision='accepted'] > b {
   color: var(--ui-positive);
 }
 
-.nightbook-library-catalog-review[data-decision='rejected'] > b {
+.library-catalog-review[data-decision='rejected'] > b {
   color: var(--ui-danger);
 }
 
-.nightbook-library-catalog-availability {
+.library-catalog-availability {
   width: 100%;
   min-width: 0;
   display: grid;
@@ -142,13 +142,13 @@
   white-space: normal;
 }
 
-.nightbook-library-catalog-availability > i {
+.library-catalog-availability > i {
   grid-column: 1;
   margin-top: 0.35em;
 }
 
-.nightbook-library-catalog-availability > b,
-.nightbook-library-catalog-availability > small {
+.library-catalog-availability > b,
+.library-catalog-availability > small {
   min-width: 0;
   grid-column: 2;
   overflow: visible;
@@ -157,12 +157,12 @@
   overflow-wrap: anywhere;
 }
 
-.nightbook-library-catalog-availability > b {
+.library-catalog-availability > b {
   text-transform: none;
   letter-spacing: 0;
 }
 
-.nightbook-library-catalog-paging {
+.library-catalog-paging {
   display: grid;
   grid-template-columns: auto minmax(100px, 1fr) auto;
   align-items: center;
@@ -172,7 +172,7 @@
   text-align: center;
 }
 
-.nightbook-library-workspace {
+.library-workspace {
   min-height: 0;
   overflow: auto;
   padding: 10px 12px 44px;
@@ -181,7 +181,7 @@
   gap: 8px;
 }
 
-.nightbook-library-assets {
+.library-assets {
   min-width: 0;
   display: grid;
   grid-template-columns: auto auto auto auto;
@@ -190,22 +190,22 @@
   gap: 4px;
 }
 
-.nightbook-library-assets > div {
+.library-assets > div {
   min-width: 0;
   color: var(--ui-text);
   text-align: center;
   font: 650 11px var(--ui-font-mono);
 }
 
-.nightbook-library-assets > a,
-.nightbook-library-assets > span {
+.library-assets > a,
+.library-assets > span {
   min-width: 72px;
   color: var(--ui-text);
   font: 650 11px var(--ui-font-mono);
   text-align: center;
 }
 
-.nightbook-library-assets > a {
+.library-assets > a {
   border: 1px solid var(--ui-line-strong);
   border-radius: var(--ui-radius);
   min-height: var(--ui-control-height);
@@ -216,43 +216,43 @@
   justify-content: center;
 }
 
-.nightbook-library-assets > a:hover {
+.library-assets > a:hover {
   border-color: var(--ui-accent);
 }
 
-.nightbook-library-assets > a:focus-visible {
+.library-assets > a:focus-visible {
   outline: 2px solid var(--ui-focus);
   outline-offset: 2px;
 }
 
-.nightbook-library-assets > span[aria-disabled='true'] {
+.library-assets > span[aria-disabled='true'] {
   color: var(--ui-muted);
   opacity: 0.6;
 }
 
-.nightbook-library-message {
+.library-message {
   color: var(--ui-muted);
   margin: 0;
 }
 
-.nightbook-library-tabs {
+.library-tabs {
   border: 1px solid var(--ui-line);
   background: var(--ui-surface);
   min-width: 0;
   min-height: 0;
 }
 
-.nightbook-library-tabs .ui-tab-list {
+.library-tabs .ui-tab-list {
   justify-content: flex-end;
 }
 
-.nightbook-library-tabs .ui-tab-panel {
+.library-tabs .ui-tab-panel {
   min-height: 0;
   height: calc(100% - var(--ui-control-height));
   padding: 8px;
 }
 
-.nightbook-library-review-grid {
+.library-review-grid {
   height: 100%;
   min-height: 0;
   display: grid;
@@ -261,24 +261,24 @@
   align-items: stretch;
 }
 
-.nightbook-library-lineage,
-.nightbook-library-decision,
-.nightbook-library-evidence {
+.library-lineage,
+.library-decision,
+.library-evidence {
   min-width: 0;
 }
 
-.nightbook-library-decision {
+.library-decision {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 8px;
   overflow: auto;
 }
 
-.nightbook-library-review-fields .ui-panel-body {
+.library-review-fields .ui-panel-body {
   padding-block: 8px;
 }
 
-.nightbook-library-rating {
+.library-rating {
   min-width: 0;
   display: flex;
   align-items: center;
@@ -289,11 +289,11 @@
   font: 650 11px var(--ui-font-mono);
 }
 
-.nightbook-library-rating > span {
+.library-rating > span {
   margin-right: auto;
 }
 
-.nightbook-library-rating button {
+.library-rating button {
   width: 40px;
   min-width: 40px;
   height: 40px;
@@ -307,24 +307,24 @@
   line-height: 1;
 }
 
-.nightbook-library-rating button:disabled {
+.library-rating button:disabled {
   color: var(--ui-muted);
   cursor: not-allowed;
   opacity: 0.65;
 }
 
-.nightbook-library-lineage .ui-panel-body {
+.library-lineage .ui-panel-body {
   height: 100%;
 }
 
-.nightbook-library-evidence {
+.library-evidence {
   height: 100%;
   min-height: 420px;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto auto;
 }
 
-.nightbook-library-evidence .ui-evidence-canvas {
+.library-evidence .ui-evidence-canvas {
   height: 100%;
   aspect-ratio: auto;
   background:
@@ -338,25 +338,25 @@
   background-size: 18px 18px;
 }
 
-.nightbook-library-evidence[data-fit='aspect'] .ui-evidence-canvas > img {
+.library-evidence[data-fit='aspect'] .ui-evidence-canvas > img {
   object-fit: contain;
 }
 
-.nightbook-library-evidence[data-fit='fill'] .ui-evidence-canvas > img {
+.library-evidence[data-fit='fill'] .ui-evidence-canvas > img {
   object-fit: cover;
 }
 
-.nightbook-library-evidence .ui-evidence-overlays {
+.library-evidence .ui-evidence-overlays {
   display: flex;
   align-items: end;
   padding: 8px;
 }
 
-.nightbook-library-evidence .ui-metric-overlay {
+.library-evidence .ui-metric-overlay {
   pointer-events: none;
 }
 
-.nightbook-library-availability {
+.library-availability {
   min-height: 380px;
   display: grid;
   grid-template-columns: minmax(300px, 1.4fr) minmax(240px, 0.8fr);
@@ -364,7 +364,7 @@
   align-items: start;
 }
 
-.nightbook-library-compare {
+.library-compare {
   min-height: 0;
   height: 100%;
   display: grid;
@@ -373,7 +373,7 @@
   gap: 8px;
 }
 
-.nightbook-library-compare-picker {
+.library-compare-picker {
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
@@ -383,20 +383,20 @@
   font: 650 11px var(--ui-font-mono);
 }
 
-.nightbook-library-compare-picker .ui-button {
+.library-compare-picker .ui-button {
   flex: 0 0 auto;
 }
 
-.nightbook-library-compare .nightbook-library-evidence {
+.library-compare .library-evidence {
   min-height: 360px;
 }
 
-.nightbook-library-compare-facts {
+.library-compare-facts {
   min-width: 0;
   overflow: auto;
 }
 
-.nightbook-library-download {
+.library-download {
   min-height: var(--ui-control-height);
   border: 1px solid var(--ui-line-strong);
   border-radius: var(--ui-radius);
@@ -409,101 +409,101 @@
   align-items: center;
 }
 
-.nightbook-library-download:hover {
+.library-download:hover {
   border-color: var(--ui-accent);
 }
 
-.nightbook-library-download:focus-visible {
+.library-download:focus-visible {
   outline: 2px solid var(--ui-focus);
   outline-offset: 2px;
 }
 
-.nightbook-library-phone {
+.library-phone {
   padding: 12px 12px 44px;
   display: none;
   gap: 10px;
 }
 
-.nightbook-library-phone .nightbook-library-evidence {
+.library-phone .library-evidence {
   min-height: 0;
 }
 
-.nightbook-library-phone .ui-evidence-toolbar {
+.library-phone .ui-evidence-toolbar {
   display: none;
 }
 
-.nightbook-library-phone-groups,
-.nightbook-library-phone-groups nav {
+.library-phone-groups,
+.library-phone-groups nav {
   min-width: 0;
   display: grid;
   gap: 8px;
 }
 
 @media (max-width: 1050px) {
-  .nightbook-library-review-grid {
+  .library-review-grid {
     height: auto;
     min-height: 0;
     grid-template-columns: 190px minmax(360px, 1fr);
   }
 
-  .nightbook-library-decision {
+  .library-decision {
     grid-column: 1 / -1;
   }
 
-  .nightbook-library-compare {
+  .library-compare {
     height: auto;
     grid-template-columns: 1fr 1fr;
   }
 
-  .nightbook-library-compare-facts {
+  .library-compare-facts {
     grid-column: 1 / -1;
   }
 }
 
 @media (max-width: 800px) and (min-width: 601px) {
-  .nightbook-library-catalog-groups {
+  .library-catalog-groups {
     grid-template-columns: 1fr;
   }
 
-  .nightbook-library-intake-fields {
+  .library-intake-fields {
     grid-template-columns: 1fr 1fr;
   }
 
-  .nightbook-library-intake-fields > .ui-button {
+  .library-intake-fields > .ui-button {
     grid-column: 1 / -1;
   }
 
-  .nightbook-library-review-grid,
-  .nightbook-library-availability,
-  .nightbook-library-compare {
+  .library-review-grid,
+  .library-availability,
+  .library-compare {
     grid-template-columns: 1fr;
   }
 
-  .nightbook-library-compare-picker,
-  .nightbook-library-compare-facts {
+  .library-compare-picker,
+  .library-compare-facts {
     grid-column: auto;
   }
 
-  .nightbook-library-evidence {
+  .library-evidence {
     height: auto;
     min-height: 360px;
   }
 }
 
 @media (max-width: 600px) {
-  .nightbook-library-workspace {
+  .library-workspace {
     display: none;
   }
 
-  .nightbook-library-phone {
+  .library-phone {
     display: grid;
   }
 
-  .nightbook-library-phone .ui-data-list-item {
+  .library-phone .ui-data-list-item {
     grid-template-columns: minmax(88px, 0.8fr) minmax(0, 1.2fr);
   }
 
-  .nightbook-library-phone-groups nav > a {
+  .library-phone-groups nav > a {
     min-height: 52px;
   }
 }

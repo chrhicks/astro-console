@@ -79,12 +79,12 @@ const healthFacts = (health: readonly HealthFact[]): readonly HealthFact[] =>
 function Health({ health }: { health: readonly HealthFact[] }) {
   const id = useId()
   return (
-    <div className="nightbook-health" aria-label="System health">
+    <div className="shell-health" aria-label="System health">
       {healthFacts(health).map((fact, index) => {
         const tooltipId = `${id}-${index}`
         return (
           <div
-            className="nightbook-health-item"
+            className="shell-health-item"
             data-tone={tone(fact.tone)}
             key={fact.label}
           >
@@ -156,7 +156,7 @@ export function ControlActionList({
   submitAction: (action: ShellView['control']['actions'][number]) => void
 }) {
   return (
-    <div className="nightbook-control-actions">
+    <div className="shell-control-actions">
       {actions.map((action) => {
         const actionKey = controlActionKey(action)
         return (
@@ -243,10 +243,10 @@ function Control({
     return () => document.removeEventListener('keydown', closeOnEscape)
   }, [open])
   return (
-    <div className="nightbook-control">
+    <div className="shell-control">
       <button
         ref={triggerRef}
-        className="nightbook-control-trigger"
+        className="shell-control-trigger"
         type="button"
         aria-expanded={open}
         aria-controls={panelId}
@@ -257,7 +257,7 @@ function Control({
       </button>
       {open ? (
         <section
-          className="nightbook-control-flyout"
+          className="shell-control-flyout"
           id={panelId}
           role="dialog"
           aria-label={presentation?.dialogLabel ?? 'Control state'}
@@ -344,16 +344,16 @@ export function CommandBar({
     runPresentation ?? projectedRunPresentation(projection, loading)
   const workspaceLabel = titleCase(workspace)
   return (
-    <div className="nightbook-shell-header">
-      <header className="nightbook-command-bar">
+    <div className="shell-header">
+      <header className="shell-command-bar">
         <a
-          className="nightbook-brand"
+          className="shell-brand"
           href={nightbookHref(`/${workspace}`)}
-          aria-label={`Nightbook ${workspaceLabel}`}
+          aria-label={`Astro Console ${workspaceLabel}`}
         >
-          <span aria-hidden="true">N</span>
+          <span aria-hidden="true">A</span>
           <span>
-            <strong>Nightbook</strong>
+            <strong>Astro Console</strong>
             <small>Backyard observatory</small>
           </span>
         </a>
@@ -383,7 +383,7 @@ export function CommandBar({
             Process
           </a>
         </nav>
-        <div className="nightbook-run-capsule" aria-label="Current run">
+        <div className="shell-run-capsule" aria-label="Current run">
           <i
             data-active={run === undefined ? 'false' : 'true'}
             aria-hidden="true"

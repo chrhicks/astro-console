@@ -1,19 +1,19 @@
-.nightbook-plan-workspace {
+.plan-workspace {
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
-.nightbook-plan-portal {
+.plan-portal {
   position: absolute;
   width: 0;
   height: 0;
 }
 
-.nightbook-plan-header {
+.plan-header {
   min-height: 48px;
   padding: 2px;
 }
 
-.nightbook-plan-freeze-banner {
+.plan-freeze-banner {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -24,7 +24,7 @@
   padding: 6px 8px;
 }
 
-.nightbook-plan-freeze-copy {
+.plan-freeze-copy {
   overflow: hidden;
   color: var(--ui-muted);
   font-size: 10px;
@@ -32,31 +32,31 @@
   white-space: nowrap;
 }
 
-.nightbook-operational-status .nightbook-plan-status-mobile {
+.workspace-operational-status .plan-status-mobile {
   display: none;
 }
 
-.nightbook-plan-tabs {
+.plan-tabs {
   min-width: 0;
   min-height: 0;
   display: grid;
   grid-template-rows: 34px minmax(0, 1fr);
 }
 
-.nightbook-plan-tabs > [role='tablist'] {
+.plan-tabs > [role='tablist'] {
   justify-content: flex-end;
   border: 1px solid var(--ui-line);
   background: var(--ui-surface);
 }
 
-.nightbook-plan-tabs > [role='tabpanel'] {
+.plan-tabs > [role='tabpanel'] {
   min-width: 0;
   min-height: 0;
   overflow: auto;
   padding-top: 8px;
 }
 
-.nightbook-plan-active-grid {
+.plan-active-grid {
   display: grid;
   grid-template-columns: 220px minmax(430px, 1fr) 280px;
   min-width: 0;
@@ -64,24 +64,24 @@
   gap: 8px;
 }
 
-.nightbook-plan-active-grid > * {
+.plan-active-grid > * {
   min-width: 0;
   height: 100%;
 }
 
-.nightbook-plan-sequences .ui-panel-body,
-.nightbook-plan-editor .ui-panel-body {
+.plan-sequences .ui-panel-body,
+.plan-editor .ui-panel-body {
   overflow: auto;
 }
 
-.nightbook-plan-section-label {
+.plan-section-label {
   margin: 2px 0 4px;
   color: var(--ui-muted);
   font: 650 8px var(--ui-font-mono);
   text-transform: uppercase;
 }
 
-.nightbook-plan-sequence {
+.plan-sequence {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   width: 100%;
@@ -96,66 +96,66 @@
   text-align: left;
 }
 
-.nightbook-plan-sequence + .nightbook-plan-sequence {
+.plan-sequence + .plan-sequence {
   margin-top: 5px;
 }
 
-.nightbook-plan-sequence b,
-.nightbook-plan-sequence span,
-.nightbook-plan-sequence small {
+.plan-sequence b,
+.plan-sequence span,
+.plan-sequence small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.nightbook-plan-sequence b {
+.plan-sequence b {
   font: 650 10px var(--ui-font-sans);
 }
 
-.nightbook-plan-sequence span {
+.plan-sequence span {
   color: var(--ui-muted);
   font: 9px var(--ui-font-mono);
 }
 
-.nightbook-plan-sequence small {
+.plan-sequence small {
   grid-column: 1 / -1;
   color: var(--ui-muted);
   font-size: 9px;
 }
 
-.nightbook-plan-sequence[data-state='done'] {
+.plan-sequence[data-state='done'] {
   opacity: 0.62;
 }
 
-.nightbook-plan-sequence[data-state='live'] {
+.plan-sequence[data-state='live'] {
   border-color: var(--ui-positive);
 }
 
-.nightbook-plan-sequence[data-selected='true'] {
+.plan-sequence[data-selected='true'] {
   border-color: var(--ui-accent);
   background: var(--ui-accent-surface);
 }
 
-.nightbook-plan-schedule .ui-panel-body {
+.plan-schedule .ui-panel-body {
   display: grid;
   grid-template-rows: minmax(260px, 1fr) auto auto;
   min-height: 0;
 }
 
-.nightbook-plan-altitude {
+.plan-altitude {
   display: grid;
   grid-template-rows: minmax(240px, 1fr) auto;
   min-height: 0;
 }
 
-.nightbook-plan-altitude svg {
+.plan-altitude svg {
   width: 100%;
   height: 100%;
   min-height: 240px;
 }
 
-.nightbook-plan-altitude path {
+.plan-altitude path {
   fill: none;
   stroke: var(--ui-info);
   stroke-width: 2;
@@ -163,26 +163,26 @@
   opacity: 0.55;
 }
 
-.nightbook-plan-altitude path.grid {
+.plan-altitude path.grid {
   stroke: var(--ui-line);
   stroke-width: 1;
   stroke-dasharray: none;
   opacity: 1;
 }
 
-.nightbook-plan-altitude path.selected {
+.plan-altitude path.selected {
   stroke: var(--ui-text);
   stroke-dasharray: none;
   opacity: 1;
 }
 
-.nightbook-plan-altitude span,
-.nightbook-plan-muted {
+.plan-altitude span,
+.plan-muted {
   color: var(--ui-muted);
   font-size: 9px;
 }
 
-.nightbook-plan-timeline {
+.plan-timeline {
   min-width: 0;
   min-height: 105px;
   margin-top: 10px;
@@ -196,13 +196,13 @@
   padding: 28px 6% 20px;
 }
 
-.nightbook-plan-timeline-track {
+.plan-timeline-track {
   position: relative;
   min-width: 0;
   min-height: calc(var(--timeline-lane-count) * 50px - 6px);
 }
 
-.nightbook-plan-timeline article {
+.plan-timeline article {
   display: grid;
   position: absolute;
   top: calc(var(--timeline-lane) * 50px);
@@ -216,23 +216,23 @@
   overflow: hidden;
 }
 
-.nightbook-plan-timeline article[data-selected='true'] {
+.plan-timeline article[data-selected='true'] {
   border-color: var(--ui-positive);
 }
 
-.nightbook-plan-timeline b,
-.nightbook-plan-timeline small {
+.plan-timeline b,
+.plan-timeline small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 8px;
 }
 
-.nightbook-plan-timeline small {
+.plan-timeline small {
   color: var(--ui-muted);
 }
 
-.nightbook-plan-field-group {
+.plan-field-group {
   display: grid;
   gap: 4px;
   margin: 0 0 12px;
@@ -240,7 +240,7 @@
   padding: 0;
 }
 
-.nightbook-plan-field-group legend {
+.plan-field-group legend {
   width: 100%;
   margin-bottom: 3px;
   color: var(--ui-muted);
@@ -248,7 +248,7 @@
   text-transform: uppercase;
 }
 
-.nightbook-plan-field-group .ui-field {
+.plan-field-group .ui-field {
   display: grid;
   grid-template-columns: 82px minmax(0, 1fr);
   align-items: center;
@@ -256,17 +256,17 @@
   gap: 6px;
 }
 
-.nightbook-plan-field-group .ui-field-label,
-.nightbook-plan-field-group .ui-field-hint {
+.plan-field-group .ui-field-label,
+.plan-field-group .ui-field-hint {
   color: var(--ui-muted);
   font-size: 9px;
 }
 
-.nightbook-plan-field-group .ui-field-hint {
+.plan-field-group .ui-field-hint {
   grid-column: 2;
 }
 
-.nightbook-plan-action-dock {
+.plan-action-dock {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -277,14 +277,14 @@
   padding: 7px;
 }
 
-.nightbook-plan-action-dock > div:first-child {
+.plan-action-dock > div:first-child {
   display: grid;
   min-width: 0;
   gap: 2px;
 }
 
-.nightbook-plan-action-dock b,
-.nightbook-plan-action-dock small {
+.plan-action-dock b,
+.plan-action-dock small {
   overflow: hidden;
   color: var(--ui-muted);
   font-size: 9px;
@@ -292,12 +292,12 @@
   white-space: nowrap;
 }
 
-.nightbook-plan-action-dock .ui-cluster {
+.plan-action-dock .ui-cluster {
   flex: none;
   flex-wrap: nowrap;
 }
 
-.nightbook-plan-review-grid {
+.plan-review-grid {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
   min-width: 0;
@@ -305,12 +305,12 @@
   gap: 8px;
 }
 
-.nightbook-plan-review-grid > * {
+.plan-review-grid > * {
   min-width: 0;
   height: 100%;
 }
 
-.nightbook-plan-frozen-row {
+.plan-frozen-row {
   display: flex;
   justify-content: space-between;
   gap: 8px;
@@ -318,18 +318,18 @@
   padding: 9px 0;
 }
 
-.nightbook-plan-frozen-row span {
+.plan-frozen-row span {
   color: var(--ui-muted);
   font: 9px var(--ui-font-mono);
 }
 
-.nightbook-plan-change-list,
-.nightbook-plan-preview-options {
+.plan-change-list,
+.plan-preview-options {
   display: grid;
   gap: 6px;
 }
 
-.nightbook-plan-change {
+.plan-change {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
   min-width: 0;
@@ -338,7 +338,7 @@
   padding: 8px;
 }
 
-.nightbook-plan-change > div {
+.plan-change > div {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -346,42 +346,42 @@
   gap: 8px;
 }
 
-.nightbook-plan-change p {
+.plan-change p {
   grid-column: 2;
   margin: 0;
   color: var(--ui-muted);
   font-size: 9px;
 }
 
-.nightbook-plan-phone-sequences {
+.plan-phone-sequences {
   display: grid;
   gap: 5px;
 }
 
-.nightbook-plan-phone-sequences article {
+.plan-phone-sequences article {
   display: grid;
   gap: 2px;
   border: 1px solid var(--ui-line);
   padding: 8px;
 }
 
-.nightbook-plan-phone-sequences span,
-.nightbook-plan-phone-sequences small {
+.plan-phone-sequences span,
+.plan-phone-sequences small {
   color: var(--ui-muted);
   font-size: 9px;
 }
 
 @media (min-width: 781px) and (max-width: 1120px) {
-  .nightbook-plan-active-grid {
+  .plan-active-grid {
     grid-template-columns: 190px minmax(0, 1fr);
   }
 
-  .nightbook-plan-editor {
+  .plan-editor {
     grid-column: 1 / -1;
     height: auto;
   }
 
-  .nightbook-plan-editor .ui-panel-body {
+  .plan-editor .ui-panel-body {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 12px;
@@ -389,45 +389,45 @@
 }
 
 @media (min-width: 601px) and (max-width: 780px) {
-  .nightbook-plan-active-grid,
-  .nightbook-plan-review-grid {
+  .plan-active-grid,
+  .plan-review-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .nightbook-plan-freeze-banner {
+  .plan-freeze-banner {
     grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 8px;
   }
 
-  .nightbook-plan-freeze-copy {
+  .plan-freeze-copy {
     font-size: 8px;
   }
 
-  .nightbook-plan-action-dock {
+  .plan-action-dock {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .nightbook-plan-action-dock .ui-cluster {
+  .plan-action-dock .ui-cluster {
     align-self: flex-end;
   }
 }
 
 @media (max-width: 600px) {
-  .nightbook-plan-phone {
+  .plan-phone {
     overflow-x: hidden;
   }
 
-  .nightbook-operational-status.nightbook-plan-status-strip {
+  .workspace-operational-status.plan-status-strip {
     display: flex;
     min-width: 0;
   }
 
-  .nightbook-operational-status .nightbook-plan-status-desktop {
+  .workspace-operational-status .plan-status-desktop {
     display: none;
   }
 
-  .nightbook-operational-status .nightbook-plan-status-mobile {
+  .workspace-operational-status .plan-status-mobile {
     display: flex;
     width: 100%;
     max-width: none;
