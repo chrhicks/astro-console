@@ -63,6 +63,7 @@ import {
 } from './preflight-refresh-client'
 import { projectBootstrapState } from './bootstrap-projection'
 import type { Projection } from './presentation'
+import { latestSavedStackingMasterAssetIdFromCompleteEvidence } from './processing-project-evidence'
 import {
   processingProjectFailureCertainty,
   processClient,
@@ -371,8 +372,11 @@ const processIntent = (
   action: ProcessAction,
   project: OpenedProcessingProject,
   evidence: ProcessingProjectEvidence | undefined,
-): ProcessIntentPreparation =>
-  ProcessAction.$match(action, {
+): ProcessIntentPreparation => {
+  const selectedStage = (stage: ExecutableProcessingStage) =>
+    project.stages.find((candidate) => candidate.stage === stage)
+
+  return ProcessAction.$match(action, {
     ReplaceDraft: ({ draft }) =>
       ProcessIntentPreparation.Ready({
         intent: { _tag: 'ReplaceDraft', draft },
@@ -390,49 +394,75 @@ const processIntent = (
             },
           })
     },
-    RunCurrentDraft: ({ stage }) =>
-      ProcessIntentPreparation.Ready({
-        intent: {
-          _tag: 'RunStage',
-          stage,
-          from: { _tag: 'CurrentDraft' },
-        },
-      }),
-    UndoDraft: ({ stage }) =>
-      ProcessIntentPreparation.Ready({
-        intent: { _tag: 'UndoDraft', stage },
-      }),
-    RedoDraft: ({ stage }) =>
-      ProcessIntentPreparation.Ready({
-        intent: { _tag: 'RedoDraft', stage },
-      }),
-    UndoCurrentResult: ({ stage }) =>
-      ProcessIntentPreparation.Ready({
-        intent: { _tag: 'UndoCurrentResult', stage },
-      }),
-    RedoCurrentResult: ({ stage }) =>
-      ProcessIntentPreparation.Ready({
-        intent: { _tag: 'RedoCurrentResult', stage },
-      }),
-    SaveCurrentResult: ({ stage }) =>
-      ProcessIntentPreparation.Ready({
-        intent: { _tag: 'SaveCurrentResult', stage },
-      }),
+    RunCurrentDraft: ({ stage }) => {
+      const currentStage = selectedStage(stage)
+      return currentStage?.run._tag !== 'Available'
+        ? ProcessIntentPreparation.Unavailable({
+            message: 'The current stage cannot run.',
+          })
+        : ProcessIntentPreparation.Ready({
+            intent: {
+              _tag: 'RunStage',
+              stage,
+              from: { _tag: 'CurrentDraft' },
+            },
+          })
+    },
+    UndoDraft: ({ stage }) => {
+      const currentStage = selectedStage(stage)
+      return currentStage?.draft.canUndo !== true
+        ? ProcessIntentPreparation.Unavailable({
+            message: 'The current stage draft cannot undo.',
+          })
+        : ProcessIntentPreparation.Ready({
+            intent: { _tag: 'UndoDraft', stage },
+          })
+    },
+    RedoDraft: ({ stage }) => {
+      const currentStage = selectedStage(stage)
+      return currentStage?.draft.canRedo !== true
+        ? ProcessIntentPreparation.Unavailable({
+            message: 'The current stage draft cannot redo.',
+          })
+        : ProcessIntentPreparation.Ready({
+            intent: { _tag: 'RedoDraft', stage },
+          })
+    },
+    UndoCurrentResult: ({ stage }) => {
+      const currentStage = selectedStage(stage)
+      return currentStage?.resultHistory.canUndo !== true
+        ? ProcessIntentPreparation.Unavailable({
+            message: 'The current stage result cannot undo.',
+          })
+        : ProcessIntentPreparation.Ready({
+            intent: { _tag: 'UndoCurrentResult', stage },
+          })
+    },
+    RedoCurrentResult: ({ stage }) => {
+      const currentStage = selectedStage(stage)
+      return currentStage?.resultHistory.canRedo !== true
+        ? ProcessIntentPreparation.Unavailable({
+            message: 'The current stage result cannot redo.',
+          })
+        : ProcessIntentPreparation.Ready({
+            intent: { _tag: 'RedoCurrentResult', stage },
+          })
+    },
+    SaveCurrentResult: ({ stage }) => {
+      const currentStage = selectedStage(stage)
+      return currentStage?.currentResult === undefined
+        ? ProcessIntentPreparation.Unavailable({
+            message: 'The current stage result cannot be saved.',
+          })
+        : ProcessIntentPreparation.Ready({
+            intent: { _tag: 'SaveCurrentResult', stage },
+          })
+    },
     OpenSavedMasterInDevelop: () => {
-      const stackingAttempt =
-        evidence?.projectId === project.projectId
-          ? evidence.attempts
-              .toReversed()
-              .find(
-                (attempt) =>
-                  attempt.evidence._tag === 'Stacking' &&
-                  attempt.evidence.savedMasterAssetId !== undefined,
-              )
-          : undefined
-      const assetId =
-        stackingAttempt?.evidence._tag === 'Stacking'
-          ? stackingAttempt.evidence.savedMasterAssetId
-          : undefined
+      const assetId = latestSavedStackingMasterAssetIdFromCompleteEvidence(
+        project,
+        evidence,
+      )
       return assetId === undefined
         ? ProcessIntentPreparation.Unavailable({
             message: 'The current saved Master is unavailable.',
@@ -442,6 +472,7 @@ const processIntent = (
           })
     },
   })
+}
 
 const acquireCommandIntent = (
   current: NightbookWorkspaceState,
@@ -514,6 +545,7 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
     let comparisonFiber: Fiber.Fiber<void> | undefined
     let latestReviewOperation: string | undefined
     let latestProcessOperation: typeof IntentId.Type | undefined
+    let latestProjectIntakeOperation: typeof IntentId.Type | undefined
     let processPairCommitGeneration = 0
     const pendingProjectCreations = new Map<
       string,
@@ -1200,6 +1232,7 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
               project === undefined ||
               project.projectId !== route.projectId ||
               current.process.state !== 'current' ||
+              project.activeAttempt !== undefined ||
               !ProcessingProjectAuthority.guards.Allowed(project.authority) ||
               !current.projection.libraryProcessMutation.allowed
             )
@@ -1318,7 +1351,6 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
                 'Current destination Project truth and mutation authority are required before intake.',
               )
             const generation = routeGeneration
-            const ownsResult = () => generation === routeGeneration
             const intentId = yield* Effect.sync(() =>
               IntentId.make(crypto.randomUUID()),
             )
@@ -1332,6 +1364,10 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
             }).pipe(Effect.result)
             if (Result.isFailure(requestResult))
               return unavailable('The Project intake selection is invalid.')
+            latestProjectIntakeOperation = intentId
+            const ownsResult = () =>
+              generation === routeGeneration &&
+              latestProjectIntakeOperation === intentId
             return yield* remote.addProjectSources(requestResult.success).pipe(
               Effect.map((project) =>
                 NightbookWorkspaceSubmission.Project({ project }),

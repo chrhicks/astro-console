@@ -1364,12 +1364,36 @@ const everySemanticProcessActionIsCovered = true satisfies Exclude<
 const semanticProcessProject = () =>
   Schema.decodeUnknownSync(OpenedProcessingProject)({
     ...openedProject(7),
-    stages: processingStages.map((stage) =>
-      stage.stage === 'Develop'
-        ? { ...stage, draft: { ...stage.draft, revision: 12 } }
-        : stage,
-    ),
-    savedAssetIds: ['asset-master-old', 'asset-master', 'asset-developed'],
+    stages: processingStages.map((stage) => ({
+      ...stage,
+      draft: {
+        ...stage.draft,
+        revision: stage.stage === 'Develop' ? 12 : stage.draft.revision,
+        canUndo: true,
+        canRedo: true,
+      },
+      currentResult: {
+        resultId: `${stage.stage.toLowerCase()}-result`,
+        attemptId: `${stage.stage.toLowerCase()}-attempt`,
+        outcome: 'Succeeded',
+        lineage: 'Current',
+        summary: `${stage.stage} result`,
+        completedAt: '2026-08-11T00:00:06.000Z',
+      },
+      resultHistory: { canUndo: true, canRedo: true },
+      run: {
+        _tag: 'Available',
+        label: stage.stage === 'Develop' ? 'Apply' : 'Rerun',
+      },
+    })),
+    savedAssetIds: ['asset-master', 'asset-master-old', 'asset-developed'],
+  })
+
+const semanticProcessProjectAt = (revision: number) =>
+  Schema.decodeUnknownSync(OpenedProcessingProject)({
+    ...semanticProcessProject(),
+    revision,
+    updatedAt: `2026-08-11T00:00:${revision.toString().padStart(2, '0')}.000Z`,
   })
 
 const semanticProcessEvidence = () =>
@@ -1517,7 +1541,7 @@ test('maps every semantic Process action with current facts, fresh identity, and
       { _tag: 'UndoCurrentResult', stage: 'Stacking' },
       { _tag: 'RedoCurrentResult', stage: 'Develop' },
       { _tag: 'SaveCurrentResult', stage: 'Stacking' },
-      { _tag: 'OpenDevelop', assetId: 'asset-master' },
+      { _tag: 'OpenDevelop', assetId: 'asset-master-old' },
     ],
   )
   const identities = requests.map((request) => request.intentId)
@@ -1652,6 +1676,189 @@ test('stops semantic Process actions without current routed truth or Process Aut
     const result = await submit(runtime, {
       _tag: 'Process',
       action: ProcessAction.UndoDraft({ stage: 'Calibration' }),
+    })
+    await runtime.dispose()
+
+    assert.equal(result._tag, 'Unavailable', value.name)
+    assert.equal(writes, 0, value.name)
+  }
+})
+
+test('stops every semantic Process action while stage work is active', async () => {
+  const project = Schema.decodeUnknownSync(OpenedProcessingProject)({
+    ...semanticProcessProject(),
+    activeAttempt: {
+      attemptId: 'active-calibration-attempt',
+      stage: 'Calibration',
+      state: 'Running',
+      acceptedAt: '2026-08-11T00:00:07.000Z',
+      startedAt: '2026-08-11T00:00:08.000Z',
+    },
+  })
+  let writes = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(currentBootstrap),
+      openProject: () => Effect.succeed(project),
+      projectEvidence: () => Effect.succeed(semanticProcessEvidence()),
+      changeProject: () =>
+        Effect.sync(() => {
+          writes += 1
+          return project
+        }),
+    }),
+  )
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'process-project', projectId: project.projectId },
+    libraryQuery: query('active-process-attempt'),
+  })
+  await waitFor(runtime, (state) => state.process.state === 'current')
+
+  for (const action of semanticProcessActions) {
+    const result = await submit(runtime, { _tag: 'Process', action })
+    assert.equal(result._tag, 'Unavailable', action._tag)
+  }
+  await runtime.dispose()
+
+  assert.equal(writes, 0)
+})
+
+test('stops ineligible stage Process actions before transport', async () => {
+  const eligible = semanticProcessProject()
+  const cases = [
+    {
+      name: 'Run is unavailable',
+      action: ProcessAction.RunCurrentDraft({ stage: 'Calibration' }),
+      change: { run: { _tag: 'Unavailable', reason: 'LightsRequired' } },
+    },
+    {
+      name: 'draft undo is unavailable',
+      action: ProcessAction.UndoDraft({ stage: 'Calibration' }),
+      change: { draft: { canUndo: false } },
+    },
+    {
+      name: 'draft redo is unavailable',
+      action: ProcessAction.RedoDraft({ stage: 'Calibration' }),
+      change: { draft: { canRedo: false } },
+    },
+    {
+      name: 'Current Result undo is unavailable',
+      action: ProcessAction.UndoCurrentResult({ stage: 'Calibration' }),
+      change: { resultHistory: { canUndo: false } },
+    },
+    {
+      name: 'Current Result redo is unavailable',
+      action: ProcessAction.RedoCurrentResult({ stage: 'Calibration' }),
+      change: { resultHistory: { canRedo: false } },
+    },
+    {
+      name: 'Save lacks a Current Result',
+      action: ProcessAction.SaveCurrentResult({ stage: 'Stacking' }),
+      change: { currentResult: undefined },
+    },
+  ] as const
+
+  for (const value of cases) {
+    const project = Schema.decodeUnknownSync(OpenedProcessingProject)({
+      ...eligible,
+      stages: eligible.stages.map((stage) => {
+        if (stage.stage !== value.action.stage) return stage
+        if ('draft' in value.change)
+          return { ...stage, draft: { ...stage.draft, ...value.change.draft } }
+        if ('resultHistory' in value.change)
+          return {
+            ...stage,
+            resultHistory: {
+              ...stage.resultHistory,
+              ...value.change.resultHistory,
+            },
+          }
+        if ('currentResult' in value.change) {
+          const { currentResult, ...withoutCurrentResult } = stage
+          void currentResult
+          return withoutCurrentResult
+        }
+        return { ...stage, ...value.change }
+      }),
+    })
+    let writes = 0
+    const runtime = makeRuntime(
+      makeRemote({
+        states: Stream.make(currentBootstrap),
+        openProject: () => Effect.succeed(project),
+        projectEvidence: () => Effect.succeed(semanticProcessEvidence()),
+        changeProject: () =>
+          Effect.sync(() => {
+            writes += 1
+            return project
+          }),
+      }),
+    )
+    await submit(runtime, {
+      _tag: 'RouteChanged',
+      route: { kind: 'process-project', projectId: project.projectId },
+      libraryQuery: query(`ineligible-${value.name}`),
+    })
+    await waitFor(runtime, (state) => state.process.state === 'current')
+    const result = await submit(runtime, {
+      _tag: 'Process',
+      action: value.action,
+    })
+    await runtime.dispose()
+
+    assert.equal(result._tag, 'Unavailable', value.name)
+    assert.equal(writes, 0, value.name)
+  }
+})
+
+test('stops incomplete or mismatched saved-Master evidence before transport', async () => {
+  const project = semanticProcessProject()
+  const cases = [
+    {
+      name: 'incomplete',
+      evidence: Schema.decodeUnknownSync(ProcessingProjectEvidence)({
+        ...semanticProcessEvidence(),
+        nextAttemptId: 'stacking-attempt-next',
+      }),
+    },
+    {
+      name: 'mismatched',
+      evidence: Schema.decodeUnknownSync(ProcessingProjectEvidence)({
+        ...semanticProcessEvidence(),
+        projectId: 'project-other',
+      }),
+    },
+  ] as const
+
+  for (const value of cases) {
+    let writes = 0
+    const runtime = makeRuntime(
+      makeRemote({
+        states: Stream.make(currentBootstrap),
+        openProject: () => Effect.succeed(project),
+        projectEvidence: () => Effect.succeed(value.evidence),
+        changeProject: () =>
+          Effect.sync(() => {
+            writes += 1
+            return project
+          }),
+      }),
+    )
+    await submit(runtime, {
+      _tag: 'RouteChanged',
+      route: { kind: 'process-project', projectId: project.projectId },
+      libraryQuery: query(`${value.name}-master-evidence`),
+    })
+    await waitFor(
+      runtime,
+      (state) =>
+        state.process.state ===
+        (value.name === 'mismatched' ? 'unavailable' : 'current'),
+    )
+    const result = await submit(runtime, {
+      _tag: 'Process',
+      action: ProcessAction.OpenSavedMasterInDevelop({}),
     })
     await runtime.dispose()
 
@@ -1960,8 +2167,8 @@ test('does not let an older same-route Process failure make a newer result unava
 })
 
 test('publishes a matched Process pair when post-change evidence needs reconciliation', async () => {
-  const confirmed = openedProject(1)
-  const changed = openedProject(2)
+  const confirmed = semanticProcessProjectAt(1)
+  const changed = semanticProcessProjectAt(2)
   const confirmedEvidence = projectEvidence()
   const changedEvidence = projectEvidence()
   let openCalls = 0
@@ -2018,8 +2225,8 @@ test('publishes a matched Process pair when post-change evidence needs reconcili
 })
 
 test('retains the last-confirmed Process pair when changed evidence stays unavailable', async () => {
-  const confirmed = openedProject(1)
-  const changed = openedProject(2)
+  const confirmed = semanticProcessProjectAt(1)
+  const changed = semanticProcessProjectAt(2)
   const confirmedEvidence = projectEvidence()
   let evidenceCalls = 0
   let changeCalls = 0
@@ -3102,6 +3309,92 @@ test('does not publish failed old-route intake reconciliation over a newer Proje
   assert.equal(final.process.state, 'current')
   assert.equal(final.process.project?.projectId, projectB.projectId)
   assert.equal(final.process.evidence?.projectId, projectB.projectId)
+})
+
+test('does not let an older same-route intake reconciliation overwrite a newer operation', async () => {
+  const destination = projects('project-1')[0]
+  assert.notEqual(destination, undefined)
+  if (destination === undefined) return
+  const olderProject = openedProject(2)
+  const newerProject = openedProject(3)
+  const olderEvidence = projectEvidence()
+  const newerEvidence = semanticProcessEvidence()
+  const olderOpenStarted = Deferred.makeUnsafe<void>()
+  const olderEvidenceStarted = Deferred.makeUnsafe<void>()
+  const releaseOlderReads = Deferred.makeUnsafe<void>()
+  let writes = 0
+  let openReads = 0
+  let evidenceReads = 0
+  const runtime = makeRuntime(
+    makeRemote({
+      states: Stream.make(currentBootstrap),
+      page: () => Effect.succeed(page('same-route-intake', 1)),
+      listProjects: () => Effect.succeed([destination]),
+      addProjectSources: () =>
+        Effect.sync(() => {
+          writes += 1
+        }).pipe(Effect.andThen(Effect.fail(failure('add-project-sources')))),
+      openProject: () =>
+        ++openReads === 1
+          ? Deferred.succeed(olderOpenStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseOlderReads)),
+              Effect.as(olderProject),
+            )
+          : Effect.succeed(newerProject),
+      projectEvidence: () =>
+        ++evidenceReads === 1
+          ? Deferred.succeed(olderEvidenceStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseOlderReads)),
+              Effect.as(olderEvidence),
+            )
+          : Effect.succeed(newerEvidence),
+    }),
+  )
+  await submit(runtime, {
+    _tag: 'RouteChanged',
+    route: { kind: 'workspace', workspace: 'library' },
+    libraryQuery: query('same-route-intake'),
+  })
+  await waitFor(
+    runtime,
+    (state) =>
+      state.process.state === 'current' && state.process.projects.length === 1,
+  )
+  const intake = NightbookWorkspaceIntent.AddProjectSources({
+    projectId: destination.projectId,
+    selection: { assetIds: [detail.assetId], captureSetIds: [] },
+  })
+
+  const older = submit(runtime, intake)
+  await runtime.runPromise(
+    Effect.all([
+      Deferred.await(olderOpenStarted),
+      Deferred.await(olderEvidenceStarted),
+    ]),
+  )
+  const newerResult = await submit(runtime, intake)
+  const newerState = await waitFor(
+    runtime,
+    (state) => state.process.project?.revision === newerProject.revision,
+  )
+  await runtime.runPromise(Deferred.succeed(releaseOlderReads, undefined))
+  const olderResult = await older
+  const final = await waitFor(
+    runtime,
+    (state) =>
+      state.process.state === 'current' && state.process.project !== undefined,
+  )
+  await runtime.dispose()
+
+  assert.equal(newerResult._tag, 'Unavailable')
+  assert.equal(olderResult._tag, 'Unavailable')
+  assert.equal(newerState.process.project, newerProject)
+  assert.equal(newerState.process.evidence, newerEvidence)
+  assert.equal(final.process.project, newerProject)
+  assert.equal(final.process.evidence, newerEvidence)
+  assert.equal(writes, 2)
+  assert.equal(openReads, 2)
+  assert.equal(evidenceReads, 2)
 })
 
 test('reconciles Review and Project intake failures through reads without replay', async () => {

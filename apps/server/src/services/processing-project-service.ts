@@ -384,7 +384,25 @@ function makeProcessingProjectLifecycle(database: DatabaseSync) {
             ) + 1,
           )
     const limit = query.limit ?? 50
-    const attempts = filtered.slice(start, start + limit)
+    const attempts = filtered.slice(start, start + limit).map((attempt) => {
+      if (!ProcessingAttemptStageEvidence.guards.Stacking(attempt.evidence))
+        return attempt
+      const savedMasterAssetId = attempt.outputs
+        .map((output) => savedMasterAssetForOutput(database, output.outputId))
+        .find(
+          (assetId) =>
+            assetId !== undefined && project.savedAssetIds.includes(assetId),
+        )
+      return savedMasterAssetId === undefined
+        ? attempt
+        : ProcessingAttempt.make({
+            ...attempt,
+            evidence: ProcessingAttemptStageEvidence.cases.Stacking.make({
+              ...attempt.evidence,
+              savedMasterAssetId,
+            }),
+          })
+    })
     const next = filtered[start + limit]
     return ProcessingProjectEvidence.make({
       projectId: project.projectId,
@@ -1867,9 +1885,17 @@ function saveLibraryAsset(
     .run(save.assetId, 'ProcessSaved', save.result.checksum)
 }
 
+function savedMasterAssetForOutput(
+  database: DatabaseSync,
+  outputId: typeof ProcessingOutputId.Type,
+) {
+  return savedAssetForOutput(database, outputId, 'linearMaster')
+}
+
 function savedAssetForOutput(
   database: DatabaseSync,
   outputId: typeof ProcessingOutputId.Type,
+  role: 'linearMaster' | 'final' | undefined = undefined,
 ) {
   const rows = Schema.decodeUnknownSync(
     Schema.Array(
@@ -1878,9 +1904,11 @@ function savedAssetForOutput(
   )(
     database
       .prepare(
-        "SELECT asset_id,detail FROM library_assets WHERE role IN ('linearMaster','final')",
+        role === undefined
+          ? "SELECT asset_id,detail FROM library_assets WHERE role IN ('linearMaster','final')"
+          : 'SELECT asset_id,detail FROM library_assets WHERE role=?',
       )
-      .all(),
+      .all(...(role === undefined ? [] : [role])),
   )
   const row = rows.find((candidate) => {
     const detail = Schema.decodeUnknownSync(LibraryDetail)(
