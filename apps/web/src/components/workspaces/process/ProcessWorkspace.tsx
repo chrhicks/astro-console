@@ -13,7 +13,7 @@ import {
   Stack,
   StatusIndicator,
   StepRail,
-} from '../components/ui'
+} from '../../ui'
 import {
   AssetId,
   CaptureSetId,
@@ -28,19 +28,19 @@ import {
   useState,
   type ChangeEvent,
 } from 'react'
-import type { ProcessSourceHandoff } from '../library-client'
+import type { ProcessSourceHandoff } from '../../../library-client'
 import {
   ProcessAction,
   type OpenedProcessingProject,
   type ProcessingProjectEvidence,
   type ProcessingProjectList,
-} from '../nightbook-workspace-runtime'
-import type { Projection } from '../presentation'
-import { latestSavedStackingMasterAssetIdFromCompleteEvidence } from '../processing-project-evidence'
-import { nightbookHref } from '../route-href'
-import { CommandBar, type ControlPresentation } from '../components/shell/WorkspaceShell'
-import '../components/workspaces/Workspace.css'
-import './process.css'
+} from '../../../nightbook-workspace-runtime'
+import type { Projection } from '../../../presentation'
+import { latestSavedStackingMasterAssetIdFromCompleteEvidence } from '../../../processing-project-evidence'
+import { nightbookHref } from '../../../route-href'
+import { CommandBar, type ControlPresentation } from '../../shell/WorkspaceShell'
+import '../Workspace.css'
+import './ProcessWorkspace.css'
 
 type ViewedStage = 'Sources' | ExecutableProcessingStage | 'Master'
 type HandoffState = 'loading' | 'not-found' | 'not-local' | 'unavailable'

@@ -34,7 +34,7 @@ const currentRoute = () => parseRoute(location.pathname, location.search)
 const ObserveWorkspace = lazy(() => import('./components/workspaces/observe/ObserveWorkspace'))
 const LibraryWorkspace = lazy(() => import('./components/workspaces/library/LibraryWorkspace'))
 const PlanWorkspace = lazy(() => import('./components/workspaces/plan/PlanWorkspace'))
-const ProcessWorkspace = lazy(() => import('./nightbook/ProcessWorkspace'))
+const ProcessWorkspace = lazy(() => import('./components/workspaces/process/ProcessWorkspace'))
 
 type SubmissionHandlers<Result> = {
   readonly [Tag in NightbookWorkspaceSubmission['_tag']]?: (

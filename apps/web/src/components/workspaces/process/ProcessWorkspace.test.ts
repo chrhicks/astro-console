@@ -14,10 +14,10 @@ import {
   type ReactTestInstance,
   type ReactTestRenderer,
 } from 'react-test-renderer'
-import { BootstrapClientState } from '../bootstrap-client'
-import { projectBootstrapState } from '../bootstrap-projection'
-import { ProcessAction } from '../nightbook-workspace-runtime'
-import { bootstrapFixtures } from '../testing/bootstrap-fixtures'
+import { BootstrapClientState } from '../../../bootstrap-client'
+import { projectBootstrapState } from '../../../bootstrap-projection'
+import { ProcessAction } from '../../../nightbook-workspace-runtime'
+import { bootstrapFixtures } from '../../../testing/bootstrap-fixtures'
 import ProcessWorkspace from './ProcessWorkspace'
 
 const sourceHandoff = Schema.decodeUnknownSync(ProcessSourceHandoffSchema)({
