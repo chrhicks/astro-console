@@ -18,13 +18,13 @@ import {
   Tabs,
   TextField,
   type Tone,
-} from '../components/ui'
+} from '../../ui'
 import {
   PlanCommandResult,
   type RunSequenceDefinition,
   type PlanWorkspaceProjection,
 } from '@astro-console/protocol'
-import { planSequencePresentation, planSequenceWindow } from '../presentation'
+import { planSequencePresentation, planSequenceWindow } from '../../../presentation'
 import {
   useEffect,
   useMemo,
@@ -38,11 +38,11 @@ import {
   PlanAction,
   PlanCommandSubmission,
   type PlanAction as PlanActionValue,
-} from '../plan-command-client'
-import type { Projection, StatusTone } from '../presentation'
-import { CommandBar, type ControlSubmit } from '../components/shell/WorkspaceShell'
-import '../components/workspaces/Workspace.css'
-import './plan.css'
+} from '../../../plan-command-client'
+import type { Projection, StatusTone } from '../../../presentation'
+import { CommandBar, type ControlSubmit } from '../../shell/WorkspaceShell'
+import '../Workspace.css'
+import './PlanWorkspace.css'
 
 type PlanSequence = PlanWorkspaceProjection['sequences'][number]
 type PlanEligibility = NonNullable<

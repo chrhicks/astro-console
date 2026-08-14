@@ -33,7 +33,7 @@ import {
 const currentRoute = () => parseRoute(location.pathname, location.search)
 const ObserveWorkspace = lazy(() => import('./nightbook/ObserveWorkspace'))
 const LibraryWorkspace = lazy(() => import('./nightbook/LibraryWorkspace'))
-const PlanWorkspace = lazy(() => import('./nightbook/PlanWorkspace'))
+const PlanWorkspace = lazy(() => import('./components/workspaces/plan/PlanWorkspace'))
 const ProcessWorkspace = lazy(() => import('./nightbook/ProcessWorkspace'))
 
 type SubmissionHandlers<Result> = {
