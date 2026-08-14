@@ -19,7 +19,7 @@ import {
   DevelopmentSimulationUnavailable,
 } from '@astro-console/protocol'
 import { useEffect, useState, type ChangeEvent } from 'react'
-import { nightbookHref } from '../../route-href'
+import { routeHref } from '../../route-href'
 
 type SimulationProjection = typeof DevelopmentSimulationProjection.Type
 type UnavailableSimulation = typeof DevelopmentSimulationUnavailable.Type
@@ -252,8 +252,8 @@ export function DevelopmentSimulationSurface({
               : 16}
             s
           </Button>
-          <a href={nightbookHref('/plan')}>Plan</a>
-          <a href={nightbookHref('/observe')}>Observe</a>
+          <a href={routeHref('/plan')}>Plan</a>
+          <a href={routeHref('/observe')}>Observe</a>
         </div>
       ) : (
         <span className="simulation-protection">Controls require desktop.</span>

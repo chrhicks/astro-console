@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–4 complete locally; Processing Project lifecycle, shared protocol, origin runtime, and Nightbook workspace runtime refactors complete locally; application presentation naming retirement complete**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–4 complete locally; Processing Project lifecycle, shared protocol, origin runtime, and workspace runtime refactors complete locally; application presentation naming retirement complete**
 
 ## Current Position
 
@@ -302,7 +302,7 @@ removed. A production-interface integration test covers HTTP, Process work,
 SSE publication, durable restart, and listener shutdown without using origin
 implementation hooks.
 
-The browser now has one deep Nightbook workspace runtime. Presentation callers
+The browser now has one deep workspace runtime. Presentation callers
 consume one streamed workspace state and submit one closed set of operator
 intents across Plan, Observe, Library, and Process. The module owns bootstrap
 freshness, route loading, cancellation, last-confirmed values, command
@@ -503,7 +503,7 @@ covered indoor frame.
 ## Next Owner Action
 
 GitHub issues `#2`, `#3`, and `#4`, the shared protocol refocus, origin runtime
-deepening, and Nightbook workspace runtime deepening are complete locally. The
+deepening, and workspace runtime deepening are complete locally. The
 first four selected corrections from the `apps/web` architecture map in GitHub
 issue `#18` are merged. The fifth selected correction, Shared Control action
 reachability in `#27`, is merged through PR `#28`. The bounded Acquire semantic
@@ -520,7 +520,7 @@ binds source-handoff naming to the exact routed Library Asset. Route-leading
 projection gaps fail closed without exposing stale mutation controls. Production
 Processing Project lifecycle evidence now projects the saved Library Master onto
 its exact Stacking attempt without mutating stored attempt evidence.
-`NightbookWorkspaceRuntime.states + submit` tests prove fail-closed Process stage
+`WorkspaceRuntime.states + submit` tests prove fail-closed Process stage
 eligibility, complete latest saved Stacking Master evidence, and latest-operation
 ownership for overlapping same-route existing-Project intake reconciliation,
 with one write and no replay. The Master presentation is eligible only from that
@@ -543,17 +543,28 @@ Issue `#50` and PR `#53` retire the remaining presentation-only prototype naming
 Observe, Library, Process, shared shell, development simulation, tests, and
 styles live in the purpose-organized application component tree. Active
 selectors, presentation identifiers, product wording, and current UI authority
-use workspace, feature, or Astro Console names. The non-React Nightbook
-workspace runtime, navigation names, semantic intents, URLs, and behavior remain
-unchanged for `#51`. The complete web check passes 186/186. Functional browser
-inspection and Designer review pass Plan, Observe, Library catalog/detail, and
-Process list/project at wide, compact, and 390 px with no P0, P1, P2, or P3
-finding; phone remains read-only. Repeated inspect-runner navigation sometimes
-required one reload to finish a lazy module load, matching the pre-change runner
-behavior. Evidenced lower-priority interface and test concerns remain in `#49`. Issue
-`#51` is the next bounded task after `#50`. The other
-architecture frontiers remain the durable work-claim re-audit in `#5` and the
-origin integration-test harness in `#6`.
+use workspace, feature, or Astro Console names. At that checkpoint, the
+non-React workspace runtime still used the retired prototype name; its semantic
+intents, URLs, and behavior remained unchanged for `#51`. The complete web check
+passed 186/186. Functional browser inspection and Designer review passed Plan,
+Observe, Library catalog/detail, and Process list/project at wide, compact, and
+390 px with no P0, P1, P2, or P3 finding; phone remained read-only. Repeated
+inspect-runner navigation sometimes required one reload to finish a lazy module
+load, matching the pre-change runner behavior.
+
+Issue `#51` and PR `#54` give the non-React runtime and route helper purpose
+names. The
+deep external interface remains exactly `WorkspaceRuntime.states + submit`, and
+request identity values remain unchanged. Focused runtime and route-helper tests
+and the complete web check pass. Functional browser smoke passes Plan, Observe,
+Library, and Process navigation through the renamed runtime and route helper;
+phone Plan remains read-only, with no overflow or console error. This naming-only
+change adds no provider, device, or physical-capture proof. Evidenced
+lower-priority interface and test concerns remain in `#49`. The read-only
+composition audit under `#47`
+is the next application-architecture task. The other architecture frontiers
+remain the durable work-claim re-audit in `#5` and the origin integration-test
+harness in `#6`.
 Select and integrate a real processing library only in a later accepted item;
 the current deterministic materializer proves orchestration and evidence, not
 astronomy processing quality. The remaining accepted delivery list continues

@@ -24,7 +24,7 @@ import {
 } from '../../../observe-command-client'
 import type { PreflightRefreshSubmission } from '../../../preflight-refresh-client'
 import type { ObserveView, Projection, StatusTone } from '../../../presentation'
-import { nightbookHref } from '../../../route-href'
+import { routeHref } from '../../../route-href'
 import { CommandBar, type ControlSubmit } from '../../shell/WorkspaceShell'
 import '../Workspace.css'
 
@@ -806,7 +806,7 @@ export function ObservePhone({
       {view.source?.latestCapturedAssetId !== undefined ? (
         <a
           className="workspace-phone-library-link"
-          href={nightbookHref(
+          href={routeHref(
             `/library/assets/${encodeURIComponent(view.source.latestCapturedAssetId)}`,
           )}
         >
@@ -1129,7 +1129,7 @@ function ObserveDesktop({
                 {source?.latestCapturedAssetId !== undefined ? (
                   <a
                     className="simulation-library-link"
-                    href={nightbookHref(
+                    href={routeHref(
                       `/library/assets/${encodeURIComponent(source.latestCapturedAssetId)}`,
                     )}
                   >

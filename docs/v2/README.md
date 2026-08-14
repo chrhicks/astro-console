@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; application routes promoted locally; Processing Project lifecycle, shared protocol, origin runtime, and Nightbook workspace runtime refactors complete locally**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; application routes promoted locally; Processing Project lifecycle, shared protocol, origin runtime, and workspace runtime refactors complete locally**
 
 Keep normal working context small. Do not read the complete V2 tree.
 

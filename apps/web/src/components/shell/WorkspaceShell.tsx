@@ -17,7 +17,7 @@ import type {
   ShellView,
   StatusTone,
 } from '../../presentation'
-import { nightbookHref } from '../../route-href'
+import { routeHref } from '../../route-href'
 import { DevelopmentSimulationStrip } from '../simulation/DevelopmentSimulation'
 
 export type ControlSubmit = (
@@ -348,7 +348,7 @@ export function CommandBar({
       <header className="shell-command-bar">
         <a
           className="shell-brand"
-          href={nightbookHref(`/${workspace}`)}
+          href={routeHref(`/${workspace}`)}
           aria-label={`Astro Console ${workspaceLabel}`}
         >
           <span aria-hidden="true">A</span>
@@ -359,25 +359,25 @@ export function CommandBar({
         </a>
         <nav aria-label="Workspaces">
           <a
-            href={nightbookHref('/plan')}
+            href={routeHref('/plan')}
             aria-current={workspace === 'plan' ? 'page' : undefined}
           >
             Plan
           </a>
           <a
-            href={nightbookHref('/observe')}
+            href={routeHref('/observe')}
             aria-current={workspace === 'observe' ? 'page' : undefined}
           >
             Observe
           </a>
           <a
-            href={nightbookHref('/library')}
+            href={routeHref('/library')}
             aria-current={workspace === 'library' ? 'page' : undefined}
           >
             Library
           </a>
           <a
-            href={nightbookHref('/process')}
+            href={routeHref('/process')}
             aria-current={workspace === 'process' ? 'page' : undefined}
           >
             Process
