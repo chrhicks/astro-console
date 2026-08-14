@@ -19,7 +19,7 @@ import {
   Toolbar,
   type ActionDescriptor,
   type Tone,
-} from '../components/ui'
+} from '../../ui'
 import {
   AssetId,
   CaptureSetId,
@@ -36,13 +36,13 @@ import type {
   LibraryAssetDetail,
   LibraryPage,
   LibraryQuery,
-} from '../library-client'
-import type { Projection } from '../presentation'
-import type { ProcessingProjectList } from '../nightbook-workspace-runtime'
-import { nightbookHref } from '../route-href'
-import { CommandBar, type ControlSubmit } from '../components/shell/WorkspaceShell'
-import '../components/workspaces/Workspace.css'
-import './library.css'
+} from '../../../library-client'
+import type { Projection } from '../../../presentation'
+import type { ProcessingProjectList } from '../../../nightbook-workspace-runtime'
+import { nightbookHref } from '../../../route-href'
+import { CommandBar, type ControlSubmit } from '../../shell/WorkspaceShell'
+import '../Workspace.css'
+import './LibraryWorkspace.css'
 
 type DetailState = 'loading' | 'not-found' | 'unavailable'
 type IntakeProject = ProcessingProjectList[number]

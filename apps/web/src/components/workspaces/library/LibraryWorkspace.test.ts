@@ -11,10 +11,10 @@ import {
 import { Schema } from 'effect'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { BootstrapClientState } from '../bootstrap-client'
-import { projectBootstrapState } from '../bootstrap-projection'
-import { unavailableProjection } from '../future-adapter'
-import { bootstrapFixtures } from '../testing/bootstrap-fixtures'
+import { BootstrapClientState } from '../../../bootstrap-client'
+import { projectBootstrapState } from '../../../bootstrap-projection'
+import { unavailableProjection } from '../../../future-adapter'
+import { bootstrapFixtures } from '../../../testing/bootstrap-fixtures'
 import { LibraryWorkspace, LibraryPhone } from './LibraryWorkspace'
 
 const query = LibraryQuerySchema.make({
@@ -278,7 +278,7 @@ test('disables every Library intake control for a read-only shell', () => {
 })
 
 test('wraps long catalog availability and revision inside the card', () => {
-  const styles = readFileSync(new URL('./library.css', import.meta.url), 'utf8')
+  const styles = readFileSync(new URL('./LibraryWorkspace.css', import.meta.url), 'utf8')
   const availabilityRule = styles.match(
     /\.nightbook-library-catalog-availability\s*\{([^}]*)\}/s,
   )?.[1]
@@ -570,7 +570,7 @@ test('keeps Process handoff disabled when the service marks it unavailable', () 
 })
 
 test('contains the wide review grid inside the available shell height', () => {
-  const styles = readFileSync(new URL('./library.css', import.meta.url), 'utf8')
+  const styles = readFileSync(new URL('./LibraryWorkspace.css', import.meta.url), 'utf8')
   const wideRule = styles.match(
     /\.nightbook-library-review-grid\s*\{([^}]*)\}/s,
   )?.[1]
@@ -585,7 +585,7 @@ test('contains the wide review grid inside the available shell height', () => {
 })
 
 test('gives each desktop rating star a clear bounded hit area', () => {
-  const styles = readFileSync(new URL('./library.css', import.meta.url), 'utf8')
+  const styles = readFileSync(new URL('./LibraryWorkspace.css', import.meta.url), 'utf8')
   const ratingButtonRule = styles.match(
     /\.nightbook-library-rating button\s*\{([^}]*)\}/s,
   )?.[1]
@@ -597,7 +597,7 @@ test('gives each desktop rating star a clear bounded hit area', () => {
 })
 
 test('keeps both Library preview modes inside the bounded wide review row', () => {
-  const styles = readFileSync(new URL('./library.css', import.meta.url), 'utf8')
+  const styles = readFileSync(new URL('./LibraryWorkspace.css', import.meta.url), 'utf8')
   const evidenceRule = Array.from(
     styles.matchAll(/\.nightbook-library-evidence\s*\{([^}]*)\}/gs),
   )
