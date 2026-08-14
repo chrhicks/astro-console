@@ -40,8 +40,8 @@ import {
   type PlanAction as PlanActionValue,
 } from '../plan-command-client'
 import type { Projection, StatusTone } from '../presentation'
-import { CommandBar, type ControlSubmit } from './shared-shell'
-import './workspace.css'
+import { CommandBar, type ControlSubmit } from '../components/shell/WorkspaceShell'
+import '../components/workspaces/Workspace.css'
 import './plan.css'
 
 type PlanSequence = PlanWorkspaceProjection['sequences'][number]

@@ -11,7 +11,7 @@ import {
   DevelopmentSimulationSurface,
   readSimulationProjection,
   sendSimulationControl,
-} from './development-simulation'
+} from './DevelopmentSimulation'
 
 const projection: DevelopmentSimulationProjection = {
   mode: 'alpaca',

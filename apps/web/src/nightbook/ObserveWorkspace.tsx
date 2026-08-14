@@ -25,8 +25,8 @@ import {
 import type { PreflightRefreshSubmission } from '../preflight-refresh-client'
 import type { ObserveView, Projection, StatusTone } from '../presentation'
 import { nightbookHref } from '../route-href'
-import { CommandBar, type ControlSubmit } from './shared-shell'
-import './workspace.css'
+import { CommandBar, type ControlSubmit } from '../components/shell/WorkspaceShell'
+import '../components/workspaces/Workspace.css'
 
 export type ObserveWorkspaceProps = {
   projection: Projection

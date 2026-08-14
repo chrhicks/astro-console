@@ -4,21 +4,21 @@ import {
   DataListItem,
   StatusIndicator,
   type Tone,
-} from '../components/ui'
+} from '../ui'
 import { useEffect, useId, useRef, useState } from 'react'
 import {
   ControlAction,
   type CommandSubmission,
   type ControlAction as SemanticControlAction,
-} from '../command-client'
+} from '../../command-client'
 import type {
   HealthFact,
   Projection,
   ShellView,
   StatusTone,
-} from '../presentation'
-import { nightbookHref } from '../route-href'
-import { DevelopmentSimulationStrip } from './development-simulation'
+} from '../../presentation'
+import { nightbookHref } from '../../route-href'
+import { DevelopmentSimulationStrip } from '../simulation/DevelopmentSimulation'
 
 export type ControlSubmit = (
   action: SemanticControlAction,

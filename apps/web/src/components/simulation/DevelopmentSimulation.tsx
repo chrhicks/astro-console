@@ -8,7 +8,7 @@ import {
   Stack,
   StatusIndicator,
   type FlyoutTriggerProps,
-} from '../components/ui'
+} from '../ui'
 import { Effect, Schema } from 'effect'
 import {
   DevelopmentSimulationControlRequest,
@@ -19,7 +19,7 @@ import {
   DevelopmentSimulationUnavailable,
 } from '@astro-console/protocol'
 import { useEffect, useState, type ChangeEvent } from 'react'
-import { nightbookHref } from '../route-href'
+import { nightbookHref } from '../../route-href'
 
 type SimulationProjection = typeof DevelopmentSimulationProjection.Type
 type UnavailableSimulation = typeof DevelopmentSimulationUnavailable.Type

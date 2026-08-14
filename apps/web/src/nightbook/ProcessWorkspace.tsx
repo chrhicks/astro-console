@@ -38,8 +38,8 @@ import {
 import type { Projection } from '../presentation'
 import { latestSavedStackingMasterAssetIdFromCompleteEvidence } from '../processing-project-evidence'
 import { nightbookHref } from '../route-href'
-import { CommandBar, type ControlPresentation } from './shared-shell'
-import './workspace.css'
+import { CommandBar, type ControlPresentation } from '../components/shell/WorkspaceShell'
+import '../components/workspaces/Workspace.css'
 import './process.css'
 
 type ViewedStage = 'Sources' | ExecutableProcessingStage | 'Master'

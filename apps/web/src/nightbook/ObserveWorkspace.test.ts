@@ -11,7 +11,7 @@ import { projectBootstrapState } from '../bootstrap-projection'
 import { unavailableProjection } from '../future-adapter'
 import { PreflightRefreshSubmission } from '../preflight-refresh-client'
 import { ObserveWorkspace, ObservePhone } from './ObserveWorkspace'
-import { ControlActionList, projectedControlActions } from './shared-shell'
+import { ControlActionList, projectedControlActions } from '../components/shell/WorkspaceShell'
 
 const preflightProjection = () =>
   projectBootstrapState(
@@ -632,7 +632,7 @@ test('target-acquisition phone projection keeps evidence and protection with zer
 
 test('pins every health control to one fixed square dimension', () => {
   const styles = readFileSync(
-    new URL('./workspace.css', import.meta.url),
+    new URL('../components/workspaces/Workspace.css', import.meta.url),
     'utf8',
   )
   const rule = styles.match(
@@ -650,7 +650,7 @@ test('pins every health control to one fixed square dimension', () => {
 
 test('defines the approved target-acquire and recovery responsive geometry', () => {
   const styles = readFileSync(
-    new URL('./workspace.css', import.meta.url),
+    new URL('../components/workspaces/Workspace.css', import.meta.url),
     'utf8',
   )
   assert.match(

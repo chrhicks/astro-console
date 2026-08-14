@@ -40,8 +40,8 @@ import type {
 import type { Projection } from '../presentation'
 import type { ProcessingProjectList } from '../nightbook-workspace-runtime'
 import { nightbookHref } from '../route-href'
-import { CommandBar, type ControlSubmit } from './shared-shell'
-import './workspace.css'
+import { CommandBar, type ControlSubmit } from '../components/shell/WorkspaceShell'
+import '../components/workspaces/Workspace.css'
 import './library.css'
 
 type DetailState = 'loading' | 'not-found' | 'unavailable'
