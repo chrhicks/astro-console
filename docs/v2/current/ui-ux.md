@@ -40,18 +40,19 @@ records and use the current local web implementation for further work.
 
 ## Working Method
 
-For one demo workflow or state at a time:
+For one workflow or state at a time:
 
-1. Identify the exact demo page, state, and interaction to reproduce.
+1. Identify the exact application route, state, and interaction in scope.
 2. List the service facts, action eligibility, and command results it needs.
 3. Map existing Astro Console projections to that composition.
 4. Add the smallest missing service or contract projection. Do not replace a
    missing fact with a client fixture or inferred eligibility.
-5. Compose the beta from the local UI interface and application-owned adapters.
-6. Compare the result with the demo at wide, compact, and 390 px phone widths;
-   also check keyboard, focus, overflow, console, and read-only behavior.
-7. Keep normal routes on Nightbook after changes pass the agreed functional
-   and visual review.
+5. Compose the route from the local UI interface and application-owned
+   adapters.
+6. Review the rendered result at wide, compact, and 390 px phone widths; also
+   check keyboard, focus, overflow, console, and read-only behavior.
+7. Keep normal routes on the accepted local presentation after changes pass
+   the agreed functional and visual review.
 
 ## Known Alignment Work
 
