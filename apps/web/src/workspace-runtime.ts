@@ -323,7 +323,7 @@ const remoteFailure = (
     | 'not-local'
     | 'unavailable'
     | 'rejected' = 'unavailable',
-  message = 'The workspace remote is unavailable.',
+  message = 'The Nightbook workspace remote is unavailable.',
 ) =>
   new WorkspaceRemoteFailure({
     operation,
