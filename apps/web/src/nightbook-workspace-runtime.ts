@@ -3,6 +3,7 @@ import {
   Data,
   Effect,
   Fiber,
+  Result,
   Layer,
   ManagedRuntime,
   Schema,
@@ -14,12 +15,14 @@ import {
   AcquireCommandResponse,
   AcquireIntent,
   AssetId,
+  AssetRevision,
   CaptureSetId,
   IdempotencyKey,
   IntentId,
   LeaseRevision,
   ProcessingProjectId,
   ProcessingProjectRevision,
+  ReviewAssetRequest,
   type ProcessingProjectIntent,
 } from '@astro-console/protocol'
 import { BootstrapClient, type BootstrapClientState } from './bootstrap-client'
@@ -96,6 +99,16 @@ export type NightbookProjectSelection = {
   readonly captureSetIds: ReadonlyArray<typeof CaptureSetId.Type>
 }
 
+const LibraryReview = Schema.Struct({
+  decision: Schema.Literals(['accepted', 'rejected', 'unreviewed']),
+  rating: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 5 })),
+  ),
+  annotation: Schema.optionalKey(Schema.NonEmptyString),
+})
+
+export type LibraryReview = typeof LibraryReview.Type
+
 type LibraryDetailState = 'loading' | 'not-found' | 'unavailable'
 type SourceState = 'loading' | 'not-found' | 'not-local' | 'unavailable'
 type ProcessState = 'loading' | 'current' | 'unavailable'
@@ -133,10 +146,7 @@ export type NightbookWorkspaceIntent = Data.TaggedEnum<{
     readonly route: Route
     readonly libraryQuery: LibraryQuery
   }
-  ReviewLibraryAsset: {
-    readonly assetId: typeof AssetId.Type
-    readonly request: ReviewRequest
-  }
+  ReviewCurrentLibraryAsset: { readonly review: LibraryReview }
   Control: { readonly action: ControlAction }
   Plan: { readonly action: PlanAction }
   Observe: { readonly action: ObserveAction }
@@ -863,8 +873,40 @@ export const nightbookWorkspaceRuntimeLayer = Layer.effect(
               ),
             )
           }),
-        ReviewLibraryAsset: ({ assetId, request }) =>
+        ReviewCurrentLibraryAsset: ({ review }) =>
           Effect.gen(function* () {
+            const current = yield* SubscriptionRef.get(state)
+            const route = currentRoute
+            const detail = current.libraryDetail.value
+            if (
+              route?.kind !== 'asset' ||
+              detail === undefined ||
+              detail.assetId !== route.assetId ||
+              current.libraryDetail.state !== undefined ||
+              !current.projection.libraryProcessMutation.allowed
+            )
+              return unavailable(
+                'Current Library Asset truth and mutation authority are required before review.',
+              )
+            const assetId = detail.assetId
+            const reviewResult = yield* Schema.decodeUnknownEffect(
+              LibraryReview,
+            )(review).pipe(Effect.result)
+            if (Result.isFailure(reviewResult))
+              return unavailable('The Library review input is invalid.')
+            const requestResult = yield* Schema.decodeUnknownEffect(
+              ReviewAssetRequest,
+            )({
+              expectedAssetRevision: detail.revision,
+              expectedReviewRevision: AssetRevision.make(
+                detail.review?.revision ?? 0,
+              ),
+              ...reviewResult.success,
+              idempotencyKey: crypto.randomUUID(),
+            }).pipe(Effect.result)
+            if (Result.isFailure(requestResult))
+              return unavailable('The Library review input is invalid.')
+            const request = requestResult.success
             const generation = routeGeneration
             const operation = request.idempotencyKey
             latestReviewOperation = operation
