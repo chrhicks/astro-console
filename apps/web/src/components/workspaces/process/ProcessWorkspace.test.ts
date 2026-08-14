@@ -16,7 +16,7 @@ import {
 } from 'react-test-renderer'
 import { BootstrapClientState } from '../../../bootstrap-client'
 import { projectBootstrapState } from '../../../bootstrap-projection'
-import { ProcessAction } from '../../../nightbook-workspace-runtime'
+import { ProcessAction } from '../../../workspace-runtime'
 import { bootstrapFixtures } from '../../../testing/bootstrap-fixtures'
 import ProcessWorkspace from './ProcessWorkspace'
 

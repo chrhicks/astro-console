@@ -35,15 +35,15 @@ import { BootstrapClient, BootstrapClientState } from './bootstrap-client'
 import {
   AcquireAction,
   ProcessAction,
-  NightbookWorkspaceRemote,
-  NightbookWorkspaceRemoteFailure,
-  NightbookWorkspaceIntent,
-  NightbookWorkspaceRuntime,
-  nightbookWorkspaceRuntimeLayer,
-  type NightbookWorkspaceRemoteShape,
-  type NightbookWorkspaceState,
+  WorkspaceRemote,
+  WorkspaceRemoteFailure,
+  WorkspaceIntent,
+  WorkspaceRuntime,
+  workspaceRuntimeLayer,
+  type WorkspaceRemoteShape,
+  type WorkspaceState,
   type ProcessingProjectList,
-} from './nightbook-workspace-runtime'
+} from './workspace-runtime'
 import { bootstrapFixtures } from './testing/bootstrap-fixtures'
 import { CommandSubmission, ControlAction } from './command-client'
 import {
@@ -177,16 +177,16 @@ const projectEvidence = () =>
     attempts: [],
   })
 
-const failure = (operation: NightbookWorkspaceRemoteFailure['operation']) =>
-  new NightbookWorkspaceRemoteFailure({
+const failure = (operation: WorkspaceRemoteFailure['operation']) =>
+  new WorkspaceRemoteFailure({
     operation,
     reason: 'unavailable',
     message: `${operation} unavailable`,
   })
 
 const makeRemote = (
-  overrides: Partial<NightbookWorkspaceRemoteShape>,
-): NightbookWorkspaceRemoteShape => ({
+  overrides: Partial<WorkspaceRemoteShape>,
+): WorkspaceRemoteShape => ({
   states: Stream.empty,
   refresh: () => Effect.void,
   acquire: () => Effect.die('not used'),
@@ -207,15 +207,10 @@ const makeRemote = (
   ...overrides,
 })
 
-const makeRuntime = (remote: NightbookWorkspaceRemoteShape) =>
+const makeRuntime = (remote: WorkspaceRemoteShape) =>
   ManagedRuntime.make(
-    nightbookWorkspaceRuntimeLayer.pipe(
-      Layer.provide(
-        Layer.succeed(
-          NightbookWorkspaceRemote,
-          NightbookWorkspaceRemote.of(remote),
-        ),
-      ),
+    workspaceRuntimeLayer.pipe(
+      Layer.provide(Layer.succeed(WorkspaceRemote, WorkspaceRemote.of(remote))),
     ),
   )
 
@@ -244,10 +239,10 @@ const makeComposedPlanRuntime = (
     ),
   )
   const remoteLayer = Layer.effect(
-    NightbookWorkspaceRemote,
+    WorkspaceRemote,
     Effect.gen(function* () {
       const plan = yield* PlanCommandClient
-      return NightbookWorkspaceRemote.of(
+      return WorkspaceRemote.of(
         makeRemote({
           states: bootstrap.states,
           refresh: bootstrap.refresh,
@@ -257,7 +252,7 @@ const makeComposedPlanRuntime = (
     }),
   ).pipe(Layer.provide(planLayer))
   return ManagedRuntime.make(
-    nightbookWorkspaceRuntimeLayer.pipe(Layer.provide(remoteLayer)),
+    workspaceRuntimeLayer.pipe(Layer.provide(remoteLayer)),
   )
 }
 
@@ -286,10 +281,10 @@ const makeComposedObserveRuntime = (
     ),
   )
   const remoteLayer = Layer.effect(
-    NightbookWorkspaceRemote,
+    WorkspaceRemote,
     Effect.gen(function* () {
       const observe = yield* ObserveCommandClient
-      return NightbookWorkspaceRemote.of(
+      return WorkspaceRemote.of(
         makeRemote({
           states: bootstrap.states,
           refresh: bootstrap.refresh,
@@ -299,26 +294,24 @@ const makeComposedObserveRuntime = (
     }),
   ).pipe(Layer.provide(observeLayer))
   return ManagedRuntime.make(
-    nightbookWorkspaceRuntimeLayer.pipe(Layer.provide(remoteLayer)),
+    workspaceRuntimeLayer.pipe(Layer.provide(remoteLayer)),
   )
 }
 
 const submit = (
   runtime: ReturnType<typeof makeRuntime>,
-  intent: NightbookWorkspaceIntent,
+  intent: WorkspaceIntent,
 ) =>
   runtime.runPromise(
-    Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
-      workspace.submit(intent),
-    ),
+    Effect.flatMap(WorkspaceRuntime, (workspace) => workspace.submit(intent)),
   )
 
 const waitFor = (
   runtime: ReturnType<typeof makeRuntime>,
-  predicate: (state: NightbookWorkspaceState) => boolean,
+  predicate: (state: WorkspaceState) => boolean,
 ) =>
   runtime.runPromise(
-    Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
+    Effect.flatMap(WorkspaceRuntime, (workspace) =>
       workspace.states.pipe(
         Stream.filter(predicate),
         Stream.runHead,
@@ -900,13 +893,13 @@ const currentAcquireSnapshot = () =>
   })
 
 test('constructs closed Acquire and branded resource intents', () => {
-  const acquire = NightbookWorkspaceIntent.Acquire({
+  const acquire = WorkspaceIntent.Acquire({
     action: AcquireAction.AbortAcquire({}),
   })
-  const comparison = NightbookWorkspaceIntent.SelectComparisonAsset({
+  const comparison = WorkspaceIntent.SelectComparisonAsset({
     assetId: detail.assetId,
   })
-  const intake = NightbookWorkspaceIntent.AddProjectSources({
+  const intake = WorkspaceIntent.AddProjectSources({
     projectId: ProcessingProjectId.make('project-typed'),
     selection: { assetIds: [detail.assetId], captureSetIds: [] },
   })
@@ -1262,7 +1255,7 @@ test('retains last-confirmed Library and Process values while reload fails', asy
   const confirmedProjects = projects('confirmed-project')
   const reloadFailure = (
     started: Deferred.Deferred<void>,
-    operation: NightbookWorkspaceRemoteFailure['operation'],
+    operation: WorkspaceRemoteFailure['operation'],
   ) =>
     Deferred.succeed(started, undefined).pipe(
       Effect.andThen(Deferred.await(releaseReloads)),
@@ -2509,7 +2502,7 @@ test('reconciles the routed Project without publishing a mismatched change respo
   )
   runtime.runFork(
     Effect.gen(function* () {
-      const workspace = yield* NightbookWorkspaceRuntime
+      const workspace = yield* WorkspaceRuntime
       yield* workspace.states.pipe(
         Stream.runForEach((state) =>
           Effect.sync(() => {
@@ -2584,7 +2577,7 @@ test('reconciles matched truth without publishing mismatched changed evidence', 
   )
   runtime.runFork(
     Effect.gen(function* () {
-      const workspace = yield* NightbookWorkspaceRuntime
+      const workspace = yield* WorkspaceRuntime
       yield* workspace.states.pipe(
         Stream.runForEach((state) =>
           Effect.sync(() => {
@@ -3058,7 +3051,7 @@ test('creates a distinct identity for each semantic existing-Project intake', as
     (state) =>
       state.process.state === 'current' && state.process.projects.length === 1,
   )
-  const intent = NightbookWorkspaceIntent.AddProjectSources({
+  const intent = WorkspaceIntent.AddProjectSources({
     projectId: destination.projectId,
     selection: { assetIds: [detail.assetId], captureSetIds: [] },
   })
@@ -3132,7 +3125,7 @@ test('stops semantic existing-Project intake without current destination truth o
       name: 'destination missing',
       states: Stream.make(currentBootstrap),
       listProjects: () => Effect.succeed([]),
-      ready: (state: NightbookWorkspaceState) =>
+      ready: (state: WorkspaceState) =>
         state.projectionReceived && state.process.state === 'current',
       release: () => Effect.void,
     },
@@ -3141,7 +3134,7 @@ test('stops semantic existing-Project intake without current destination truth o
       states: Stream.make(currentBootstrap),
       listProjects: () =>
         Deferred.await(loadingList).pipe(Effect.as([destination])),
-      ready: (state: NightbookWorkspaceState) =>
+      ready: (state: WorkspaceState) =>
         state.projectionReceived && state.process.state === 'loading',
       release: () => Deferred.succeed(loadingList, undefined),
     },
@@ -3149,7 +3142,7 @@ test('stops semantic existing-Project intake without current destination truth o
       name: 'Project list unavailable',
       states: Stream.make(currentBootstrap),
       listProjects: () => Effect.fail(failure('list-projects')),
-      ready: (state: NightbookWorkspaceState) =>
+      ready: (state: WorkspaceState) =>
         state.projectionReceived && state.process.state === 'unavailable',
       release: () => Effect.void,
     },
@@ -3157,7 +3150,7 @@ test('stops semantic existing-Project intake without current destination truth o
       name: 'stale projection',
       states: Stream.make(staleBootstrap),
       listProjects: () => Effect.succeed([destination]),
-      ready: (state: NightbookWorkspaceState) =>
+      ready: (state: WorkspaceState) =>
         state.projectionReceived &&
         state.process.state === 'current' &&
         state.process.projects.length === 1,
@@ -3167,7 +3160,7 @@ test('stops semantic existing-Project intake without current destination truth o
       name: 'mutation authority denied',
       states: Stream.make(deniedBootstrap),
       listProjects: () => Effect.succeed([destination]),
-      ready: (state: NightbookWorkspaceState) =>
+      ready: (state: WorkspaceState) =>
         state.projectionReceived &&
         state.process.state === 'current' &&
         state.process.projects.length === 1,
@@ -3360,7 +3353,7 @@ test('does not let an older same-route intake reconciliation overwrite a newer o
     (state) =>
       state.process.state === 'current' && state.process.projects.length === 1,
   )
-  const intake = NightbookWorkspaceIntent.AddProjectSources({
+  const intake = WorkspaceIntent.AddProjectSources({
     projectId: destination.projectId,
     selection: { assetIds: [detail.assetId], captureSetIds: [] },
   })
@@ -3523,7 +3516,7 @@ test('reuses one Project creation receipt after an uncertain accepted response',
         }),
     }),
   )
-  const intent = NightbookWorkspaceIntent.CreateProject({
+  const intent = WorkspaceIntent.CreateProject({
     name: 'M27',
     selection: { assetIds: [detail.assetId], captureSetIds: [] },
   })
@@ -3535,7 +3528,7 @@ test('reuses one Project creation receipt after an uncertain accepted response',
 
   const recovered = await submit(
     runtime,
-    NightbookWorkspaceIntent.CreateProject({
+    WorkspaceIntent.CreateProject({
       name: 'M27',
       selection: { assetIds: [detail.assetId], captureSetIds: [] },
     }),
@@ -3881,7 +3874,7 @@ test('does not let an old-route Create failure invalidate a current route Projec
 test('releases the Project creation receipt after a definite protocol rejection', async () => {
   const intentIds: Array<string> = []
   let createCalls = 0
-  const rejected = new NightbookWorkspaceRemoteFailure({
+  const rejected = new WorkspaceRemoteFailure({
     operation: 'create-project',
     reason: 'rejected',
     message: 'Project creation was rejected.',
@@ -3899,7 +3892,7 @@ test('releases the Project creation receipt after a definite protocol rejection'
       listProjects: () => Effect.succeed([]),
     }),
   )
-  const intent = NightbookWorkspaceIntent.CreateProject({
+  const intent = WorkspaceIntent.CreateProject({
     name: 'M27',
     selection: { assetIds: [detail.assetId], captureSetIds: [] },
   })

@@ -19,16 +19,16 @@ import { parseRoute, routeWorkspace, type Route } from './routes'
 import { routeHref } from './route-href'
 import {
   AcquireAction,
-  createNightbookWorkspaceRuntime,
-  initialNightbookWorkspaceState,
-  NightbookWorkspaceRuntime,
-  NightbookWorkspaceSubmission,
+  createWorkspaceRuntime,
+  initialWorkspaceState,
+  WorkspaceRuntime,
+  WorkspaceSubmission,
   type LibraryQuery,
-  type NightbookProjectSelection,
-  type NightbookWorkspaceIntent,
+  type WorkspaceProjectSelection,
+  type WorkspaceIntent,
   type ProcessAction,
-  type NightbookWorkspaceState,
-} from './nightbook-workspace-runtime'
+  type WorkspaceState,
+} from './workspace-runtime'
 
 const currentRoute = () => parseRoute(location.pathname, location.search)
 const ObserveWorkspace = lazy(
@@ -45,8 +45,8 @@ const ProcessWorkspace = lazy(
 )
 
 type SubmissionHandlers<Result> = {
-  readonly [Tag in NightbookWorkspaceSubmission['_tag']]?: (
-    submission: Extract<NightbookWorkspaceSubmission, { readonly _tag: Tag }>,
+  readonly [Tag in WorkspaceSubmission['_tag']]?: (
+    submission: Extract<WorkspaceSubmission, { readonly _tag: Tag }>,
   ) => Result
 }
 
@@ -60,10 +60,10 @@ const applySubmissionHandler = <Result, Submission>(
 }
 
 const foldWorkspaceSubmission = <Result,>(
-  submission: NightbookWorkspaceSubmission,
+  submission: WorkspaceSubmission,
   handlers: SubmissionHandlers<Result>,
 ) =>
-  NightbookWorkspaceSubmission.$match(submission, {
+  WorkspaceSubmission.$match(submission, {
     Loaded: (value) =>
       applySubmissionHandler(
         handlers.Loaded,
@@ -117,9 +117,9 @@ const acceptedAcquireSubmission: SubmissionHandlers<void> = {
 }
 
 export function App() {
-  const workspaceRuntime = useRef(createNightbookWorkspaceRuntime())
-  const [workspaceState, setWorkspaceState] = useState<NightbookWorkspaceState>(
-    initialNightbookWorkspaceState,
+  const workspaceRuntime = useRef(createWorkspaceRuntime())
+  const [workspaceState, setWorkspaceState] = useState<WorkspaceState>(
+    initialWorkspaceState,
   )
   const projection = workspaceState.projection
   const [route, setRoute] = useState<Route>(currentRoute)
@@ -170,9 +170,9 @@ export function App() {
   const selectedLibraryAssetId =
     route.kind === 'asset' ? route.assetId : undefined
   const submitWorkspace = useCallback(
-    (intent: NightbookWorkspaceIntent) =>
+    (intent: WorkspaceIntent) =>
       workspaceRuntime.current.runPromise(
-        Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
+        Effect.flatMap(WorkspaceRuntime, (workspace) =>
           workspace.submit(intent),
         ),
       ),
@@ -192,7 +192,7 @@ export function App() {
   useEffect(() => {
     const runtime = workspaceRuntime.current
     const fiber = runtime.runFork(
-      Effect.flatMap(NightbookWorkspaceRuntime, (workspace) =>
+      Effect.flatMap(WorkspaceRuntime, (workspace) =>
         workspace.states.pipe(
           Stream.runForEach((state) =>
             Effect.sync(() => setWorkspaceState(state)),
@@ -319,7 +319,7 @@ export function App() {
     return foldWorkspaceSubmission(result, { Loaded: () => undefined })
   }
   const createProject = useCallback(
-    async (name: string, selection: NightbookProjectSelection) => {
+    async (name: string, selection: WorkspaceProjectSelection) => {
       const project = foldWorkspaceSubmission(
         await submitWorkspace({
           _tag: 'CreateProject',
@@ -329,9 +329,7 @@ export function App() {
         { Project: ({ project }) => project },
       )
       location.assign(
-        routeHref(
-          `/process/projects/${encodeURIComponent(project.projectId)}`,
-        ),
+        routeHref(`/process/projects/${encodeURIComponent(project.projectId)}`),
       )
     },
     [submitWorkspace],

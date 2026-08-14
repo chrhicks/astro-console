@@ -34,7 +34,7 @@ import {
   type OpenedProcessingProject,
   type ProcessingProjectEvidence,
   type ProcessingProjectList,
-} from '../../../nightbook-workspace-runtime'
+} from '../../../workspace-runtime'
 import type { Projection } from '../../../presentation'
 import { latestSavedStackingMasterAssetIdFromCompleteEvidence } from '../../../processing-project-evidence'
 import { routeHref } from '../../../route-href'

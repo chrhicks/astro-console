@@ -38,7 +38,7 @@ import type {
   LibraryQuery,
 } from '../../../library-client'
 import type { Projection } from '../../../presentation'
-import type { ProcessingProjectList } from '../../../nightbook-workspace-runtime'
+import type { ProcessingProjectList } from '../../../workspace-runtime'
 import { routeHref } from '../../../route-href'
 import { CommandBar, type ControlSubmit } from '../../shell/WorkspaceShell'
 import '../Workspace.css'
