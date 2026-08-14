@@ -147,11 +147,26 @@ export default function ProcessWorkspace(props: ProcessWorkspaceProps) {
   const [viewedStage, setViewedStage] = useState<ViewedStage>('Sources')
   const [pending, setPending] = useState<string>()
   const [message, setMessage] = useState<string>()
-  const [stretch, setStretch] = useState(0.35)
+  const { projects } = props.process
+  const project =
+    props.projectId !== undefined &&
+    props.process.project?.projectId === props.projectId
+      ? props.process.project
+      : undefined
+  const evidence =
+    project !== undefined &&
+    props.process.evidence?.projectId === project.projectId
+      ? props.process.evidence
+      : undefined
+  const sourceHandoff =
+    props.sourceAssetId !== undefined &&
+    props.sourceHandoff?.sourceAssetId === props.sourceAssetId
+      ? props.sourceHandoff
+      : undefined
 
   const change = useCallback(
     async (action: ProcessAction, label: string) => {
-      if (props.process.project === undefined || pending !== undefined) return
+      if (project === undefined || pending !== undefined) return
       setPending(label)
       setMessage(undefined)
       try {
@@ -163,10 +178,8 @@ export default function ProcessWorkspace(props: ProcessWorkspaceProps) {
         setPending(undefined)
       }
     },
-    [pending, props.onChangeProject, props.process.project],
+    [pending, project, props.onChangeProject],
   )
-
-  const { projects, project, evidence } = props.process
   const state =
     props.process.state === 'current'
       ? 'Current'
@@ -195,17 +208,14 @@ export default function ProcessWorkspace(props: ProcessWorkspaceProps) {
           {...(props.sourceAssetId === undefined
             ? {}
             : { sourceAssetId: props.sourceAssetId })}
-          {...(props.sourceHandoff === undefined
-            ? {}
-            : { sourceHandoff: props.sourceHandoff })}
+          {...(sourceHandoff === undefined ? {} : { sourceHandoff })}
         />
       ) : props.sourceAssetId !== undefined ? (
         <SourceIntake
+          key={props.sourceAssetId}
           assetId={props.sourceAssetId}
           mutationAuthority={props.projection.libraryProcessMutation}
-          {...(props.sourceHandoff === undefined
-            ? {}
-            : { handoff: props.sourceHandoff })}
+          {...(sourceHandoff === undefined ? {} : { handoff: sourceHandoff })}
           {...(props.sourceHandoffState === undefined
             ? {}
             : { handoffState: props.sourceHandoffState })}
@@ -213,14 +223,14 @@ export default function ProcessWorkspace(props: ProcessWorkspaceProps) {
           {...(message === undefined ? {} : { message })}
           onCreate={async (name) => {
             if (
-              props.sourceHandoff === undefined ||
+              sourceHandoff === undefined ||
               props.onCreateProject === undefined
             )
               return
             setPending('Creating Project')
             try {
               await props.onCreateProject(name, {
-                assetIds: [props.sourceHandoff.sourceAssetId],
+                assetIds: [sourceHandoff.sourceAssetId],
                 captureSetIds: [],
               })
             } catch {
@@ -233,14 +243,16 @@ export default function ProcessWorkspace(props: ProcessWorkspaceProps) {
         <ProjectList projects={projects} state={state} />
       ) : (
         <ProjectWorkspace
+          key={`${project.projectId}:${
+            project.stages.find((stage) => stage.stage === 'Develop')?.draft
+              .revision ?? 'none'
+          }`}
           project={project}
           {...(evidence === undefined ? {} : { evidence })}
           viewedStage={viewedStage}
           setViewedStage={setViewedStage}
           {...(pending === undefined ? {} : { pending })}
           {...(message === undefined ? {} : { message })}
-          stretch={stretch}
-          setStretch={setStretch}
           change={change}
         />
       )}
@@ -394,8 +406,6 @@ function ProjectWorkspace({
   setViewedStage,
   pending,
   message,
-  stretch,
-  setStretch,
   change,
 }: {
   project: OpenedProcessingProject
@@ -404,10 +414,17 @@ function ProjectWorkspace({
   setViewedStage: (stage: ViewedStage) => void
   pending?: string | undefined
   message?: string | undefined
-  stretch: number
-  setStretch: (value: number) => void
   change: (action: ProcessAction, label: string) => Promise<void>
 }) {
+  const develop = project.stages.find(
+    (candidate) => candidate.stage === 'Develop',
+  )
+  const [stretch, setStretch] = useState(() =>
+    develop?.draft.value._tag === 'Develop' &&
+    develop.draft.value.operation._tag === 'Stretch'
+      ? develop.draft.value.operation.amount
+      : 0.35,
+  )
   const stage = project.stages.find(
     (candidate) => candidate.stage === viewedStage,
   )
