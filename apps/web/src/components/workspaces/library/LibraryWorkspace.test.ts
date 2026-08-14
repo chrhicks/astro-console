@@ -11,14 +11,14 @@ import {
 import { Schema } from 'effect'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { BootstrapClientState } from '../bootstrap-client'
-import { projectBootstrapState } from '../bootstrap-projection'
-import { unavailableProjection } from '../future-adapter'
-import { bootstrapFixtures } from '../testing/bootstrap-fixtures'
+import { BootstrapClientState } from '../../../bootstrap-client'
+import { projectBootstrapState } from '../../../bootstrap-projection'
+import { unavailableProjection } from '../../../future-adapter'
+import { bootstrapFixtures } from '../../../testing/bootstrap-fixtures'
 import { LibraryWorkspace, LibraryPhone } from './LibraryWorkspace'
 
 const query = LibraryQuerySchema.make({
-  queryId: LibraryQueryId.make('nightbook-current'),
+  queryId: LibraryQueryId.make('library-current'),
   pageSize: 40,
   sort: 'capturedAtDescending',
 })
@@ -250,7 +250,7 @@ test('renders a service-page catalog grouped only by projected identities', () =
   assert.match(markup, /Unreviewed/)
   assert.match(markup, /☆ Not rated/)
   assert.match(markup, /Rejected/)
-  assert.match(markup, /nightbook-library-catalog-availability/)
+  assert.match(markup, /library-catalog-availability/)
   assert.match(markup, /Temporarily Unavailable/)
   assert.match(markup, /Revision 1/)
   assert.match(
@@ -278,12 +278,15 @@ test('disables every Library intake control for a read-only shell', () => {
 })
 
 test('wraps long catalog availability and revision inside the card', () => {
-  const styles = readFileSync(new URL('./library.css', import.meta.url), 'utf8')
+  const styles = readFileSync(
+    new URL('./LibraryWorkspace.css', import.meta.url),
+    'utf8',
+  )
   const availabilityRule = styles.match(
-    /\.nightbook-library-catalog-availability\s*\{([^}]*)\}/s,
+    /\.library-catalog-availability\s*\{([^}]*)\}/s,
   )?.[1]
   const availabilityTextRule = styles.match(
-    /\.nightbook-library-catalog-availability > b,\s*\.nightbook-library-catalog-availability > small\s*\{([^}]*)\}/s,
+    /\.library-catalog-availability > b,\s*\.library-catalog-availability > small\s*\{([^}]*)\}/s,
   )?.[1]
   assert.ok(availabilityRule)
   assert.ok(availabilityTextRule)
@@ -570,24 +573,28 @@ test('keeps Process handoff disabled when the service marks it unavailable', () 
 })
 
 test('contains the wide review grid inside the available shell height', () => {
-  const styles = readFileSync(new URL('./library.css', import.meta.url), 'utf8')
-  const wideRule = styles.match(
-    /\.nightbook-library-review-grid\s*\{([^}]*)\}/s,
-  )?.[1]
+  const styles = readFileSync(
+    new URL('./LibraryWorkspace.css', import.meta.url),
+    'utf8',
+  )
+  const wideRule = styles.match(/\.library-review-grid\s*\{([^}]*)\}/s)?.[1]
   assert.ok(wideRule)
   assert.match(wideRule, /height:\s*100%/)
   assert.match(wideRule, /min-height:\s*0/)
   assert.doesNotMatch(wideRule, /100vh/)
   assert.match(
     styles,
-    /@media \(max-width: 1050px\)[\s\S]*?\.nightbook-library-review-grid\s*\{[^}]*height:\s*auto/,
+    /@media \(max-width: 1050px\)[\s\S]*?\.library-review-grid\s*\{[^}]*height:\s*auto/,
   )
 })
 
 test('gives each desktop rating star a clear bounded hit area', () => {
-  const styles = readFileSync(new URL('./library.css', import.meta.url), 'utf8')
+  const styles = readFileSync(
+    new URL('./LibraryWorkspace.css', import.meta.url),
+    'utf8',
+  )
   const ratingButtonRule = styles.match(
-    /\.nightbook-library-rating button\s*\{([^}]*)\}/s,
+    /\.library-rating button\s*\{([^}]*)\}/s,
   )?.[1]
   assert.ok(ratingButtonRule)
   assert.match(ratingButtonRule, /width:\s*40px/)
@@ -597,14 +604,17 @@ test('gives each desktop rating star a clear bounded hit area', () => {
 })
 
 test('keeps both Library preview modes inside the bounded wide review row', () => {
-  const styles = readFileSync(new URL('./library.css', import.meta.url), 'utf8')
+  const styles = readFileSync(
+    new URL('./LibraryWorkspace.css', import.meta.url),
+    'utf8',
+  )
   const evidenceRule = Array.from(
-    styles.matchAll(/\.nightbook-library-evidence\s*\{([^}]*)\}/gs),
+    styles.matchAll(/\.library-evidence\s*\{([^}]*)\}/gs),
   )
     .map((match) => match[1])
     .find((rule) => rule?.includes('height: 100%'))
   const canvasRule = styles.match(
-    /\.nightbook-library-evidence \.ui-evidence-canvas\s*\{([^}]*)\}/s,
+    /\.library-evidence \.ui-evidence-canvas\s*\{([^}]*)\}/s,
   )?.[1]
   assert.ok(evidenceRule)
   assert.ok(canvasRule)
@@ -617,11 +627,11 @@ test('keeps both Library preview modes inside the bounded wide review row', () =
   assert.match(canvasRule, /aspect-ratio:\s*auto/)
   assert.match(
     styles,
-    /\.nightbook-library-evidence\[data-fit='aspect'\] \.ui-evidence-canvas > img\s*\{[^}]*object-fit:\s*contain/,
+    /\.library-evidence\[data-fit='aspect'\] \.ui-evidence-canvas > img\s*\{[^}]*object-fit:\s*contain/,
   )
   assert.match(
     styles,
-    /\.nightbook-library-evidence\[data-fit='fill'\] \.ui-evidence-canvas > img\s*\{[^}]*object-fit:\s*cover/,
+    /\.library-evidence\[data-fit='fill'\] \.ui-evidence-canvas > img\s*\{[^}]*object-fit:\s*cover/,
   )
 })
 

@@ -1,111 +1,111 @@
-.nightbook-process-workspace {
+.process-workspace {
   grid-template-rows: auto minmax(520px, 1fr);
 }
-.nightbook-process-grid {
+.process-grid {
   display: grid;
   grid-template-columns: 220px minmax(430px, 1fr) 285px;
   gap: 8px;
   min-width: 0;
   min-height: 0;
 }
-.nightbook-process-grid > * {
+.process-grid > * {
   min-width: 0;
   height: 100%;
 }
-.nightbook-process-source .ui-panel-body,
-.nightbook-process-operation .ui-panel-body,
-.nightbook-process-stage .ui-panel-body {
+.process-source .ui-panel-body,
+.process-operation .ui-panel-body,
+.process-stage .ui-panel-body {
   overflow: auto;
 }
-.nightbook-process-stage .ui-panel-body {
+.process-stage .ui-panel-body {
   height: calc(100% - 34px);
 }
-.nightbook-process-stage .ui-evidence {
+.process-stage .ui-evidence {
   min-height: 360px;
 }
-.nightbook-process-stage .ui-evidence-canvas {
+.process-stage .ui-evidence-canvas {
   min-height: 330px;
 }
-.nightbook-process-message,
-.nightbook-process-denial,
-.nightbook-process-phone-protection {
+.process-message,
+.process-denial,
+.process-phone-protection {
   color: var(--ui-muted);
   font-size: 10px;
 }
-.nightbook-process-denial {
+.process-denial {
   margin: 0;
 }
-.nightbook-process-empty {
+.process-empty {
   align-self: start;
 }
-.nightbook-process-empty .ui-attention {
+.process-empty .ui-attention {
   max-width: 760px;
 }
-.nightbook-process-review {
+.process-review {
   min-width: 0;
 }
-.nightbook-process-review .ui-evidence,
-.nightbook-process-review .ui-evidence-canvas {
+.process-review .ui-evidence,
+.process-review .ui-evidence-canvas {
   min-height: 150px;
 }
-.nightbook-process-operation a {
+.process-operation a {
   color: var(--ui-accent);
   font: 9px var(--ui-font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.nightbook-operational-status .nightbook-process-status-mobile {
+.workspace-operational-status .process-status-mobile {
   display: none;
 }
 @media (min-width: 781px) and (max-width: 1120px) {
-  .nightbook-process-grid {
+  .process-grid {
     grid-template-columns: 190px minmax(0, 1fr);
   }
-  .nightbook-process-operation {
+  .process-operation {
     grid-column: 1/-1;
     height: auto;
   }
-  .nightbook-process-operation .ui-panel-body > .ui-stack {
+  .process-operation .ui-panel-body > .ui-stack {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     align-items: start;
   }
 }
 @media (min-width: 601px) and (max-width: 780px) {
-  .nightbook-process-grid {
+  .process-grid {
     grid-template-columns: minmax(0, 1fr);
     grid-auto-rows: max-content;
     overflow: visible;
   }
-  .nightbook-process-stage {
+  .process-stage {
     grid-row: 1;
     min-height: 520px;
   }
-  .nightbook-process-source {
+  .process-source {
     grid-row: 2;
     align-self: start;
     height: max-content;
   }
-  .nightbook-process-operation {
+  .process-operation {
     grid-row: 3;
     align-self: start;
     height: max-content;
   }
-  .nightbook-process-source .ui-panel-body,
-  .nightbook-process-operation .ui-panel-body {
+  .process-source .ui-panel-body,
+  .process-operation .ui-panel-body {
     overflow: visible;
   }
 }
 @media (max-width: 600px) {
-  .nightbook-process-phone {
+  .process-phone {
     overflow-x: hidden;
     grid-auto-rows: max-content;
   }
-  .nightbook-process-phone-sources {
+  .process-phone-sources {
     display: grid;
     gap: 6px;
   }
-  .nightbook-process-phone-source {
+  .process-phone-source {
     min-width: 0;
     border: 1px solid var(--ui-line);
     border-radius: var(--ui-radius);
@@ -114,25 +114,25 @@
     display: grid;
     gap: 3px;
   }
-  .nightbook-process-phone-source b,
-  .nightbook-process-phone-source span {
+  .process-phone-source b,
+  .process-phone-source span {
     overflow-wrap: anywhere;
   }
-  .nightbook-process-phone-source span {
+  .process-phone-source span {
     color: var(--ui-muted);
     font: 600 10px/1.4 var(--ui-font-mono);
   }
-  .nightbook-process-phone .ui-evidence-canvas {
+  .process-phone .ui-evidence-canvas {
     min-height: 220px;
   }
-  .nightbook-operational-status.nightbook-process-status {
+  .workspace-operational-status.process-status {
     display: flex;
     min-width: 0;
   }
-  .nightbook-operational-status .nightbook-process-status-desktop {
+  .workspace-operational-status .process-status-desktop {
     display: none;
   }
-  .nightbook-operational-status .nightbook-process-status-mobile {
+  .workspace-operational-status .process-status-mobile {
     display: flex;
     width: 100%;
     max-width: none;
@@ -140,7 +140,7 @@
     font-size: 8px;
   }
 }
-.nightbook-process-project-grid {
+.process-project-grid {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
@@ -148,32 +148,32 @@
   overflow: hidden;
 }
 
-.nightbook-process-project-rail,
-.nightbook-process-project-sources {
+.process-project-rail,
+.process-project-sources {
   min-width: 0;
   min-height: 0;
 }
 
-.nightbook-process-project-sources {
+.process-project-sources {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
 }
 
-.nightbook-process-project-sources .ui-panel-body {
+.process-project-sources .ui-panel-body {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
-.nightbook-process-source-table {
+.process-source-table {
   min-width: 720px;
   display: grid;
   gap: 5px;
 }
 
-.nightbook-process-source-row {
+.process-source-row {
   border: 1px solid var(--ui-line);
   border-radius: var(--ui-radius);
   background: var(--ui-surface-raised);
@@ -186,80 +186,80 @@
   gap: 10px;
 }
 
-.nightbook-process-source-row > div {
+.process-source-row > div {
   min-width: 0;
   display: grid;
   gap: 3px;
 }
 
-.nightbook-process-source-row b,
-.nightbook-process-source-row span {
+.process-source-row b,
+.process-source-row span {
   overflow-wrap: anywhere;
 }
 
-.nightbook-process-attempts {
+.process-attempts {
   display: grid;
   gap: 6px;
 }
 
-.nightbook-process-develop {
+.process-develop {
   display: grid;
   gap: 8px;
 }
 
-.nightbook-process-develop-grid {
+.process-develop-grid {
   display: grid;
   grid-template-columns: minmax(320px, 1.25fr) minmax(260px, 0.75fr);
   gap: 8px;
   align-items: start;
 }
 
-.nightbook-process-develop-grid .ui-evidence,
-.nightbook-process-develop-grid .ui-evidence-canvas {
+.process-develop-grid .ui-evidence,
+.process-develop-grid .ui-evidence-canvas {
   min-height: 280px;
 }
 
-.nightbook-process-develop-color {
+.process-develop-color {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
 @media (max-width: 1180px) and (min-width: 601px) {
-  .nightbook-process-develop-grid {
+  .process-develop-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
-.nightbook-process-calibration-intro {
+.process-calibration-intro {
   margin: 0;
   color: var(--ui-muted);
   font: 600 10px/1.5 var(--ui-font-mono);
 }
 
-.nightbook-process-calibration-matches {
+.process-calibration-matches {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 6px;
 }
 
-.nightbook-process-calibration-reasons {
+.process-calibration-reasons {
   margin: 0;
   padding-left: 16px;
   display: grid;
   gap: 2px;
 }
 
-.nightbook-process-calibration-reasons li {
+.process-calibration-reasons li {
   overflow-wrap: anywhere;
 }
 
-.nightbook-process-phone-source > .nightbook-process-calibration-reasons {
+.process-phone-source > .process-calibration-reasons {
   color: var(--ui-muted);
   font: 600 10px/1.4 var(--ui-font-mono);
 }
 
-.nightbook-process-attempts article {
+.process-attempts article {
   display: grid;
   gap: 3px;
   border: 1px solid var(--ui-line);
@@ -268,39 +268,39 @@
   padding: 8px;
 }
 
-.nightbook-process-attempts b,
-.nightbook-process-attempts span,
-.nightbook-process-attempts strong {
+.process-attempts b,
+.process-attempts span,
+.process-attempts strong {
   overflow-wrap: anywhere;
 }
 
-.nightbook-process-attempts span,
-.nightbook-process-attempts strong,
-.nightbook-process-attempts p {
+.process-attempts span,
+.process-attempts strong,
+.process-attempts p {
   color: var(--ui-muted);
   font: 600 10px/1.4 var(--ui-font-mono);
 }
 
-.nightbook-process-attempts strong {
+.process-attempts strong {
   color: var(--ui-warning);
 }
 
 @media (max-width: 900px) and (min-width: 601px) {
-  .nightbook-process-project-grid {
+  .process-project-grid {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
   }
 
-  .nightbook-process-source-table {
+  .process-source-table {
     min-width: 0;
   }
 
-  .nightbook-process-source-row {
+  .process-source-row {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 }
 
-.nightbook-process-source-row span {
+.process-source-row span {
   color: var(--ui-muted);
   font: 600 11px var(--ui-font-mono);
 }

@@ -1,6 +1,6 @@
 # UI And UX Direction
 
-Status: **current direction after Nightbook route promotion**
+Status: **current application UI direction**
 
 ## Goal
 
@@ -13,11 +13,11 @@ The authoritative implementation is:
 
 - domain-neutral visual modules and contained styles:
   `apps/web/src/components/ui`
-- product composition and interaction: `apps/web/src/nightbook`
+- product composition and interaction: `apps/web/src/components/workspaces`, with shared shell and development simulation presentation under `apps/web/src/components`
 - rendered application verification: the normal Plan, Observe, Library, and
   Process routes
 
-The disposable Nightbook checkout, product demo, Gallery, and package source
+The disposable prototype checkout, product demo, Gallery, and package source
 were migration input only. They are not ongoing design, build, synchronization,
 or verification authority. The older Astro Console visual guides, component
 grammar, UX catalog, and Phase 0.5 material are also historical. Preserve those
@@ -74,8 +74,8 @@ integrated Item 3.5 review is also complete: the retained two-Capture-Set M27
 journey passed functional and Designer review across all six Process stages,
 public Library detail, restart, wide, compact, and read-only phone states. The
 route audit and promotion are complete. The follow-on architecture audit is
-complete, and its shared protocol, origin runtime, and Nightbook workspace
-runtime refactors do not change the visual authority.
+complete, and its shared protocol, origin runtime, and Nightbook workspace runtime
+refactors do not change the visual authority.
 
 - Library selection and whole Capture Set intake must lead to a persistent
   Processing Project, not directly into transient worker progress.
@@ -93,6 +93,6 @@ runtime refactors do not change the visual authority.
 
 ## Promotion State
 
-Plan, Observe, Library, Library detail, and Process routes render Nightbook.
-The former presentation has been removed. Normal workspace routes render
-Nightbook directly. The root route `/` maps to Plan.
+Plan, Observe, Library, Library detail, and Process routes render the application-owned presentation.
+The former presentation has been removed. Normal workspace routes render the
+application workspaces directly. The root route `/` maps to Plan.

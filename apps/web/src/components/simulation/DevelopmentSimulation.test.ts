@@ -11,7 +11,7 @@ import {
   DevelopmentSimulationSurface,
   readSimulationProjection,
   sendSimulationControl,
-} from './development-simulation'
+} from './DevelopmentSimulation'
 
 const projection: DevelopmentSimulationProjection = {
   mode: 'alpaca',
@@ -283,7 +283,7 @@ test('a simulator-only scenario names the missing UI driver', () => {
       driver: {
         _tag: 'Unavailable',
         reason:
-          'The Nightbook workspace driver is not implemented yet; Load changes simulator state only.',
+          'The Astro Console workspace driver is not implemented yet; Load changes simulator state only.',
       },
     },
   }

@@ -42,8 +42,7 @@ bounded camera exposure, immutable original intake, and local solve evidence.
 
 It is designed for one observatory shared with a few trusted people. It is not
 a commercial multi-tenant platform, a generic device dashboard, or an
-enterprise operations product. **Nightbook** is the user-facing V2 workspace;
-Astro Console remains the project and service name.
+enterprise operations product. **Astro Console** is the user-facing V2 workspace, project, and service name.
 
 The product should answer three questions in order:
 

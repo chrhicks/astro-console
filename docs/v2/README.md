@@ -1,6 +1,6 @@
 # Astro Console V2 — Start Here
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; Nightbook routes promoted locally; Processing Project lifecycle, shared protocol, origin runtime, and Nightbook workspace runtime refactors complete locally**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; application routes promoted locally; Processing Project lifecycle, shared protocol, origin runtime, and Nightbook workspace runtime refactors complete locally**
 
 Keep normal working context small. Do not read the complete V2 tree.
 
@@ -21,7 +21,7 @@ specific detail.
 | Need                                                      | Read                                                                                                                                                      |
 | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | UI or UX work, beta alignment, or route promotion         | [Current UI and UX direction](current/ui-ux.md), then the local web routes and states it names                                                            |
-| Accepted beta real-runtime delivery or Alpaca simulation  | [Nightbook beta real-runtime plan](current/beta-real-runtime-plan.md)                                                                                     |
+| Accepted beta real-runtime delivery or Alpaca simulation  | [Beta real-runtime plan](current/beta-real-runtime-plan.md)                                                                                               |
 | Explicit Process workflow and Item 3.5 delivery           | [Item 3.5 Process workflow plan](current/process-workflow-plan.md)                                                                                        |
 | Workspace behavior or product entities                    | [Current product specification](current/product-spec.md); use it for domain truth, not visual composition                                                 |
 | Accepted Gate 5 scenarios and ownership                   | [Gate 5 baseline](current/gate-05-scenarios.md)                                                                                                           |
@@ -46,8 +46,7 @@ Phase 5 work is owner-observed live provider and physical outdoor proof.
 
 The official presentation is the app-private UI implementation under
 `apps/web/src/components/ui` and its composition in the Plan, Observe, Library,
-and Process workspaces. The former presentation and borrowed `@nightbook/ui`
-package seam have been removed. Normal workspace routes render this local
+and Process workspaces. The former presentation and borrowed UI package seam have been removed. Normal workspace routes render this local
 presentation directly.
 
 Process now has one explicit, project-ID-addressed Processing Project

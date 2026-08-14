@@ -15,18 +15,18 @@ import {
   type AttemptItem,
   type StepItem,
   type Tone,
-} from '../components/ui'
+} from '../../ui'
 import type { ObserveWorkspaceProjection } from '@astro-console/protocol'
 import { useEffect, useMemo, useState } from 'react'
 import {
   ObserveCommandSubmission,
   type ObserveAction,
-} from '../observe-command-client'
-import type { PreflightRefreshSubmission } from '../preflight-refresh-client'
-import type { ObserveView, Projection, StatusTone } from '../presentation'
-import { nightbookHref } from '../route-href'
-import { CommandBar, type ControlSubmit } from './shared-shell'
-import './workspace.css'
+} from '../../../observe-command-client'
+import type { PreflightRefreshSubmission } from '../../../preflight-refresh-client'
+import type { ObserveView, Projection, StatusTone } from '../../../presentation'
+import { nightbookHref } from '../../../route-href'
+import { CommandBar, type ControlSubmit } from '../../shell/WorkspaceShell'
+import '../Workspace.css'
 
 export type ObserveWorkspaceProps = {
   projection: Projection
@@ -188,7 +188,7 @@ function Progress({
 }) {
   const percent = progressPercent(progress)
   return (
-    <div className="nightbook-progress">
+    <div className="observe-progress">
       <div>
         <span>{progress.label}</span>
         {showValue && percent !== undefined ? <b>{percent}%</b> : null}
@@ -216,10 +216,10 @@ const evidenceStatusLabel = (view: ObserveView) => {
 }
 
 const Evidence = ({ view }: { view: ObserveView }) => (
-  <figure className="nightbook-evidence" aria-label="Current Observe evidence">
-    <div className="nightbook-evidence-canvas">
+  <figure className="observe-evidence" aria-label="Current Observe evidence">
+    <div className="observe-evidence-canvas">
       <div
-        className="nightbook-evidence-copy"
+        className="observe-evidence-copy"
         role="group"
         aria-label="Evidence facts"
       >
@@ -230,7 +230,7 @@ const Evidence = ({ view }: { view: ObserveView }) => (
         />
         <p>{view.evidence}</p>
         {view.trace.length > 0 ? (
-          <ol className="nightbook-trace" aria-label="Current evidence trace">
+          <ol className="observe-trace" aria-label="Current evidence trace">
             {view.trace.slice(0, 3).map((fact) => (
               <li key={fact}>{fact}</li>
             ))}
@@ -383,11 +383,11 @@ function TargetEvidenceViewport({ acquire }: { acquire: AcquireView }) {
   const metrics = evidenceMetrics(acquire)
   return (
     <EvidenceViewport
-      className="nightbook-target-evidence"
+      className="observe-target-evidence"
       label="Current target-acquisition evidence"
       fit="fill"
       fallback={
-        <div className="nightbook-target-evidence-copy">
+        <div className="observe-target-evidence-copy">
           <StatusIndicator
             label={titleCase(acquire.phase)}
             tone={acquireTone(acquire)}
@@ -419,7 +419,7 @@ function TargetContext({
 }) {
   const attempts = attemptItems(acquire)
   return (
-    <Panel className="nightbook-target-context" as="aside">
+    <Panel className="observe-target-context" as="aside">
       <PanelHeader
         title="Target acquire"
         meta={`Acquire rev ${acquire.revision}`}
@@ -444,7 +444,7 @@ function TargetContext({
         {attempts.length > 0 ? (
           <AttemptTrail label="Acquisition attempts" items={attempts} />
         ) : (
-          <p className="nightbook-target-empty-trail">
+          <p className="observe-target-empty-trail">
             No attempt evidence has been recorded.
           </p>
         )}
@@ -581,7 +581,7 @@ function TargetDecision({
                 : 'Acquire the target'
   return (
     <ActionPanel
-      className="nightbook-decision-rail"
+      className="observe-decision-rail"
       eyebrow={
         projection.shell.readOnly
           ? 'Decision now · viewer'
@@ -656,11 +656,11 @@ function TargetStage({
   if (recovery)
     return (
       <section
-        className="nightbook-target-stage"
+        className="observe-target-stage"
         data-mode="recover"
         aria-live="polite"
       >
-        <Panel className="nightbook-target-recovery-evidence">
+        <Panel className="observe-target-recovery-evidence">
           <PanelHeader
             title="Recovery evidence"
             meta={`${acquire.attemptCount} attempts retained`}
@@ -689,12 +689,12 @@ function TargetStage({
     )
   return (
     <section
-      className="nightbook-target-stage"
+      className="observe-target-stage"
       data-mode="acquire"
       aria-live="polite"
     >
       <TargetContext view={view} acquire={acquire} />
-      <Panel className="nightbook-target-evidence-panel">
+      <Panel className="observe-target-evidence-panel">
         <PanelHeader title="Current evidence" meta="Image truth first" />
         <PanelBody>
           <TargetEvidenceViewport acquire={acquire} />
@@ -717,7 +717,7 @@ function StatusStrip({ projection }: { projection: Projection }) {
       : lifecycleLabel(projection.observe)
   return (
     <footer
-      className="nightbook-operational-status"
+      className="workspace-operational-status"
       aria-label="Operational status"
     >
       <span>
@@ -751,12 +751,12 @@ export function ObservePhone({
   const attempts = targetAcquisition ? attemptItems(acquire) : []
   return (
     <section
-      id="nightbook-workspace"
-      className="nightbook-phone-workspace"
+      id="workspace-content"
+      className="workspace-phone-workspace"
       aria-label="Read-only phone projection"
-      data-testid="nightbook-phone"
+      data-testid="workspace-phone"
     >
-      <header className="nightbook-phone-header">
+      <header className="workspace-phone-header">
         <div>
           <p>Live run</p>
           <h1>{loading ? 'Loading current state' : view.target}</h1>
@@ -778,7 +778,7 @@ export function ObservePhone({
         title={lifecycleLabel(view)}
         description="Desktop workflow controls are intentionally unavailable."
       />
-      <Panel as="section" className="nightbook-phone-progress-panel">
+      <Panel as="section" className="workspace-phone-progress-panel">
         <PanelHeader
           title="Run progress"
           meta={progress.pending ? '—' : lifecycleLabel(view)}
@@ -788,7 +788,7 @@ export function ObservePhone({
         </PanelBody>
       </Panel>
       {targetAcquisition ? (
-        <Panel as="section" className="nightbook-phone-target-evidence">
+        <Panel as="section" className="workspace-phone-target-evidence">
           <PanelHeader
             title="Target evidence"
             meta={titleCase(acquire.phase)}
@@ -805,7 +805,7 @@ export function ObservePhone({
       )}
       {view.source?.latestCapturedAssetId !== undefined ? (
         <a
-          className="nightbook-phone-library-link"
+          className="workspace-phone-library-link"
           href={nightbookHref(
             `/library/assets/${encodeURIComponent(view.source.latestCapturedAssetId)}`,
           )}
@@ -1024,13 +1024,13 @@ function ObserveDesktop({
   )
 
   return (
-    <main id="nightbook-workspace" className="nightbook-desktop-workspace">
-      <header className="nightbook-titlebar">
+    <main id="workspace-content" className="workspace-desktop">
+      <header className="observe-titlebar">
         <div>
           <p>Observe / Authoritative lifecycle</p>
           <h1>{currentStage}</h1>
         </div>
-        <div className="nightbook-title-progress">
+        <div className="observe-title-progress">
           <span>
             {lifecycleState.activeIndex < 0
               ? '— of 6'
@@ -1045,7 +1045,7 @@ function ObserveDesktop({
       </header>
 
       <StepRail
-        className="nightbook-lifecycle"
+        className="observe-lifecycle"
         items={lifecycleState.items}
         activeId={lifecycleState.activeId}
         label="Observe lifecycle"
@@ -1067,8 +1067,8 @@ function ObserveDesktop({
             : { approvePointingCorrection })}
         />
       ) : (
-        <section className="nightbook-observe-stage" aria-live="polite">
-          <Panel className="nightbook-context-rail" as="aside">
+        <section className="observe-stage" aria-live="polite">
+          <Panel className="observe-context-rail" as="aside">
             <PanelHeader
               title={`Run plan · rev ${source?.revision ?? '—'}`}
               meta="Read-only here"
@@ -1090,7 +1090,7 @@ function ObserveDesktop({
                   value={source?.executor ?? 'Unavailable'}
                 />
               </DataList>
-              <div className="nightbook-run-summary">
+              <div className="observe-run-summary">
                 <b>
                   {projection.shell.currentRun?.sequenceProgress ?? view.status}
                 </b>
@@ -1100,7 +1100,7 @@ function ObserveDesktop({
           </Panel>
 
           <Panel
-            className="nightbook-evidence-panel"
+            className="observe-evidence-panel"
             as="section"
             aria-busy={loading}
           >
@@ -1109,7 +1109,7 @@ function ObserveDesktop({
               meta="Verdict first · facts behind"
             />
             <PanelBody>
-              <div className="nightbook-evidence-stack">
+              <div className="observe-evidence-stack">
                 <AttentionCard
                   tone={tone(view.tone)}
                   statusLabel={
@@ -1128,7 +1128,7 @@ function ObserveDesktop({
                 ) : null}
                 {source?.latestCapturedAssetId !== undefined ? (
                   <a
-                    className="nightbook-simulation-library-link"
+                    className="simulation-library-link"
                     href={nightbookHref(
                       `/library/assets/${encodeURIComponent(source.latestCapturedAssetId)}`,
                     )}
@@ -1160,7 +1160,7 @@ function ObserveDesktop({
           </Panel>
 
           <ActionPanel
-            className="nightbook-decision-rail"
+            className="observe-decision-rail"
             eyebrow={
               projection.shell.readOnly
                 ? 'Decision now · viewer'
@@ -1187,11 +1187,11 @@ export function ObserveWorkspace(props: ObserveWorkspaceProps) {
   const phone = usePhoneProjection()
   return (
     <div
-      className="nightbook-app ui-theme"
+      className="workspace-app ui-theme"
       data-ui-theme="default"
       data-ui-density="compact"
     >
-      <a className="nightbook-skip-link" href="#nightbook-workspace">
+      <a className="workspace-skip-link" href="#workspace-content">
         Skip to Observe evidence
       </a>
       <CommandBar

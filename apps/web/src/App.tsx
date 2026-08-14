@@ -31,10 +31,18 @@ import {
 } from './nightbook-workspace-runtime'
 
 const currentRoute = () => parseRoute(location.pathname, location.search)
-const ObserveWorkspace = lazy(() => import('./nightbook/ObserveWorkspace'))
-const LibraryWorkspace = lazy(() => import('./nightbook/LibraryWorkspace'))
-const PlanWorkspace = lazy(() => import('./nightbook/PlanWorkspace'))
-const ProcessWorkspace = lazy(() => import('./nightbook/ProcessWorkspace'))
+const ObserveWorkspace = lazy(
+  () => import('./components/workspaces/observe/ObserveWorkspace'),
+)
+const LibraryWorkspace = lazy(
+  () => import('./components/workspaces/library/LibraryWorkspace'),
+)
+const PlanWorkspace = lazy(
+  () => import('./components/workspaces/plan/PlanWorkspace'),
+)
+const ProcessWorkspace = lazy(
+  () => import('./components/workspaces/process/ProcessWorkspace'),
+)
 
 type SubmissionHandlers<Result> = {
   readonly [Tag in NightbookWorkspaceSubmission['_tag']]?: (
@@ -274,7 +282,7 @@ export function App() {
   const changeLibraryQuery = (query: LibraryQuery) => {
     setLibraryQuery(query)
   }
-  const selectNightbookLibraryAsset = (assetId: typeof AssetId.Type) => {
+  const selectLibraryAsset = (assetId: typeof AssetId.Type) => {
     const path = `/library/assets/${encodeURIComponent(assetId)}`
     const href = nightbookHref(path)
     const url = new URL(href, location.origin)
@@ -283,7 +291,7 @@ export function App() {
     history.pushState(null, '', href)
     setRoute(next)
   }
-  const openNightbookProcess = (assetId: typeof AssetId.Type) => {
+  const openProcess = (assetId: typeof AssetId.Type) => {
     const href = nightbookHref(
       `/process?sourceAssetId=${encodeURIComponent(assetId)}`,
     )
@@ -334,8 +342,8 @@ export function App() {
     return (
       <Suspense
         fallback={
-          <main aria-busy="true" aria-label="Loading Nightbook Observe">
-            Loading Nightbook Observe…
+          <main aria-busy="true" aria-label="Loading Observe">
+            Loading Observe…
           </main>
         }
       >
@@ -370,8 +378,8 @@ export function App() {
     return (
       <Suspense
         fallback={
-          <main aria-busy="true" aria-label="Loading Nightbook Plan">
-            Loading Nightbook Plan…
+          <main aria-busy="true" aria-label="Loading Plan">
+            Loading Plan…
           </main>
         }
       >
@@ -390,8 +398,8 @@ export function App() {
     return (
       <Suspense
         fallback={
-          <main aria-busy="true" aria-label="Loading Nightbook Library">
-            Loading Nightbook Library…
+          <main aria-busy="true" aria-label="Loading Library">
+            Loading Library…
           </main>
         }
       >
@@ -409,7 +417,7 @@ export function App() {
               : { message: libraryPage.message }),
           }}
           onQuery={changeLibraryQuery}
-          onSelectAsset={selectNightbookLibraryAsset}
+          onSelectAsset={selectLibraryAsset}
           {...(selectedLibraryAssetId === undefined
             ? {}
             : { assetId: selectedLibraryAssetId })}
@@ -424,7 +432,7 @@ export function App() {
             : { onReview: reviewLibraryAsset })}
           comparison={comparison}
           onSelectComparisonAsset={selectComparisonAsset}
-          onOpenProcess={openNightbookProcess}
+          onOpenProcess={openProcess}
           processProjects={processWorkspace.projects}
           {...(!projection.libraryProcessMutation.allowed
             ? {}
@@ -454,8 +462,8 @@ export function App() {
     return (
       <Suspense
         fallback={
-          <main aria-busy="true" aria-label="Loading Nightbook Process">
-            Loading Nightbook Process…
+          <main aria-busy="true" aria-label="Loading Process">
+            Loading Process…
           </main>
         }
       >
@@ -495,7 +503,7 @@ function NotFound() {
   return (
     <section className="not-found">
       <h1 tabIndex={-1}>Not Found</h1>
-      <p>This address does not name a Nightbook workspace.</p>
+      <p>This address does not name an Astro Console workspace.</p>
       <a href="/plan">Open Plan</a>
     </section>
   )

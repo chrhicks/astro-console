@@ -8,7 +8,7 @@ import {
   Stack,
   StatusIndicator,
   type FlyoutTriggerProps,
-} from '../components/ui'
+} from '../ui'
 import { Effect, Schema } from 'effect'
 import {
   DevelopmentSimulationControlRequest,
@@ -19,7 +19,7 @@ import {
   DevelopmentSimulationUnavailable,
 } from '@astro-console/protocol'
 import { useEffect, useState, type ChangeEvent } from 'react'
-import { nightbookHref } from '../route-href'
+import { nightbookHref } from '../../route-href'
 
 type SimulationProjection = typeof DevelopmentSimulationProjection.Type
 type UnavailableSimulation = typeof DevelopmentSimulationUnavailable.Type
@@ -168,15 +168,15 @@ export function DevelopmentSimulationSurface({
   }
   return (
     <section
-      className="nightbook-simulation-strip"
+      className="simulation-strip"
       aria-label="Development simulation context"
       aria-busy={pending}
     >
-      <div className="nightbook-simulation-identity">
+      <div className="simulation-identity">
         <strong>Simulation · not live hardware</strong>
         <span>{scenario}</span>
       </div>
-      <div className="nightbook-simulation-evidence">
+      <div className="simulation-evidence">
         <span>
           {frame === undefined || frame === null
             ? 'Real FITS copy · no frame selected'
@@ -189,7 +189,7 @@ export function DevelopmentSimulationSurface({
         </span>
       </div>
       {!protectedControls && projection !== undefined ? (
-        <div className="nightbook-simulation-controls">
+        <div className="simulation-controls">
           <Field label="Scenario">
             <Select
               value={selectedScenario}
@@ -256,12 +256,10 @@ export function DevelopmentSimulationSurface({
           <a href={nightbookHref('/observe')}>Observe</a>
         </div>
       ) : (
-        <span className="nightbook-simulation-protection">
-          Controls require desktop.
-        </span>
+        <span className="simulation-protection">Controls require desktop.</span>
       )}
       <Flyout
-        className="nightbook-simulation-details"
+        className="simulation-details"
         open={detailsOpen}
         onOpenChange={setDetailsOpen}
         label="Simulation details"
@@ -341,7 +339,7 @@ export function DevelopmentSimulationSurface({
           {unavailable !== undefined ? <p>{unavailable.message}</p> : null}
         </Stack>
       </Flyout>
-      <span className="nightbook-simulation-message" role="status">
+      <span className="simulation-message" role="status">
         {message ??
           (projection === undefined
             ? unavailable?.message

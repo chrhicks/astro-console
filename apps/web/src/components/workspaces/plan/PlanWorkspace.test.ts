@@ -2,12 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createElement } from 'react'
 import { BootstrapSnapshot } from '@astro-console/protocol'
-import { bootstrapFixtures } from '../testing/bootstrap-fixtures'
+import { bootstrapFixtures } from '../../../testing/bootstrap-fixtures'
 import { Schema } from 'effect'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { BootstrapClientState } from '../bootstrap-client'
-import { projectBootstrapState } from '../bootstrap-projection'
-import { unavailableProjection } from '../future-adapter'
+import { BootstrapClientState } from '../../../bootstrap-client'
+import { projectBootstrapState } from '../../../bootstrap-projection'
+import { unavailableProjection } from '../../../future-adapter'
 import { PlanWorkspace, PlanPhone } from './PlanWorkspace'
 
 const executionDefinition = (
@@ -168,7 +168,7 @@ const projection = (
     }),
   )
 
-test('renders the Nightbook Plan shell and real typed editor controls', () => {
+test('renders the Plan workspace shell and real typed editor controls', () => {
   const markup = renderToStaticMarkup(
     createElement(PlanWorkspace, {
       projection: projection(),
