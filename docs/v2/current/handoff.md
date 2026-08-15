@@ -570,9 +570,13 @@ React binding lifetime, ordered state delivery, semantic submission, synchronous
 late-publication invalidation and interruption, and asynchronous disposal.
 `App` retains URL, Library-query, route-adapter, and callback-presence ownership
 without importing Effect runtime mechanics or storing mount-initialized command
-closures. Focused mounted proof covers Starting and Ready states, ordered
-publication, one submission, unsubscription, asynchronous disposal, late-event
-rejection, and independent Strict Mode setup lifetimes. Library and Process
+closures. Focused mounted proof covers Starting and Ready states, synchronous
+and ordered publication, one submission, unsubscription, asynchronous disposal,
+late-event rejection, and independent Strict Mode setup lifetimes. The complete
+web check passes 189/189. Functional browser smoke passes Plan, Observe,
+Library, and Process runtime delivery and navigation; desktop callback
+availability, Control Flyout focus restoration, console health, overflow, and
+390 px phone read-only behavior remain unchanged. Library and Process
 closed route interfaces, route-failure recovery, phone projection reuse,
 route-identity reset decisions, and active-only Tabs remain separate findings
 in `#49` or `#43`. The other architecture frontiers remain the durable
