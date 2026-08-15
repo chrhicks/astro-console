@@ -66,8 +66,9 @@ const makeControlledSource = (): ControlledSource => {
 test('binds one ordered source lifetime and submits each semantic intent once', async () => {
   const source = makeControlledSource()
   const bindings: Array<WorkspaceRuntimeBinding> = []
+  const createSource = () => source
   const Probe = () => {
-    bindings.push(useWorkspaceRuntimeFromSource(() => source))
+    bindings.push(useWorkspaceRuntimeFromSource(createSource))
     return null
   }
 
@@ -106,14 +107,13 @@ test('binds one ordered source lifetime and submits each semantic intent once', 
 test('invalidates late publication and creates an independent Strict Mode lifetime', async () => {
   const sources: Array<ControlledSource> = []
   const bindings: Array<WorkspaceRuntimeBinding> = []
+  const createSource = () => {
+    const source = makeControlledSource()
+    sources.push(source)
+    return source
+  }
   const Probe = () => {
-    bindings.push(
-      useWorkspaceRuntimeFromSource(() => {
-        const source = makeControlledSource()
-        sources.push(source)
-        return source
-      }),
-    )
+    bindings.push(useWorkspaceRuntimeFromSource(createSource))
     return null
   }
 

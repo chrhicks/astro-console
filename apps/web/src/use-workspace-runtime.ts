@@ -89,7 +89,7 @@ export const useWorkspaceRuntimeFromSource = (
       unsubscribe()
       void source.dispose()
     }
-  }, [])
+  }, [createSource])
 
   return binding
 }
