@@ -29,7 +29,9 @@ const makeState = (projectionReceived: boolean): WorkspaceState => ({
   projectionReceived,
 })
 
-const makeControlledSource = (): ControlledSource => {
+const makeControlledSource = (
+  publishOnSubscribe?: WorkspaceState,
+): ControlledSource => {
   let subscriber: ((state: WorkspaceState) => void) | undefined
   let unsubscribed = 0
   let disposed = 0
@@ -48,6 +50,7 @@ const makeControlledSource = (): ControlledSource => {
     },
     subscribe: (publish) => {
       subscriber = publish
+      if (publishOnSubscribe !== undefined) publish(publishOnSubscribe)
       return () => {
         unsubscribed += 1
       }
@@ -78,6 +81,8 @@ test('binds one ordered source lifetime and submits each semantic intent once', 
   })
 
   assert.equal(bindings[0]?._tag, 'Starting')
+  assert.equal(bindings[0]?.state.projectionReceived, false)
+  assert.equal(bindings[0] === undefined || 'submit' in bindings[0], false)
   const ready = bindings.at(-1)
   assert.equal(ready?._tag, 'Ready')
   assert.equal(ready?.state, initialWorkspaceState)
@@ -101,6 +106,29 @@ test('binds one ordered source lifetime and submits each semantic intent once', 
   await act(() => renderer?.unmount())
   assert.equal(source.unsubscribeCount(), 1)
   assert.equal(source.disposeCount(), 1)
+  source.finishDisposal()
+})
+
+test('keeps a synchronous subscription publication newer than the initial state', async () => {
+  const published = makeState(true)
+  const source = makeControlledSource(published)
+  const bindings: Array<WorkspaceRuntimeBinding> = []
+  const createSource = () => source
+  const Probe = () => {
+    bindings.push(useWorkspaceRuntimeFromSource(createSource))
+    return null
+  }
+
+  let renderer: ReactTestRenderer | undefined
+  await act(() => {
+    renderer = create(createElement(Probe))
+  })
+
+  assert.equal(bindings[0]?._tag, 'Starting')
+  assert.equal(bindings.at(-1)?._tag, 'Ready')
+  assert.equal(bindings.at(-1)?.state, published)
+
+  await act(() => renderer?.unmount())
   source.finishDisposal()
 })
 

@@ -77,12 +77,12 @@ export const useWorkspaceRuntimeFromSource = (
       if (!active) return
       setBinding({ _tag: 'Ready', state, submit: source.submit })
     }
-    const unsubscribe = source.subscribe(publish)
     setBinding({
       _tag: 'Ready',
       state: source.initialState,
       submit: source.submit,
     })
+    const unsubscribe = source.subscribe(publish)
 
     return () => {
       active = false
