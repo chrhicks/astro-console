@@ -1,6 +1,6 @@
 # V2 Current Handoff
 
-Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–4 complete locally; Processing Project lifecycle, shared protocol, origin runtime, and workspace runtime refactors complete locally; application presentation naming retirement complete**
+Status: **V2.0 complete; V2.1 Phases 1–4 complete; configured Phase 5 Acquire prepared and simulator-proven; follow-on Items 1–4 complete locally; Processing Project lifecycle, shared protocol, origin runtime, workspace runtime, and React runtime adapter refactors complete locally; application presentation naming retirement complete**
 
 ## Current Position
 
@@ -564,14 +564,23 @@ physical-capture proof.
 The read-only composition audit under `#47` is complete. It confirms the URL,
 service, `WorkspaceRuntime`, and workspace-local state owners; keeps the deep
 runtime, workspace, and `CommandBar` interfaces; and rejects a provider, HOC,
-compound module, or generic wrapper at the current seam. Issue `#55` is the one
-selected ready child: a purpose Hook will own the existing runtime's React
-subscription and disposal lifetime so `App` no longer knows Effect runtime
-mechanics. Library and Process closed route interfaces, route-failure recovery,
-phone projection reuse, route-identity reset decisions, and active-only Tabs
-remain separate findings in `#49` or `#43`. The other architecture frontiers
-remain the durable work-claim re-audit in `#5` and the origin integration-test
-harness in `#6`.
+compound module, or generic wrapper at the current seam. Issue `#55` now adapts
+`WorkspaceRuntime.states + submit` through one purpose Hook. The Hook owns one
+React binding lifetime, ordered state delivery, semantic submission, synchronous
+late-publication invalidation and interruption, and asynchronous disposal.
+`App` retains URL, Library-query, route-adapter, and callback-presence ownership
+without importing Effect runtime mechanics or storing mount-initialized command
+closures. Focused mounted proof covers Starting and Ready states, synchronous
+and ordered publication, one submission, unsubscription, asynchronous disposal,
+late-event rejection, and independent Strict Mode setup lifetimes. The complete
+web check passes 189/189. Functional browser smoke passes Plan, Observe,
+Library, and Process runtime delivery and navigation; desktop callback
+availability, Control Flyout focus restoration, console health, overflow, and
+390 px phone read-only behavior remain unchanged. Library and Process
+closed route interfaces, route-failure recovery, phone projection reuse,
+route-identity reset decisions, and active-only Tabs remain separate findings
+in `#49` or `#43`. The other architecture frontiers remain the durable
+work-claim re-audit in `#5` and the origin integration-test harness in `#6`.
 Select and integrate a real processing library only in a later accepted item;
 the current deterministic materializer proves orchestration and evidence, not
 astronomy processing quality. The remaining accepted delivery list continues

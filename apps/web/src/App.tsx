@@ -1,5 +1,12 @@
-import { Effect, Fiber, Stream } from 'effect'
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import {
   type PlanAction,
   type PlanCommandSubmission,
@@ -19,16 +26,12 @@ import { parseRoute, routeWorkspace, type Route } from './routes'
 import { routeHref } from './route-href'
 import {
   AcquireAction,
-  createWorkspaceRuntime,
-  initialWorkspaceState,
-  WorkspaceRuntime,
   WorkspaceSubmission,
   type LibraryQuery,
   type WorkspaceProjectSelection,
-  type WorkspaceIntent,
   type ProcessAction,
-  type WorkspaceState,
 } from './workspace-runtime'
+import { useWorkspaceRuntime } from './use-workspace-runtime'
 
 const currentRoute = () => parseRoute(location.pathname, location.search)
 const ObserveWorkspace = lazy(
@@ -117,39 +120,12 @@ const acceptedAcquireSubmission: SubmissionHandlers<void> = {
 }
 
 export function App() {
-  const workspaceRuntime = useRef(createWorkspaceRuntime())
-  const [workspaceState, setWorkspaceState] = useState<WorkspaceState>(
-    initialWorkspaceState,
-  )
+  const workspaceRuntime = useWorkspaceRuntime()
+  const workspaceState = workspaceRuntime.state
+  const submitWorkspace =
+    workspaceRuntime._tag === 'Ready' ? workspaceRuntime.submit : undefined
   const projection = workspaceState.projection
   const [route, setRoute] = useState<Route>(currentRoute)
-  const [submitPlan, setSubmitPlan] = useState<
-    ((action: PlanAction) => Promise<PlanCommandSubmission>) | undefined
-  >()
-  const [submitObserve, setSubmitObserve] = useState<
-    ((action: ObserveAction) => Promise<ObserveCommandSubmission>) | undefined
-  >()
-  const [submitControl, setSubmitControl] = useState<
-    ((action: ControlAction) => Promise<CommandSubmission>) | undefined
-  >()
-  const [refreshPreflight, setRefreshPreflight] = useState<
-    (() => Promise<PreflightRefreshSubmission>) | undefined
-  >()
-  const [targetAcquisitionCommand, setTargetAcquisitionCommand] = useState<
-    (() => Promise<void>) | undefined
-  >()
-  const [acquireRecoveryCommand, setAcquireRecoveryCommand] = useState<
-    | ((
-        action:
-          | 'RetryPlateSolveWithParameters'
-          | 'SkipAcquireTarget'
-          | 'AbortAcquire',
-      ) => Promise<void>)
-    | undefined
-  >()
-  const [approvePointingCorrection, setApprovePointingCorrection] = useState<
-    ((proposalId: string) => Promise<void>) | undefined
-  >()
   const workspace = routeWorkspace(route)
   const initialRoute = useRef(true)
   const [libraryQuery, setLibraryQuery] = useState<LibraryQuery>(() =>
@@ -169,15 +145,86 @@ export function App() {
   } = workspaceState
   const selectedLibraryAssetId =
     route.kind === 'asset' ? route.assetId : undefined
-  const submitWorkspace = useCallback(
-    (intent: WorkspaceIntent) =>
-      workspaceRuntime.current.runPromise(
-        Effect.flatMap(WorkspaceRuntime, (workspace) =>
-          workspace.submit(intent),
+  const {
+    submitPlan,
+    submitObserve,
+    submitControl,
+    refreshPreflight,
+    targetAcquisitionCommand,
+    acquireRecoveryCommand,
+    approvePointingCorrection,
+  } = useMemo(() => {
+    if (submitWorkspace === undefined)
+      return {
+        submitPlan: undefined,
+        submitObserve: undefined,
+        submitControl: undefined,
+        refreshPreflight: undefined,
+        targetAcquisitionCommand: undefined,
+        acquireRecoveryCommand: undefined,
+        approvePointingCorrection: undefined,
+      }
+
+    return {
+      submitPlan: async (action: PlanAction): Promise<PlanCommandSubmission> =>
+        foldWorkspaceSubmission(
+          await submitWorkspace({ _tag: 'Plan', action }),
+          { Plan: ({ result }) => result },
         ),
-      ),
-    [],
-  )
+      submitObserve: async (
+        action: ObserveAction,
+      ): Promise<ObserveCommandSubmission> =>
+        foldWorkspaceSubmission(
+          await submitWorkspace({ _tag: 'Observe', action }),
+          { Observe: ({ result }) => result },
+        ),
+      submitControl: async (
+        action: ControlAction,
+      ): Promise<CommandSubmission> =>
+        foldWorkspaceSubmission(
+          await submitWorkspace({ _tag: 'Control', action }),
+          { Control: ({ result }) => result },
+        ),
+      refreshPreflight: async (): Promise<PreflightRefreshSubmission> =>
+        foldWorkspaceSubmission(
+          await submitWorkspace({ _tag: 'RefreshPreflight' }),
+          { Preflight: ({ result }) => result },
+        ),
+      targetAcquisitionCommand: async () =>
+        foldWorkspaceSubmission(
+          await submitWorkspace({
+            _tag: 'Acquire',
+            action: AcquireAction.CaptureTargetAcquisitionEvidence({}),
+          }),
+          acceptedAcquireSubmission,
+        ),
+      acquireRecoveryCommand: async (
+        action:
+          | 'RetryPlateSolveWithParameters'
+          | 'SkipAcquireTarget'
+          | 'AbortAcquire',
+      ) => {
+        const semanticAction =
+          action === 'RetryPlateSolveWithParameters'
+            ? AcquireAction.RetryPlateSolveWithParameters({})
+            : action === 'SkipAcquireTarget'
+              ? AcquireAction.SkipAcquireTarget({})
+              : AcquireAction.AbortAcquire({})
+        return foldWorkspaceSubmission(
+          await submitWorkspace({ _tag: 'Acquire', action: semanticAction }),
+          acceptedAcquireSubmission,
+        )
+      },
+      approvePointingCorrection: async (proposalId: string) =>
+        foldWorkspaceSubmission(
+          await submitWorkspace({
+            _tag: 'Acquire',
+            action: AcquireAction.ApprovePointingCorrection({ proposalId }),
+          }),
+          acceptedAcquireSubmission,
+        ),
+    }
+  }, [submitWorkspace])
 
   useEffect(() => {
     const onPopState = () => {
@@ -187,91 +234,9 @@ export function App() {
     return () => removeEventListener('popstate', onPopState)
   }, [])
   useEffect(() => {
+    if (submitWorkspace === undefined) return
     void submitWorkspace({ _tag: 'RouteChanged', route, libraryQuery })
   }, [libraryQuery, route, submitWorkspace])
-  useEffect(() => {
-    const runtime = workspaceRuntime.current
-    const fiber = runtime.runFork(
-      Effect.flatMap(WorkspaceRuntime, (workspace) =>
-        workspace.states.pipe(
-          Stream.runForEach((state) =>
-            Effect.sync(() => setWorkspaceState(state)),
-          ),
-        ),
-      ),
-    )
-    setSubmitPlan(() => async (action: PlanAction) => {
-      return foldWorkspaceSubmission(
-        await submitWorkspace({ _tag: 'Plan', action }),
-        { Plan: ({ result }) => result },
-      )
-    })
-    setSubmitObserve(() => async (action: ObserveAction) => {
-      return foldWorkspaceSubmission(
-        await submitWorkspace({ _tag: 'Observe', action }),
-        { Observe: ({ result }) => result },
-      )
-    })
-    setSubmitControl(() => async (action: ControlAction) => {
-      return foldWorkspaceSubmission(
-        await submitWorkspace({ _tag: 'Control', action }),
-        { Control: ({ result }) => result },
-      )
-    })
-    setRefreshPreflight(() => async () => {
-      return foldWorkspaceSubmission(
-        await submitWorkspace({ _tag: 'RefreshPreflight' }),
-        { Preflight: ({ result }) => result },
-      )
-    })
-    setTargetAcquisitionCommand(() => async () => {
-      const result = await submitWorkspace({
-        _tag: 'Acquire',
-        action: AcquireAction.CaptureTargetAcquisitionEvidence({}),
-      })
-      return foldWorkspaceSubmission(result, acceptedAcquireSubmission)
-    })
-    setAcquireRecoveryCommand(
-      () =>
-        async (
-          action:
-            | 'RetryPlateSolveWithParameters'
-            | 'SkipAcquireTarget'
-            | 'AbortAcquire',
-        ) => {
-          const semanticAction =
-            action === 'RetryPlateSolveWithParameters'
-              ? AcquireAction.RetryPlateSolveWithParameters({})
-              : action === 'SkipAcquireTarget'
-                ? AcquireAction.SkipAcquireTarget({})
-                : AcquireAction.AbortAcquire({})
-          const result = await submitWorkspace({
-            _tag: 'Acquire',
-            action: semanticAction,
-          })
-          return foldWorkspaceSubmission(result, acceptedAcquireSubmission)
-        },
-    )
-    setApprovePointingCorrection(() => async (proposalId: string) => {
-      const result = await submitWorkspace({
-        _tag: 'Acquire',
-        action: AcquireAction.ApprovePointingCorrection({ proposalId }),
-      })
-      return foldWorkspaceSubmission(result, acceptedAcquireSubmission)
-    })
-    return () => {
-      setSubmitPlan(undefined)
-      setSubmitObserve(undefined)
-      setSubmitControl(undefined)
-      setRefreshPreflight(undefined)
-      setTargetAcquisitionCommand(undefined)
-      setAcquireRecoveryCommand(undefined)
-      setApprovePointingCorrection(undefined)
-      void runtime
-        .runPromise(Fiber.interrupt(fiber))
-        .then(() => runtime.dispose())
-    }
-  }, [submitWorkspace])
   useEffect(() => {
     if (initialRoute.current) {
       initialRoute.current = false
@@ -303,6 +268,7 @@ export function App() {
   }
   const selectComparisonAsset = useCallback(
     (assetId: typeof AssetId.Type | undefined) => {
+      if (submitWorkspace === undefined) return
       void submitWorkspace({ _tag: 'SelectComparisonAsset', assetId })
     },
     [submitWorkspace],
@@ -312,6 +278,8 @@ export function App() {
     rating?: number
     annotation?: string
   }) => {
+    if (submitWorkspace === undefined)
+      throw new Error('Workspace runtime is unavailable.')
     const result = await submitWorkspace({
       _tag: 'ReviewCurrentLibraryAsset',
       review,
@@ -320,6 +288,8 @@ export function App() {
   }
   const createProject = useCallback(
     async (name: string, selection: WorkspaceProjectSelection) => {
+      if (submitWorkspace === undefined)
+        throw new Error('Workspace runtime is unavailable.')
       const project = foldWorkspaceSubmission(
         await submitWorkspace({
           _tag: 'CreateProject',
@@ -437,6 +407,8 @@ export function App() {
             : {
                 onCreateProject: createProject,
                 onAddProjectSources: async (projectId, selection) => {
+                  if (submitWorkspace === undefined)
+                    throw new Error('Workspace runtime is unavailable.')
                   const project = foldWorkspaceSubmission(
                     await submitWorkspace({
                       _tag: 'AddProjectSources',
@@ -485,6 +457,8 @@ export function App() {
             ? {}
             : { onCreateProject: createProject })}
           onChangeProject={async (action: ProcessAction) => {
+            if (submitWorkspace === undefined)
+              throw new Error('Workspace runtime is unavailable.')
             foldWorkspaceSubmission(
               await submitWorkspace({ _tag: 'Process', action }),
               { Project: () => undefined },
