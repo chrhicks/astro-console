@@ -553,16 +553,23 @@ inspect-runner navigation sometimes required one reload to finish a lazy module
 load, matching the pre-change runner behavior.
 
 Issue `#51` and PR `#54` give the non-React runtime and route helper purpose
-names. The
-deep external interface remains exactly `WorkspaceRuntime.states + submit`, and
-request identity values remain unchanged. Focused runtime and route-helper tests
-and the complete web check pass. Functional browser smoke passes Plan, Observe,
-Library, and Process navigation through the renamed runtime and route helper;
-phone Plan remains read-only, with no overflow or console error. This naming-only
-change adds no provider, device, or physical-capture proof. Evidenced
-lower-priority interface and test concerns remain in `#49`. The read-only
-composition audit under `#47`
-is the next application-architecture task. The other architecture frontiers
+names. The deep external interface remains exactly `WorkspaceRuntime.states +
+submit`, and request identity values remain unchanged. Focused runtime and
+route-helper tests and the complete web check pass. Functional browser smoke
+passes Plan, Observe, Library, and Process navigation through the renamed
+runtime and route helper; phone Plan remains read-only, with no overflow or
+console error. This naming-only change adds no provider, device, or
+physical-capture proof.
+
+The read-only composition audit under `#47` is complete. It confirms the URL,
+service, `WorkspaceRuntime`, and workspace-local state owners; keeps the deep
+runtime, workspace, and `CommandBar` interfaces; and rejects a provider, HOC,
+compound module, or generic wrapper at the current seam. Issue `#55` is the one
+selected ready child: a purpose Hook will own the existing runtime's React
+subscription and disposal lifetime so `App` no longer knows Effect runtime
+mechanics. Library and Process closed route interfaces, route-failure recovery,
+phone projection reuse, route-identity reset decisions, and active-only Tabs
+remain separate findings in `#49` or `#43`. The other architecture frontiers
 remain the durable work-claim re-audit in `#5` and the origin integration-test
 harness in `#6`.
 Select and integrate a real processing library only in a later accepted item;
